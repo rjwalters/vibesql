@@ -393,17 +393,9 @@ fn generate_natural_join_condition(
     let mut condition: Option<vibesql_ast::Expression> = None;
     for (left_table, left_col, right_table, right_col) in common_columns {
         let equality = vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: Some(left_table),
-                column: left_col,
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&left_table, false, &left_col, false))),
             op: vibesql_ast::BinaryOperator::Equal,
-            right: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: Some(right_table),
-                column: right_col,
-            }),
+            right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&right_table, false, &right_col, false))),
         };
 
         condition = Some(match condition {
@@ -591,13 +583,18 @@ fn predicate_references_only_tables(
     table_set: &HashSet<String>,
 ) -> bool {
     match expr {
-        vibesql_ast::Expression::ColumnRef { schema: None, table: Some(t), .. } => {
+        vibesql_ast::Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+            let t = col_id.table_canonical().unwrap();
             let t_lower = t.to_lowercase();
             table_set.contains(t) || table_set.contains(&t_lower)
         }
-        vibesql_ast::Expression::ColumnRef { schema: None, table: None, .. } => {
+        vibesql_ast::Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
             // Unqualified column - can't determine which table, assume it might be from nullable
             // side Return false to be conservative (keep the predicate)
+            false
+        }
+        vibesql_ast::Expression::ColumnRef(_) => {
+            // Schema-qualified or other cases, be conservative
             false
         }
         vibesql_ast::Expression::IsNull { expr: inner, .. } => {
@@ -920,13 +917,23 @@ fn parse_semi_join_condition(
         } = &pred
         {
             if let (
-                vibesql_ast::Expression::ColumnRef { schema: None, table: left_tbl, column: left_col, .. },
-                vibesql_ast::Expression::ColumnRef { schema: None, table: right_tbl, column: right_col, .. },
+                vibesql_ast::Expression::ColumnRef(left_col_id),
+                vibesql_ast::Expression::ColumnRef(right_col_id),
             ) = (left.as_ref(), right.as_ref())
             {
+                if left_col_id.schema_canonical().is_some() || right_col_id.schema_canonical().is_some() {
+                    // Schema-qualified, skip this predicate
+                    right_only_preds.push(pred);
+                    continue;
+                }
+                let left_tbl = left_col_id.table_canonical();
+                let right_tbl = right_col_id.table_canonical();
+                let left_col = left_col_id.column_canonical();
+                let right_col = right_col_id.column_canonical();
+
                 // Determine which column is from left and which from right
-                let left_tbl_lower = left_tbl.as_ref().map(|s| s.to_lowercase());
-                let right_tbl_lower = right_tbl.as_ref().map(|s| s.to_lowercase());
+                let left_tbl_lower = left_tbl.map(|s| s.to_lowercase());
+                let right_tbl_lower = right_tbl.map(|s| s.to_lowercase());
 
                 let left_col_lower = left_col.to_lowercase();
 
@@ -942,8 +949,8 @@ fn parse_semi_join_condition(
 
                 if left_is_left && right_is_right && equi_join.is_none() {
                     equi_join = Some(EquiJoinInfo {
-                        left_col: left_col.clone(),
-                        right_col: right_col.clone(),
+                        left_col: left_col.to_string(),
+                        right_col: right_col.to_string(),
                     });
                     continue;
                 }
@@ -956,8 +963,8 @@ fn parse_semi_join_condition(
 
                 if right_is_left && left_is_right && equi_join.is_none() {
                     equi_join = Some(EquiJoinInfo {
-                        left_col: right_col.clone(),
-                        right_col: left_col.clone(),
+                        left_col: right_col.to_string(),
+                        right_col: left_col.to_string(),
                     });
                     continue;
                 }
@@ -1009,10 +1016,11 @@ fn extract_constant_prefix_for_pk(
         {
             // Check if left is column and right is literal
             if let (
-                vibesql_ast::Expression::ColumnRef { column, .. },
+                vibesql_ast::Expression::ColumnRef(col_id),
                 vibesql_ast::Expression::Literal(value),
             ) = (left.as_ref(), right.as_ref())
             {
+                let column = col_id.column_canonical();
                 let col_upper = column.to_lowercase();
                 // Only add if it's a PK column and not the join key
                 if pk_columns.iter().any(|pk| pk.to_lowercase() == col_upper)
@@ -1025,9 +1033,10 @@ fn extract_constant_prefix_for_pk(
             // Check reverse: right is column and left is literal
             if let (
                 vibesql_ast::Expression::Literal(value),
-                vibesql_ast::Expression::ColumnRef { column, .. },
+                vibesql_ast::Expression::ColumnRef(col_id),
             ) = (left.as_ref(), right.as_ref())
             {
+                let column = col_id.column_canonical();
                 let col_upper = column.to_lowercase();
                 if pk_columns.iter().any(|pk| pk.to_lowercase() == col_upper)
                     && col_upper != join_key_upper
@@ -1091,15 +1100,15 @@ fn build_residual_filter(
             } = pred
             {
                 // Check if it's col = literal or literal = col
-                if let vibesql_ast::Expression::ColumnRef { column, .. } = left.as_ref() {
-                    if pk_upper.contains(&column.to_lowercase())
+                if let vibesql_ast::Expression::ColumnRef(col_id) = left.as_ref() {
+                    if pk_upper.contains(&col_id.column_canonical().to_lowercase())
                         && matches!(right.as_ref(), vibesql_ast::Expression::Literal(_))
                     {
                         return false; // Filter out, covered by PK lookup
                     }
                 }
-                if let vibesql_ast::Expression::ColumnRef { column, .. } = right.as_ref() {
-                    if pk_upper.contains(&column.to_lowercase())
+                if let vibesql_ast::Expression::ColumnRef(col_id) = right.as_ref() {
+                    if pk_upper.contains(&col_id.column_canonical().to_lowercase())
                         && matches!(left.as_ref(), vibesql_ast::Expression::Literal(_))
                     {
                         return false; // Filter out, covered by PK lookup
@@ -1369,17 +1378,9 @@ fn generate_using_join_condition(
 
         // Create equality condition with qualified column references
         let equality = vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: Some(left_col.0.to_string()),
-                column: left_col.1,
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&left_col.0.to_string(), false, &left_col.1, false))),
             op: vibesql_ast::BinaryOperator::Equal,
-            right: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: Some(right_col.0.to_string()),
-                column: right_col.1,
-            }),
+            right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&right_col.0.to_string(), false, &right_col.1, false))),
         };
 
         condition = Some(match condition {

@@ -413,7 +413,7 @@ fn can_use_index_for_in_subquery(
     let column_name = match &subquery.select_list[0] {
         vibesql_ast::SelectItem::Expression { expr, .. } => {
             match expr {
-                vibesql_ast::Expression::ColumnRef { column, .. } => column,
+                vibesql_ast::Expression::ColumnRef(col_id) => col_id.column_canonical(),
                 _ => return false, // Expressions, functions, etc.
             }
         }
@@ -426,7 +426,7 @@ fn can_use_index_for_in_subquery(
         if let Some(index_metadata) = database.get_index(index_name) {
             // Check if first indexed column matches our projected column
             if let Some(first_col) = index_metadata.columns.first() {
-                if &first_col.column_name == column_name {
+                if first_col.column_name == column_name {
                     return true;
                 }
             }
@@ -455,7 +455,7 @@ fn try_index_optimized_in_subquery(
     #[allow(clippy::collapsible_match)]
     let column_name = match &subquery.select_list[0] {
         vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-            vibesql_ast::Expression::ColumnRef { column, .. } => column,
+            vibesql_ast::Expression::ColumnRef(col_id) => col_id.column_canonical(),
             _ => return Ok(None),
         },
         _ => return Ok(None),
@@ -468,7 +468,7 @@ fn try_index_optimized_in_subquery(
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
             if let Some(first_col) = index_metadata.columns.first() {
-                if &first_col.column_name == column_name {
+                if first_col.column_name == column_name {
                     selected_index = Some(index_name.clone());
                     break;
                 }
@@ -523,7 +523,7 @@ fn try_index_optimized_in_subquery(
             let column_index =
                 table.schema.columns.iter().position(|col| col.name == *column_name).ok_or_else(
                     || ExecutorError::ColumnNotFound {
-                        column_name: column_name.clone(),
+                        column_name: column_name.to_string(),
                         table_name: table_name.clone(),
                         searched_tables: vec![table_name.clone()],
                         available_columns: table
@@ -558,7 +558,7 @@ fn try_index_optimized_in_subquery(
             .iter()
             .position(|col| col.name == *column_name)
             .ok_or_else(|| ExecutorError::ColumnNotFound {
-                column_name: column_name.clone(),
+                column_name: column_name.to_string(),
                 table_name: table_name.clone(),
                 searched_tables: vec![table_name.clone()],
                 available_columns: table.schema.columns.iter().map(|c| c.name.clone()).collect(),

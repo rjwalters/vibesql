@@ -918,18 +918,18 @@ impl UpdateExecutor {
             }
             Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
                 // Check: column = literal
-                if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
+                if let (Expression::ColumnRef(col_id), Expression::Literal(value)) =
                     (left.as_ref(), right.as_ref())
                 {
-                    if let Some(col_index) = schema.get_column_index(column) {
+                    if let Some(col_index) = schema.get_column_index(col_id.column_canonical()) {
                         equalities.insert(col_index, value.clone());
                     }
                 }
                 // Check: literal = column
-                else if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
+                else if let (Expression::Literal(value), Expression::ColumnRef(col_id)) =
                     (left.as_ref(), right.as_ref())
                 {
-                    if let Some(col_index) = schema.get_column_index(column) {
+                    if let Some(col_index) = schema.get_column_index(col_id.column_canonical()) {
                         equalities.insert(col_index, value.clone());
                     }
                 }

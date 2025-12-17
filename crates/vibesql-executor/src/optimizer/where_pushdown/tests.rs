@@ -95,38 +95,22 @@ fn test_or_filter_extraction() {
     // 'FRANCE')
     let n1_france = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef {
-            schema: None,
-            table: Some("n1".to_string()),
-            column: "n_name".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("n1", false, "n_name", false))),
         right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("FRANCE")))),
     };
     let n2_germany = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef {
-            schema: None,
-            table: Some("n2".to_string()),
-            column: "n_name".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("n2", false, "n_name", false))),
         right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("GERMANY")))),
     };
     let n1_germany = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef {
-            schema: None,
-            table: Some("n1".to_string()),
-            column: "n_name".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("n1", false, "n_name", false))),
         right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("GERMANY")))),
     };
     let n2_france = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef {
-            schema: None,
-            table: Some("n2".to_string()),
-            column: "n_name".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("n2", false, "n_name", false))),
         right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("FRANCE")))),
     };
 
@@ -203,20 +187,12 @@ fn test_or_filter_extraction_multi_branch() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t1".to_string()),
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "a", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t2".to_string()),
-                column: "b".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "b", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -225,20 +201,12 @@ fn test_or_filter_extraction_multi_branch() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t1".to_string()),
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "a", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t2".to_string()),
-                column: "b".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "b", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(4))),
         }),
     };
@@ -247,20 +215,12 @@ fn test_or_filter_extraction_multi_branch() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t1".to_string()),
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "a", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t2".to_string()),
-                column: "b".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "b", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(6))),
         }),
     };
@@ -321,20 +281,12 @@ fn test_or_filter_extraction_nested_or() {
         op: BinaryOperator::Or,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t1".to_string()),
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "a", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t1".to_string()),
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "a", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -344,11 +296,7 @@ fn test_or_filter_extraction_nested_or() {
         left: Box::new(left_or),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t1".to_string()),
-                column: "b".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "b", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         }),
     };
@@ -357,20 +305,12 @@ fn test_or_filter_extraction_nested_or() {
         op: BinaryOperator::Or,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t1".to_string()),
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "a", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t1".to_string()),
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "a", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(4))),
         }),
     };
@@ -380,11 +320,7 @@ fn test_or_filter_extraction_nested_or() {
         left: Box::new(right_or),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t1".to_string()),
-                column: "b".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "b", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(20))),
         }),
     };
@@ -436,20 +372,12 @@ fn test_or_filter_extraction_asymmetric() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t1".to_string()),
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "a", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t2".to_string()),
-                column: "b".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "b", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -457,11 +385,7 @@ fn test_or_filter_extraction_asymmetric() {
     // Right branch: t1.a = 3 (only t1, no t2)
     let right_branch = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef {
-            schema: None,
-            table: Some("t1".to_string()),
-            column: "a".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "a", false))),
         right: Box::new(Expression::Literal(SqlValue::Integer(3))),
     };
 
@@ -504,20 +428,12 @@ fn test_or_filter_extraction_single_table() {
         op: BinaryOperator::Or,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t1".to_string()),
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "a", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t1".to_string()),
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "a", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -577,20 +493,12 @@ fn test_or_filter_extraction_no_common_tables() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t1".to_string()),
-                column: "a".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "a", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t2".to_string()),
-                column: "b".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "b", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -600,20 +508,12 @@ fn test_or_filter_extraction_no_common_tables() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t3".to_string()),
-                column: "c".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t3", false, "c", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("t4".to_string()),
-                column: "d".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t4", false, "d", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(4))),
         }),
     };

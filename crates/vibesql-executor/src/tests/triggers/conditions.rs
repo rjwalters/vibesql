@@ -53,11 +53,9 @@ fn test_when_clause_filters_firing() {
         granularity: TriggerGranularity::Row,
         when_condition: Some(Box::new(vibesql_ast::Expression::BinaryOp {
             op: vibesql_ast::BinaryOperator::GreaterThan,
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                column: "amount".to_string(),
-                table: None,
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("amount", false)
+            )),
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
                 100,
             ))),

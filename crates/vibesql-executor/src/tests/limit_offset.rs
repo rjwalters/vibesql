@@ -233,17 +233,9 @@ fn test_limit_with_inner_join() {
             }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("users".to_string()),
-                    column: "id".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("orders".to_string()),
-                    column: "user_id".to_string(),
-                }),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
             }),
             using_columns: None,
             natural: false,
@@ -348,17 +340,9 @@ fn test_offset_with_inner_join() {
             }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("users".to_string()),
-                    column: "id".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("orders".to_string()),
-                    column: "user_id".to_string(),
-                }),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
             }),
             using_columns: None,
             natural: false,
@@ -463,17 +447,9 @@ fn test_limit_offset_with_inner_join() {
             }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("users".to_string()),
-                    column: "id".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("orders".to_string()),
-                    column: "user_id".to_string(),
-                }),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
             }),
             using_columns: None,
             natural: false,

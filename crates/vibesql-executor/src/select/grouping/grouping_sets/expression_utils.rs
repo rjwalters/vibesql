@@ -9,14 +9,16 @@ use vibesql_ast::{Expression, WindowFunctionSpec, WindowSpec};
 /// Uses case-insensitive comparison for column names, structural equality for others.
 pub fn expressions_equal(a: &Expression, b: &Expression) -> bool {
     match (a, b) {
-        // ColumnRef: case-insensitive comparison for identifiers
+        // ColumnRef: SQL:1999 compliant comparison using canonical forms
         (
-            Expression::ColumnRef { schema: None, table: t1, column: c1, .. },
-            Expression::ColumnRef { schema: None, table: t2, column: c2, .. },
-        ) => {
-            let columns_equal = c1.eq_ignore_ascii_case(c2);
-            let tables_equal = match (t1, t2) {
-                (Some(tb1), Some(tb2)) => tb1.eq_ignore_ascii_case(tb2),
+            Expression::ColumnRef(col_id1),
+            Expression::ColumnRef(col_id2),
+        ) if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() => {
+            // Use direct equality on canonical forms - they already handle SQL:1999 case sensitivity
+            // (unquoted → lowercase, quoted → preserved case)
+            let columns_equal = col_id1.column_canonical() == col_id2.column_canonical();
+            let tables_equal = match (col_id1.table_canonical(), col_id2.table_canonical()) {
+                (Some(tb1), Some(tb2)) => tb1 == tb2,
                 (None, None) => true,
                 // If one has a qualifier and the other doesn't, they could still be equal
                 _ => true,
@@ -287,11 +289,11 @@ mod tests {
     use super::*;
 
     fn col(name: &str) -> Expression {
-        Expression::ColumnRef { schema: None, table: None, column: name.to_string() }
+        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&name, false))
     }
 
     fn qualified_col(table: &str, column: &str) -> Expression {
-        Expression::ColumnRef { schema: None, table: Some(table.to_string()), column: column.to_string() }
+        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(table, false, column, false))
     }
 
     fn lit_int(n: i64) -> Expression {

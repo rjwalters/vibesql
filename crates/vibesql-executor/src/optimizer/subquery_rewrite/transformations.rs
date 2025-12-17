@@ -198,8 +198,12 @@ fn try_extract_correlation(
 /// Check if an expression references a specific table
 fn is_from_table(expr: &Expression, table: &str) -> bool {
     match expr {
-        Expression::ColumnRef { schema: None, table: Some(t), .. } => t.eq_ignore_ascii_case(table),
-        Expression::ColumnRef { schema: None, table: None, .. } => true, // Unqualified could be from inner
+        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() => {
+            match col_id.table_canonical() {
+                Some(t) => t.eq_ignore_ascii_case(table),
+                None => true, // Unqualified could be from inner
+            }
+        }
         _ => false,
     }
 }
@@ -209,25 +213,28 @@ fn is_from_table(expr: &Expression, table: &str) -> bool {
 /// orders table)
 fn is_from_outer_tables(expr: &Expression, outer_tables: &[String], inner_table: &str) -> bool {
     match expr {
-        Expression::ColumnRef { schema: None, table: Some(t), .. } => {
-            outer_tables.iter().any(|ot| ot.eq_ignore_ascii_case(t))
-        }
-        // Handle unqualified columns that use table prefix convention (e.g., o_orderkey for orders)
-        Expression::ColumnRef { schema: None, table: None, column, .. } => {
-            // Don't match if column starts with inner table's prefix
-            let inner_prefix = inner_table.chars().next().unwrap_or('_').to_ascii_lowercase();
-            let col_prefix = column.chars().next().unwrap_or('_').to_ascii_lowercase();
+        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() => {
+            match col_id.table_canonical() {
+                Some(t) => outer_tables.iter().any(|ot| ot.eq_ignore_ascii_case(t)),
+                None => {
+                    // Handle unqualified columns that use table prefix convention (e.g., o_orderkey for orders)
+                    let column = col_id.column_canonical();
+                    // Don't match if column starts with inner table's prefix
+                    let inner_prefix = inner_table.chars().next().unwrap_or('_').to_ascii_lowercase();
+                    let col_prefix = column.chars().next().unwrap_or('_').to_ascii_lowercase();
 
-            // If column prefix matches an outer table's prefix but not inner table's prefix
-            if col_prefix != inner_prefix {
-                for outer in outer_tables {
-                    let outer_prefix = outer.chars().next().unwrap_or('_').to_ascii_lowercase();
-                    if col_prefix == outer_prefix {
-                        return true;
+                    // If column prefix matches an outer table's prefix but not inner table's prefix
+                    if col_prefix != inner_prefix {
+                        for outer in outer_tables {
+                            let outer_prefix = outer.chars().next().unwrap_or('_').to_ascii_lowercase();
+                            if col_prefix == outer_prefix {
+                                return true;
+                            }
+                        }
                     }
+                    false
                 }
             }
-            false
         }
         _ => false,
     }
@@ -307,7 +314,7 @@ fn group_by_ensures_distinct(subquery: &SelectStmt) -> bool {
     let group_by_cols: Vec<&str> = group_by_exprs
         .iter()
         .filter_map(|expr| match expr {
-            Expression::ColumnRef { column, .. } => Some(column.as_str()),
+            Expression::ColumnRef(col_id) => Some(col_id.column_canonical()),
             _ => None,
         })
         .collect();
@@ -323,8 +330,9 @@ fn group_by_ensures_distinct(subquery: &SelectStmt) -> bool {
     for item in &subquery.select_list {
         match item {
             SelectItem::Expression { expr, .. } => match expr {
-                Expression::ColumnRef { column, .. } => {
+                Expression::ColumnRef(col_id) => {
                     // Column must be in GROUP BY
+                    let column = col_id.column_canonical();
                     if !group_by_cols.iter().any(|&gc| gc.eq_ignore_ascii_case(column)) {
                         return false;
                     }

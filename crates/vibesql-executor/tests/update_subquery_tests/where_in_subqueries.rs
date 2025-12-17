@@ -51,7 +51,7 @@ fn test_update_where_in_subquery() {
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: Expression::ColumnRef { schema: None, table: None, column: "dept_id".to_string() },
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
             alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
@@ -80,7 +80,7 @@ fn test_update_where_in_subquery() {
             value: Expression::Literal(SqlValue::Integer(80000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "dept_id".to_string() }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
             subquery,
             negated: false,
         })),
@@ -137,7 +137,7 @@ fn test_update_where_not_in_subquery() {
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: Expression::ColumnRef { schema: None, table: None, column: "dept_id".to_string() },
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
             alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
@@ -166,7 +166,7 @@ fn test_update_where_not_in_subquery() {
             value: Expression::Literal(SqlValue::Boolean(false)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "dept_id".to_string() }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
             subquery,
             negated: true,
         })),
@@ -216,7 +216,7 @@ fn test_update_where_subquery_empty_result() {
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: Expression::ColumnRef { schema: None, table: None, column: "dept_id".to_string() },
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
             alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
@@ -245,7 +245,7 @@ fn test_update_where_subquery_empty_result() {
             value: Expression::Literal(SqlValue::Boolean(false)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "dept_id".to_string() }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
             subquery,
             negated: false,
         })),
@@ -305,7 +305,7 @@ fn test_update_where_complex_subquery_condition() {
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: Expression::ColumnRef { schema: None, table: None, column: "dept_id".to_string() },
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
             alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
@@ -316,7 +316,7 @@ fn test_update_where_complex_subquery_condition() {
         quoted: false,
         }),
         where_clause: Some(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "budget".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("budget", false))),
             op: vibesql_ast::BinaryOperator::GreaterThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(80000))),
         }),
@@ -339,7 +339,7 @@ fn test_update_where_complex_subquery_condition() {
             value: Expression::Literal(SqlValue::Integer(70000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "dept_id".to_string() }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
             subquery,
             negated: false,
         })),
@@ -400,7 +400,7 @@ fn test_update_where_multiple_rows_in_subquery() {
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: Expression::ColumnRef { schema: None, table: None, column: "dept_id".to_string() },
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
             alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
@@ -429,7 +429,7 @@ fn test_update_where_multiple_rows_in_subquery() {
             value: Expression::Literal(SqlValue::Boolean(false)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "dept_id".to_string() }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
             subquery,
             negated: false,
         })),

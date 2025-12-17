@@ -65,7 +65,7 @@ fn test_create_assertion_statement() {
         assertion_name: "valid_balance".to_string(),
         check_condition: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThanOrEqual,
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "balance".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("balance", false))),
             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(0))),
         }),
     });

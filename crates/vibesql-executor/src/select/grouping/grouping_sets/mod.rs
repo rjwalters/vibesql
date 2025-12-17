@@ -88,7 +88,7 @@ mod tests {
     use super::*;
 
     fn col(name: &str) -> Expression {
-        Expression::ColumnRef { schema: None, table: None, column: name.to_string() }
+        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&name, false))
     }
 
     fn lit_int(n: i64) -> Expression {

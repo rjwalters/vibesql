@@ -49,9 +49,9 @@ fn test_batch_expression_aggregate_multiply() {
 
     // Test SUM(price * discount)
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
         op: BinaryOperator::Multiply,
-        right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "discount".to_string() }),
+        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("discount", false))),
     };
 
     let result = compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Sum, &schema)
@@ -79,9 +79,9 @@ fn test_batch_expression_aggregate_avg() {
 
     // Test AVG(price * discount)
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
         op: BinaryOperator::Multiply,
-        right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "discount".to_string() }),
+        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("discount", false))),
     };
 
     let result = compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Avg, &schema)
@@ -109,9 +109,9 @@ fn test_batch_expression_aggregate_mixed_types() {
 
     // Test SUM(price * quantity) - Float64 * Int64
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
         op: BinaryOperator::Multiply,
-        right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "quantity".to_string() }),
+        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false))),
     };
 
     let result = compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Sum, &schema)
@@ -139,7 +139,7 @@ fn test_batch_expression_aggregate_with_literal() {
 
     // Test SUM(price * 2)
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
         op: BinaryOperator::Multiply,
         right: Box::new(Expression::Literal(SqlValue::Integer(2))),
     };
@@ -169,12 +169,12 @@ fn test_batch_expression_aggregate_nested() {
 
     // Test SUM(price * (1 - discount))
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
         op: BinaryOperator::Multiply,
         right: Box::new(Expression::BinaryOp {
             left: Box::new(Expression::Literal(SqlValue::Double(1.0))),
             op: BinaryOperator::Minus,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "discount".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("discount", false))),
         }),
     };
 
@@ -203,9 +203,9 @@ fn test_batch_expression_aggregate_min_max() {
 
     // Test MIN(price * discount)
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
         op: BinaryOperator::Multiply,
-        right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "discount".to_string() }),
+        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("discount", false))),
     };
 
     let min_result = compute_batch_expression_aggregate(&batch, &expr, AggregateOp::Min, &schema)
@@ -257,9 +257,9 @@ fn test_batch_expression_aggregate_empty_batch() {
     let combined_schema = CombinedSchema::from_table("test".to_string(), schema);
 
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
         op: BinaryOperator::Multiply,
-        right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "discount".to_string() }),
+        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("discount", false))),
     };
 
     // SUM of empty batch should return NULL
@@ -306,9 +306,9 @@ fn test_batch_expression_aggregate_with_nulls() {
     let combined_schema = CombinedSchema::from_table("test".to_string(), schema);
 
     let expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
         op: BinaryOperator::Multiply,
-        right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "discount".to_string() }),
+        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("discount", false))),
     };
 
     let result =

@@ -36,9 +36,9 @@ pub fn evaluate_arithmetic_simd(
         Expression::BinaryOp { left, op, right } => {
             evaluate_binary_arithmetic_simd(batch, left, op, right)
         }
-        Expression::ColumnRef { column, .. } => {
+        Expression::ColumnRef(col_id) => {
             // Simple column reference
-            get_numeric_column(batch, column)
+            get_numeric_column(batch, col_id.column_canonical())
         }
         Expression::Literal(value) => {
             // Create array filled with literal value
@@ -289,9 +289,9 @@ mod tests {
         .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "quantity".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -312,7 +312,7 @@ mod tests {
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(price_array)]).unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::Literal(SqlValue::Float(0.9))),
         };
@@ -344,16 +344,12 @@ mod tests {
 
         // price * (1 - discount)
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::Literal(SqlValue::Float(1.0))),
                 op: BinaryOperator::Minus,
-                right: Box::new(Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "discount".to_string(),
-                }),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("discount", false))),
             }),
         };
 
@@ -382,9 +378,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -409,9 +405,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
             op: BinaryOperator::Minus,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -436,9 +432,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
             op: BinaryOperator::Divide,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -466,9 +462,9 @@ mod tests {
 
         // Test addition
         let add_expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &add_expr).unwrap();
@@ -478,9 +474,9 @@ mod tests {
 
         // Test multiplication
         let mul_expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &mul_expr).unwrap();
@@ -504,9 +500,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -526,9 +522,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -552,9 +548,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -578,9 +574,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -604,9 +600,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
             op: BinaryOperator::Divide,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -630,9 +626,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -653,7 +649,7 @@ mod tests {
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array)]).unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
             op: BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Float(5.0))),
         };
@@ -673,7 +669,7 @@ mod tests {
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array)]).unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         };
@@ -709,15 +705,15 @@ mod tests {
 
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
                 op: BinaryOperator::Plus,
-                right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
             }),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "c".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c", false))),
                 op: BinaryOperator::Minus,
-                right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "d".to_string() }),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("d", false))),
             }),
         };
 
@@ -740,7 +736,7 @@ mod tests {
         let a_array = Float64Array::from(vec![10.0, 20.0, 30.0]);
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array)]).unwrap();
 
-        let expr = Expression::ColumnRef { schema: None, table: None, column: "a".to_string() };
+        let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false));
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
         let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
@@ -763,7 +759,7 @@ mod tests {
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::Literal(SqlValue::Null)),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -785,7 +781,7 @@ mod tests {
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(price_array)]).unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
             op: BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Null)),
         };
@@ -818,9 +814,9 @@ mod tests {
         .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "quantity".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false))),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "discount".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("discount", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -879,16 +875,12 @@ mod tests {
 
         // price * (1 - discount)
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::Literal(SqlValue::Float(1.0))),
                 op: BinaryOperator::Minus,
-                right: Box::new(Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "discount".to_string(),
-                }),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("discount", false))),
             }),
         };
 
@@ -922,9 +914,9 @@ mod tests {
         .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
             op: BinaryOperator::Divide,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "quantity".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -957,9 +949,9 @@ mod tests {
         .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "revenue".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("revenue", false))),
             op: BinaryOperator::Minus,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "cost".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("cost", false))),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();

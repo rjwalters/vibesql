@@ -71,11 +71,7 @@ fn test_phase_c_proof_of_concept_full_pipeline() {
 
     // Stage 2: WHERE age > 18
     let where_expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: Some("users".to_string()),
-            column: "age".to_string(),
-        }),
+        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "age", false))),
         op: vibesql_ast::BinaryOperator::GreaterThan,
         right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Integer(18))),
     };
@@ -178,17 +174,9 @@ fn test_phase_c_proof_of_concept_join_pipeline() {
 
     // Stage 2: JOIN customers ON orders.customer_id = customers.id
     let join_condition = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: Some("orders".to_string()),
-            column: "customer_id".to_string(),
-        }),
+        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "customer_id", false))),
         op: vibesql_ast::BinaryOperator::Equal,
-        right: Box::new(vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: Some("customers".to_string()),
-            column: "id".to_string(),
-        }),
+        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("customers", false, "id", false))),
     };
 
     let join = LazyNestedLoopJoin::new(
@@ -217,11 +205,7 @@ fn test_phase_c_proof_of_concept_join_pipeline() {
     };
 
     let where_expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: Some("orders".to_string()),
-            column: "amount".to_string(),
-        }),
+        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "amount", false))),
         op: vibesql_ast::BinaryOperator::GreaterThan,
         right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Integer(100))),
     };

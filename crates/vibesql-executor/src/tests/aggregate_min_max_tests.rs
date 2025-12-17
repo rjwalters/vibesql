@@ -59,11 +59,7 @@ fn test_min_function() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "MIN".to_string(),
-                args: vec![vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "temp".to_string(),
-                }],
+                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("temp", false))],
                 character_unit: None,
             },
             alias: None,
@@ -142,11 +138,7 @@ fn test_max_function() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "MAX".to_string(),
-                args: vec![vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "temp".to_string(),
-                }],
+                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("temp", false))],
                 character_unit: None,
             },
             alias: None,
@@ -228,11 +220,7 @@ fn test_min_max_on_strings() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "MIN".to_string(),
-                args: vec![vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "name".to_string(),
-                }],
+                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))],
                 character_unit: None,
             },
             alias: None,
@@ -269,11 +257,7 @@ fn test_min_max_on_strings() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "MAX".to_string(),
-                args: vec![vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "name".to_string(),
-                }],
+                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))],
                 character_unit: None,
             },
             alias: None,

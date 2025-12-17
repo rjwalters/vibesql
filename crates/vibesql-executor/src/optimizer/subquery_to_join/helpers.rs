@@ -82,21 +82,17 @@ pub(super) fn rewrite_column_refs_with_alias(
     new_alias: &str,
 ) -> Expression {
     match expr {
-        Expression::ColumnRef { table, column, .. } => {
+        Expression::ColumnRef(col_id) => {
             // Rewrite if:
             // 1. No table qualifier (unqualified column from the subquery table)
             // 2. Table qualifier matches the old table name
-            let should_rewrite = match table {
+            let should_rewrite = match col_id.table_canonical() {
                 None => true, // Unqualified columns from subquery should be rewritten
                 Some(t) => t.eq_ignore_ascii_case(old_table),
             };
 
             if should_rewrite {
-                Expression::ColumnRef {
-                    schema: None,
-                    table: Some(new_alias.to_string()),
-                    column: column.clone(),
-                }
+                Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(new_alias, false, col_id.column_canonical(), false))
             } else {
                 expr.clone()
             }

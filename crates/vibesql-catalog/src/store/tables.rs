@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{errors::CatalogError, identifier::TableIdentifier, table::TableSchema};
+use crate::{errors::CatalogError, TableIdentifier, table::TableSchema};
 
 impl super::Catalog {
     /// Check for circular foreign key dependencies that would be created by adding this table.

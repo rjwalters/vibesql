@@ -38,8 +38,10 @@ fn test_not_is_null_precedence() {
 
                     // Innermost expression should be column reference
                     match &**inner_expr {
-                        Expression::ColumnRef { table, column, .. } => {
-                            assert_eq!(*table, None);
+                        Expression::ColumnRef(col_id) => {
+                            let table = col_id.table_canonical();
+                            let column = col_id.column_canonical();
+                            assert!(table.is_none());
                             assert_eq!(column, "col0");
                         }
                         _ => panic!("Expected column reference, got {:?}", inner_expr),
@@ -79,8 +81,10 @@ fn test_is_not_null_parsing() {
             assert!(*negated, "IS NOT NULL should have negated=true");
 
             match &**expr {
-                Expression::ColumnRef { table, column, .. } => {
-                    assert_eq!(*table, None);
+                Expression::ColumnRef(col_id) => {
+                    let table = col_id.table_canonical();
+                    let column = col_id.column_canonical();
+                    assert!(table.is_none());
                     assert_eq!(column, "col0");
                 }
                 _ => panic!("Expected column reference, got {:?}", expr),

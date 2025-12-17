@@ -8,7 +8,7 @@ use crate::{errors::ExecutorError, schema::CombinedSchema, select::SelectResult}
 /// Derive a column name from an expression (simplified version from columns.rs)
 fn derive_column_name_from_expr(expr: &vibesql_ast::Expression) -> String {
     match expr {
-        vibesql_ast::Expression::ColumnRef { column, .. } => column.clone(),
+        vibesql_ast::Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
         vibesql_ast::Expression::Function { name, args, character_unit: _ } => {
             let args_str = if args.is_empty() {
                 "*".to_string()

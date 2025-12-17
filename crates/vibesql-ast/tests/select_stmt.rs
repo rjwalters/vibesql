@@ -40,12 +40,12 @@ fn test_select_with_columns() {
         distinct: false,
         select_list: vec![
             SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "id".to_string() },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
                 alias: None,
                 source_text: None,
             },
             SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
                 alias: None,
                 source_text: None,
             },
@@ -72,7 +72,7 @@ fn test_select_with_alias() {
             values: None,
         distinct: false,
         select_list: vec![SelectItem::Expression {
-            expr: Expression::ColumnRef { schema: None, table: None, column: "id".to_string() },
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
             alias: Some("user_id".to_string()),
             source_text: None,
         }],
@@ -139,7 +139,7 @@ fn test_select_with_where() {
         }),
         where_clause: Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         group_by: None,
@@ -171,7 +171,7 @@ fn test_select_with_order_by() {
         group_by: None,
         having: None,
         order_by: Some(vec![OrderByItem {
-            expr: Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
             direction: OrderDirection::Asc,
             nulls_order: None,
         }]),
@@ -195,7 +195,7 @@ fn test_select_distinct() {
             values: None,
         distinct: true,
         select_list: vec![SelectItem::Expression {
-            expr: Expression::ColumnRef { schema: None, table: None, column: "country".to_string() },
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("country", false)),
             alias: None,
             source_text: None,
         }],
@@ -240,11 +240,7 @@ fn test_select_with_group_by() {
             column_aliases: None, quoted: false,
         }),
         where_clause: None,
-        group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef {
-            schema: None,
-            table: None,
-            column: "customer_id".to_string(),
-        }])),
+        group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false))])),
         having: None,
         order_by: None,
         limit: None,
@@ -269,16 +265,12 @@ fn test_select_with_having() {
             column_aliases: None, quoted: false,
         }),
         where_clause: None,
-        group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef {
-            schema: None,
-            table: None,
-            column: "region".to_string(),
-        }])),
+        group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("region", false))])),
         having: Some(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
             left: Box::new(Expression::Function {
                 name: "SUM".to_string(),
-                args: vec![Expression::ColumnRef { schema: None, table: None, column: "amount".to_string() }],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
                 character_unit: None,
             }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1000))),
@@ -359,7 +351,7 @@ fn test_order_by_desc() {
         group_by: None,
         having: None,
         order_by: Some(vec![OrderByItem {
-            expr: Expression::ColumnRef { schema: None, table: None, column: "created_at".to_string() },
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("created_at", false)),
             direction: OrderDirection::Desc,
             nulls_order: None,
         }]),
@@ -390,16 +382,8 @@ fn test_inner_join() {
         join_type: JoinType::Inner,
         condition: Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("users".to_string()),
-                column: "id".to_string(),
-            }),
-            right: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("orders".to_string()),
-                column: "user_id".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
         }),
         using_columns: None,
         natural: false,
@@ -527,7 +511,7 @@ fn test_from_subquery() {
         }),
         where_clause: Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "active".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("active", false))),
             right: Box::new(Expression::Literal(SqlValue::Boolean(true))),
         }),
         group_by: None,

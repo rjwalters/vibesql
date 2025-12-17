@@ -88,7 +88,7 @@ fn test_index_ordering() {
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
             alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
@@ -102,7 +102,7 @@ fn test_index_ordering() {
         group_by: None,
         having: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
-            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
             direction: OrderDirection::Asc,
             nulls_order: None,
         }]),

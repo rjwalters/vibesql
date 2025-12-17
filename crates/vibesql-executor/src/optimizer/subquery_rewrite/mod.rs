@@ -193,7 +193,7 @@ mod tests {
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: column.to_string() },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&column, false)),
                 alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn test_add_distinct_to_uncorrelated_in_subquery() {
         let subquery = simple_select("customers", "region");
-        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "region".to_string() };
+        let in_expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("region", false));
 
         let mut stmt = simple_select("orders", "order_id");
         stmt.where_clause = Some(Expression::In {
@@ -244,7 +244,7 @@ mod tests {
         let mut subquery = simple_select("customers", "region");
         subquery.distinct = true;
 
-        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "region".to_string() };
+        let in_expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("region", false));
 
         let mut stmt = simple_select("orders", "order_id");
         stmt.where_clause = Some(Expression::In {
@@ -278,16 +278,8 @@ mod tests {
         // Add WHERE clause with qualified column reference to outer table
         subquery.where_clause = Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("customers".to_string()),
-                column: "region".to_string(),
-            }),
-            right: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("orders".to_string()),
-                column: "region".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("customers", false, "region", false))),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "region", false))),
         });
 
         let correlated = correlation::is_correlated(&subquery);
@@ -297,22 +289,14 @@ mod tests {
 
     #[test]
     fn test_in_to_exists_rewrite() {
-        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "customer_id".to_string() };
+        let in_expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false));
 
         let mut subquery = simple_select("customers", "customer_id");
         // Make it correlated
         subquery.where_clause = Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("customers".to_string()),
-                column: "region".to_string(),
-            }),
-            right: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("orders".to_string()),
-                column: "region".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("customers", false, "region", false))),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "region", false))),
         });
 
         let mut stmt = simple_select("orders", "order_id");
@@ -353,33 +337,21 @@ mod tests {
     #[test]
     fn test_complex_expression_skips_in_to_exists() {
         // Test that complex expressions in SELECT list skip IN → EXISTS transformation
-        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "customer_id".to_string() };
+        let in_expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false));
 
         let mut subquery = simple_select("customers", "customer_id");
         // Add WHERE clause to make it correlated
         subquery.where_clause = Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("customers".to_string()),
-                column: "region".to_string(),
-            }),
-            right: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("orders".to_string()),
-                column: "region".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("customers", false, "region", false))),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "region", false))),
         });
 
         // Replace SELECT with complex expression
         subquery.select_list = vec![SelectItem::Expression {
             expr: Expression::Function {
                 name: "UPPER".to_string(),
-                args: vec![Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "customer_id".to_string(),
-                }],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false))],
                 character_unit: None,
             },
             alias: None, source_text: None }];
@@ -411,12 +383,12 @@ mod tests {
     #[test]
     fn test_multi_column_in_skips_optimization() {
         // Test that multi-column IN subqueries are not optimized
-        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "customer_id".to_string() };
+        let in_expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false));
 
         let mut subquery = simple_select("customers", "customer_id");
         // Add second column to SELECT list
         subquery.select_list.push(SelectItem::Expression {
-            expr: Expression::ColumnRef { schema: None, table: None, column: "region".to_string() },
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("region", false)),
             alias: None, source_text: None });
 
         let mut stmt = simple_select("orders", "order_id");
@@ -449,22 +421,14 @@ mod tests {
     #[test]
     fn test_negated_in_preserved() {
         // Test that NOT IN negation is preserved
-        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "customer_id".to_string() };
+        let in_expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false));
 
         let mut subquery = simple_select("customers", "customer_id");
         // Make it correlated
         subquery.where_clause = Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("customers".to_string()),
-                column: "region".to_string(),
-            }),
-            right: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("orders".to_string()),
-                column: "region".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("customers", false, "region", false))),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "region", false))),
         });
 
         let mut stmt = simple_select("orders", "order_id");
@@ -492,12 +456,12 @@ mod tests {
         // Add nested IN subquery in WHERE clause
         let inner_subquery = simple_select("regions", "region_id");
         outer_subquery.where_clause = Some(Expression::In {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "region_id".to_string() }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("region_id", false))),
             subquery: Box::new(inner_subquery),
             negated: false,
         });
 
-        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "customer_id".to_string() };
+        let in_expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false));
 
         let mut stmt = simple_select("orders", "order_id");
         stmt.where_clause = Some(Expression::In {
@@ -546,11 +510,7 @@ mod tests {
 
         let mut stmt_with_in = simple_select("orders", "order_id");
         stmt_with_in.where_clause = Some(Expression::In {
-            expr: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "customer_id".to_string(),
-            }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false))),
             subquery: Box::new(simple_select("customers", "customer_id")),
             negated: false,
         });
@@ -564,11 +524,7 @@ mod tests {
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
-                expr: Expression::ColumnRef {
-                    schema: None,
-                    table: Some(alias.to_string()),
-                    column: column.to_string(),
-                },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(alias, false, column, false)),
                 alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
@@ -598,16 +554,8 @@ mod tests {
         // Add correlation predicate: l2.l_orderkey = l1.l_orderkey
         subquery.where_clause = Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("l2".to_string()),
-                column: "l_orderkey".to_string(),
-            }),
-            right: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("l1".to_string()),
-                column: "l_orderkey".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("l2", false, "l_orderkey", false))),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("l1", false, "l_orderkey", false))),
         });
 
         // Outer query: SELECT * FROM lineitem l1
@@ -623,9 +571,9 @@ mod tests {
                 assert!(!negated, "Should not be negated");
                 // The outer expression should be l1.l_orderkey
                 match expr.as_ref() {
-                    Expression::ColumnRef { schema: None, table: Some(t), column: c, .. } => {
-                        assert_eq!(t, "l1");
-                        assert_eq!(c, "l_orderkey");
+                    Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+                        assert_eq!(col_id.table_canonical().unwrap(), "l1");
+                        assert_eq!(col_id.column_canonical(), "l_orderkey");
                     }
                     _ => panic!("Expected ColumnRef for outer expression"),
                 }
@@ -646,16 +594,8 @@ mod tests {
         let mut subquery = simple_select_with_alias("orders", "o", "o_custkey");
         subquery.where_clause = Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("o".to_string()),
-                column: "o_custkey".to_string(),
-            }),
-            right: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("c".to_string()),
-                column: "c_custkey".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("o", false, "o_custkey", false))),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("c", false, "c_custkey", false))),
         });
 
         let mut stmt = simple_select_with_alias("customer", "c", "c_custkey");

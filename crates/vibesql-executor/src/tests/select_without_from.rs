@@ -223,11 +223,7 @@ fn test_column_reference_without_from_fails() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "some_column".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("some_column", false)),
             alias: None, source_text: None }],
         from: None,
         where_clause: None,
@@ -262,11 +258,7 @@ fn test_is_null_with_column_reference_fails() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::IsNull {
-                expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
                 negated: false,
             },
             alias: None, source_text: None }],
@@ -303,11 +295,7 @@ fn test_between_with_column_reference_fails() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Between {
-                expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "price".to_string(),
-                }),
+                expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
                 low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
                     10,
                 ))),
@@ -351,11 +339,7 @@ fn test_cast_with_column_reference_fails() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
-                expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
                 data_type: vibesql_types::DataType::Varchar { max_length: Some(255) },
             },
             alias: None, source_text: None }],
@@ -392,11 +376,7 @@ fn test_like_with_column_reference_fails() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Like {
-                expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "name".to_string(),
-                }),
+                expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))),
                 pattern: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("A%")),
                 )),
@@ -436,11 +416,7 @@ fn test_in_list_with_column_reference_fails() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::InList {
-                expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
                 values: vec![
                     vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
                     vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),

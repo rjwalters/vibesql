@@ -111,16 +111,18 @@ pub(super) fn extract_equijoin_conditions(
         Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             // Check if this is col1 = col2 (equi-join)
             if let (
-                Expression::ColumnRef { schema: None, table: lt, column: lc, .. },
-                Expression::ColumnRef { schema: None, table: rt, column: rc, .. },
+                Expression::ColumnRef(left_col_id),
+                Expression::ColumnRef(right_col_id),
             ) = (left.as_ref(), right.as_ref())
             {
-                conditions.push(EquiJoinCondition {
-                    left_table: lt.clone(),
-                    left_column: lc.clone(),
-                    right_table: rt.clone(),
-                    right_column: rc.clone(),
-                });
+                if left_col_id.schema_canonical().is_none() && right_col_id.schema_canonical().is_none() {
+                    conditions.push(EquiJoinCondition {
+                        left_table: left_col_id.table_canonical().map(|t| t.to_string()),
+                        left_column: left_col_id.column_canonical().to_string(),
+                        right_table: right_col_id.table_canonical().map(|t| t.to_string()),
+                        right_column: right_col_id.column_canonical().to_string(),
+                    });
+                }
             }
         }
         _ => {}
@@ -153,8 +155,8 @@ fn extract_non_join_predicates_recursive(
         }
         Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             // Skip column = column (join conditions)
-            if matches!(left.as_ref(), Expression::ColumnRef { .. })
-                && matches!(right.as_ref(), Expression::ColumnRef { .. })
+            if matches!(left.as_ref(), Expression::ColumnRef(_))
+                && matches!(right.as_ref(), Expression::ColumnRef(_))
             {
                 return;
             }

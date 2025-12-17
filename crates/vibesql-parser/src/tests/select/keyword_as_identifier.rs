@@ -16,7 +16,8 @@ fn test_column_m_in_select() {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::ColumnRef { column, .. } => {
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+            let column = col_id.column_canonical();
                         // Identifiers preserve original case from SQL
                         assert_eq!(column, "m");
                     }

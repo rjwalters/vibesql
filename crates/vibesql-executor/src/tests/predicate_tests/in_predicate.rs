@@ -42,11 +42,7 @@ fn test_in_list_basic() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::InList {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             values: vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
@@ -101,11 +97,7 @@ fn test_not_in_list() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::InList {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             values: vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
@@ -158,11 +150,7 @@ fn test_in_list_with_null_value() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::InList {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             values: vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
@@ -215,11 +203,7 @@ fn test_in_list_with_null_in_list() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::InList {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             values: vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
@@ -273,11 +257,7 @@ fn test_empty_in_list() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::InList {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             values: vec![],
             negated: false,
         }),
@@ -327,11 +307,7 @@ fn test_empty_not_in_list() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::InList {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             values: vec![],
             negated: true,
         }),

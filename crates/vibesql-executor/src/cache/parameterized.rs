@@ -496,7 +496,7 @@ impl LiteralExtractor {
             }
 
             // These expressions don't contain literals
-            Expression::ColumnRef { .. }
+            Expression::ColumnRef(_)
             | Expression::Placeholder(_)
             | Expression::NumberedPlaceholder(_)
             | Expression::NamedPlaceholder(_)
@@ -543,7 +543,7 @@ mod tests {
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false)),
                 alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
@@ -557,20 +557,12 @@ mod tests {
                 op: BinaryOperator::And,
                 left: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::GreaterThan,
-                    left: Box::new(Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "col1".to_string(),
-                    }),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
                     right: Box::new(Expression::Literal(SqlValue::Integer(25))),
                 }),
                 right: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::Equal,
-                    left: Box::new(Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "col2".to_string(),
-                    }),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col2", false))),
                     right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                         "John",
                     )))),
@@ -610,7 +602,7 @@ mod tests {
             quoted: false,
             }),
             where_clause: Some(Expression::InList {
-                expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
+                expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
                 values: vec![
                     Expression::Literal(SqlValue::Integer(1)),
                     Expression::Literal(SqlValue::Integer(2)),

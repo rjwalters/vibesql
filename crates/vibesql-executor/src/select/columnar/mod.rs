@@ -531,13 +531,13 @@ fn eval_simple_expression(row: &Row, expr: &vibesql_ast::Expression) -> Option<f
                 _ => None,
             }
         }
-        Expression::ColumnRef { column, .. } => {
+        Expression::ColumnRef(col_id) => {
             // Cannot resolve column names without a schema - return None to skip
             // the fast path and fall back to the columnar execution path which
             // properly handles expression aggregates with schema resolution.
             log::debug!(
                 "fast_aggregate_on_rows: ColumnRef '{}' requires schema resolution, skipping fast path",
-                column
+                col_id.column_canonical()
             );
             None
         }
@@ -788,7 +788,7 @@ mod tests {
         let aggregates = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: false,
-            args: vec![Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }],
+            args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
             order_by: None,
         }];
 
@@ -817,7 +817,7 @@ mod tests {
 
         // SELECT SUM(price) FROM test WHERE quantity < 25
         let filter = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "quantity".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false))),
             op: BinaryOperator::LessThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(25))),
         };
@@ -825,7 +825,7 @@ mod tests {
         let aggregates = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: false,
-            args: vec![Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }],
+            args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
             order_by: None,
         }];
 
@@ -857,7 +857,7 @@ mod tests {
             Expression::AggregateFunction {
                 name: "SUM".to_string(),
                 distinct: false,
-                args: vec![Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
                 order_by: None,
             },
             Expression::AggregateFunction {
@@ -869,7 +869,7 @@ mod tests {
             Expression::AggregateFunction {
                 name: "AVG".to_string(),
                 distinct: false,
-                args: vec![Expression::ColumnRef { schema: None, table: None, column: "quantity".to_string() }],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false))],
                 order_by: None,
             },
         ];
@@ -911,7 +911,7 @@ mod tests {
         let aggregates = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: true,
-            args: vec![Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }],
+            args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
             order_by: None,
         }];
 
@@ -945,7 +945,7 @@ mod tests {
         let aggregates = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: false,
-            args: vec![Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }],
+            args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
             order_by: None,
         }];
 

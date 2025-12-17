@@ -39,11 +39,7 @@ fn test_between_with_null_expr() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             negated: false,
@@ -97,11 +93,7 @@ fn test_not_between() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: true,
@@ -154,11 +146,7 @@ fn test_between_boundary_values() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: false,
@@ -214,11 +202,7 @@ fn test_not_between_with_null_bound() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
             negated: true,
@@ -273,11 +257,7 @@ fn test_between_with_null_bound() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: false,
@@ -335,11 +315,7 @@ fn test_not_between_with_null_lower_bound() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: true,

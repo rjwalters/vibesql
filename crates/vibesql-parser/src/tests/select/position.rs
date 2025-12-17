@@ -100,11 +100,7 @@ fn test_parse_position_with_column() {
                         );
                         assert_eq!(
                             **string,
-                            vibesql_ast::Expression::ColumnRef {
-                                schema: None,
-                                table: None,
-                                column: "name".to_string()
-                            }
+                            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))
                         );
                     }
                     _ => panic!("Expected Position expression"),
@@ -132,19 +128,11 @@ fn test_parse_position_both_columns() {
                     vibesql_ast::Expression::Position { substring, string, character_unit: _ } => {
                         assert_eq!(
                             **substring,
-                            vibesql_ast::Expression::ColumnRef {
-                                schema: None,
-                                table: None,
-                                column: "needle".to_string()
-                            }
+                            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("needle", false))
                         );
                         assert_eq!(
                             **string,
-                            vibesql_ast::Expression::ColumnRef {
-                                schema: None,
-                                table: None,
-                                column: "haystack".to_string()
-                            }
+                            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("haystack", false))
                         );
                     }
                     _ => panic!("Expected Position expression"),

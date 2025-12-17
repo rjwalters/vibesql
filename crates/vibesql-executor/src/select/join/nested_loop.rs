@@ -47,7 +47,7 @@ enum EquijoinEvalStrategy {
     Simple {
         left_col_idx: usize,
         right_col_idx: usize,
-        remaining_condition: Option<vibesql_ast::Expression>,
+        remaining_condition: Option<Box<vibesql_ast::Expression>>,
     },
     /// Complex condition - need full evaluation with combined_row
     Complex,
@@ -80,7 +80,7 @@ fn analyze_join_condition(
             return EquijoinEvalStrategy::Simple {
                 left_col_idx: equi_info.left_col_idx,
                 right_col_idx: equi_info.right_col_idx,
-                remaining_condition: Some(right.as_ref().clone()),
+                remaining_condition: Some(Box::new(right.as_ref().clone())),
             };
         }
         // Try right side
@@ -88,7 +88,7 @@ fn analyze_join_condition(
             return EquijoinEvalStrategy::Simple {
                 left_col_idx: equi_info.left_col_idx,
                 right_col_idx: equi_info.right_col_idx,
-                remaining_condition: Some(left.as_ref().clone()),
+                remaining_condition: Some(Box::new(left.as_ref().clone())),
             };
         }
     }
@@ -609,7 +609,7 @@ pub(super) fn nested_loop_inner_join(
                 right_slice,
                 left_col_idx,
                 right_col_idx,
-                remaining_condition.as_ref(),
+                remaining_condition.as_deref(),
                 &combined_schema,
                 database,
                 timeout_ctx,
@@ -1199,17 +1199,9 @@ mod tests {
 
         // Condition: users.id = orders.user_id (column 0 = column 2 in combined row)
         let condition = vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: Some("users".to_string()),
-                column: "id".to_string(),
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
             op: vibesql_ast::BinaryOperator::Equal,
-            right: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: Some("orders".to_string()),
-                column: "user_id".to_string(),
-            }),
+            right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
         };
 
         let result = execute_nested_loop_classic(
@@ -1349,17 +1341,9 @@ mod tests {
 
             // Condition: users.id = orders.user_id
             let condition = vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("users".to_string()),
-                    column: "id".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("orders".to_string()),
-                    column: "user_id".to_string(),
-                }),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
             };
 
             let result = execute_nested_loop_parallel(
@@ -1462,17 +1446,9 @@ mod tests {
 
             // Condition: left.a = right.b (no matches since ranges don't overlap)
             let condition = vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("left".to_string()),
-                    column: "a".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("left", false, "a", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("right".to_string()),
-                    column: "b".to_string(),
-                }),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("right", false, "b", false))),
             };
 
             let result = execute_nested_loop_parallel(
@@ -1521,17 +1497,9 @@ mod tests {
 
             // Condition: left.id = right.id
             let condition = vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("left".to_string()),
-                    column: "id".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("left", false, "id", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("right".to_string()),
-                    column: "id".to_string(),
-                }),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("right", false, "id", false))),
             };
 
             // Sequential result
@@ -1595,17 +1563,9 @@ mod tests {
 
             // Condition: left.key = right.key
             let condition = vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("left".to_string()),
-                    column: "key".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("left", false, "key", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("right".to_string()),
-                    column: "key".to_string(),
-                }),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("right", false, "key", false))),
             };
 
             let result = execute_nested_loop_parallel(

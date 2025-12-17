@@ -41,7 +41,8 @@ use vibesql_types::SqlValue;
 pub fn evaluate_expression(expr: &Expression, row: &Row) -> Result<SqlValue, String> {
     match expr {
         Expression::Literal(val) => Ok(val.clone()),
-        Expression::ColumnRef { column, .. } => {
+        Expression::ColumnRef(col_id) => {
+            let column = col_id.column_canonical();
             // Try parsing column name as index (e.g., "0", "1")
             if let Ok(index) = column.parse::<usize>() {
                 row.get(index)

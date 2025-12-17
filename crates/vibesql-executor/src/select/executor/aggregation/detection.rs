@@ -134,7 +134,7 @@ impl SelectExecutor<'_> {
                         matches!(args[0], vibesql_ast::Expression::Wildcard)
                             || matches!(
                                 &args[0],
-                                vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } if column == "*"
+                                vibesql_ast::Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() && col_id.column_canonical() == "*"
                             )
                     }
                     vibesql_ast::Expression::Function { name, args, .. } => {
@@ -145,7 +145,7 @@ impl SelectExecutor<'_> {
                         matches!(args[0], vibesql_ast::Expression::Wildcard)
                             || matches!(
                                 &args[0],
-                                vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } if column == "*"
+                                vibesql_ast::Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() && col_id.column_canonical() == "*"
                             )
                     }
                     _ => false,

@@ -74,7 +74,7 @@ impl DeleteExecutor {
     ///     table_name: "users".to_string(),
     ///     quoted: false,
     ///     where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-    ///         left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
+    ///         left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
     ///         op: BinaryOperator::Equal,
     ///         right: Box::new(Expression::Literal(SqlValue::Integer(1))),
     ///     })),
@@ -402,10 +402,11 @@ impl DeleteExecutor {
         // Only handle simple binary equality operations
         if let Expression::BinaryOp { left, op: BinaryOperator::Equal, right } = where_expr {
             // Check if left side is a column reference and right side is a literal
-            if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
+            if let (Expression::ColumnRef(col_id), Expression::Literal(value)) =
                 (left.as_ref(), right.as_ref())
             {
                 // Check if this column is the primary key
+                let column = col_id.column_canonical();
                 if let Some(pk_indices) = schema.get_primary_key_indices() {
                     if let Some(col_index) = schema.get_column_index(column) {
                         // Only handle single-column primary keys for now
@@ -417,9 +418,10 @@ impl DeleteExecutor {
             }
 
             // Also check the reverse: literal = column
-            if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
+            if let (Expression::Literal(value), Expression::ColumnRef(col_id)) =
                 (left.as_ref(), right.as_ref())
             {
+                let column = col_id.column_canonical();
                 if let Some(pk_indices) = schema.get_primary_key_indices() {
                     if let Some(col_index) = schema.get_column_index(column) {
                         if pk_indices.len() == 1 && pk_indices[0] == col_index {

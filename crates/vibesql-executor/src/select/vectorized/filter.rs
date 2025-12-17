@@ -47,7 +47,7 @@ fn evaluate_predicate_simd(
                 right_type: Some("Boolean".to_string()),
             }),
         },
-        Expression::ColumnRef { column, .. } => get_boolean_column(batch, column),
+        Expression::ColumnRef(col_id) => get_boolean_column(batch, col_id.column_canonical()),
         Expression::UnaryOp { op, expr } => match op {
             vibesql_ast::UnaryOperator::Not => {
                 let expr_mask = evaluate_predicate_simd(batch, expr)?;
@@ -140,7 +140,7 @@ fn evaluate_comparison_simd(
     right: &Expression,
 ) -> Result<BooleanArray, ExecutorError> {
     let (col_name, literal_value) = match (left, right) {
-        (Expression::ColumnRef { column, .. }, Expression::Literal(val)) => (column, val),
+        (Expression::ColumnRef(col_id), Expression::Literal(val)) => (col_id.column_canonical(), val),
         _ => {
             return Err(ExecutorError::UnsupportedFeature(
                 "SIMD comparison requires: column <op> literal".to_string(),
@@ -559,7 +559,7 @@ fn evaluate_like_simd(
 ) -> Result<BooleanArray, ExecutorError> {
     // Extract column name from expression
     let col_name = match expr {
-        Expression::ColumnRef { column, .. } => column,
+        Expression::ColumnRef(col_id) => col_id.column_canonical(),
         _ => {
             return Err(ExecutorError::UnsupportedFeature(
                 "SIMD LIKE requires: column LIKE literal".to_string(),
@@ -641,7 +641,7 @@ mod tests {
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array)]).unwrap();
 
         let predicate = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))),
             op: BinaryOperator::GreaterThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         };
@@ -660,13 +660,13 @@ mod tests {
         // value > 10 (all false) AND value < 100 (would be all true)
         let predicate = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(100))),
             }),
@@ -687,13 +687,13 @@ mod tests {
         // value < 100 (all true) OR value > 10 (would be all false)
         let predicate = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(100))),
             }),
             op: BinaryOperator::Or,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
@@ -714,13 +714,13 @@ mod tests {
         // value > 3 AND value < 8
         let predicate = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(3))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(8))),
             }),
@@ -740,7 +740,7 @@ mod tests {
 
         // name LIKE 'Al%'
         let predicate = Expression::Like {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "name".to_string() }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))),
             pattern: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Al%")))),
             negated: false,
         };
@@ -764,7 +764,7 @@ mod tests {
 
         // name LIKE '%lie'
         let predicate = Expression::Like {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "name".to_string() }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))),
             pattern: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("%lie")))),
             negated: false,
         };
@@ -783,7 +783,7 @@ mod tests {
 
         // name NOT LIKE 'Al%'
         let predicate = Expression::Like {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "name".to_string() }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))),
             pattern: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Al%")))),
             negated: true,
         };
@@ -806,7 +806,7 @@ mod tests {
 
         // name LIKE '%li%'
         let predicate = Expression::Like {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "name".to_string() }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))),
             pattern: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("%li%")))),
             negated: false,
         };

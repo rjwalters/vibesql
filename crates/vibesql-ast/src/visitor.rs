@@ -224,8 +224,12 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
 
         Expression::NamedPlaceholder(name) => visitor.visit_named_placeholder(name),
 
-        Expression::ColumnRef { schema, table, column } => {
-            visitor.visit_column_ref(schema.as_deref(), table.as_deref(), column)
+        Expression::ColumnRef(col_id) => {
+            visitor.visit_column_ref(
+                col_id.schema_canonical(),
+                col_id.table_canonical(),
+                col_id.column_canonical(),
+            )
         }
 
         Expression::BinaryOp { left, right, .. } => {
@@ -1349,6 +1353,7 @@ mod tests {
     use vibesql_types::SqlValue;
 
     use super::*;
+    use crate::ColumnIdentifier;
 
     // Helper to create a simple expression for testing
     fn make_binary_expr() -> Expression {
@@ -1442,16 +1447,8 @@ mod tests {
 
         let expr = Expression::BinaryOp {
             op: crate::BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: Some("users".to_string()),
-                column: "id".to_string(),
-            }),
-            right: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "value".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(ColumnIdentifier::qualified("users", false, "id", false))),
+            right: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("value", false))),
         };
 
         let mut visitor = ColumnCollector { columns: vec![] };
@@ -1588,7 +1585,7 @@ mod tests {
             from: None,
             where_clause: Some(Expression::BinaryOp {
                 op: crate::BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
+                left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("id", false))),
                 right: Box::new(Expression::Placeholder(0)),
             }),
             group_by: None,

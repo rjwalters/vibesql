@@ -39,7 +39,8 @@ fn any_order_by_column_nullable(
     table_schema: &TableSchema,
 ) -> bool {
     for item in order_items {
-        if let Expression::ColumnRef { column, .. } = &item.expr {
+        if let Expression::ColumnRef(col_id) = &item.expr {
+            let column = col_id.column_canonical();
             // Look up column in schema (case-insensitive)
             if let Some(idx) = table_schema.get_column_index(column) {
                 if table_schema.columns[idx].nullable {
@@ -135,7 +136,7 @@ pub(crate) fn should_use_index_scan(
                         .iter()
                         .map(|item| {
                             let col_name = match &item.expr {
-                                Expression::ColumnRef { column, .. } => column.clone(),
+                                Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
                                 _ => unreachable!(
                                     "can_use_index_for_order_by ensures simple column refs"
                                 ),
@@ -227,15 +228,17 @@ pub(crate) fn expression_filters_column(expr: &Expression, column_name: &str) ->
     }
 }
 
-/// Check if an expression is a reference to a specific column
+/// Check if an expression is a reference to a specific column.
 ///
 /// Uses case-insensitive comparison because:
-/// - SQL parser normalizes unquoted identifiers to uppercase (e.g., `i_id` → `I_ID`)
-/// - Index column names may be lowercase or uppercase depending on how they're created
-/// - Table column statistics are stored with the original column name case
+/// - ColumnIdentifier.column_canonical() returns lowercase for unquoted identifiers
+/// - Schema metadata (column_name) may not be consistently lowercased
+/// - For SQL:1999 compliance with quoted identifiers, both sides should use canonical forms
+///
+/// TODO: Once schema metadata consistently uses canonical forms, change to direct equality
 pub(super) fn is_column_reference(expr: &Expression, column_name: &str) -> bool {
     match expr {
-        Expression::ColumnRef { column, .. } => column.eq_ignore_ascii_case(column_name),
+        Expression::ColumnRef(col_id) => col_id.column_canonical().eq_ignore_ascii_case(column_name),
         _ => false,
     }
 }
@@ -328,7 +331,7 @@ pub(crate) fn can_use_index_for_order_by_with_pinned(
     for (order_item, index_col) in order_items.iter().zip(remaining_index_columns.iter()) {
         // ORDER BY expression must be a simple column reference
         let order_col_name = match &order_item.expr {
-            Expression::ColumnRef { schema: None, table: None, column, .. } => column,
+            Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => col_id.column_canonical(),
             _ => return false, // Complex expressions not supported
         };
 
@@ -395,14 +398,14 @@ fn collect_equality_columns(expr: &Expression, columns: &mut std::collections::H
         match op {
             vibesql_ast::BinaryOperator::Equal => {
                 // Check for column = literal pattern
-                if let Expression::ColumnRef { column, .. } = &**left {
+                if let Expression::ColumnRef(col_id) = &**left {
                     if is_literal(right) {
-                        columns.insert(column.to_uppercase());
+                        columns.insert(col_id.column_canonical().to_uppercase());
                     }
                 }
-                if let Expression::ColumnRef { column, .. } = &**right {
+                if let Expression::ColumnRef(col_id) = &**right {
                     if is_literal(left) {
-                        columns.insert(column.to_uppercase());
+                        columns.insert(col_id.column_canonical().to_uppercase());
                     }
                 }
             }
@@ -580,7 +583,7 @@ pub(crate) fn cost_based_index_selection(
                         .iter()
                         .map(|item| {
                             let col_name = match &item.expr {
-                                Expression::ColumnRef { column, .. } => column.clone(),
+                                Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
                                 _ => unreachable!(
                                     "can_use_index_for_order_by ensures simple column refs"
                                 ),
@@ -670,17 +673,17 @@ pub(crate) fn estimate_selectivity(
                 vibesql_ast::BinaryOperator::Equal => {
                     // Check if this is a predicate on our column (case-insensitive)
                     // For literal values, use actual statistics
-                    if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
+                    if let (Expression::ColumnRef(col_id), Expression::Literal(value)) =
                         (&**left, &**right)
                     {
-                        if column.eq_ignore_ascii_case(column_name) {
+                        if col_id.column_canonical().eq_ignore_ascii_case(column_name) {
                             return col_stats.estimate_eq_selectivity(value);
                         }
                     }
-                    if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
+                    if let (Expression::Literal(value), Expression::ColumnRef(col_id)) =
                         (&**left, &**right)
                     {
-                        if column.eq_ignore_ascii_case(column_name) {
+                        if col_id.column_canonical().eq_ignore_ascii_case(column_name) {
                             return col_stats.estimate_eq_selectivity(value);
                         }
                     }
@@ -704,10 +707,10 @@ pub(crate) fn estimate_selectivity(
                 | vibesql_ast::BinaryOperator::LessThan
                 | vibesql_ast::BinaryOperator::LessThanOrEqual => {
                     // Range predicates (case-insensitive column comparison)
-                    if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
+                    if let (Expression::ColumnRef(col_id), Expression::Literal(value)) =
                         (&**left, &**right)
                     {
-                        if column.eq_ignore_ascii_case(column_name) {
+                        if col_id.column_canonical().eq_ignore_ascii_case(column_name) {
                             let op_str = match op {
                                 vibesql_ast::BinaryOperator::GreaterThan => ">",
                                 vibesql_ast::BinaryOperator::GreaterThanOrEqual => ">=",
@@ -744,8 +747,8 @@ pub(crate) fn estimate_selectivity(
             }
         }
         Expression::Between { expr, low, high, negated: _, symmetric: _ } => {
-            if let Expression::ColumnRef { column, .. } = &**expr {
-                if column.eq_ignore_ascii_case(column_name) {
+            if let Expression::ColumnRef(col_id) = &**expr {
+                if col_id.column_canonical().eq_ignore_ascii_case(column_name) {
                     // Estimate BETWEEN as: P(col >= low AND col <= high)
                     if let (Expression::Literal(low_val), Expression::Literal(high_val)) =
                         (&**low, &**high)
@@ -843,7 +846,7 @@ mod tests {
     fn test_expression_filters_column_simple() {
         let expr = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "age".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(25))),
         };
 
@@ -857,12 +860,12 @@ mod tests {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "age".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(18))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "city".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("city", false))),
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "Boston",
                 )))),
@@ -876,7 +879,7 @@ mod tests {
 
     #[test]
     fn test_is_column_reference() {
-        let expr = Expression::ColumnRef { schema: None, table: None, column: "age".to_string() };
+        let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false));
 
         assert!(is_column_reference(&expr, "age"));
         assert!(!is_column_reference(&expr, "name"));
@@ -886,11 +889,7 @@ mod tests {
     fn test_is_column_reference_case_insensitive() {
         // SQL parser normalizes unquoted identifiers to uppercase
         // but index columns might be lowercase
-        let expr = Expression::ColumnRef {
-            schema: None,
-            table: None,
-            column: "I_ID".to_string(), // Uppercase from parser
-        };
+        let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("I_ID", false)); // Uppercase from parser
 
         // Should match regardless of case
         assert!(is_column_reference(&expr, "i_id")); // lowercase
@@ -904,7 +903,7 @@ mod tests {
         // WHERE I_ID = 42 (uppercase from parser)
         let expr = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "I_ID".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("I_ID", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(42))),
         };
 

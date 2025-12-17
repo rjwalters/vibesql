@@ -50,6 +50,9 @@ pub enum Expression<'arena> {
         schema: Option<Symbol>,
         table: Option<Symbol>,
         column: Symbol,
+        schema_quoted: bool,
+        table_quoted: bool,
+        column_quoted: bool,
     },
 
     /// Binary operation (a + b, x = y, etc.)

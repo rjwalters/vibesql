@@ -63,11 +63,9 @@ impl Parser {
                     }
                     _ => {
                         // Treat DATE as column name when not followed by string literal
-                        Ok(Some(vibesql_ast::Expression::ColumnRef {
-                            schema: None,
-                            table: None,
-                            column: "DATE".to_string(),
-                        }))
+                        Ok(Some(vibesql_ast::Expression::ColumnRef(
+                            vibesql_ast::ColumnIdentifier::simple("DATE", false)
+                        )))
                     }
                 }
             }
@@ -90,11 +88,9 @@ impl Parser {
                     }
                     _ => {
                         // Treat TIME as column name when not followed by string literal
-                        Ok(Some(vibesql_ast::Expression::ColumnRef {
-                            schema: None,
-                            table: None,
-                            column: "TIME".to_string(),
-                        }))
+                        Ok(Some(vibesql_ast::Expression::ColumnRef(
+                            vibesql_ast::ColumnIdentifier::simple("TIME", false)
+                        )))
                     }
                 }
             }
@@ -117,11 +113,9 @@ impl Parser {
                     }
                     _ => {
                         // Treat TIMESTAMP as column name when not followed by string literal
-                        Ok(Some(vibesql_ast::Expression::ColumnRef {
-                            schema: None,
-                            table: None,
-                            column: "TIMESTAMP".to_string(),
-                        }))
+                        Ok(Some(vibesql_ast::Expression::ColumnRef(
+                            vibesql_ast::ColumnIdentifier::simple("TIMESTAMP", false)
+                        )))
                     }
                 }
             }

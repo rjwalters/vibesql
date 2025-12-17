@@ -57,11 +57,9 @@ fn test_after_update_trigger_fires() {
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Equal,
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    column: "id".to_string(),
-                    table: None,
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("id", false)
+                )),
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(1),
                 )),
@@ -124,11 +122,9 @@ fn test_before_update_trigger_fires() {
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Equal,
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    column: "id".to_string(),
-                    table: None,
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("id", false)
+                )),
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(1),
                 )),

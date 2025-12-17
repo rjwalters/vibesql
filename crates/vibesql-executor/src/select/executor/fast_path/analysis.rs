@@ -176,7 +176,7 @@ pub(crate) fn is_simple_aggregate_expression(expr: &Expression) -> bool {
             }
 
             // Argument must be a simple column reference
-            matches!(&args[0], Expression::ColumnRef { .. })
+            matches!(&args[0], Expression::ColumnRef(_))
         }
         _ => false,
     }
@@ -203,7 +203,8 @@ pub(crate) fn extract_simple_aggregate(
                 return None;
             }
 
-            if let Expression::ColumnRef { column, .. } = &args[0] {
+            if let Expression::ColumnRef(col_id) = &args[0] {
+                let column = col_id.column_canonical();
                 // Find column index
                 let col_idx = table_schema
                     .columns
@@ -232,7 +233,7 @@ pub(crate) fn extract_simple_aggregate(
 pub(crate) fn is_simple_order_by(order_by: &[OrderByItem]) -> bool {
     for item in order_by {
         // ORDER BY expression must be a simple column reference
-        if !matches!(item.expr, Expression::ColumnRef { .. }) {
+        if !matches!(item.expr, Expression::ColumnRef(_)) {
             return false;
         }
     }
@@ -264,10 +265,13 @@ pub(crate) fn uses_select_alias(order_by: &[OrderByItem], select_list: &[SelectI
 
     // Check if any ORDER BY column matches an alias
     for item in order_by {
-        if let Expression::ColumnRef { schema: None, table: None, column, .. } = &item.expr {
-            // Case-insensitive comparison for SQL identifiers
-            if aliases.iter().any(|alias| alias.eq_ignore_ascii_case(column)) {
-                return true;
+        if let Expression::ColumnRef(col_id) = &item.expr {
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() {
+                let column = col_id.column_canonical();
+                // Case-insensitive comparison for SQL identifiers
+                if aliases.iter().any(|alias| alias.eq_ignore_ascii_case(column)) {
+                    return true;
+                }
             }
         }
     }
@@ -294,7 +298,7 @@ pub fn needs_sorting(
     for (order_item, (col_name, col_dir)) in order_by.iter().zip(sorted_cols.iter()) {
         // Extract column name from ORDER BY expression
         let order_col = match &order_item.expr {
-            Expression::ColumnRef { column, .. } => column,
+            Expression::ColumnRef(col_id) => col_id.column_canonical(),
             _ => return true, // Non-column expression, need to sort
         };
 
@@ -330,7 +334,7 @@ pub(crate) fn has_simple_select_list(select_list: &[SelectItem]) -> bool {
 /// Check if an expression is simple (column ref, literal, or basic arithmetic)
 pub(crate) fn is_simple_expression(expr: &Expression) -> bool {
     match expr {
-        Expression::ColumnRef { .. } | Expression::Literal(_) => true,
+        Expression::ColumnRef(_) | Expression::Literal(_) => true,
         Expression::BinaryOp { left, right, op } => {
             // Allow simple arithmetic on columns/literals
             matches!(
@@ -394,7 +398,7 @@ pub(crate) fn is_simple_where_clause(expr: &Expression) -> bool {
 
 /// Check if an expression is a column reference or literal
 pub(crate) fn is_column_or_literal(expr: &Expression) -> bool {
-    matches!(expr, Expression::ColumnRef { .. } | Expression::Literal(_))
+    matches!(expr, Expression::ColumnRef(_) | Expression::Literal(_))
 }
 
 #[cfg(test)]
@@ -484,7 +488,7 @@ mod tests {
         // No sorted_by means we need to sort
         assert!(needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "a".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false)),
                 direction: vibesql_ast::OrderDirection::Asc,
                 nulls_order: None,
             }],
@@ -494,7 +498,7 @@ mod tests {
         // Matching sorted_by means no sorting needed
         assert!(!needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "a".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false)),
                 direction: vibesql_ast::OrderDirection::Asc,
                 nulls_order: None,
             }],
@@ -504,7 +508,7 @@ mod tests {
         // Different column means sorting needed
         assert!(needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "b".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false)),
                 direction: vibesql_ast::OrderDirection::Asc,
                 nulls_order: None,
             }],
@@ -514,7 +518,7 @@ mod tests {
         // Different direction means sorting needed
         assert!(needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "a".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false)),
                 direction: vibesql_ast::OrderDirection::Desc,
                 nulls_order: None,
             }],
@@ -524,7 +528,7 @@ mod tests {
         // ORDER BY prefix of sorted_by is OK
         assert!(!needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "a".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false)),
                 direction: vibesql_ast::OrderDirection::Asc,
                 nulls_order: None,
             }],
@@ -538,20 +542,12 @@ mod tests {
         assert!(needs_sorting(
             &[
                 vibesql_ast::OrderByItem {
-                    expr: vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "a".to_string()
-                    },
+                    expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false)),
                     direction: vibesql_ast::OrderDirection::Asc,
                     nulls_order: None,
                 },
                 vibesql_ast::OrderByItem {
-                    expr: vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "b".to_string()
-                    },
+                    expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false)),
                     direction: vibesql_ast::OrderDirection::Asc,
                     nulls_order: None,
                 },

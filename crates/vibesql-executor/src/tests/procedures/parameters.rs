@@ -26,7 +26,7 @@ fn test_call_procedure_with_in_parameter() {
             },
             ProceduralStatement::Set {
                 name: "greeting".to_string(),
-                value: Box::new(Expression::ColumnRef { schema: None, table: None, column: "name".to_string() }),
+                value: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))),
             },
         ]),
         sql_security: None,
@@ -78,9 +78,9 @@ fn test_call_procedure_with_multiple_parameters() {
             ProceduralStatement::Set {
                 name: "result".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
                     op: BinaryOperator::Plus,
-                    right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
+                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
                 }),
             },
         ]),
@@ -170,7 +170,7 @@ fn test_variable_in_expression() {
             ProceduralStatement::Set {
                 name: "y".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "x".to_string() }),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))),
                     op: BinaryOperator::Multiply,
                     right: Box::new(Expression::Literal(SqlValue::Integer(2))),
                 }),
@@ -223,9 +223,9 @@ fn test_concat_function_in_procedure() {
                 value: Box::new(Expression::Function {
                     name: "CONCAT".to_string(),
                     args: vec![
-                        Expression::ColumnRef { schema: None, table: None, column: "first".to_string() },
+                        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("first", false)),
                         Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(" "))),
-                        Expression::ColumnRef { schema: None, table: None, column: "last".to_string() },
+                        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("last", false)),
                     ],
                     character_unit: None,
                 }),

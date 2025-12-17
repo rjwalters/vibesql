@@ -139,11 +139,7 @@ fn test_insert_from_select_with_where() {
         quoted: false,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "id".to_string(),
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
         }),
@@ -320,11 +316,7 @@ fn test_insert_from_select_with_aggregates() {
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: "SUM".to_string(),
-                    args: vec![vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "amount".to_string(),
-                    }],
+                    args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
                     character_unit: None,
                 },
                 alias: None, source_text: None },

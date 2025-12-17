@@ -194,8 +194,8 @@ impl PivotAggregateGroup {
 
         // Result must be a column reference (value column)
         let value_col_idx = match result {
-            Expression::ColumnRef { table, column, .. } => {
-                schema.get_column_index(table.as_deref(), column)?
+            Expression::ColumnRef(col_id) => {
+                schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?
             }
             _ => return None,
         };
@@ -220,8 +220,8 @@ impl PivotAggregateGroup {
         schema: &CombinedSchema,
     ) -> Option<(usize, SqlValue)> {
         let col_idx = match col_expr {
-            Expression::ColumnRef { table, column, .. } => {
-                schema.get_column_index(table.as_deref(), column)?
+            Expression::ColumnRef(col_id) => {
+                schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?
             }
             _ => return None,
         };
@@ -323,21 +323,13 @@ mod tests {
                 operand: None,
                 when_clauses: vec![CaseWhen {
                     conditions: vec![Expression::BinaryOp {
-                        left: Box::new(Expression::ColumnRef {
-                            schema: None,
-                            table: None,
-                            column: "d_day_name".to_string(),
-                        }),
+                        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("d_day_name", false))),
                         op: BinaryOperator::Equal,
                         right: Box::new(Expression::Literal(SqlValue::Varchar(
                             arcstr::ArcStr::from(match_value),
                         ))),
                     }],
-                    result: Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "sales_price".to_string(),
-                    },
+                    result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("sales_price", false)),
                 }],
                 else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
             }],
@@ -415,19 +407,11 @@ mod tests {
                 operand: None,
                 when_clauses: vec![CaseWhen {
                     conditions: vec![Expression::BinaryOp {
-                        left: Box::new(Expression::ColumnRef {
-                            schema: None,
-                            table: None,
-                            column: "d_week_seq".to_string(),
-                        }),
+                        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("d_week_seq", false))),
                         op: BinaryOperator::Equal,
                         right: Box::new(Expression::Literal(SqlValue::Integer(1))),
                     }],
-                    result: Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "sales_price".to_string(),
-                    },
+                    result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("sales_price", false)),
                 }],
                 else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
             }],

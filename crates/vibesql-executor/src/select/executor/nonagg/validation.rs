@@ -311,7 +311,9 @@ fn validate_expression_column_refs(
     use vibesql_ast::Expression;
 
     match expr {
-        Expression::ColumnRef { table, column, .. } => {
+        Expression::ColumnRef(col_id) => {
+            let table = col_id.table_canonical();
+            let column = col_id.column_canonical();
             // Skip "*" - it's a wildcard used in COUNT(*) and is not a real column
             if column == "*" {
                 return Ok(());
@@ -328,7 +330,7 @@ fn validate_expression_column_refs(
             }
 
             // Try to resolve the column in the inner schema first
-            if schema.get_column_index(table.as_deref(), column).is_some() {
+            if schema.get_column_index(table, column).is_some() {
                 return Ok(());
             }
 
@@ -336,7 +338,7 @@ fn validate_expression_column_refs(
             // Only if there's no actual column with that name (real columns take precedence)
             if is_rowid_pseudo_column(column) {
                 // Verify the qualifier matches a table in the schema (if qualified)
-                if let Some(ref qualifier) = table {
+                if let Some(qualifier) = table {
                     let qualifier_lower = qualifier.to_lowercase();
                     let table_exists =
                         schema.table_schemas.keys().any(|k| k.canonical() == qualifier_lower);
@@ -356,7 +358,7 @@ fn validate_expression_column_refs(
 
             // For correlated subqueries, also check outer schema (#2694)
             if let Some(outer) = outer_schema {
-                if outer.get_column_index(table.as_deref(), column).is_some() {
+                if outer.get_column_index(table, column).is_some() {
                     return Ok(());
                 }
             }
@@ -380,8 +382,8 @@ fn validate_expression_column_refs(
             }
 
             return Err(ExecutorError::ColumnNotFound {
-                column_name: column.clone(),
-                table_name: table.clone().unwrap_or_else(|| "unknown".to_string()),
+                column_name: column.to_string(),
+                table_name: table.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string()),
                 searched_tables,
                 available_columns,
             });

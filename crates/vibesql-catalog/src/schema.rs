@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::{errors::CatalogError, identifier::TableIdentifier, table::TableSchema};
+use crate::{errors::CatalogError, TableIdentifier, table::TableSchema};
 
 /// A schema - named collection of database objects (tables, views, etc.)
 #[derive(Debug, Clone)]

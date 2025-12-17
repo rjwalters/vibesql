@@ -107,11 +107,25 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             arena_expr::Expression::NamedPlaceholder(name) => {
                 Expression::NamedPlaceholder(self.resolve(*name))
             }
-            arena_expr::Expression::ColumnRef { schema, table, column } => Expression::ColumnRef {
-                schema: self.resolve_opt(*schema),
-                table: self.resolve_opt(*table),
-                column: self.resolve(*column),
-            },
+            arena_expr::Expression::ColumnRef { schema, table, column, schema_quoted, table_quoted, column_quoted } => {
+                let schema_str = self.resolve_opt(*schema);
+                let table_str = self.resolve_opt(*table);
+                let column_str = self.resolve(*column);
+
+                let col_id = match (schema_str, table_str) {
+                    (Some(s), Some(t)) => crate::ColumnIdentifier::fully_qualified(
+                        &s, *schema_quoted,
+                        &t, *table_quoted,
+                        &column_str, *column_quoted,
+                    ),
+                    (None, Some(t)) => crate::ColumnIdentifier::qualified(
+                        &t, *table_quoted,
+                        &column_str, *column_quoted,
+                    ),
+                    (_, None) => crate::ColumnIdentifier::simple(&column_str, *column_quoted),
+                };
+                Expression::ColumnRef(col_id)
+            }
             arena_expr::Expression::BinaryOp { op, left, right } => Expression::BinaryOp {
                 op: *op,
                 left: Box::new(self.convert_expression(left)),

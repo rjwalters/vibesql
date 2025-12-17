@@ -289,7 +289,7 @@ impl SelectExecutor<'_> {
     /// Derive a column name from an expression
     fn derive_column_name_from_expr(&self, expr: &vibesql_ast::Expression) -> String {
         match expr {
-            vibesql_ast::Expression::ColumnRef { column, .. } => column.clone(),
+            vibesql_ast::Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
             vibesql_ast::Expression::Literal(val) => format!("{}", val),
             _ => "?column?".to_string(),
         }
@@ -1144,7 +1144,7 @@ fn collect_select_aliases(
                 } else {
                     // Derive from expression - use column name for ColumnRef
                     match expr {
-                        vibesql_ast::Expression::ColumnRef { column, .. } => Some(column.clone()),
+                        vibesql_ast::Expression::ColumnRef(col_id) => Some(col_id.column_canonical().to_string()),
                         _ => None,
                     }
                 };
@@ -1248,7 +1248,8 @@ impl SelectExecutor<'_> {
                     Some((*n as usize).saturating_sub(1)) // 1-based to 0-based
                 }
                 // Column reference: ORDER BY x or ORDER BY a
-                vibesql_ast::Expression::ColumnRef { column, .. } => {
+                vibesql_ast::Expression::ColumnRef(col_id) => {
+                    let column = col_id.column_canonical();
                     // Try to parse as numeric column reference first
                     if let Ok(n) = column.parse::<usize>() {
                         Some(n.saturating_sub(1))
@@ -1257,7 +1258,7 @@ impl SelectExecutor<'_> {
                         // Use case-insensitive matching for SQLite compatibility
                         let col_idx = column_info.iter().position(|(alias, orig)| {
                             alias.eq_ignore_ascii_case(column)
-                                || orig.as_ref().map_or(false, |o| o.eq_ignore_ascii_case(column))
+                                || orig.as_ref().is_some_and(|o| o.eq_ignore_ascii_case(column))
                         });
 
                         // If not found, check if any branch has this alias (SQLite compatibility)

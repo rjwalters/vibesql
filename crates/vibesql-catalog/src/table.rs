@@ -451,7 +451,7 @@ impl TableSchema {
     /// Check if an expression references a specific column
     fn expression_references_column(expr: &vibesql_ast::Expression, column_name: &str) -> bool {
         match expr {
-            vibesql_ast::Expression::ColumnRef { column, .. } => column == column_name,
+            vibesql_ast::Expression::ColumnRef(col_id) => col_id.column_canonical() == column_name,
             vibesql_ast::Expression::BinaryOp { left, right, .. } => {
                 Self::expression_references_column(left, column_name)
                     || Self::expression_references_column(right, column_name)

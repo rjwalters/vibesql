@@ -28,16 +28,18 @@ pub fn compute_expression_aggregate_batch(
         if *bin_op == BinaryOperator::Multiply {
             // Get column indices from left and right operands
             if let (
-                Expression::ColumnRef { schema: None, column: col1, .. },
-                Expression::ColumnRef { schema: None, column: col2, .. },
+                Expression::ColumnRef(col_id1),
+                Expression::ColumnRef(col_id2),
             ) = (left.as_ref(), right.as_ref())
             {
-                // Find column indices by name
-                let left_idx = batch.column_index_by_name(col1);
-                let right_idx = batch.column_index_by_name(col2);
+                if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() {
+                    // Find column indices by name
+                    let left_idx = batch.column_index_by_name(col_id1.column_canonical());
+                    let right_idx = batch.column_index_by_name(col_id2.column_canonical());
 
-                if let (Some(l_idx), Some(r_idx)) = (left_idx, right_idx) {
-                    return compute_multiply_aggregate(batch, l_idx, r_idx, op);
+                    if let (Some(l_idx), Some(r_idx)) = (left_idx, right_idx) {
+                        return compute_multiply_aggregate(batch, l_idx, r_idx, op);
+                    }
                 }
             }
         }
@@ -312,8 +314,8 @@ pub fn eval_expr_on_batch(
     row_idx: usize,
 ) -> Result<SqlValue, ExecutorError> {
     match expr {
-        Expression::ColumnRef { column, .. } => {
-            if let Some(col_idx) = batch.column_index_by_name(column) {
+        Expression::ColumnRef(col_id) => {
+            if let Some(col_idx) = batch.column_index_by_name(col_id.column_canonical()) {
                 batch.get_value(row_idx, col_idx)
             } else {
                 Ok(SqlValue::Null)

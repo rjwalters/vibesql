@@ -52,14 +52,10 @@ fn test_select_into_single_row() {
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "id".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "name".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
                 alias: None, source_text: None },
         ],
         into_table: Some("target".to_string()),
@@ -143,7 +139,7 @@ fn test_select_into_no_rows_error() {
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "id".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
             alias: None, source_text: None }],
         into_table: Some("target".to_string()),
         into_variables: None,
@@ -212,7 +208,7 @@ fn test_select_into_multiple_rows_error() {
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "id".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
             alias: None, source_text: None }],
         into_table: Some("target".to_string()),
         into_variables: None,
@@ -278,11 +274,7 @@ fn test_select_into_with_expressions() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Plus,
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "x".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))),
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(5),
                 )),

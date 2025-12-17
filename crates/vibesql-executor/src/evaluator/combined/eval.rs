@@ -58,7 +58,11 @@ impl CombinedExpressionEvaluator<'_> {
             )),
 
             // Column reference - look up column index (with optional table qualifier)
-            vibesql_ast::Expression::ColumnRef { schema, table, column } => {
+            vibesql_ast::Expression::ColumnRef(col_id) => {
+                let schema = col_id.schema_canonical();
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
+
                 // Handle schema qualifier (three-part names like schema.table.column)
                 // SQLite schemas: "main" (default), "temp" (temporary tables), or attached database names
                 // For our single-database implementation:
@@ -69,17 +73,17 @@ impl CombinedExpressionEvaluator<'_> {
                     if schema_lower != "main" {
                         // SQLite returns "no such column: schema.table.column" for unknown schemas
                         let mut available_columns = Vec::new();
-                        for (_start, schema) in self.schema.table_schemas.values() {
-                            available_columns.extend(schema.columns.iter().map(|c| c.name.clone()));
+                        for (_start, s) in self.schema.table_schemas.values() {
+                            available_columns.extend(s.columns.iter().map(|c| c.name.clone()));
                         }
                         return Err(ExecutorError::ColumnNotFound {
                             column_name: format!(
                                 "{}.{}.{}",
                                 schema_name,
-                                table.as_deref().unwrap_or(""),
+                                table.unwrap_or(""),
                                 column
                             ),
-                            table_name: table.clone().unwrap_or_else(|| "unknown".to_string()),
+                            table_name: table.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string()),
                             searched_tables: self.schema.table_names(),
                             available_columns,
                         });
@@ -105,11 +109,11 @@ impl CombinedExpressionEvaluator<'_> {
                 let column_lower = column.to_lowercase();
                 if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
                     // First check if schema has a real column with this name
-                    if self.get_column_index_cached(table.as_deref(), column).is_none() {
+                    if self.get_column_index_cached(table, column).is_none() {
                         // No real column - check if we have a row_id for this table
                         // Use the new get_row_id_for_table method that handles both single-table
                         // and multi-table (JOIN) rows (issue #4370)
-                        if let Some(row_id) = row.get_row_id_for_table(table.as_deref()) {
+                        if let Some(row_id) = row.get_row_id_for_table(table) {
                             return Ok(vibesql_types::SqlValue::Bigint(row_id as i64));
                         }
                         // ROWID not available - return NULL (matches SQLite behavior for derived tables)
@@ -134,13 +138,13 @@ impl CombinedExpressionEvaluator<'_> {
                     // an error when a column name exists in multiple joined tables.
                     if self.schema.is_column_ambiguous(column) {
                         return Err(ExecutorError::AmbiguousColumnName {
-                            column_name: column.clone(),
+                            column_name: column.to_string(),
                         });
                     }
                 }
 
                 // Try to resolve in inner schema first
-                if let Some(col_index) = self.get_column_index_cached(table.as_deref(), column) {
+                if let Some(col_index) = self.get_column_index_cached(table, column) {
                     return row
                         .get(col_index)
                         .cloned()
@@ -151,7 +155,7 @@ impl CombinedExpressionEvaluator<'_> {
                 // FIX for issue #4493: Support chained context resolution for deeply nested subqueries
                 // First try immediate parent (outer_row + outer_schema)
                 if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
-                    if let Some(col_index) = outer_schema.get_column_index(table.as_deref(), column)
+                    if let Some(col_index) = outer_schema.get_column_index(table, column)
                     {
                         return outer_row
                             .get(col_index)
@@ -166,7 +170,7 @@ impl CombinedExpressionEvaluator<'_> {
                     // Recursively resolve through the context chain
                     // The outer_context will search its own schema, then its outer schema, etc.
                     if let (Some(outer_row), Some(_)) = (outer_context.outer_row, outer_context.outer_schema) {
-                        if let Some(col_index) = outer_context.schema.get_column_index(table.as_deref(), column) {
+                        if let Some(col_index) = outer_context.schema.get_column_index(table, column) {
                             return outer_row
                                 .get(col_index)
                                 .cloned()
@@ -177,7 +181,7 @@ impl CombinedExpressionEvaluator<'_> {
                             // TODO: This should be a recursive call, but we need to restructure
                             // For now, this provides 3-level nesting support
                             if let (Some(grandparent_row), Some(_)) = (grandparent_context.outer_row, grandparent_context.outer_schema) {
-                                if let Some(col_index) = grandparent_context.schema.get_column_index(table.as_deref(), column) {
+                                if let Some(col_index) = grandparent_context.schema.get_column_index(table, column) {
                                     return grandparent_row
                                         .get(col_index)
                                         .cloned()
@@ -201,8 +205,8 @@ impl CombinedExpressionEvaluator<'_> {
                 }
 
                 Err(ExecutorError::ColumnNotFound {
-                    column_name: column.clone(),
-                    table_name: table.clone().unwrap_or_else(|| "unknown".to_string()),
+                    column_name: column.to_string(),
+                    table_name: table.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string()),
                     searched_tables,
                     available_columns,
                 })

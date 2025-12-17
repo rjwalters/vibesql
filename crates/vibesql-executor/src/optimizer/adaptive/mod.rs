@@ -143,7 +143,7 @@ mod tests {
             quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(123))),
             }),
@@ -169,24 +169,16 @@ mod tests {
             distinct: false,
             select_list: vec![
                 SelectItem::Expression {
-                    expr: Expression::ColumnRef { schema: None, table: None, column: "region".to_string() },
+                    expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("region", false)),
                     alias: None, source_text: None },
                 SelectItem::Expression {
                     expr: Expression::AggregateFunction {
                         name: "SUM".to_string(),
                         distinct: false,
                         args: vec![Expression::BinaryOp {
-                            left: Box::new(Expression::ColumnRef {
-                                schema: None,
-                                table: None,
-                                column: "price".to_string(),
-                            }),
+                            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
                             op: BinaryOperator::Multiply,
-                            right: Box::new(Expression::ColumnRef {
-                                schema: None,
-                                table: None,
-                                column: "quantity".to_string(),
-                            }),
+                            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false))),
                         }],
                         order_by: None,
                     },
@@ -201,11 +193,7 @@ mod tests {
             quoted: false,
             }),
             where_clause: None,
-            group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "region".to_string(),
-            }])),
+            group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("region", false))])),
             having: None,
             order_by: None,
             limit: None,
@@ -230,17 +218,9 @@ mod tests {
                     name: "SUM".to_string(),
                     distinct: false,
                     args: vec![Expression::BinaryOp {
-                        left: Box::new(Expression::ColumnRef {
-                            schema: None,
-                            table: None,
-                            column: "price".to_string(),
-                        }),
+                        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
                         op: BinaryOperator::Multiply,
-                        right: Box::new(Expression::ColumnRef {
-                            schema: None,
-                            table: None,
-                            column: "quantity".to_string(),
-                        }),
+                        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false))),
                     }],
                     order_by: None,
                 },
@@ -373,17 +353,9 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "price".to_string(),
-                    }),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
                     op: BinaryOperator::Multiply,
-                    right: Box::new(Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "quantity".to_string(),
-                    }),
+                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false))),
                 },
                 alias: Some("total".to_string()), source_text: None }],
             into_table: None,
@@ -415,10 +387,10 @@ mod tests {
             distinct: false,
             select_list: vec![
                 SelectItem::Expression {
-                    expr: Expression::ColumnRef { schema: None, table: None, column: "id".to_string() },
+                    expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
                     alias: None, source_text: None },
                 SelectItem::Expression {
-                    expr: Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
+                    expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
                     alias: None, source_text: None },
             ],
             into_table: None,

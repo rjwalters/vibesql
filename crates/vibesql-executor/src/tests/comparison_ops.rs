@@ -36,11 +36,7 @@ fn test_greater_than_comparison() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             op: vibesql_ast::BinaryOperator::GreaterThan,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(15))),
         }),
@@ -88,11 +84,7 @@ fn test_less_than_comparison() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             op: vibesql_ast::BinaryOperator::LessThan,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(15))),
         }),
@@ -142,11 +134,7 @@ fn test_not_equal_comparison() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             op: vibesql_ast::BinaryOperator::NotEqual,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
         }),
@@ -197,11 +185,7 @@ fn test_less_than_or_equal_comparison() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "val".to_string(),
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
             op: vibesql_ast::BinaryOperator::LessThanOrEqual,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
         }),

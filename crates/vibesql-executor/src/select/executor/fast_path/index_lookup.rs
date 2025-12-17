@@ -83,7 +83,7 @@ impl SelectExecutor<'_> {
 
         // Get the ORDER BY column
         let order_col = match &order_by[0].expr {
-            Expression::ColumnRef { column, .. } => column.as_str(),
+            Expression::ColumnRef(col_id) => col_id.column_canonical(),
             _ => return Ok(None),
         };
         let is_desc = order_by[0].direction == vibesql_ast::OrderDirection::Desc;

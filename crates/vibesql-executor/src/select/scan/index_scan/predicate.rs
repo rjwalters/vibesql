@@ -468,8 +468,8 @@ fn filter_expression(
         // Check if this is a covered equality predicate: col = literal or literal = col
         Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             // Check col = literal
-            if let Expression::ColumnRef { column, .. } = left.as_ref() {
-                if covered_columns.contains(&column.to_uppercase())
+            if let Expression::ColumnRef(col_id) = left.as_ref() {
+                if covered_columns.contains(&col_id.column_canonical().to_uppercase())
                     && matches!(right.as_ref(), Expression::Literal(_))
                 {
                     // This predicate is covered - remove it
@@ -477,8 +477,8 @@ fn filter_expression(
                 }
             }
             // Check literal = col
-            if let Expression::ColumnRef { column, .. } = right.as_ref() {
-                if covered_columns.contains(&column.to_uppercase())
+            if let Expression::ColumnRef(col_id) = right.as_ref() {
+                if covered_columns.contains(&col_id.column_canonical().to_uppercase())
                     && matches!(left.as_ref(), Expression::Literal(_))
                 {
                     // This predicate is covered - remove it
@@ -525,18 +525,18 @@ fn collect_equality_predicates(
         // Handle equality: col = value or value = col
         Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             // Check col = literal (using ColumnRef variant)
-            if let Expression::ColumnRef { column, .. } = left.as_ref() {
+            if let Expression::ColumnRef(col_id) = left.as_ref() {
                 if let Expression::Literal(value) = right.as_ref() {
                     if !matches!(value, SqlValue::Null) {
-                        predicates.insert(column.to_uppercase(), value.clone());
+                        predicates.insert(col_id.column_canonical().to_uppercase(), value.clone());
                     }
                 }
             }
             // Check literal = col (reversed)
-            if let Expression::ColumnRef { column, .. } = right.as_ref() {
+            if let Expression::ColumnRef(col_id) = right.as_ref() {
                 if let Expression::Literal(value) = left.as_ref() {
                     if !matches!(value, SqlValue::Null) {
-                        predicates.insert(column.to_uppercase(), value.clone());
+                        predicates.insert(col_id.column_canonical().to_uppercase(), value.clone());
                     }
                 }
             }
@@ -622,18 +622,18 @@ fn collect_predicates_with_in(
         // Handle equality: col = value or value = col
         Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             // Check col = literal
-            if let Expression::ColumnRef { column, .. } = left.as_ref() {
+            if let Expression::ColumnRef(col_id) = left.as_ref() {
                 if let Expression::Literal(value) = right.as_ref() {
                     if !matches!(value, SqlValue::Null) {
-                        equality_predicates.insert(column.to_uppercase(), value.clone());
+                        equality_predicates.insert(col_id.column_canonical().to_uppercase(), value.clone());
                     }
                 }
             }
             // Check literal = col (reversed)
-            if let Expression::ColumnRef { column, .. } = right.as_ref() {
+            if let Expression::ColumnRef(col_id) = right.as_ref() {
                 if let Expression::Literal(value) = left.as_ref() {
                     if !matches!(value, SqlValue::Null) {
-                        equality_predicates.insert(column.to_uppercase(), value.clone());
+                        equality_predicates.insert(col_id.column_canonical().to_uppercase(), value.clone());
                     }
                 }
             }
@@ -641,7 +641,7 @@ fn collect_predicates_with_in(
         // Handle IN list: col IN (val1, val2, ...)
         Expression::InList { expr: col_expr, values, negated } => {
             if !negated {
-                if let Expression::ColumnRef { column, .. } = col_expr.as_ref() {
+                if let Expression::ColumnRef(col_id) = col_expr.as_ref() {
                     // Extract literal values from the IN list
                     let mut in_values = Vec::new();
                     let mut all_literals = true;
@@ -662,7 +662,7 @@ fn collect_predicates_with_in(
                     // Only use if all are literals and no NULL values
                     // (NULL in IN list has special three-valued logic)
                     if all_literals && !has_null && !in_values.is_empty() {
-                        in_predicates.insert(column.to_uppercase(), in_values);
+                        in_predicates.insert(col_id.column_canonical().to_uppercase(), in_values);
                     }
                 }
             }
@@ -802,7 +802,7 @@ fn check_composite_satisfaction(
 /// Extract column name from a ColumnRef expression
 fn extract_column_name(expr: &Expression) -> Option<&str> {
     match expr {
-        Expression::ColumnRef { column, .. } => Some(column.as_str()),
+        Expression::ColumnRef(col_id) => Some(col_id.column_canonical()),
         _ => None,
     }
 }

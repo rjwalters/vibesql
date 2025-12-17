@@ -190,7 +190,7 @@ fn extract_from_expression(expr: &vibesql_ast::Expression, tables: &mut HashSet<
         | vibesql_ast::Expression::Placeholder(_)
         | vibesql_ast::Expression::NumberedPlaceholder(_)
         | vibesql_ast::Expression::NamedPlaceholder(_)
-        | vibesql_ast::Expression::ColumnRef { .. }
+        | vibesql_ast::Expression::ColumnRef(_)
         | vibesql_ast::Expression::Wildcard
         | vibesql_ast::Expression::CurrentDate
         | vibesql_ast::Expression::CurrentTime { .. }

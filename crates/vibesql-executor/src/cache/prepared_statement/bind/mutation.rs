@@ -247,7 +247,7 @@ fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
 
         // Leaf nodes: nothing to do
         Expression::Literal(_)
-        | Expression::ColumnRef { .. }
+        | Expression::ColumnRef(_)
         | Expression::Wildcard
         | Expression::CurrentDate
         | Expression::CurrentTime { .. }
@@ -627,7 +627,7 @@ fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String, Sql
 
         // Leaf nodes: nothing to do
         Expression::Literal(_)
-        | Expression::ColumnRef { .. }
+        | Expression::ColumnRef(_)
         | Expression::Wildcard
         | Expression::CurrentDate
         | Expression::CurrentTime { .. }
@@ -858,7 +858,7 @@ mod tests {
         use vibesql_ast::BinaryOperator;
         let mut expr = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
             right: Box::new(Expression::Placeholder(0)),
         };
         bind_expression_mut(&mut expr, &[SqlValue::Integer(42)]);

@@ -88,18 +88,19 @@ pub(crate) fn is_correlated(subquery: &SelectStmt) -> bool {
 /// TODO: Implement full symbol table analysis for more accurate correlation detection
 pub(crate) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt) -> bool {
     match expr {
-        Expression::ColumnRef { schema: Some(_), .. } => {
+        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_some() => {
             // Schema-qualified column references are always considered external
             // (they explicitly reference a different database schema)
             true
         }
 
-        Expression::ColumnRef { schema: None, table: Some(table), .. } => {
+        Expression::ColumnRef(col_id) if col_id.table_canonical().is_some() => {
             // If column is qualified, check if table is in subquery's FROM clause
-            !subquery_references_table(subquery, table)
+            !subquery_references_table(subquery, col_id.table_canonical().unwrap())
         }
 
-        Expression::ColumnRef { schema: None, table: None, column, .. } => {
+        Expression::ColumnRef(col_id) => {
+            let column = col_id.column_canonical();
             // Unqualified column refs: Conservative approach
             //
             // Per SQL semantics (section 7.6 of SQL:1999), unqualified column references

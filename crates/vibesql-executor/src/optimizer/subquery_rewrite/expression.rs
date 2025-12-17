@@ -49,7 +49,7 @@ pub(super) fn rewrite_expression_with_context(
             // Complex expressions (e.g., UPPER(col)) can't be safely used in correlation predicates
             let is_simple_column = matches!(
                 subquery.select_list.first(),
-                Some(SelectItem::Expression { expr: Expression::ColumnRef { .. }, .. })
+                Some(SelectItem::Expression { expr: Expression::ColumnRef(_), .. })
             );
 
             // Check if subquery is correlated
@@ -267,7 +267,7 @@ pub(super) fn rewrite_expression_with_context(
                 items.iter().map(|item| vibesql_ast::OrderByItem {
                     expr: rewrite_expression_with_context(&item.expr, rewrite_subquery_fn, outer_tables),
                     direction: item.direction.clone(),
-                    nulls_order: item.nulls_order.clone(),
+                    nulls_order: item.nulls_order,
                 }).collect()
             }),
         },
@@ -372,7 +372,7 @@ pub(super) fn rewrite_expression_with_context(
 
         // Literals, column refs, and special expressions don't need rewriting
         Expression::Literal(_)
-        | Expression::ColumnRef { .. }
+        | Expression::ColumnRef(_)
         | Expression::Wildcard
         | Expression::CurrentDate
         | Expression::CurrentTime { .. }

@@ -107,7 +107,8 @@ pub(super) fn try_convert_in_to_join(
     //   SELECT o_orderkey FROM orders WHERE o_orderkey IN (SELECT l_orderkey FROM lineitem)
     //   Different tables, no ambiguity - l_orderkey can only be from lineitem.
     if needs_alias {
-        if let Expression::ColumnRef { schema: None, table: None, .. } = &subquery_column {
+        if let Expression::ColumnRef(col_id) = &subquery_column {
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() {
             // Check if outer query has exactly one table and it matches the subquery's table
             let is_simple_self_join = is_simple_single_table_self_join(from, &table_name, &table_alias);
 
@@ -117,6 +118,7 @@ pub(super) fn try_convert_in_to_join(
                 return None;
             }
             // else: Simple self-join with single table - safe to optimize
+            }
         }
     }
 
@@ -282,7 +284,7 @@ fn try_convert_aggregate_in_to_join(
     // Extract the column name from the subquery's select list for the join condition
     // The column must be a simple column reference for us to build the join condition
     let column_name = match subquery_column {
-        Expression::ColumnRef { column, .. } => column.clone(),
+        Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
         // For aggregate subqueries, we could also handle expressions by giving them an alias,
         // but for now we only support simple column references
         _ => return None,
@@ -313,11 +315,7 @@ fn try_convert_aggregate_in_to_join(
     let join_condition = Expression::BinaryOp {
         op: BinaryOperator::Equal,
         left: Box::new(outer_expr.clone()),
-        right: Box::new(Expression::ColumnRef {
-            schema: None,
-            table: Some(alias.clone()),
-            column: column_name,
-        }),
+        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&alias, false, &column_name, false))),
     };
 
     // Create SEMI or ANTI join based on negation

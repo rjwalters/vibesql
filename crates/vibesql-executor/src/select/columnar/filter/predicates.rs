@@ -369,9 +369,11 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
         // Binary comparison: column op value (value can be literal or foldable expression)
         Expression::BinaryOp { left, op, right } => {
             // Try: column op value (fold right side if possible)
-            if let Expression::ColumnRef { table, column, .. } = left.as_ref() {
+            if let Expression::ColumnRef(col_id) = left.as_ref() {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
                 if let Some(value) = try_fold_constant(right) {
-                    let column_idx = schema.get_column_index(table.as_deref(), column)?;
+                    let column_idx = schema.get_column_index(table, column)?;
                     let predicate = match op {
                         BinaryOperator::LessThan => ColumnPredicate::LessThan { column_idx, value },
                         BinaryOperator::GreaterThan => {
@@ -392,9 +394,11 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
             }
 
             // Try: value op column (reverse the comparison, fold left side if possible)
-            if let Expression::ColumnRef { table, column, .. } = right.as_ref() {
+            if let Expression::ColumnRef(col_id) = right.as_ref() {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
                 if let Some(value) = try_fold_constant(left) {
-                    let column_idx = schema.get_column_index(table.as_deref(), column)?;
+                    let column_idx = schema.get_column_index(table, column)?;
                     let predicate = match op {
                         BinaryOperator::LessThan => {
                             ColumnPredicate::GreaterThan { column_idx, value }
@@ -420,12 +424,17 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
             // Try: column op column (column-to-column comparison)
             // This handles predicates like `l_commitdate < l_receiptdate` in TPC-H Q4
             if let (
-                Expression::ColumnRef { schema: None, table: t1, column: c1, .. },
-                Expression::ColumnRef { schema: None, table: t2, column: c2, .. },
+                Expression::ColumnRef(col_id1),
+                Expression::ColumnRef(col_id2),
             ) = (left.as_ref(), right.as_ref())
             {
-                let left_idx = schema.get_column_index(t1.as_deref(), c1)?;
-                let right_idx = schema.get_column_index(t2.as_deref(), c2)?;
+                if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() {
+                    let t1 = col_id1.table_canonical();
+                    let c1 = col_id1.column_canonical();
+                    let t2 = col_id2.table_canonical();
+                    let c2 = col_id2.column_canonical();
+                    let left_idx = schema.get_column_index(t1, c1)?;
+                    let right_idx = schema.get_column_index(t2, c2)?;
                 let compare_op = match op {
                     BinaryOperator::LessThan => CompareOp::LessThan,
                     BinaryOperator::GreaterThan => CompareOp::GreaterThan,
@@ -435,11 +444,12 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
                     BinaryOperator::NotEqual => CompareOp::NotEqual,
                     _ => return None,
                 };
-                return Some(PredicateTree::Leaf(ColumnPredicate::ColumnCompare {
-                    left_column_idx: left_idx,
-                    op: compare_op,
-                    right_column_idx: right_idx,
-                }));
+                    return Some(PredicateTree::Leaf(ColumnPredicate::ColumnCompare {
+                        left_column_idx: left_idx,
+                        op: compare_op,
+                        right_column_idx: right_idx,
+                    }));
+                }
             }
 
             None
@@ -449,12 +459,14 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
         // Only support ASYMMETRIC (default) BETWEEN for columnar optimization
         // SYMMETRIC BETWEEN falls through to general evaluator which handles bounds swapping
         Expression::Between { expr: inner, low, high, negated: false, symmetric: false } => {
-            if let Expression::ColumnRef { table, column, .. } = inner.as_ref() {
+            if let Expression::ColumnRef(col_id) = inner.as_ref() {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
                 // Try to fold bounds to literals (handles arithmetic expressions like 1+2)
                 let low_val = try_fold_constant(low)?;
                 let high_val = try_fold_constant(high)?;
 
-                let column_idx = schema.get_column_index(table.as_deref(), column)?;
+                let column_idx = schema.get_column_index(table, column)?;
                 return Some(PredicateTree::Leaf(ColumnPredicate::Between {
                     column_idx,
                     low: low_val,
@@ -466,12 +478,14 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
 
         // LIKE: column LIKE pattern
         Expression::Like { expr: inner, pattern, negated, .. } => {
-            if let Expression::ColumnRef { table, column, .. } = inner.as_ref() {
+            if let Expression::ColumnRef(col_id) = inner.as_ref() {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
                 // Extract pattern string from literal
                 if let Expression::Literal(SqlValue::Character(pattern_str))
                 | Expression::Literal(SqlValue::Varchar(pattern_str)) = pattern.as_ref()
                 {
-                    let column_idx = schema.get_column_index(table.as_deref(), column)?;
+                    let column_idx = schema.get_column_index(table, column)?;
                     return Some(PredicateTree::Leaf(ColumnPredicate::Like {
                         column_idx,
                         pattern: pattern_str.to_string(),
@@ -484,7 +498,9 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
 
         // IN list: column IN (value1, value2, ...)
         Expression::InList { expr: inner, values, negated } => {
-            if let Expression::ColumnRef { table, column, .. } = inner.as_ref() {
+            if let Expression::ColumnRef(col_id) = inner.as_ref() {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
                 // Extract all values from the IN list (try to fold each to a constant)
                 let mut folded_values = Vec::with_capacity(values.len());
                 for value_expr in values {
@@ -500,7 +516,7 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
                     return None;
                 }
 
-                let column_idx = schema.get_column_index(table.as_deref(), column)?;
+                let column_idx = schema.get_column_index(table, column)?;
                 return Some(PredicateTree::Leaf(ColumnPredicate::InList {
                     column_idx,
                     values: folded_values,
@@ -538,10 +554,12 @@ fn extract_predicates_recursive(
         // Binary comparison: column op value (value can be literal or foldable expression)
         Expression::BinaryOp { left, op, right } => {
             // Try: column op value (fold right side if possible)
-            if let Expression::ColumnRef { table, column, .. } = left.as_ref() {
+            if let Expression::ColumnRef(col_id) = left.as_ref() {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
                 if let Some(value) = try_fold_constant(right) {
                     // Skip if column not in schema (cross-table predicate)
-                    if let Some(column_idx) = schema.get_column_index(table.as_deref(), column) {
+                    if let Some(column_idx) = schema.get_column_index(table, column) {
                         let predicate = match op {
                             BinaryOperator::LessThan => {
                                 ColumnPredicate::LessThan { column_idx, value }
@@ -568,10 +586,12 @@ fn extract_predicates_recursive(
             }
 
             // Try: value op column (reverse the comparison, fold left side if possible)
-            if let Expression::ColumnRef { table, column, .. } = right.as_ref() {
+            if let Expression::ColumnRef(col_id) = right.as_ref() {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
                 if let Some(value) = try_fold_constant(left) {
                     // Skip if column not in schema (cross-table predicate)
-                    if let Some(column_idx) = schema.get_column_index(table.as_deref(), column) {
+                    if let Some(column_idx) = schema.get_column_index(table, column) {
                         let predicate = match op {
                             // Reverse the comparison: value < column => column > value
                             BinaryOperator::LessThan => {
@@ -602,15 +622,20 @@ fn extract_predicates_recursive(
             // Try: column op column (column-to-column comparison within same table)
             // This handles predicates like `l_commitdate < l_receiptdate` in TPC-H Q4
             if let (
-                Expression::ColumnRef { schema: None, table: t1, column: c1, .. },
-                Expression::ColumnRef { schema: None, table: t2, column: c2, .. },
+                Expression::ColumnRef(col_id1),
+                Expression::ColumnRef(col_id2),
             ) = (left.as_ref(), right.as_ref())
             {
-                // Only add if BOTH columns are in schema (same-table comparison)
-                if let (Some(left_idx), Some(right_idx)) = (
-                    schema.get_column_index(t1.as_deref(), c1),
-                    schema.get_column_index(t2.as_deref(), c2),
-                ) {
+                if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() {
+                    let t1 = col_id1.table_canonical();
+                    let c1 = col_id1.column_canonical();
+                    let t2 = col_id2.table_canonical();
+                    let c2 = col_id2.column_canonical();
+                    // Only add if BOTH columns are in schema (same-table comparison)
+                    if let (Some(left_idx), Some(right_idx)) = (
+                        schema.get_column_index(t1, c1),
+                        schema.get_column_index(t2, c2),
+                    ) {
                     let compare_op = match op {
                         BinaryOperator::LessThan => CompareOp::LessThan,
                         BinaryOperator::GreaterThan => CompareOp::GreaterThan,
@@ -620,13 +645,14 @@ fn extract_predicates_recursive(
                         BinaryOperator::NotEqual => CompareOp::NotEqual,
                         _ => return Some(()), // Skip unsupported operator
                     };
-                    predicates.push(ColumnPredicate::ColumnCompare {
-                        left_column_idx: left_idx,
-                        op: compare_op,
-                        right_column_idx: right_idx,
-                    });
+                        predicates.push(ColumnPredicate::ColumnCompare {
+                            left_column_idx: left_idx,
+                            op: compare_op,
+                            right_column_idx: right_idx,
+                        });
+                    }
+                    return Some(());
                 }
-                return Some(());
             }
 
             // Skip other unsupported expressions
@@ -636,13 +662,15 @@ fn extract_predicates_recursive(
         // BETWEEN: column BETWEEN low AND high
         // Only support ASYMMETRIC (default) BETWEEN for columnar optimization
         Expression::Between { expr: inner, low, high, negated: false, symmetric: false } => {
-            if let Expression::ColumnRef { table, column, .. } = inner.as_ref() {
+            if let Expression::ColumnRef(col_id) = inner.as_ref() {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
                 // Try to fold bounds to literals (handles arithmetic expressions like 1+2)
                 if let (Some(low_val), Some(high_val)) =
                     (try_fold_constant(low), try_fold_constant(high))
                 {
                     // Skip if column not in schema (cross-table predicate)
-                    if let Some(column_idx) = schema.get_column_index(table.as_deref(), column) {
+                    if let Some(column_idx) = schema.get_column_index(table, column) {
                         predicates.push(ColumnPredicate::Between {
                             column_idx,
                             low: low_val,
@@ -658,13 +686,15 @@ fn extract_predicates_recursive(
 
         // LIKE: column LIKE pattern
         Expression::Like { expr: inner, pattern, negated, .. } => {
-            if let Expression::ColumnRef { table, column, .. } = inner.as_ref() {
+            if let Expression::ColumnRef(col_id) = inner.as_ref() {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
                 // Extract pattern string from literal
                 if let Expression::Literal(SqlValue::Character(pattern_str))
                 | Expression::Literal(SqlValue::Varchar(pattern_str)) = pattern.as_ref()
                 {
                     // Skip if column not in schema (cross-table predicate)
-                    if let Some(column_idx) = schema.get_column_index(table.as_deref(), column) {
+                    if let Some(column_idx) = schema.get_column_index(table, column) {
                         predicates.push(ColumnPredicate::Like {
                             column_idx,
                             pattern: pattern_str.to_string(),
@@ -680,7 +710,9 @@ fn extract_predicates_recursive(
 
         // IN list: column IN (value1, value2, ...)
         Expression::InList { expr: inner, values, negated } => {
-            if let Expression::ColumnRef { table, column, .. } = inner.as_ref() {
+            if let Expression::ColumnRef(col_id) = inner.as_ref() {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
                 // Extract all values from the IN list (try to fold each to a constant)
                 let mut folded_values = Vec::with_capacity(values.len());
                 for value_expr in values {
@@ -697,7 +729,7 @@ fn extract_predicates_recursive(
                 }
 
                 // Skip if column not in schema (cross-table predicate)
-                if let Some(column_idx) = schema.get_column_index(table.as_deref(), column) {
+                if let Some(column_idx) = schema.get_column_index(table, column) {
                     predicates.push(ColumnPredicate::InList {
                         column_idx,
                         values: folded_values,
@@ -779,7 +811,7 @@ mod tests {
     #[test]
     fn test_try_fold_constant_column_ref_returns_none() {
         // Column references cannot be folded
-        let expr = Expression::ColumnRef { schema: None, table: None, column: "x".to_string() };
+        let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false));
         assert_eq!(try_fold_constant(&expr), None);
     }
 
@@ -789,7 +821,7 @@ mod tests {
 
         // col0 BETWEEN 1 AND 1+2
         let expr = Expression::Between {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
             low: Box::new(Expression::Literal(SqlValue::Integer(1))),
             high: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::Literal(SqlValue::Integer(1))),
@@ -819,7 +851,7 @@ mod tests {
 
         // col0 < 10 - 3
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
             op: BinaryOperator::LessThan,
             right: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::Literal(SqlValue::Integer(10))),
@@ -852,7 +884,7 @@ mod tests {
                 right: Box::new(Expression::Literal(SqlValue::Integer(5))),
             }),
             op: BinaryOperator::GreaterThan,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
         };
 
         let tree = extract_predicate_tree(&expr, &schema);
@@ -873,7 +905,7 @@ mod tests {
 
         // col0 IN (1, 1+1, 2+1)
         let expr = Expression::InList {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
             values: vec![
                 Expression::Literal(SqlValue::Integer(1)),
                 Expression::BinaryOp {
@@ -912,9 +944,9 @@ mod tests {
 
         // col0 BETWEEN 1 AND col1 (col1 cannot be folded)
         let expr = Expression::Between {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() }),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
             low: Box::new(Expression::Literal(SqlValue::Integer(1))),
-            high: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() }),
+            high: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
             negated: false,
             symmetric: false,
         };
@@ -929,9 +961,9 @@ mod tests {
 
         // col0 < col1 (column-to-column comparison)
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
             op: BinaryOperator::LessThan,
-            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() }),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
         };
 
         let tree = extract_predicate_tree(&expr, &schema);
@@ -966,9 +998,9 @@ mod tests {
 
         for (binary_op, expected_compare_op) in operators {
             let expr = Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
                 op: binary_op,
-                right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() }),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
             };
 
             let tree = extract_predicate_tree(&expr, &schema);
@@ -990,13 +1022,13 @@ mod tests {
         // col0 < col1 AND col0 > 5 (mix of column-to-column and column-to-value)
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
                 op: BinaryOperator::LessThan,
-                right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() }),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(5))),
             }),

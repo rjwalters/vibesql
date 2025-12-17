@@ -62,8 +62,8 @@ impl SelectExecutor<'_> {
             .iter()
             .filter_map(|expr| {
                 match expr {
-                    vibesql_ast::Expression::ColumnRef { table, column, .. } => {
-                        schema.get_column_index(table.as_deref(), column.as_str())
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+                        schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())
                     }
                     _ => None, // Only simple column references supported for now
                 }
@@ -266,8 +266,8 @@ impl SelectExecutor<'_> {
         let group_cols: Vec<usize> = simple_exprs
             .iter()
             .filter_map(|expr| match expr {
-                Expression::ColumnRef { table, column, .. } => {
-                    schema.get_column_index(table.as_deref(), column.as_str())
+                Expression::ColumnRef(col_id) => {
+                    schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())
                 }
                 _ => None,
             })
