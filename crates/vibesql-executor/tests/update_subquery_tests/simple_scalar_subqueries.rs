@@ -84,7 +84,7 @@ fn create_aggregate_subquery(
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::Function {
-                name: func_name.to_string(),
+                name: vibesql_ast::FunctionIdentifier::new(func_name),
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&column_name.to_string(), false))],
                 character_unit: None,
             },

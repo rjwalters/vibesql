@@ -350,7 +350,7 @@ mod tests {
         // Replace SELECT with complex expression
         subquery.select_list = vec![SelectItem::Expression {
             expr: Expression::Function {
-                name: "UPPER".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("UPPER"),
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false))],
                 character_unit: None,
             },

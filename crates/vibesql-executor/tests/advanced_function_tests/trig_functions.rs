@@ -8,7 +8,7 @@ fn test_sin_function() {
 
     // sin(0) = 0
     let expr = vibesql_ast::Expression::Function {
-        name: "SIN".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SIN"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0))],
         character_unit: None,
     };
@@ -22,7 +22,7 @@ fn test_cos_function() {
 
     // cos(0) = 1
     let expr = vibesql_ast::Expression::Function {
-        name: "COS".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("COS"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0))],
         character_unit: None,
     };
@@ -36,7 +36,7 @@ fn test_tan_function() {
 
     // tan(0) = 0
     let expr = vibesql_ast::Expression::Function {
-        name: "TAN".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("TAN"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0))],
         character_unit: None,
     };
@@ -50,7 +50,7 @@ fn test_asin_function() {
 
     // asin(0.5) ≈ 0.5236 (30 degrees in radians)
     let expr = vibesql_ast::Expression::Function {
-        name: "ASIN".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ASIN"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(0.5))],
         character_unit: None,
     };
@@ -69,7 +69,7 @@ fn test_acos_function() {
 
     // acos(0.5) ≈ 1.0472 (60 degrees in radians)
     let expr = vibesql_ast::Expression::Function {
-        name: "ACOS".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ACOS"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(0.5))],
         character_unit: None,
     };
@@ -88,7 +88,7 @@ fn test_atan_function() {
 
     // atan(1) ≈ 0.7854 (45 degrees in radians)
     let expr = vibesql_ast::Expression::Function {
-        name: "ATAN".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ATAN"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))],
         character_unit: None,
     };
@@ -107,7 +107,7 @@ fn test_atan2_function() {
 
     // atan2(1, 1) ≈ 0.7854 (45 degrees)
     let expr = vibesql_ast::Expression::Function {
-        name: "ATAN2".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ATAN2"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -129,7 +129,7 @@ fn test_radians_function() {
 
     // 180 degrees = π radians
     let expr = vibesql_ast::Expression::Function {
-        name: "RADIANS".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("RADIANS"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(180))],
         character_unit: None,
     };
@@ -148,7 +148,7 @@ fn test_degrees_function() {
 
     // π radians = 180 degrees
     let expr = vibesql_ast::Expression::Function {
-        name: "DEGREES".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DEGREES"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(
             std::f64::consts::PI,
         ))],

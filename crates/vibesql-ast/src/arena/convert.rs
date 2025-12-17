@@ -25,8 +25,8 @@ use super::{
 };
 use crate::{
     Assignment, BinaryOperator, CaseWhen, CharacterUnit, CommonTableExpr, ConflictClause,
-    DeleteStmt, Expression, FrameBound, FrameUnit, FromClause, FulltextMode, GroupByClause,
-    GroupingElement, GroupingSet, InsertSource, InsertStmt, IntervalUnit, JoinType,
+    DeleteStmt, Expression, FrameBound, FrameUnit, FromClause, FulltextMode, FunctionIdentifier,
+    GroupByClause, GroupingElement, GroupingSet, InsertSource, InsertStmt, IntervalUnit, JoinType,
     MixedGroupingItem, NullsOrder, OrderByItem, OrderDirection, PseudoTable, Quantifier,
     SelectItem, SelectStmt, SetOperation, SetOperator, TrimPosition, TruthValue, UpdateStmt,
     WhereClause, WindowFrame, WindowFunctionSpec, WindowSpec,
@@ -186,14 +186,14 @@ impl<'a, 'arena> Converter<'a, 'arena> {
         match ext {
             arena_expr::ExtendedExpr::Function { name, args, character_unit } => {
                 Expression::Function {
-                    name: self.resolve(*name),
+                    name: FunctionIdentifier::new(&self.resolve(*name)),
                     args: args.iter().map(|e| self.convert_expression(e)).collect(),
                     character_unit: character_unit.map(|u| u.into()),
                 }
             }
             arena_expr::ExtendedExpr::AggregateFunction { name, distinct, args } => {
                 Expression::AggregateFunction {
-                    name: self.resolve(*name),
+                    name: FunctionIdentifier::new(&self.resolve(*name)),
                     distinct: *distinct,
                     args: args.iter().map(|e| self.convert_expression(e)).collect(),
                     order_by: None, // Arena parser doesn't support ORDER BY in aggregates yet
@@ -329,16 +329,16 @@ impl<'a, 'arena> Converter<'a, 'arena> {
         match spec {
             arena_expr::WindowFunctionSpec::Aggregate { name, args } => {
                 WindowFunctionSpec::Aggregate {
-                    name: self.resolve(*name),
+                    name: FunctionIdentifier::new(&self.resolve(*name)),
                     args: args.iter().map(|e| self.convert_expression(e)).collect(),
                 }
             }
             arena_expr::WindowFunctionSpec::Ranking { name, args } => WindowFunctionSpec::Ranking {
-                name: self.resolve(*name),
+                name: FunctionIdentifier::new(&self.resolve(*name)),
                 args: args.iter().map(|e| self.convert_expression(e)).collect(),
             },
             arena_expr::WindowFunctionSpec::Value { name, args } => WindowFunctionSpec::Value {
-                name: self.resolve(*name),
+                name: FunctionIdentifier::new(&self.resolve(*name)),
                 args: args.iter().map(|e| self.convert_expression(e)).collect(),
             },
         }

@@ -84,7 +84,7 @@ fn test_binary_operation_equality() {
 #[test]
 fn test_function_call_count_star() {
     let expr = Expression::Function {
-        name: "COUNT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("COUNT"),
         args: vec![Expression::Wildcard],
         character_unit: None,
     };

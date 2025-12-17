@@ -8,9 +8,9 @@ fn test_trig_with_pi() {
 
     // SIN(PI()) should be approximately 0
     let expr = vibesql_ast::Expression::Function {
-        name: "SIN".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SIN"),
         args: vec![vibesql_ast::Expression::Function {
-            name: "PI".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("PI"),
             args: vec![],
             character_unit: None,
         }],
@@ -31,9 +31,9 @@ fn test_radians_degrees_roundtrip() {
 
     // DEGREES(RADIANS(90)) should equal 90
     let expr = vibesql_ast::Expression::Function {
-        name: "DEGREES".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DEGREES"),
         args: vec![vibesql_ast::Expression::Function {
-            name: "RADIANS".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("RADIANS"),
             args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(90))],
             character_unit: None,
         }],
@@ -54,9 +54,9 @@ fn test_exp_ln_roundtrip() {
 
     // LN(EXP(2)) should equal 2
     let expr = vibesql_ast::Expression::Function {
-        name: "LN".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LN"),
         args: vec![vibesql_ast::Expression::Function {
-            name: "EXP".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("EXP"),
             args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2))],
             character_unit: None,
         }],
@@ -77,15 +77,15 @@ fn test_greatest_with_abs() {
 
     // GREATEST(ABS(-5), ABS(3)) should be 5
     let expr = vibesql_ast::Expression::Function {
-        name: "GREATEST".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("GREATEST"),
         args: vec![
             vibesql_ast::Expression::Function {
-                name: "ABS".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("ABS"),
                 args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(-5))],
                 character_unit: None,
             },
             vibesql_ast::Expression::Function {
-                name: "ABS".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("ABS"),
                 args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3))],
                 character_unit: None,
             },

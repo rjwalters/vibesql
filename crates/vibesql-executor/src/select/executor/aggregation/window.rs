@@ -66,7 +66,7 @@ fn collect_aggregate_window_functions(select_list: &[SelectItem]) -> Vec<Aggrega
         {
             result.push(AggregateWindowFunction {
                 select_index: idx,
-                outer_func_name: name.clone(),
+                outer_func_name: name.to_string(),
                 window_spec: over.clone(),
             });
         }

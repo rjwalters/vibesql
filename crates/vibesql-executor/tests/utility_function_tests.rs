@@ -16,7 +16,7 @@ use common::create_test_evaluator;
 fn test_substr_basic() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTR"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("Hello World"),
@@ -34,7 +34,7 @@ fn test_substr_basic() {
 fn test_substr_to_end() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTR"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("Hello World"),
@@ -51,7 +51,7 @@ fn test_substr_to_end() {
 fn test_substr_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTR"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -69,7 +69,7 @@ fn test_substr_null() {
 fn test_instr_found() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "INSTR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("INSTR"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("Hello World"),
@@ -88,7 +88,7 @@ fn test_instr_found() {
 fn test_instr_not_found() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "INSTR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("INSTR"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("Hello World"),
@@ -107,7 +107,7 @@ fn test_instr_not_found() {
 fn test_instr_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "INSTR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("INSTR"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -127,7 +127,7 @@ fn test_instr_null() {
 fn test_locate_basic() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOCATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("World"),
@@ -146,7 +146,7 @@ fn test_locate_basic() {
 fn test_locate_with_start() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOCATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("o"),
@@ -170,7 +170,7 @@ fn test_locate_with_start() {
 fn test_format_basic() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "FORMAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("FORMAT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(1234567.89)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
@@ -185,7 +185,7 @@ fn test_format_basic() {
 fn test_format_zero_decimals() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "FORMAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("FORMAT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(1234567.89)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0)),
@@ -201,7 +201,7 @@ fn test_format_zero_decimals() {
 fn test_format_adds_zeros() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "FORMAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("FORMAT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(42)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
@@ -216,7 +216,7 @@ fn test_format_adds_zeros() {
 fn test_format_negative() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "FORMAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("FORMAT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(-1234567.89)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
@@ -235,7 +235,7 @@ fn test_format_negative() {
 fn test_version() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "VERSION".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("VERSION"),
         args: vec![],
         character_unit: None,
     };
@@ -260,7 +260,7 @@ fn test_version() {
 fn test_database() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "DATABASE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATABASE"),
         args: vec![],
         character_unit: None,
     };
@@ -280,7 +280,7 @@ fn test_database() {
 fn test_schema_alias() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SCHEMA".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SCHEMA"),
         args: vec![],
         character_unit: None,
     };
@@ -297,7 +297,7 @@ fn test_schema_alias() {
 fn test_user() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "USER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("USER"),
         args: vec![],
         character_unit: None,
     };
@@ -314,7 +314,7 @@ fn test_user() {
 fn test_current_user_alias() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CURRENT_USER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CURRENT_USER"),
         args: vec![],
         character_unit: None,
     };

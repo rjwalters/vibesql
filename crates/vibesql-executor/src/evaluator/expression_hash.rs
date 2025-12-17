@@ -567,7 +567,7 @@ mod tests {
     #[test]
     fn test_rand_function_is_not_deterministic() {
         let expr = vibesql_ast::Expression::Function {
-            name: "RAND".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("RAND"),
             args: vec![],
             character_unit: None,
         };
@@ -578,7 +578,7 @@ mod tests {
     fn test_deterministic_function_is_deterministic() {
         let arg = vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(42));
         let expr = vibesql_ast::Expression::Function {
-            name: "ABS".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ABS"),
             args: vec![arg],
             character_unit: None,
         };

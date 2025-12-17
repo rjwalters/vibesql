@@ -60,7 +60,7 @@ fn test_scalar_subquery() {
         distinct: false,
         select_list: vec![SelectItem::Expression {
             expr: Expression::Function {
-                name: "AVG".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("AVG"),
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))],
                 character_unit: None,
             },

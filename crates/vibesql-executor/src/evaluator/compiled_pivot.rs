@@ -317,7 +317,7 @@ mod tests {
     fn create_sum_case_expression(match_value: &str) -> Expression {
         // SUM(CASE WHEN d_day_name = match_value THEN sales_price ELSE NULL END)
         Expression::AggregateFunction {
-            name: "SUM".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("SUM"),
             distinct: false,
             args: vec![Expression::Case {
                 operand: None,
@@ -401,7 +401,7 @@ mod tests {
         // Second aggregate: SUM(CASE WHEN d_week_seq = 1 THEN sales_price ...)
         // Different condition column
         let expr2 = Expression::AggregateFunction {
-            name: "SUM".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("SUM"),
             distinct: false,
             args: vec![Expression::Case {
                 operand: None,

@@ -74,7 +74,7 @@ fn test_scalar_subquery_in_where_clause() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "AVG".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("AVG"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))],
                 character_unit: None,
             },
@@ -191,7 +191,7 @@ fn test_scalar_subquery_in_select_list() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "MAX".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("MAX"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))],
                 character_unit: None,
             },

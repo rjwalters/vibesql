@@ -556,7 +556,7 @@ mod tests {
     #[test]
     fn test_collect_from_aggregate() {
         let expr = Expression::AggregateFunction {
-            name: "SUM".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("SUM"),
             args: vec![Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
                 op: BinaryOperator::Multiply,

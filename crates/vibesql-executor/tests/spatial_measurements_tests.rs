@@ -27,17 +27,17 @@ fn eval_expr(expr: Expression) -> Result<SqlValue, String> {
 fn test_st_distance_point_to_point() {
     // ST_Distance(ST_GeomFromText('POINT(0 0)'), ST_GeomFromText('POINT(3 4)'))
     let expr = Expression::Function {
-        name: "ST_DISTANCE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_DISTANCE"),
         args: vec![
             Expression::Function {
-                name: "ST_GEOMFROMTEXT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                 args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "POINT(0 0)",
                 )))],
                 character_unit: None,
             },
             Expression::Function {
-                name: "ST_GEOMFROMTEXT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                 args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "POINT(3 4)",
                 )))],
@@ -59,17 +59,17 @@ fn test_st_distance_point_to_point() {
 #[test]
 fn test_st_distance_same_point() {
     let expr = Expression::Function {
-        name: "ST_DISTANCE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_DISTANCE"),
         args: vec![
             Expression::Function {
-                name: "ST_GEOMFROMTEXT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                 args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "POINT(1 1)",
                 )))],
                 character_unit: None,
             },
             Expression::Function {
-                name: "ST_GEOMFROMTEXT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                 args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "POINT(1 1)",
                 )))],
@@ -91,9 +91,9 @@ fn test_st_distance_same_point() {
 #[test]
 fn test_st_length_linestring() {
     let expr = Expression::Function {
-        name: "ST_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_LENGTH"),
         args: vec![Expression::Function {
-            name: "ST_GEOMFROMTEXT".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
             args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                 "LINESTRING(0 0, 3 0, 3 4)",
             )))],
@@ -114,9 +114,9 @@ fn test_st_length_linestring() {
 #[test]
 fn test_st_area_polygon() {
     let expr = Expression::Function {
-        name: "ST_AREA".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_AREA"),
         args: vec![Expression::Function {
-            name: "ST_GEOMFROMTEXT".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
             args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                 "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))",
             )))],
@@ -137,11 +137,11 @@ fn test_st_area_polygon() {
 #[test]
 fn test_st_centroid_polygon() {
     let expr = Expression::Function {
-        name: "ST_ASTEXT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_ASTEXT"),
         args: vec![Expression::Function {
-            name: "ST_CENTROID".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_CENTROID"),
             args: vec![Expression::Function {
-                name: "ST_GEOMFROMTEXT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                 args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))",
                 )))],
@@ -164,11 +164,11 @@ fn test_st_centroid_polygon() {
 #[test]
 fn test_st_envelope() {
     let expr = Expression::Function {
-        name: "ST_ASTEXT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_ASTEXT"),
         args: vec![Expression::Function {
-            name: "ST_ENVELOPE".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_ENVELOPE"),
             args: vec![Expression::Function {
-                name: "ST_GEOMFROMTEXT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                 args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "POINT(5 5)",
                 )))],
@@ -191,11 +191,11 @@ fn test_st_envelope() {
 #[test]
 fn test_st_null_handling_distance() {
     let expr = Expression::Function {
-        name: "ST_DISTANCE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_DISTANCE"),
         args: vec![
             Expression::Literal(SqlValue::Null),
             Expression::Function {
-                name: "ST_GEOMFROMTEXT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                 args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "POINT(0 0)",
                 )))],
@@ -212,7 +212,7 @@ fn test_st_null_handling_distance() {
 #[test]
 fn test_st_null_handling_area() {
     let expr = Expression::Function {
-        name: "ST_AREA".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_AREA"),
         args: vec![Expression::Literal(SqlValue::Null)],
         character_unit: None,
     };
@@ -224,9 +224,9 @@ fn test_st_null_handling_area() {
 #[test]
 fn test_st_perimeter_polygon() {
     let expr = Expression::Function {
-        name: "ST_PERIMETER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_PERIMETER"),
         args: vec![Expression::Function {
-            name: "ST_GEOMFROMTEXT".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
             args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                 "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))",
             )))],
@@ -247,11 +247,11 @@ fn test_st_perimeter_polygon() {
 #[test]
 fn test_st_convex_hull() {
     let expr = Expression::Function {
-        name: "ST_ASTEXT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_ASTEXT"),
         args: vec![Expression::Function {
-            name: "ST_CONVEXHULL".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_CONVEXHULL"),
             args: vec![Expression::Function {
-                name: "ST_GEOMFROMTEXT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                 args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "LINESTRING(0 0, 1 1, 0 1)",
                 )))],
@@ -274,11 +274,11 @@ fn test_st_convex_hull() {
 #[test]
 fn test_st_point_on_surface_point() {
     let expr = Expression::Function {
-        name: "ST_ASTEXT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_ASTEXT"),
         args: vec![Expression::Function {
-            name: "ST_POINTONSURFACE".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_POINTONSURFACE"),
             args: vec![Expression::Function {
-                name: "ST_GEOMFROMTEXT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                 args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "POINT(5 5)",
                 )))],
@@ -301,9 +301,9 @@ fn test_st_point_on_surface_point() {
 #[test]
 fn test_st_wrong_arity_distance() {
     let expr = Expression::Function {
-        name: "ST_DISTANCE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_DISTANCE"),
         args: vec![Expression::Function {
-            name: "ST_GEOMFROMTEXT".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
             args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POINT(0 0)")))],
             character_unit: None,
         }],
@@ -318,9 +318,9 @@ fn test_st_wrong_arity_distance() {
 fn test_st_wrong_type_area() {
     // ST_Area on a Point should error
     let expr = Expression::Function {
-        name: "ST_AREA".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_AREA"),
         args: vec![Expression::Function {
-            name: "ST_GEOMFROMTEXT".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
             args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POINT(5 5)")))],
             character_unit: None,
         }],

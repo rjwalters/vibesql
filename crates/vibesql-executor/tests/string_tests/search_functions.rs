@@ -19,7 +19,7 @@ use crate::common::create_test_evaluator;
 fn test_position_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "POSITION".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("POSITION"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -36,7 +36,7 @@ fn test_position_null() {
 fn test_position_not_found() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "POSITION".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("POSITION"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("xyz"),
@@ -55,7 +55,7 @@ fn test_position_not_found() {
 fn test_position_found() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "POSITION".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("POSITION"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("lo"),
@@ -74,7 +74,7 @@ fn test_position_found() {
 fn test_position_empty_needle() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "POSITION".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("POSITION"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from(""),
@@ -94,7 +94,7 @@ fn test_position_empty_needle() {
 fn test_position_multiple_occurrences() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "POSITION".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("POSITION"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("l"),
@@ -114,7 +114,7 @@ fn test_position_multiple_occurrences() {
 fn test_position_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "POSITION".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("POSITION"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("hello"),
         ))],
@@ -128,7 +128,7 @@ fn test_position_wrong_arg_count() {
 fn test_position_wrong_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "POSITION".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("POSITION"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -145,7 +145,7 @@ fn test_position_wrong_type() {
 fn test_position_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "POSITION".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("POSITION"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
                 arcstr::ArcStr::from("lo"),
@@ -168,7 +168,7 @@ fn test_position_character_type() {
 fn test_instr_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "INSTR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("INSTR"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -185,7 +185,7 @@ fn test_instr_null() {
 fn test_instr_not_found() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "INSTR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("INSTR"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -204,7 +204,7 @@ fn test_instr_not_found() {
 fn test_instr_found() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "INSTR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("INSTR"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -223,7 +223,7 @@ fn test_instr_found() {
 fn test_instr_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "INSTR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("INSTR"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("hello"),
         ))],
@@ -239,7 +239,7 @@ fn test_instr_integer_coercion() {
     // INSTR(123, 'l') -> INSTR('123', 'l') -> 0 (not found)
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "INSTR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("INSTR"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -256,7 +256,7 @@ fn test_instr_integer_coercion() {
 fn test_instr_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "INSTR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("INSTR"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
                 arcstr::ArcStr::from("hello"),
@@ -279,7 +279,7 @@ fn test_instr_character_type() {
 fn test_locate_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOCATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -296,7 +296,7 @@ fn test_locate_null() {
 fn test_locate_not_found() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOCATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("xyz"),
@@ -316,7 +316,7 @@ fn test_locate_with_start_position() {
     let (evaluator, row) = create_test_evaluator();
     // Find second occurrence of 'l' in 'hello'
     let expr = vibesql_ast::Expression::Function {
-        name: "LOCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOCATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("l"),
@@ -336,7 +336,7 @@ fn test_locate_with_start_position() {
 fn test_locate_start_beyond_length() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOCATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("l"),
@@ -356,7 +356,7 @@ fn test_locate_start_beyond_length() {
 fn test_locate_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOCATE"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("l"),
         ))],
@@ -370,7 +370,7 @@ fn test_locate_wrong_arg_count() {
 fn test_locate_wrong_type_needle() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOCATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -387,7 +387,7 @@ fn test_locate_wrong_type_needle() {
 fn test_locate_wrong_type_start() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOCATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("l"),
@@ -409,7 +409,7 @@ fn test_locate_wrong_type_start() {
 fn test_locate_null_start() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOCATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("l"),
@@ -429,7 +429,7 @@ fn test_locate_null_start() {
 fn test_locate_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOCATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
                 arcstr::ArcStr::from("ll"),

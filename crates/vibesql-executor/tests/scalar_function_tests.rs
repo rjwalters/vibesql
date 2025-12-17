@@ -14,7 +14,7 @@ fn test_abs_positive() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "ABS".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ABS"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(-5.2))],
         character_unit: None,
     };
@@ -27,7 +27,7 @@ fn test_abs_integer() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "ABS".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ABS"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(-42))],
         character_unit: None,
     };
@@ -40,7 +40,7 @@ fn test_round_basic() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "ROUND".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ROUND"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(3.7))],
         character_unit: None,
     };
@@ -53,7 +53,7 @@ fn test_round_with_precision() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "ROUND".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ROUND"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(3.14159)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
@@ -69,7 +69,7 @@ fn test_floor_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "FLOOR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("FLOOR"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(3.9))],
         character_unit: None,
     };
@@ -82,7 +82,7 @@ fn test_ceil_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "CEIL".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CEIL"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(3.1))],
         character_unit: None,
     };
@@ -95,7 +95,7 @@ fn test_ceiling_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "CEILING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CEILING"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(3.1))],
         character_unit: None,
     };
@@ -108,7 +108,7 @@ fn test_mod_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "MOD".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("MOD"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(17)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5)),
@@ -124,7 +124,7 @@ fn test_power_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "POWER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("POWER"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
@@ -140,7 +140,7 @@ fn test_pow_alias() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "POW".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("POW"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
@@ -156,7 +156,7 @@ fn test_sqrt_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "SQRT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SQRT"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(16))],
         character_unit: None,
     };
@@ -171,7 +171,7 @@ fn test_concat_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "CONCAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("Hello"),
@@ -194,7 +194,7 @@ fn test_concat_with_integer() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "CONCAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("ID:"),
@@ -212,7 +212,7 @@ fn test_length_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("Hello"),
         ))],
@@ -227,7 +227,7 @@ fn test_position_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "POSITION".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("POSITION"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("lo"),
@@ -248,7 +248,7 @@ fn test_position_not_found() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "POSITION".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("POSITION"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("xyz"),
@@ -268,7 +268,7 @@ fn test_replace_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "REPLACE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REPLACE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("Hello World"),
@@ -291,7 +291,7 @@ fn test_reverse_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "REVERSE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REVERSE"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("Hello"),
         ))],
@@ -306,7 +306,7 @@ fn test_left_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "LEFT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LEFT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("Hello"),
@@ -324,7 +324,7 @@ fn test_right_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "RIGHT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("RIGHT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("Hello"),
@@ -344,7 +344,7 @@ fn test_abs_with_null() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "ABS".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ABS"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)],
         character_unit: None,
     };
@@ -357,7 +357,7 @@ fn test_concat_with_null() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "CONCAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("Hello"),
@@ -375,7 +375,7 @@ fn test_length_with_null() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)],
         character_unit: None,
     };
@@ -388,7 +388,7 @@ fn test_octet_length_ascii() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "OCTET_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("OCTET_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("foo"),
         ))],
@@ -403,7 +403,7 @@ fn test_octet_length_empty_string() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "OCTET_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("OCTET_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from(""),
         ))],
@@ -419,7 +419,7 @@ fn test_octet_length_multibyte() {
 
     // Emoji is 4 bytes in UTF-8
     let expr = vibesql_ast::Expression::Function {
-        name: "OCTET_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("OCTET_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("🦀"),
         ))],
@@ -434,7 +434,7 @@ fn test_octet_length_with_null() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "OCTET_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("OCTET_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)],
         character_unit: None,
     };
@@ -450,9 +450,9 @@ fn test_nested_functions() {
 
     // ABS(ROUND(-3.7)) should equal 4.0
     let expr = vibesql_ast::Expression::Function {
-        name: "ABS".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ABS"),
         args: vec![vibesql_ast::Expression::Function {
-            name: "ROUND".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ROUND"),
             args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(-3.7))],
             character_unit: None,
         }],
@@ -468,9 +468,9 @@ fn test_upper_left_nested() {
 
     // UPPER(LEFT('hello', 3)) should equal 'HEL'
     let expr = vibesql_ast::Expression::Function {
-        name: "UPPER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("UPPER"),
         args: vec![vibesql_ast::Expression::Function {
-            name: "LEFT".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("LEFT"),
             args: vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                     arcstr::ArcStr::from("hello"),

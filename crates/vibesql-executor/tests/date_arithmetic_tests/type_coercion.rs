@@ -17,7 +17,7 @@ fn test_datediff_varchar_dates() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATEDIFF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATEDIFF"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-10"))),
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-01"))),
@@ -34,7 +34,7 @@ fn test_datediff_mixed_varchar_date() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATEDIFF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATEDIFF"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-10"))),
             vibesql_ast::Expression::Literal(SqlValue::Date("2024-01-01".parse().unwrap())),
@@ -51,7 +51,7 @@ fn test_datediff_invalid_varchar() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATEDIFF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATEDIFF"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("not-a-date"))),
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-01"))),
@@ -68,7 +68,7 @@ fn test_datediff_varchar_null() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATEDIFF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATEDIFF"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Null),
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-01"))),
@@ -238,7 +238,7 @@ fn test_date_add_varchar_with_interval() {
 
     // DATE_ADD('2024-01-01', INTERVAL '5' DAY)
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_ADD".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_ADD"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-01"))),
             vibesql_ast::Expression::Literal(SqlValue::Interval(Interval::new(
@@ -266,7 +266,7 @@ fn test_date_add_varchar_legacy_syntax() {
 
     // DATE_ADD('2024-01-01', 5, 'DAY') - legacy 3-arg syntax
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_ADD".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_ADD"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-01"))),
             vibesql_ast::Expression::Literal(SqlValue::Integer(5)),
@@ -293,7 +293,7 @@ fn test_date_sub_varchar_with_interval() {
 
     // DATE_SUB('2024-01-10', INTERVAL '5' DAY)
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_SUB".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_SUB"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-10"))),
             vibesql_ast::Expression::Literal(SqlValue::Interval(Interval::new(
@@ -321,7 +321,7 @@ fn test_date_sub_varchar_legacy_syntax() {
 
     // DATE_SUB('2024-01-10', 5, 'DAY') - legacy 3-arg syntax
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_SUB".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_SUB"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-10"))),
             vibesql_ast::Expression::Literal(SqlValue::Integer(5)),

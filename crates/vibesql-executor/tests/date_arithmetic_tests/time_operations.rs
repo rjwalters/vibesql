@@ -10,7 +10,7 @@ fn test_date_add_hours_across_midnight() {
 
     // 11 PM + 2 hours → 1 AM next day
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_ADD".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_ADD"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
                 "2024-01-15 23:00:00".parse().unwrap(),
@@ -32,7 +32,7 @@ fn test_date_add_minutes_overflow() {
 
     // 90 minutes from 11:30 → 1:00 PM
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_ADD".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_ADD"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
                 "2024-01-15 11:30:00".parse().unwrap(),
@@ -54,7 +54,7 @@ fn test_date_add_seconds_overflow() {
 
     // 3661 seconds (1 hour, 1 minute, 1 second)
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_ADD".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_ADD"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
                 "2024-01-15 10:30:30".parse().unwrap(),
@@ -76,7 +76,7 @@ fn test_date_sub_hours_across_midnight() {
 
     // 1 AM - 2 hours → 11 PM previous day
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_SUB".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_SUB"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
                 "2024-01-16 01:00:00".parse().unwrap(),

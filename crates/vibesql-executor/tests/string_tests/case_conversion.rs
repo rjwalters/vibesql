@@ -14,7 +14,7 @@ use crate::common::create_test_evaluator;
 fn test_upper_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "UPPER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("UPPER"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)],
         character_unit: None,
     };
@@ -26,7 +26,7 @@ fn test_upper_null() {
 fn test_upper_empty() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "UPPER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("UPPER"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from(""),
         ))],
@@ -41,7 +41,7 @@ fn test_upper_unicode() {
     let (evaluator, row) = create_test_evaluator();
     // Test Greek, accented characters, emojis
     let expr = vibesql_ast::Expression::Function {
-        name: "UPPER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("UPPER"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("café"),
         ))],
@@ -55,7 +55,7 @@ fn test_upper_unicode() {
 fn test_upper_mixed_case() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "UPPER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("UPPER"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("HeLLo WoRLd"),
         ))],
@@ -69,7 +69,7 @@ fn test_upper_mixed_case() {
 fn test_upper_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "UPPER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("UPPER"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
             arcstr::ArcStr::from("test"),
         ))],
@@ -83,7 +83,7 @@ fn test_upper_character_type() {
 fn test_upper_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "UPPER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("UPPER"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("test"),
@@ -102,7 +102,7 @@ fn test_upper_wrong_arg_count() {
 fn test_upper_wrong_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "UPPER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("UPPER"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123))],
         character_unit: None,
     };
@@ -114,7 +114,7 @@ fn test_upper_wrong_type() {
 fn test_lower_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOWER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOWER"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)],
         character_unit: None,
     };
@@ -126,7 +126,7 @@ fn test_lower_null() {
 fn test_lower_empty() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOWER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOWER"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from(""),
         ))],
@@ -140,7 +140,7 @@ fn test_lower_empty() {
 fn test_lower_unicode() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOWER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOWER"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("CAFÉ"),
         ))],
@@ -154,7 +154,7 @@ fn test_lower_unicode() {
 fn test_lower_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOWER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOWER"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("TEST"),
@@ -173,7 +173,7 @@ fn test_lower_wrong_arg_count() {
 fn test_lower_wrong_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOWER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOWER"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123))],
         character_unit: None,
     };
@@ -185,7 +185,7 @@ fn test_lower_wrong_type() {
 fn test_lower_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LOWER".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOWER"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
             arcstr::ArcStr::from("TEST"),
         ))],

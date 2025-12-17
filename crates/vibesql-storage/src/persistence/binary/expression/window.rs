@@ -6,7 +6,9 @@
 
 use std::io::{Read, Write};
 
-use vibesql_ast::{FrameBound, FrameUnit, WindowFrame, WindowFunctionSpec, WindowSpec};
+use vibesql_ast::{
+    FrameBound, FrameUnit, WindowFrame, WindowFunctionSpec, WindowSpec,
+};
 
 use super::super::io::*;
 use crate::StorageError;
@@ -20,7 +22,7 @@ pub(super) fn write_window_function_spec<W: Write>(
             writer
                 .write_all(&[0u8])
                 .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-            write_string(writer, name)?;
+            write_string(writer, name.canonical())?;
             write_u32(writer, args.len() as u32)?;
             for arg in args {
                 super::write_expression(writer, arg)?;
@@ -30,7 +32,7 @@ pub(super) fn write_window_function_spec<W: Write>(
             writer
                 .write_all(&[1u8])
                 .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-            write_string(writer, name)?;
+            write_string(writer, name.canonical())?;
             write_u32(writer, args.len() as u32)?;
             for arg in args {
                 super::write_expression(writer, arg)?;
@@ -40,7 +42,7 @@ pub(super) fn write_window_function_spec<W: Write>(
             writer
                 .write_all(&[2u8])
                 .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-            write_string(writer, name)?;
+            write_string(writer, name.canonical())?;
             write_u32(writer, args.len() as u32)?;
             for arg in args {
                 super::write_expression(writer, arg)?;
@@ -56,7 +58,8 @@ pub(super) fn read_window_function_spec<R: Read>(
     let tag = read_u8(reader)?;
     match tag {
         0 => {
-            let name = read_string(reader)?;
+            let name_str = read_string(reader)?;
+            let name = vibesql_ast::FunctionIdentifier::new(&name_str);
             let arg_count = read_u32(reader)?;
             let mut args = Vec::new();
             for _ in 0..arg_count {
@@ -65,7 +68,8 @@ pub(super) fn read_window_function_spec<R: Read>(
             Ok(WindowFunctionSpec::Aggregate { name, args })
         }
         1 => {
-            let name = read_string(reader)?;
+            let name_str = read_string(reader)?;
+            let name = vibesql_ast::FunctionIdentifier::new(&name_str);
             let arg_count = read_u32(reader)?;
             let mut args = Vec::new();
             for _ in 0..arg_count {
@@ -74,7 +78,8 @@ pub(super) fn read_window_function_spec<R: Read>(
             Ok(WindowFunctionSpec::Ranking { name, args })
         }
         2 => {
-            let name = read_string(reader)?;
+            let name_str = read_string(reader)?;
+            let name = vibesql_ast::FunctionIdentifier::new(&name_str);
             let arg_count = read_u32(reader)?;
             let mut args = Vec::new();
             for _ in 0..arg_count {

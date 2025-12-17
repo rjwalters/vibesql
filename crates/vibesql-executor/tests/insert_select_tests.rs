@@ -315,14 +315,14 @@ fn test_insert_from_select_with_aggregates() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
-                    name: "SUM".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("SUM"),
                     args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
                     character_unit: None,
                 },
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
-                    name: "COUNT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     args: vec![vibesql_ast::Expression::Wildcard],
                     character_unit: None,
                 },

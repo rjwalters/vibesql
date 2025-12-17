@@ -15,7 +15,7 @@ use crate::common::create_test_evaluator;
 fn test_char_length_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CHAR_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CHAR_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)],
         character_unit: None,
     };
@@ -27,7 +27,7 @@ fn test_char_length_null() {
 fn test_char_length_empty() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CHAR_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CHAR_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from(""),
         ))],
@@ -42,7 +42,7 @@ fn test_char_length_multibyte() {
     let (evaluator, row) = create_test_evaluator();
     // "café" is 4 characters but 5 bytes
     let expr = vibesql_ast::Expression::Function {
-        name: "CHAR_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CHAR_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("café"),
         ))],
@@ -56,7 +56,7 @@ fn test_char_length_multibyte() {
 fn test_char_length_using_characters() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CHAR_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CHAR_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("café"),
         ))],
@@ -71,7 +71,7 @@ fn test_char_length_using_octets() {
     let (evaluator, row) = create_test_evaluator();
     // "café" is 5 bytes in UTF-8 (c=1, a=1, f=1, é=2)
     let expr = vibesql_ast::Expression::Function {
-        name: "CHAR_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CHAR_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("café"),
         ))],
@@ -85,7 +85,7 @@ fn test_char_length_using_octets() {
 fn test_octet_length_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "OCTET_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("OCTET_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)],
         character_unit: None,
     };
@@ -97,7 +97,7 @@ fn test_octet_length_null() {
 fn test_octet_length_empty() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "OCTET_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("OCTET_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from(""),
         ))],
@@ -112,7 +112,7 @@ fn test_octet_length_multibyte() {
     let (evaluator, row) = create_test_evaluator();
     // "café" is 5 bytes in UTF-8
     let expr = vibesql_ast::Expression::Function {
-        name: "OCTET_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("OCTET_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("café"),
         ))],
@@ -128,7 +128,7 @@ fn test_octet_length_vs_char_length() {
 
     // ASCII: same count
     let ascii_expr = vibesql_ast::Expression::Function {
-        name: "CHAR_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CHAR_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("hello"),
         ))],
@@ -137,7 +137,7 @@ fn test_octet_length_vs_char_length() {
     let char_result = evaluator.eval(&ascii_expr, &row).unwrap();
 
     let octet_expr = vibesql_ast::Expression::Function {
-        name: "OCTET_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("OCTET_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("hello"),
         ))],
@@ -153,7 +153,7 @@ fn test_octet_length_vs_char_length() {
 fn test_length_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)],
         character_unit: None,
     };
@@ -165,7 +165,7 @@ fn test_length_null() {
 fn test_length_empty() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from(""),
         ))],
@@ -179,7 +179,7 @@ fn test_length_empty() {
 fn test_length_basic() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("hello"),
         ))],
@@ -194,7 +194,7 @@ fn test_length_multibyte() {
     let (evaluator, row) = create_test_evaluator();
     // LENGTH returns byte count (unlike CHAR_LENGTH)
     let expr = vibesql_ast::Expression::Function {
-        name: "LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("café"),
         ))],
@@ -209,7 +209,7 @@ fn test_length_multibyte() {
 fn test_length_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LENGTH"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -229,7 +229,7 @@ fn test_length_integer() {
     // SQLite compatibility: LENGTH() accepts any type, converting to string first
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123))],
         character_unit: None,
     };
@@ -243,7 +243,7 @@ fn test_length_float() {
     // SQLite compatibility: LENGTH() accepts any type, converting to string first
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Numeric(1.5))],
         character_unit: None,
     };
@@ -256,7 +256,7 @@ fn test_length_float() {
 fn test_char_length_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CHAR_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CHAR_LENGTH"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -275,7 +275,7 @@ fn test_char_length_wrong_arg_count() {
 fn test_char_length_wrong_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CHAR_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CHAR_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123))],
         character_unit: None,
     };
@@ -287,7 +287,7 @@ fn test_char_length_wrong_type() {
 fn test_octet_length_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "OCTET_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("OCTET_LENGTH"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -306,7 +306,7 @@ fn test_octet_length_wrong_arg_count() {
 fn test_octet_length_wrong_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "OCTET_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("OCTET_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123))],
         character_unit: None,
     };
@@ -318,7 +318,7 @@ fn test_octet_length_wrong_type() {
 fn test_char_length_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CHAR_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CHAR_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
             arcstr::ArcStr::from("test"),
         ))],
@@ -332,7 +332,7 @@ fn test_char_length_character_type() {
 fn test_octet_length_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "OCTET_LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("OCTET_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
             arcstr::ArcStr::from("café"),
         ))],
@@ -346,7 +346,7 @@ fn test_octet_length_character_type() {
 fn test_length_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LENGTH".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
             arcstr::ArcStr::from("test"),
         ))],

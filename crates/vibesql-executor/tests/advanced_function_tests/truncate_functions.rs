@@ -7,7 +7,7 @@ fn test_truncate_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "TRUNCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("TRUNCATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(3.14159)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
@@ -29,7 +29,7 @@ fn test_truncate_no_precision() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "TRUNCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("TRUNCATE"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(3.999))],
         character_unit: None,
     };
@@ -48,7 +48,7 @@ fn test_truncate_negative() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "TRUNCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("TRUNCATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(-1.999)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -70,7 +70,7 @@ fn test_truncate_null() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "TRUNCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("TRUNCATE"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)],
         character_unit: None,
     };
@@ -83,7 +83,7 @@ fn test_truncate_negative_precision() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "TRUNCATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("TRUNCATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(123.456)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(-1)),

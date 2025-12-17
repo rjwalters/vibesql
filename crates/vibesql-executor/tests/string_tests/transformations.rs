@@ -20,7 +20,7 @@ use crate::common::create_test_evaluator;
 fn test_concat_null_propagation() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CONCAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -40,7 +40,7 @@ fn test_concat_null_propagation() {
 fn test_concat_empty_strings() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CONCAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from(""),
@@ -62,7 +62,7 @@ fn test_concat_empty_strings() {
 fn test_concat_single_arg() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CONCAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("hello"),
         ))],
@@ -76,7 +76,7 @@ fn test_concat_single_arg() {
 fn test_concat_many_args() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CONCAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("a"),
@@ -104,7 +104,7 @@ fn test_concat_many_args() {
 fn test_concat_integer_conversion() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CONCAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("ID:"),
@@ -121,7 +121,7 @@ fn test_concat_integer_conversion() {
 fn test_concat_no_args() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CONCAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
         args: vec![],
         character_unit: None,
     };
@@ -133,7 +133,7 @@ fn test_concat_no_args() {
 fn test_concat_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "CONCAT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
                 arcstr::ArcStr::from("hello"),
@@ -159,7 +159,7 @@ fn test_concat_character_type() {
 fn test_replace_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REPLACE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REPLACE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -179,7 +179,7 @@ fn test_replace_null() {
 fn test_replace_multiple_occurrences() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REPLACE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REPLACE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello hello"),
@@ -201,7 +201,7 @@ fn test_replace_multiple_occurrences() {
 fn test_replace_empty_search() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REPLACE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REPLACE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -224,7 +224,7 @@ fn test_replace_empty_search() {
 fn test_replace_empty_replacement() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REPLACE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REPLACE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -246,7 +246,7 @@ fn test_replace_empty_replacement() {
 fn test_replace_not_found() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REPLACE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REPLACE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -268,7 +268,7 @@ fn test_replace_not_found() {
 fn test_replace_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REPLACE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REPLACE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -287,7 +287,7 @@ fn test_replace_wrong_arg_count() {
 fn test_replace_wrong_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REPLACE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REPLACE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -307,7 +307,7 @@ fn test_replace_wrong_type() {
 fn test_replace_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REPLACE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REPLACE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
                 arcstr::ArcStr::from("hello"),
@@ -333,7 +333,7 @@ fn test_replace_character_type() {
 fn test_reverse_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REVERSE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REVERSE"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)],
         character_unit: None,
     };
@@ -345,7 +345,7 @@ fn test_reverse_null() {
 fn test_reverse_empty() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REVERSE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REVERSE"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from(""),
         ))],
@@ -359,7 +359,7 @@ fn test_reverse_empty() {
 fn test_reverse_single_char() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REVERSE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REVERSE"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("a"),
         ))],
@@ -373,7 +373,7 @@ fn test_reverse_single_char() {
 fn test_reverse_basic() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REVERSE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REVERSE"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("hello"),
         ))],
@@ -387,7 +387,7 @@ fn test_reverse_basic() {
 fn test_reverse_multibyte() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REVERSE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REVERSE"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("café"),
         ))],
@@ -401,7 +401,7 @@ fn test_reverse_multibyte() {
 fn test_reverse_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REVERSE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REVERSE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -420,7 +420,7 @@ fn test_reverse_wrong_arg_count() {
 fn test_reverse_wrong_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REVERSE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REVERSE"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123))],
         character_unit: None,
     };
@@ -432,7 +432,7 @@ fn test_reverse_wrong_type() {
 fn test_reverse_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "REVERSE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("REVERSE"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
             arcstr::ArcStr::from("test"),
         ))],

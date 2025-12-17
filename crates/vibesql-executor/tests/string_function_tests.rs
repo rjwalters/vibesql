@@ -12,7 +12,7 @@ use common::create_test_evaluator;
 fn test_substring_from_for() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -30,7 +30,7 @@ fn test_substring_from_for() {
 fn test_substring_from_only() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -49,7 +49,7 @@ fn test_substring_both_syntaxes_equivalent() {
 
     // Test comma syntax
     let comma_expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -63,7 +63,7 @@ fn test_substring_both_syntaxes_equivalent() {
 
     // Test FROM/FOR syntax (same AST)
     let from_for_expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -208,7 +208,7 @@ fn test_substring_with_date_extract_year() {
     let (evaluator, row) = create_test_evaluator();
     let date = vibesql_types::Date::new(1996, 7, 15).unwrap();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(date)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -226,7 +226,7 @@ fn test_substring_with_date_extract_month() {
     let (evaluator, row) = create_test_evaluator();
     let date = vibesql_types::Date::new(1996, 7, 15).unwrap();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTR".to_string(), // Test alias
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTR"), // Test alias
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(date)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(6)),
@@ -244,7 +244,7 @@ fn test_substring_with_date_extract_day() {
     let (evaluator, row) = create_test_evaluator();
     let date = vibesql_types::Date::new(1996, 7, 15).unwrap();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(date)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(9)),
@@ -264,7 +264,7 @@ fn test_substring_with_timestamp() {
     let time = vibesql_types::Time::new(8, 30, 0, 0).unwrap();
     let timestamp = vibesql_types::Timestamp::new(date, time);
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(timestamp)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),

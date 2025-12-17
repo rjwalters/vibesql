@@ -786,7 +786,7 @@ mod tests {
 
         // SELECT SUM(price) FROM test
         let aggregates = vec![Expression::AggregateFunction {
-            name: "SUM".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("SUM"),
             distinct: false,
             args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
             order_by: None,
@@ -823,7 +823,7 @@ mod tests {
         };
 
         let aggregates = vec![Expression::AggregateFunction {
-            name: "SUM".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("SUM"),
             distinct: false,
             args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
             order_by: None,
@@ -855,19 +855,19 @@ mod tests {
         // SELECT SUM(price), COUNT(*), AVG(quantity) FROM test
         let aggregates = vec![
             Expression::AggregateFunction {
-                name: "SUM".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("SUM"),
                 distinct: false,
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
                 order_by: None,
             },
             Expression::AggregateFunction {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 distinct: false,
                 args: vec![Expression::Wildcard],
                 order_by: None,
             },
             Expression::AggregateFunction {
-                name: "AVG".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("AVG"),
                 distinct: false,
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false))],
                 order_by: None,
@@ -909,7 +909,7 @@ mod tests {
 
         // SELECT SUM(DISTINCT price) FROM test - should return None
         let aggregates = vec![Expression::AggregateFunction {
-            name: "SUM".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("SUM"),
             distinct: true,
             args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
             order_by: None,
@@ -943,7 +943,7 @@ mod tests {
         }));
 
         let aggregates = vec![Expression::AggregateFunction {
-            name: "SUM".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("SUM"),
             distinct: false,
             args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
             order_by: None,

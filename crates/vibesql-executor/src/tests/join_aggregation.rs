@@ -148,7 +148,7 @@ fn test_inner_join_with_group_by_count() {
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
-                    name: "COUNT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("e", false, "emp_id", false))],
                     character_unit: None,
                 },
@@ -243,7 +243,7 @@ fn test_left_join_with_group_by_avg_salary() {
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
-                    name: "AVG".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("AVG"),
                     args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("e", false, "salary", false))],
                     character_unit: None,
                 },
@@ -336,7 +336,7 @@ fn test_join_group_by_with_having() {
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
-                    name: "COUNT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("e", false, "emp_id", false))],
                     character_unit: None,
                 },
@@ -368,7 +368,7 @@ fn test_join_group_by_with_having() {
         ])),
         having: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::Function {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("e", false, "emp_id", false))],
                 character_unit: None,
             }),
@@ -419,21 +419,21 @@ fn test_join_group_by_multiple_aggregates() {
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
-                    name: "COUNT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     args: vec![vibesql_ast::Expression::Wildcard],
                     character_unit: None,
                 },
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
-                    name: "MIN".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("MIN"),
                     args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("e", false, "salary", false))],
                     character_unit: None,
                 },
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
-                    name: "MAX".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("MAX"),
                     args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("e", false, "salary", false))],
                     character_unit: None,
                 },

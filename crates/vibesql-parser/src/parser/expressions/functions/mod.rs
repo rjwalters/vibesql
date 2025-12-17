@@ -240,11 +240,12 @@ impl Parser {
         };
 
         // Return appropriate expression type
-        // SQL:1999 normalizes unquoted identifiers to lowercase
-        let normalized_name = first.to_lowercase();
+        // FunctionIdentifier handles SQL:1999 case normalization internally
+        // (canonical lowercase for comparison, display preserves original case)
+        let func_id = vibesql_ast::FunctionIdentifier::new(&first);
         if is_aggregate {
             Ok(Some(vibesql_ast::Expression::AggregateFunction {
-                name: normalized_name,
+                name: func_id,
                 distinct,
                 args,
                 order_by,
@@ -255,11 +256,11 @@ impl Parser {
                 return Err(ParseError {
                     message: format!(
                         "ORDER BY may not be used with non-aggregate {}()",
-                        normalized_name.to_uppercase()
+                        first.to_uppercase()
                     ),
                 });
             }
-            Ok(Some(vibesql_ast::Expression::Function { name: normalized_name, args, character_unit }))
+            Ok(Some(vibesql_ast::Expression::Function { name: func_id, args, character_unit }))
         }
     }
 }

@@ -90,7 +90,7 @@ pub(super) fn evaluate(
     };
 
     // Validate argument count first
-    validate_aggregate_args(name, args)?;
+    validate_aggregate_args(name.canonical(), args)?;
 
     // Generate cache key for this aggregate expression
     // Format: "{name}:{distinct}:{arg_debug}"
@@ -101,7 +101,7 @@ pub(super) fn evaluate(
         return Ok(cached_result.clone());
     }
 
-    let mut acc = AggregateAccumulator::new(name, distinct)?;
+    let mut acc = AggregateAccumulator::new(name.canonical(), distinct)?;
 
     // Special handling for COUNT(*)
     if name.to_uppercase() == "COUNT" && args.len() == 1 {
@@ -132,7 +132,7 @@ pub(super) fn evaluate(
         if !distinct {
             // SQLite-compatible error message
             return Err(ExecutorError::WrongNumberOfArguments {
-                function_name: name.clone(),
+                function_name: name.to_string(),
             });
         }
 
@@ -225,7 +225,7 @@ pub(super) fn evaluate(
             });
 
             // Now accumulate in sorted order
-            let mut acc = AggregateAccumulator::new_with_separator(name, distinct, &separator)?;
+            let mut acc = AggregateAccumulator::new_with_separator(name.canonical(), distinct, &separator)?;
             for (value, _) in value_sort_pairs {
                 acc.accumulate(&value);
             }
@@ -236,7 +236,7 @@ pub(super) fn evaluate(
         }
 
         // No ORDER BY - use the original path
-        let mut acc = AggregateAccumulator::new_with_separator(name, distinct, &separator)?;
+        let mut acc = AggregateAccumulator::new_with_separator(name.canonical(), distinct, &separator)?;
 
         for row in group_rows {
             evaluator.clear_cse_cache();

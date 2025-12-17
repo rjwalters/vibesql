@@ -173,7 +173,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
         }
         Expression::Function { name, args, character_unit } => {
             write_tag!(writer, ExprTag::Function);
-            write_string(writer, name)?;
+            write_string(writer, name.canonical())?;
             write_u32(writer, args.len() as u32)?;
             for arg in args {
                 write_expression(writer, arg)?;
@@ -185,7 +185,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
         }
         Expression::AggregateFunction { name, distinct, args, order_by } => {
             write_tag!(writer, ExprTag::AggregateFunction);
-            write_string(writer, name)?;
+            write_string(writer, name.canonical())?;
             write_bool(writer, *distinct)?;
             write_u32(writer, args.len() as u32)?;
             for arg in args {
@@ -473,7 +473,8 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             Ok(Expression::UnaryOp { op, expr })
         }
         ExprTag::Function => {
-            let name = read_string(reader)?;
+            let name_str = read_string(reader)?;
+            let name = vibesql_ast::FunctionIdentifier::new(&name_str);
             let arg_count = read_u32(reader)?;
             let mut args = Vec::new();
             for _ in 0..arg_count {
@@ -484,7 +485,8 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             Ok(Expression::Function { name, args, character_unit })
         }
         ExprTag::AggregateFunction => {
-            let name = read_string(reader)?;
+            let name_str = read_string(reader)?;
+            let name = vibesql_ast::FunctionIdentifier::new(&name_str);
             let distinct = read_bool(reader)?;
             let arg_count = read_u32(reader)?;
             let mut args = Vec::new();
@@ -740,7 +742,7 @@ mod tests {
     #[test]
     fn test_function_roundtrip() {
         let expr = Expression::Function {
-            name: "UPPER".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("UPPER"),
             args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("test")))],
             character_unit: None,
         };

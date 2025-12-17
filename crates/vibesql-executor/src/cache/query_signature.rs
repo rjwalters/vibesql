@@ -342,7 +342,7 @@ impl QuerySignature {
 
             Expression::Function { name, args, character_unit } => {
                 "FUNCTION".hash(hasher);
-                name.to_lowercase().hash(hasher);
+                name.canonical().hash(hasher);
                 for arg in args {
                     Self::hash_expression(arg, hasher);
                 }
@@ -353,7 +353,7 @@ impl QuerySignature {
 
             Expression::AggregateFunction { name, distinct, args, order_by } => {
                 "AGGREGATE".hash(hasher);
-                name.to_lowercase().hash(hasher);
+                name.canonical().hash(hasher);
                 distinct.hash(hasher);
                 for arg in args {
                     Self::hash_expression(arg, hasher);
@@ -523,21 +523,21 @@ impl QuerySignature {
                 match function {
                     vibesql_ast::WindowFunctionSpec::Aggregate { name, args } => {
                         "AGGREGATE".hash(hasher);
-                        name.to_lowercase().hash(hasher);
+                        name.canonical().hash(hasher);
                         for arg in args {
                             Self::hash_expression(arg, hasher);
                         }
                     }
                     vibesql_ast::WindowFunctionSpec::Ranking { name, args } => {
                         "RANKING".hash(hasher);
-                        name.to_lowercase().hash(hasher);
+                        name.canonical().hash(hasher);
                         for arg in args {
                             Self::hash_expression(arg, hasher);
                         }
                     }
                     vibesql_ast::WindowFunctionSpec::Value { name, args } => {
                         "VALUE".hash(hasher);
-                        name.to_lowercase().hash(hasher);
+                        name.canonical().hash(hasher);
                         for arg in args {
                             Self::hash_expression(arg, hasher);
                         }

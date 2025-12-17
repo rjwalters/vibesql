@@ -115,7 +115,7 @@ fn test_aggregate_subquery_transforms_to_derived_table() {
     subquery.having = Some(Expression::BinaryOp {
         op: BinaryOperator::GreaterThan,
         left: Box::new(Expression::AggregateFunction {
-            name: "SUM".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("SUM"),
             distinct: false,
             args: vec![column_ref("l_quantity")],
             order_by: None,

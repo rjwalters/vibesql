@@ -29,12 +29,12 @@ fn test_st_simplify_linestring() {
     // The original line goes: (0,0) -> (1,0.1) -> (2,0) -> (3,0)
     // With a high tolerance, it should simplify to: (0,0) -> (3,0)
     let expr = Expression::Function {
-        name: "ST_ASTEXT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_ASTEXT"),
         args: vec![Expression::Function {
-            name: "ST_SIMPLIFY".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_SIMPLIFY"),
             args: vec![
                 Expression::Function {
-                    name: "ST_GEOMFROMTEXT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                     args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                         "LINESTRING(0 0, 1 0.1, 2 0, 3 0)",
                     )))],
@@ -60,12 +60,12 @@ fn test_st_simplify_linestring() {
 fn test_st_simplify_polygon() {
     // ST_Simplify on a polygon with small deviations
     let expr = Expression::Function {
-        name: "ST_ASTEXT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_ASTEXT"),
         args: vec![Expression::Function {
-            name: "ST_SIMPLIFY".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_SIMPLIFY"),
             args: vec![
                 Expression::Function {
-                    name: "ST_GEOMFROMTEXT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                     args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                         "POLYGON((0 0, 10 0, 10.1 5, 10 10, 0 10, 0 0))",
                     )))],
@@ -90,7 +90,7 @@ fn test_st_simplify_polygon() {
 #[test]
 fn test_st_simplify_null_handling() {
     let expr = Expression::Function {
-        name: "ST_SIMPLIFY".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_SIMPLIFY"),
         args: vec![Expression::Literal(SqlValue::Null), Expression::Literal(SqlValue::Double(0.1))],
         character_unit: None,
     };
@@ -103,12 +103,12 @@ fn test_st_simplify_null_handling() {
 fn test_st_simplify_zero_tolerance() {
     // Zero tolerance should still work (no simplification)
     let expr = Expression::Function {
-        name: "ST_ASTEXT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_ASTEXT"),
         args: vec![Expression::Function {
-            name: "ST_SIMPLIFY".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_SIMPLIFY"),
             args: vec![
                 Expression::Function {
-                    name: "ST_GEOMFROMTEXT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                     args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                         "LINESTRING(0 0, 1 1, 2 2)",
                     )))],
@@ -133,9 +133,9 @@ fn test_st_simplify_zero_tolerance() {
 #[test]
 fn test_st_simplify_wrong_arity() {
     let expr = Expression::Function {
-        name: "ST_SIMPLIFY".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_SIMPLIFY"),
         args: vec![Expression::Function {
-            name: "ST_GEOMFROMTEXT".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
             args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                 "LINESTRING(0 0, 1 1)",
             )))],
@@ -151,10 +151,10 @@ fn test_st_simplify_wrong_arity() {
 #[test]
 fn test_st_simplify_negative_tolerance() {
     let expr = Expression::Function {
-        name: "ST_SIMPLIFY".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_SIMPLIFY"),
         args: vec![
             Expression::Function {
-                name: "ST_GEOMFROMTEXT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                 args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "LINESTRING(0 0, 1 1)",
                 )))],
@@ -173,12 +173,12 @@ fn test_st_simplify_negative_tolerance() {
 fn test_st_simplify_with_integer_tolerance() {
     // ST_Simplify should handle integer tolerance values too
     let expr = Expression::Function {
-        name: "ST_ASTEXT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ST_ASTEXT"),
         args: vec![Expression::Function {
-            name: "ST_SIMPLIFY".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("ST_SIMPLIFY"),
             args: vec![
                 Expression::Function {
-                    name: "ST_GEOMFROMTEXT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("ST_GEOMFROMTEXT"),
                     args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                         "LINESTRING(0 0, 1 1, 2 2)",
                     )))],

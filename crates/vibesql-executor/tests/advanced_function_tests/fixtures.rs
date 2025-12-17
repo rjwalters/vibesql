@@ -13,7 +13,7 @@ pub fn create_function_expr(
     name: &str,
     args: Vec<vibesql_ast::Expression>,
 ) -> vibesql_ast::Expression {
-    vibesql_ast::Expression::Function { name: name.to_string(), args, character_unit: None }
+    vibesql_ast::Expression::Function { name: vibesql_ast::FunctionIdentifier::new(name), args, character_unit: None }
 }
 
 /// Helper to create a literal expression from a SQL value

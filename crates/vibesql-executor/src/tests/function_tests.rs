@@ -286,7 +286,7 @@ fn test_function_varchar_return_type() {
             ProceduralStatement::Set {
                 name: "greeting".to_string(),
                 value: Box::new(Expression::Function {
-                    name: "CONCAT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
                     args: vec![
                         Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Hello, "))),
                         Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),

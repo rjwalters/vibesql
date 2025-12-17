@@ -44,9 +44,9 @@ fn extract_column_name_from_expr(expr: &Expression) -> String {
                     return col_id.column_canonical().to_string();
                 }
             }
-            name.clone()
+            name.to_string()
         }
-        Expression::Function { name, .. } => name.clone(),
+        Expression::Function { name, .. } => name.to_string(),
         Expression::BinaryOp { left, .. } => extract_column_name_from_expr(left),
         _ => "?column?".to_string(),
     }

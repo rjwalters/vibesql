@@ -7,7 +7,7 @@ fn test_datediff_with_timestamps() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATEDIFF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATEDIFF"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
                 "2024-01-10 15:30:00".parse().unwrap(),
@@ -27,7 +27,7 @@ fn test_date_add_timestamp_with_time() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_ADD".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_ADD"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
                 "2024-01-15 14:30:00".parse().unwrap(),
@@ -48,7 +48,7 @@ fn test_extract_hour_from_timestamp() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "EXTRACT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("EXTRACT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("HOUR"),

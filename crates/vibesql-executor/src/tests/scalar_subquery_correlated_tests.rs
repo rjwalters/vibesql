@@ -85,7 +85,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
-                name: "AVG".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("AVG"),
                 distinct: false,
                 args: vec![vibesql_ast::Expression::ColumnRef(
                     vibesql_ast::ColumnIdentifier::qualified("J", false, "I_CURRENT_PRICE", false)
@@ -257,7 +257,7 @@ fn test_correlated_subquery_basic() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "AVG".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("AVG"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))],
                 character_unit: None,
             },

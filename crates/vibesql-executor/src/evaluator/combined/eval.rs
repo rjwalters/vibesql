@@ -407,7 +407,7 @@ impl CombinedExpressionEvaluator<'_> {
 
             // Function expressions - handle scalar functions (not aggregates)
             vibesql_ast::Expression::Function { name, args, character_unit } => {
-                self.eval_function(name, args, character_unit, row)
+                self.eval_function(name.display(), args, character_unit, row)
             }
 
             // Current date/time functions
@@ -466,7 +466,7 @@ impl CombinedExpressionEvaluator<'_> {
                 // This error occurs when an aggregate is evaluated outside of aggregation,
                 // such as in ORDER BY clauses of non-aggregate queries.
                 // Uses "misuse of aggregate: X()" format (with colon) to match SQLite's expr.c
-                Err(ExecutorError::MisuseOfAggregateContext { function_name: name.clone() })
+                Err(ExecutorError::MisuseOfAggregateContext { function_name: name.to_string() })
             }
 
             // Full-text search

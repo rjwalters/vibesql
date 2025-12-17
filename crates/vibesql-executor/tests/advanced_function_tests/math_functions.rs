@@ -7,7 +7,7 @@ fn test_exp_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "EXP".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("EXP"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))],
         character_unit: None,
     };
@@ -26,7 +26,7 @@ fn test_ln_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "LN".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LN"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(2.718281828))],
         character_unit: None,
     };
@@ -45,7 +45,7 @@ fn test_log_alias() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "LOG".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOG"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(2.718281828))],
         character_unit: None,
     };
@@ -64,7 +64,7 @@ fn test_log10_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "LOG10".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LOG10"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(100))],
         character_unit: None,
     };
@@ -77,7 +77,7 @@ fn test_sign_positive() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "SIGN".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SIGN"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(42))],
         character_unit: None,
     };
@@ -90,7 +90,7 @@ fn test_sign_negative() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "SIGN".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SIGN"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(-42))],
         character_unit: None,
     };
@@ -103,7 +103,7 @@ fn test_sign_zero() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "SIGN".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SIGN"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0))],
         character_unit: None,
     };
@@ -116,7 +116,7 @@ fn test_pi_function() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "PI".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("PI"),
         args: vec![],
         character_unit: None,
     };

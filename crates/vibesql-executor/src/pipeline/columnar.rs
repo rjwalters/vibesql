@@ -529,7 +529,7 @@ mod tests {
 
         // COUNT(*) should return 0 for empty set
         let count_expr = Expression::AggregateFunction {
-            name: "COUNT".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("COUNT"),
             args: vec![Expression::Wildcard],
             distinct: false, order_by: None,
         };
@@ -538,7 +538,7 @@ mod tests {
 
         // count (lowercase) should also return 0
         let count_lower = Expression::AggregateFunction {
-            name: "count".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("count"),
             args: vec![Expression::Wildcard],
             distinct: false, order_by: None,
         };
@@ -553,7 +553,7 @@ mod tests {
         let evaluator = ctx.create_evaluator();
 
         let sum_expr = Expression::AggregateFunction {
-            name: "SUM".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("SUM"),
             args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))],
             distinct: false, order_by: None,
         };
@@ -569,7 +569,7 @@ mod tests {
 
         for agg_name in &["AVG", "MIN", "MAX"] {
             let expr = Expression::AggregateFunction {
-                name: agg_name.to_string(),
+                name: vibesql_ast::FunctionIdentifier::new(agg_name),
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))],
                 distinct: false, order_by: None,
             };
@@ -598,7 +598,7 @@ mod tests {
         // COUNT(*) + 10 should return 0 + 10 = 10
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::AggregateFunction {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![Expression::Wildcard],
                 distinct: false, order_by: None,
             }),
@@ -619,7 +619,7 @@ mod tests {
         let expr = Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Minus,
             expr: Box::new(Expression::AggregateFunction {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![Expression::Wildcard],
                 distinct: false, order_by: None,
             }),
@@ -637,7 +637,7 @@ mod tests {
         // CAST(COUNT(*) AS VARCHAR) should return "0"
         let expr = Expression::Cast {
             expr: Box::new(Expression::AggregateFunction {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![Expression::Wildcard],
                 distinct: false, order_by: None,
             }),
@@ -655,7 +655,7 @@ mod tests {
 
         // Some parsers may represent COUNT as Expression::Function instead of AggregateFunction
         let expr = Expression::Function {
-            name: "COUNT".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("COUNT"),
             args: vec![Expression::Wildcard],
             character_unit: None,
         };
@@ -689,7 +689,7 @@ mod tests {
         let complex_agg = Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Minus,
             expr: Box::new(Expression::AggregateFunction {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![Expression::Wildcard],
                 distinct: false, order_by: None,
             }),
@@ -721,7 +721,7 @@ mod tests {
         let complex_agg = Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Minus,
             expr: Box::new(Expression::AggregateFunction {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![Expression::Wildcard],
                 distinct: false, order_by: None,
             }),
