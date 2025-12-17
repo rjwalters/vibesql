@@ -52,6 +52,30 @@ set ::SQLITE_MAX_VARIABLE_NUMBER 999
 set ::SQLITE_MAX_TRIGGER_DEPTH 1000
 set ::tcl_platform(wordSize) 8  ;# 64-bit platform
 
+# SQLite options array - used by tests to check feature availability
+array set ::sqlite_options {
+    casesensitivelike 0
+    tempdb 1
+    memorymanage 0
+    floatingpoint 1
+    utf16 0
+    autoinc 1
+    compound 1
+    subquery 1
+    incrblob 0
+    integrityck 1
+    load_ext 0
+    lookaside 0
+    progress 0
+    schema 1
+    shared_cache 0
+    stat4 0
+    stat3 0
+    tclvar 0
+    threadsafe 0
+    wal 0
+}
+
 #-----------------------------------------------------------------------------
 # SQLite Error Message Compatibility Layer
 #-----------------------------------------------------------------------------
@@ -995,6 +1019,12 @@ proc do_eqp_test {name sql expected} {
     omit_test $name "EXPLAIN QUERY PLAN not supported"
 }
 
+proc do_realnum_test {name script expected} {
+    # Test that expects floating-point results
+    # Uses approximate comparison for floating point numbers
+    do_test $name $script $expected
+}
+
 proc normalize_result {val} {
     # Normalize result for comparison
     # Convert to string and normalize whitespace
@@ -1501,6 +1531,7 @@ proc run_test_file {filename} {
         set AUTOVACUUM $::AUTOVACUUM
         set TEMP_STORE $::TEMP_STORE
         set SQLITE_DEFAULT_AUTOVACUUM $::SQLITE_DEFAULT_AUTOVACUUM
+        array set sqlite_options [array get ::sqlite_options]
     }
     regsub {source \$testdir/tester\.tcl} $content $tester_vars content
 
