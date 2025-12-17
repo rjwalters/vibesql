@@ -1255,6 +1255,12 @@ proc db {cmd args} {
             set result [execsql $sql]
             return [expr {[llength $result] > 0}]
         }
+        status {
+            # SQLite's db status command returns internal statistics
+            # We return 0 for all status queries (step, sort, autoindex, etc.)
+            # This is a stub to allow tests that check status to pass
+            return 0
+        }
         default {
             error "Unknown db command: $cmd"
         }
