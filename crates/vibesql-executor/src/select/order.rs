@@ -289,11 +289,13 @@ pub(super) fn apply_order_by(
         for ((val_a, dir, nulls_order), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
             // Determine NULL ordering:
             // - If explicitly specified via NULLS FIRST/LAST, use that
-            // - Default: SQLite uses NULLS LAST for all directions
+            // - Default: SQLite treats NULL as smallest value, so:
+            //   - ASC: NULL comes first (smallest first)
+            //   - DESC: NULL comes last (smallest last)
             let nulls_first = match nulls_order {
                 Some(vibesql_ast::NullsOrder::First) => true,
                 Some(vibesql_ast::NullsOrder::Last) => false,
-                None => false, // SQLite default: NULLS LAST
+                None => matches!(dir, vibesql_ast::OrderDirection::Asc),
             };
 
             // Handle NULLs according to nulls_first setting
@@ -1414,10 +1416,25 @@ mod tests {
             let keys_b = keys_b.as_ref().unwrap();
 
             for ((val_a, dir, _nulls), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+                // SQLite treats NULL as smallest value:
+                // - ASC: NULL comes first (Less than non-NULL)
+                // - DESC: NULL comes last (Greater than non-NULL)
                 let cmp = match (val_a.is_null(), val_b.is_null()) {
                     (true, true) => Ordering::Equal,
-                    (true, false) => return Ordering::Greater,
-                    (false, true) => return Ordering::Less,
+                    (true, false) => {
+                        return if matches!(dir, vibesql_ast::OrderDirection::Asc) {
+                            Ordering::Less
+                        } else {
+                            Ordering::Greater
+                        };
+                    }
+                    (false, true) => {
+                        return if matches!(dir, vibesql_ast::OrderDirection::Asc) {
+                            Ordering::Greater
+                        } else {
+                            Ordering::Less
+                        };
+                    }
                     (false, false) => match dir {
                         vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
                         vibesql_ast::OrderDirection::Desc => {
@@ -1470,10 +1487,25 @@ mod tests {
             let keys_b = keys_b.as_ref().unwrap();
 
             for ((val_a, dir, _nulls), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+                // SQLite treats NULL as smallest value:
+                // - ASC: NULL comes first (Less than non-NULL)
+                // - DESC: NULL comes last (Greater than non-NULL)
                 let cmp = match (val_a.is_null(), val_b.is_null()) {
                     (true, true) => Ordering::Equal,
-                    (true, false) => return Ordering::Greater,
-                    (false, true) => return Ordering::Less,
+                    (true, false) => {
+                        return if matches!(dir, vibesql_ast::OrderDirection::Asc) {
+                            Ordering::Less
+                        } else {
+                            Ordering::Greater
+                        };
+                    }
+                    (false, true) => {
+                        return if matches!(dir, vibesql_ast::OrderDirection::Asc) {
+                            Ordering::Greater
+                        } else {
+                            Ordering::Less
+                        };
+                    }
                     (false, false) => match dir {
                         vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
                         vibesql_ast::OrderDirection::Desc => {
@@ -1535,10 +1567,25 @@ mod tests {
             let keys_b = keys_b.as_ref().unwrap();
 
             for ((val_a, dir, _nulls), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+                // SQLite treats NULL as smallest value:
+                // - ASC: NULL comes first (Less than non-NULL)
+                // - DESC: NULL comes last (Greater than non-NULL)
                 let cmp = match (val_a.is_null(), val_b.is_null()) {
                     (true, true) => Ordering::Equal,
-                    (true, false) => return Ordering::Greater,
-                    (false, true) => return Ordering::Less,
+                    (true, false) => {
+                        return if matches!(dir, vibesql_ast::OrderDirection::Asc) {
+                            Ordering::Less
+                        } else {
+                            Ordering::Greater
+                        };
+                    }
+                    (false, true) => {
+                        return if matches!(dir, vibesql_ast::OrderDirection::Asc) {
+                            Ordering::Greater
+                        } else {
+                            Ordering::Less
+                        };
+                    }
                     (false, false) => match dir {
                         vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
                         vibesql_ast::OrderDirection::Desc => {
@@ -1576,7 +1623,9 @@ mod tests {
 
     #[test]
     fn test_sort_with_nulls() {
-        // NULLs should always sort last regardless of ASC/DESC
+        // SQLite treats NULL as smallest value:
+        // - ASC: NULL comes first
+        // - DESC: NULL comes last
         let mut rows_asc: Vec<RowWithSortKeys> = vec![
             (
                 Row::from_vec(vec![SqlValue::Integer(2)]),
@@ -1597,10 +1646,25 @@ mod tests {
             let keys_b = keys_b.as_ref().unwrap();
 
             for ((val_a, dir, _nulls), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+                // SQLite treats NULL as smallest value:
+                // - ASC: NULL comes first (Less than non-NULL)
+                // - DESC: NULL comes last (Greater than non-NULL)
                 let cmp = match (val_a.is_null(), val_b.is_null()) {
                     (true, true) => Ordering::Equal,
-                    (true, false) => return Ordering::Greater,
-                    (false, true) => return Ordering::Less,
+                    (true, false) => {
+                        return if matches!(dir, vibesql_ast::OrderDirection::Asc) {
+                            Ordering::Less
+                        } else {
+                            Ordering::Greater
+                        };
+                    }
+                    (false, true) => {
+                        return if matches!(dir, vibesql_ast::OrderDirection::Asc) {
+                            Ordering::Greater
+                        } else {
+                            Ordering::Less
+                        };
+                    }
                     (false, false) => match dir {
                         vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
                         vibesql_ast::OrderDirection::Desc => {
@@ -1618,10 +1682,10 @@ mod tests {
 
         rows_asc.sort_by(&comparison_fn);
 
-        // ASC: 1, 2, NULL (NULLs last)
-        assert_eq!(rows_asc[0].0.values[0], SqlValue::Integer(1));
-        assert_eq!(rows_asc[1].0.values[0], SqlValue::Integer(2));
-        assert_eq!(rows_asc[2].0.values[0], SqlValue::Null);
+        // ASC: NULL, 1, 2 (NULLs first, as smallest value)
+        assert_eq!(rows_asc[0].0.values[0], SqlValue::Null);
+        assert_eq!(rows_asc[1].0.values[0], SqlValue::Integer(1));
+        assert_eq!(rows_asc[2].0.values[0], SqlValue::Integer(2));
     }
 
     #[test]

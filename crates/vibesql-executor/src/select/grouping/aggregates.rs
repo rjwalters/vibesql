@@ -813,6 +813,9 @@ pub fn compare_sql_values_with_collation(
 /// - NULL values sort last (NULLS LAST - SQL:1999 default for ASC)
 /// - Numbers (all integer and float types) < text < other types
 /// - Within the same type class, uses natural ordering
+///
+/// Note: For ORDER BY with direction-dependent NULL handling (SQLite behavior),
+/// use the NULL ordering logic in apply_order_by() in order.rs instead.
 pub fn compare_sql_values(a: &vibesql_types::SqlValue, b: &vibesql_types::SqlValue) -> Ordering {
     use vibesql_types::SqlValue;
 
