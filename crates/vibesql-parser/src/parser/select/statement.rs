@@ -240,16 +240,29 @@ impl Parser {
 
         // Parse LIMIT clause
         // SQLite allows expressions in LIMIT (e.g., LIMIT 5+3)
-        let limit = if allow_order_limit && self.peek_keyword(Keyword::Limit) {
+        // SQLite also allows comma syntax: LIMIT offset,count (equivalent to LIMIT count OFFSET offset)
+        let (limit, offset_from_limit) = if allow_order_limit && self.peek_keyword(Keyword::Limit) {
             self.consume_keyword(Keyword::Limit)?;
-            Some(self.parse_expression()?)
+            let first_expr = self.parse_expression()?;
+
+            // Check for comma syntax: LIMIT offset,count
+            if matches!(self.peek(), Token::Comma) {
+                self.advance(); // consume comma
+                let second_expr = self.parse_expression()?;
+                // In comma syntax, first is offset, second is count
+                (Some(second_expr), Some(first_expr))
+            } else {
+                (Some(first_expr), None)
+            }
         } else {
-            None
+            (None, None)
         };
 
-        // Parse OFFSET clause
+        // Parse OFFSET clause (only if not already set via comma syntax)
         // SQLite allows expressions in OFFSET (e.g., OFFSET 10*2)
-        let offset = if allow_order_limit && self.peek_keyword(Keyword::Offset) {
+        let offset = if offset_from_limit.is_some() {
+            offset_from_limit
+        } else if allow_order_limit && self.peek_keyword(Keyword::Offset) {
             self.consume_keyword(Keyword::Offset)?;
             Some(self.parse_expression()?)
         } else {
@@ -511,16 +524,28 @@ impl Parser {
             None
         };
 
-        // Parse LIMIT
-        let limit = if allow_order_limit && self.peek_keyword(Keyword::Limit) {
+        // Parse LIMIT (supports comma syntax: LIMIT offset,count)
+        let (limit, offset_from_limit) = if allow_order_limit && self.peek_keyword(Keyword::Limit) {
             self.consume_keyword(Keyword::Limit)?;
-            Some(self.parse_expression()?)
+            let first_expr = self.parse_expression()?;
+
+            // Check for comma syntax: LIMIT offset,count
+            if matches!(self.peek(), Token::Comma) {
+                self.advance(); // consume comma
+                let second_expr = self.parse_expression()?;
+                // In comma syntax, first is offset, second is count
+                (Some(second_expr), Some(first_expr))
+            } else {
+                (Some(first_expr), None)
+            }
         } else {
-            None
+            (None, None)
         };
 
-        // Parse OFFSET
-        let offset = if allow_order_limit && self.peek_keyword(Keyword::Offset) {
+        // Parse OFFSET (only if not already set via comma syntax)
+        let offset = if offset_from_limit.is_some() {
+            offset_from_limit
+        } else if allow_order_limit && self.peek_keyword(Keyword::Offset) {
             self.consume_keyword(Keyword::Offset)?;
             Some(self.parse_expression()?)
         } else {

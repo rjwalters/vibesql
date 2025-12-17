@@ -83,15 +83,26 @@ impl<'arena> ArenaParser<'arena> {
             None
         };
 
-        // Parse LIMIT
-        let limit = if self.try_consume_keyword(Keyword::Limit) {
-            Some(self.parse_expression()?)
+        // Parse LIMIT (supports comma syntax: LIMIT offset,count)
+        let (limit, offset_from_limit) = if self.try_consume_keyword(Keyword::Limit) {
+            let first_expr = self.parse_expression()?;
+
+            // Check for comma syntax: LIMIT offset,count
+            if self.try_consume(&Token::Comma) {
+                let second_expr = self.parse_expression()?;
+                // In comma syntax, first is offset, second is count
+                (Some(second_expr), Some(first_expr))
+            } else {
+                (Some(first_expr), None)
+            }
         } else {
-            None
+            (None, None)
         };
 
-        // Parse OFFSET
-        let offset = if self.try_consume_keyword(Keyword::Offset) {
+        // Parse OFFSET (only if not already set via comma syntax)
+        let offset = if offset_from_limit.is_some() {
+            offset_from_limit
+        } else if self.try_consume_keyword(Keyword::Offset) {
             Some(self.parse_expression()?)
         } else {
             None
