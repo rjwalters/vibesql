@@ -184,6 +184,7 @@ executor-cursor-not-scrollable = Cursor '{ $name }' is not scrollable (SCROLL no
 # =============================================================================
 
 executor-join-using-column-not-present = cannot join using column { $column_name } - column not present in both tables
+executor-no-such-column = no such column: { $column_ref }
 
 # =============================================================================
 # Storage and General Errors

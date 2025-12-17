@@ -285,6 +285,16 @@ pub enum ExecutorError {
         value: String,   // The value that was provided
         reason: String,  // Why it's invalid
     },
+    /// JOIN USING column not present in both tables (SQLite-compatible error)
+    /// Format: "cannot join using column X - column not present in both tables"
+    JoinUsingColumnNotPresent {
+        column_name: String,
+    },
+    /// No such column (SQLite-compatible error)
+    /// Format: "no such column: X" or "no such column: table.column"
+    NoSuchColumn {
+        column_ref: String,
+    },
     Other(String),
 }
 
@@ -1109,6 +1119,12 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::InvalidLimitOffset { clause, value, reason } => {
                 write!(f, "{} value {} {}", clause, value, reason)
+            }
+            ExecutorError::JoinUsingColumnNotPresent { column_name } => {
+                write!(f, "{}", vibe_msg!("executor-join-using-column-not-present", column_name = column_name.as_str()))
+            }
+            ExecutorError::NoSuchColumn { column_ref } => {
+                write!(f, "{}", vibe_msg!("executor-no-such-column", column_ref = column_ref.as_str()))
             }
             ExecutorError::Other(msg) => {
                 write!(f, "{}", vibe_msg!("executor-other", message = msg.as_str()))

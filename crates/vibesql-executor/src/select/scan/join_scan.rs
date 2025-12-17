@@ -1353,11 +1353,8 @@ fn generate_using_join_condition(
                     }
                 })
             })
-            .ok_or_else(|| ExecutorError::ColumnNotFound {
+            .ok_or_else(|| ExecutorError::JoinUsingColumnNotPresent {
                 column_name: col_name.clone(),
-                table_name: "USING clause (left side)".to_string(),
-                searched_tables: left_schema.table_names(),
-                available_columns: vec![],
             })?;
 
         // Find column in right schema (case-insensitive)
@@ -1373,11 +1370,8 @@ fn generate_using_join_condition(
                     }
                 })
             })
-            .ok_or_else(|| ExecutorError::ColumnNotFound {
+            .ok_or_else(|| ExecutorError::JoinUsingColumnNotPresent {
                 column_name: col_name.clone(),
-                table_name: "USING clause (right side)".to_string(),
-                searched_tables: right_schema.table_names(),
-                available_columns: vec![],
             })?;
 
         // Create equality condition with qualified column references

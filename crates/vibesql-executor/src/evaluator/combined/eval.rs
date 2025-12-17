@@ -75,20 +75,15 @@ impl CombinedExpressionEvaluator<'_> {
                     let schema_lower = schema_name.to_lowercase();
                     if schema_lower != "main" {
                         // SQLite returns "no such column: schema.table.column" for unknown schemas
-                        let mut available_columns = Vec::new();
-                        for (_start, s) in self.schema.table_schemas.values() {
-                            available_columns.extend(s.columns.iter().map(|c| c.name.clone()));
-                        }
-                        return Err(ExecutorError::ColumnNotFound {
-                            column_name: format!(
+                        // Use display forms to preserve original case
+                        let schema_display = col_id.schema_display().unwrap_or(schema_name);
+                        return Err(ExecutorError::NoSuchColumn {
+                            column_ref: format!(
                                 "{}.{}.{}",
-                                schema_name,
-                                table.unwrap_or(""),
-                                column
+                                schema_display,
+                                table_display.unwrap_or(table.unwrap_or("")),
+                                column_display
                             ),
-                            table_name: table.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string()),
-                            searched_tables: self.schema.table_names(),
-                            available_columns,
                         });
                     }
                 }
@@ -106,6 +101,24 @@ impl CombinedExpressionEvaluator<'_> {
                 // Use display forms to preserve original case in error messages
                 if let Some(table_disp) = table_display {
                     self.schema.validate_qualified_reference(table_disp, column_display)?;
+                }
+
+                // Check if table qualifier is valid (SQLite compatibility - issue #4510)
+                // If a qualified column reference like "t3.a" has a table qualifier that doesn't
+                // exist in the query, return "no such column: t3.a" error
+                if let Some(table_name) = table {
+                    // Create TableIdentifier for lookup (handles case-insensitive comparison)
+                    let table_id = vibesql_catalog::TableIdentifier::from(table_name);
+                    let inner_has_table = self.schema.table_schemas.contains_key(&table_id);
+                    let outer_has_table = self.outer_schema.map_or(false, |outer| {
+                        outer.table_schemas.contains_key(&table_id)
+                    });
+                    if !inner_has_table && !outer_has_table {
+                        // Table qualifier doesn't exist in query - return "no such column" error
+                        return Err(ExecutorError::NoSuchColumn {
+                            column_ref: format!("{}.{}", table_display.unwrap_or(table_name), column_display),
+                        });
+                    }
                 }
 
                 // SQLite compatibility: Handle ROWID pseudo-column
