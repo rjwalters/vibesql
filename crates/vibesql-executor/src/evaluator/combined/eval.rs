@@ -62,6 +62,9 @@ impl CombinedExpressionEvaluator<'_> {
                 let schema = col_id.schema_canonical();
                 let table = col_id.table_canonical();
                 let column = col_id.column_canonical();
+                // Display forms preserve original case for error messages (SQLite compatibility)
+                let table_display = col_id.table_display();
+                let column_display = col_id.column_display();
 
                 // Handle schema qualifier (three-part names like schema.table.column)
                 // SQLite schemas: "main" (default), "temp" (temporary tables), or attached database names
@@ -100,8 +103,9 @@ impl CombinedExpressionEvaluator<'_> {
                 // This must be checked BEFORE resolving the column, as SQLite requires
                 // an error when a table alias appears multiple times in the FROM clause.
                 // Example: SELECT A.f1 FROM test1 AS A, test1 AS A => "ambiguous column name: A.f1"
-                if let Some(table_name) = table {
-                    self.schema.validate_qualified_reference(table_name, column)?;
+                // Use display forms to preserve original case in error messages
+                if let Some(table_disp) = table_display {
+                    self.schema.validate_qualified_reference(table_disp, column_display)?;
                 }
 
                 // SQLite compatibility: Handle ROWID pseudo-column
