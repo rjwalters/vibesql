@@ -147,4 +147,45 @@ impl<'a> Lexer<'a> {
             near_token: Some(format!("`{}", identifier)),
         })
     }
+
+    /// Tokenize a bracket-delimited identifier (SQLite-style).
+    /// Bracket identifiers are case-sensitive and can contain reserved words.
+    /// Supports doubled brackets as escape (e.g., [O]]Reilly] becomes O]Reilly)
+    pub(super) fn tokenize_bracket_identifier(&mut self) -> Result<Token, LexerError> {
+        self.advance(); // Skip opening bracket
+
+        let mut identifier = String::new();
+        while !self.is_eof() {
+            let ch = self.current_char();
+            if ch == ']' {
+                self.advance();
+                // Check for escaped bracket (]])
+                if !self.is_eof() && self.current_char() == ']' {
+                    // Escaped bracket - add a single bracket to the identifier
+                    identifier.push(']');
+                    self.advance();
+                } else {
+                    // End of delimited identifier
+                    // Reject empty delimited identifiers
+                    if identifier.is_empty() {
+                        return Err(LexerError {
+                            message: "Empty delimited identifier is not allowed".to_string(),
+                            position: self.position(),
+                            near_token: Some("[]".to_string()),
+                        });
+                    }
+                    return Ok(Token::DelimitedIdentifier(identifier));
+                }
+            } else {
+                identifier.push(ch);
+                self.advance();
+            }
+        }
+
+        Err(LexerError {
+            message: "Unterminated delimited identifier".to_string(),
+            position: self.position(),
+            near_token: Some(format!("[{}", identifier)),
+        })
+    }
 }
