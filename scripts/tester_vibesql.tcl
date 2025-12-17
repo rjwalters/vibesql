@@ -478,8 +478,13 @@ proc parse_raw_result {output} {
     # This matches SQLite TCL interface behavior for NULL representation
     set data {}
 
-    # Trim trailing newlines to avoid spurious empty elements from split
-    set output [string trimright $output "\n"]
+    # Important: Don't use "string trimright $output \n" because that removes
+    # ALL trailing newlines, including those that represent NULL values in
+    # single-column queries. Instead, trim only one trailing newline if present
+    # (the final line terminator) but preserve empty lines before it.
+    if {[string index $output end] eq "\n"} {
+        set output [string range $output 0 end-1]
+    }
     set lines [split $output "\n"]
 
     foreach line $lines {
