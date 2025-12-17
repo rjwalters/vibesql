@@ -32,6 +32,7 @@ memory-stats = { version = "1.0", optional = true }
 [dev-dependencies]
 regex = "1.10"
 sqllogictest = "0.28"
+tempfile = "3.19"
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt", "macros", "time"] }
 serde = { version = "1.0", features = ["derive"] }
