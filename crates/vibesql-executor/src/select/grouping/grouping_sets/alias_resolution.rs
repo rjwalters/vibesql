@@ -121,12 +121,38 @@ pub fn resolve_base_expressions_aliases(
 /// SELECT -col1 AS col1 FROM t GROUP BY col1 HAVING col1 > 0
 /// ```
 /// Here `col1` in HAVING refers to the GROUP BY column, not `-col1`.
+///
+/// Similarly, column references that match actual table columns should NOT
+/// be resolved to SELECT aliases. Table columns take precedence over aliases.
+/// For example:
+/// ```sql
+/// SELECT AVG(col2) AS col0 FROM tab0 GROUP BY col2 HAVING AVG(col0) IS NOT NULL
+/// ```
+/// Here `col0` in HAVING refers to the table column col0, not the AVG(col2) alias.
+#[allow(dead_code)]
 pub fn resolve_having_aliases(
     having_expr: &Expression,
     select_list: &[vibesql_ast::SelectItem],
     group_by_exprs: &[Expression],
 ) -> Expression {
-    resolve_having_aliases_inner(having_expr, select_list, group_by_exprs)
+    // No schema provided - use legacy behavior (for backward compatibility)
+    resolve_having_aliases_inner(having_expr, select_list, group_by_exprs, None)
+}
+
+/// Resolve aliases in HAVING expression with schema awareness
+///
+/// Like `resolve_having_aliases`, but also accepts a set of actual table column names.
+/// Column references that match table columns are NOT resolved to SELECT aliases,
+/// because table columns take precedence over aliases in SQL.
+///
+/// The `schema_columns` parameter should contain lowercase column names from the table schema.
+pub fn resolve_having_aliases_with_schema(
+    having_expr: &Expression,
+    select_list: &[vibesql_ast::SelectItem],
+    group_by_exprs: &[Expression],
+    schema_columns: &std::collections::HashSet<String>,
+) -> Expression {
+    resolve_having_aliases_inner(having_expr, select_list, group_by_exprs, Some(schema_columns))
 }
 
 /// Check if a column name matches any GROUP BY column expression
@@ -148,6 +174,7 @@ fn resolve_having_aliases_inner(
     having_expr: &Expression,
     select_list: &[vibesql_ast::SelectItem],
     group_by_exprs: &[Expression],
+    schema_columns: Option<&std::collections::HashSet<String>>,
 ) -> Expression {
     match having_expr {
         // Check if this column reference matches a SELECT list alias
@@ -157,6 +184,14 @@ fn resolve_having_aliases_inner(
             // GROUP BY columns take precedence over SELECT aliases in HAVING
             if is_group_by_column(column, group_by_exprs) {
                 return having_expr.clone();
+            }
+
+            // Skip alias resolution if this column exists in the table schema
+            // Actual table columns take precedence over SELECT aliases (#4531)
+            if let Some(schema_cols) = schema_columns {
+                if schema_cols.contains(&column.to_lowercase()) {
+                    return having_expr.clone();
+                }
             }
 
             // Search for matching alias in SELECT list (case-insensitive)
@@ -176,15 +211,15 @@ fn resolve_having_aliases_inner(
 
         // Recursively resolve in binary operations
         Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
-            left: Box::new(resolve_having_aliases_inner(left, select_list, group_by_exprs)),
+            left: Box::new(resolve_having_aliases_inner(left, select_list, group_by_exprs, schema_columns)),
             op: *op,
-            right: Box::new(resolve_having_aliases_inner(right, select_list, group_by_exprs)),
+            right: Box::new(resolve_having_aliases_inner(right, select_list, group_by_exprs, schema_columns)),
         },
 
         // Recursively resolve in unary operations
         Expression::UnaryOp { op, expr } => Expression::UnaryOp {
             op: *op,
-            expr: Box::new(resolve_having_aliases_inner(expr, select_list, group_by_exprs)),
+            expr: Box::new(resolve_having_aliases_inner(expr, select_list, group_by_exprs, schema_columns)),
         },
 
         // Recursively resolve in function arguments
@@ -192,7 +227,7 @@ fn resolve_having_aliases_inner(
             name: name.clone(),
             args: args
                 .iter()
-                .map(|a| resolve_having_aliases_inner(a, select_list, group_by_exprs))
+                .map(|a| resolve_having_aliases_inner(a, select_list, group_by_exprs, schema_columns))
                 .collect(),
             character_unit: character_unit.clone(),
         },
@@ -204,7 +239,7 @@ fn resolve_having_aliases_inner(
                 distinct: *distinct,
                 args: args
                     .iter()
-                    .map(|a| resolve_having_aliases_inner(a, select_list, group_by_exprs))
+                    .map(|a| resolve_having_aliases_inner(a, select_list, group_by_exprs, schema_columns))
                     .collect(),
                 order_by: order_by.clone(),
             }
@@ -214,21 +249,21 @@ fn resolve_having_aliases_inner(
         Expression::Case { operand, when_clauses, else_result } => {
             let resolved_operand = operand
                 .as_ref()
-                .map(|o| Box::new(resolve_having_aliases_inner(o, select_list, group_by_exprs)));
+                .map(|o| Box::new(resolve_having_aliases_inner(o, select_list, group_by_exprs, schema_columns)));
             let resolved_when_clauses = when_clauses
                 .iter()
                 .map(|wc| vibesql_ast::CaseWhen {
                     conditions: wc
                         .conditions
                         .iter()
-                        .map(|c| resolve_having_aliases_inner(c, select_list, group_by_exprs))
+                        .map(|c| resolve_having_aliases_inner(c, select_list, group_by_exprs, schema_columns))
                         .collect(),
-                    result: resolve_having_aliases_inner(&wc.result, select_list, group_by_exprs),
+                    result: resolve_having_aliases_inner(&wc.result, select_list, group_by_exprs, schema_columns),
                 })
                 .collect();
             let resolved_else = else_result
                 .as_ref()
-                .map(|e| Box::new(resolve_having_aliases_inner(e, select_list, group_by_exprs)));
+                .map(|e| Box::new(resolve_having_aliases_inner(e, select_list, group_by_exprs, schema_columns)));
             Expression::Case {
                 operand: resolved_operand,
                 when_clauses: resolved_when_clauses,
@@ -240,27 +275,27 @@ fn resolve_having_aliases_inner(
         Expression::Conjunction(terms) => Expression::Conjunction(
             terms
                 .iter()
-                .map(|t| resolve_having_aliases_inner(t, select_list, group_by_exprs))
+                .map(|t| resolve_having_aliases_inner(t, select_list, group_by_exprs, schema_columns))
                 .collect(),
         ),
         Expression::Disjunction(terms) => Expression::Disjunction(
             terms
                 .iter()
-                .map(|t| resolve_having_aliases_inner(t, select_list, group_by_exprs))
+                .map(|t| resolve_having_aliases_inner(t, select_list, group_by_exprs, schema_columns))
                 .collect(),
         ),
 
         // Recursively resolve in comparison expressions
         Expression::Between { expr, low, high, negated, symmetric } => Expression::Between {
-            expr: Box::new(resolve_having_aliases_inner(expr, select_list, group_by_exprs)),
-            low: Box::new(resolve_having_aliases_inner(low, select_list, group_by_exprs)),
-            high: Box::new(resolve_having_aliases_inner(high, select_list, group_by_exprs)),
+            expr: Box::new(resolve_having_aliases_inner(expr, select_list, group_by_exprs, schema_columns)),
+            low: Box::new(resolve_having_aliases_inner(low, select_list, group_by_exprs, schema_columns)),
+            high: Box::new(resolve_having_aliases_inner(high, select_list, group_by_exprs, schema_columns)),
             negated: *negated,
             symmetric: *symmetric,
         },
 
         Expression::IsNull { expr, negated } => Expression::IsNull {
-            expr: Box::new(resolve_having_aliases_inner(expr, select_list, group_by_exprs)),
+            expr: Box::new(resolve_having_aliases_inner(expr, select_list, group_by_exprs, schema_columns)),
             negated: *negated,
         },
 

@@ -370,8 +370,9 @@ impl Parser {
     fn parse_index_column_list(&mut self) -> Result<Vec<vibesql_ast::IndexColumn>, ParseError> {
         let mut columns = Vec::new();
         loop {
-            // Parse column name
-            let column_name = self.parse_identifier()?;
+            // Parse column name (use parse_alias_name to allow SQLite-style single-quoted identifiers)
+            // SQLite allows: CREATE INDEX i1xy ON t1(`x`,'y' ASC); -- 'y' is a column name
+            let column_name = self.parse_alias_name()?;
 
             // Check for optional prefix length: column_name(length)
             let prefix_length = if self.peek() == &Token::LParen {

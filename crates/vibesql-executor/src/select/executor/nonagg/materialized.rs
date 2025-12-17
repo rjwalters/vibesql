@@ -323,7 +323,11 @@ impl SelectExecutor<'_> {
             }
         } else if sorted_by.is_none() && !result_rows.is_empty() {
             // No explicit ORDER BY - apply implicit ordering for deterministic results
-            self.apply_implicit_sorting(result_rows);
+            // Skip for derived tables (subqueries) whose order might be intentional (e.g., UNION ALL)
+            let from_is_subquery = matches!(stmt.from.as_ref(), Some(vibesql_ast::FromClause::Subquery { .. }));
+            if !from_is_subquery {
+                self.apply_implicit_sorting(result_rows);
+            }
         }
 
         Ok(())

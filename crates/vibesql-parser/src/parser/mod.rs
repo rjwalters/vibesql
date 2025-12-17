@@ -176,8 +176,13 @@ impl Parser {
                 } else if self.peek_next_keyword(Keyword::Temp)
                     || self.peek_next_keyword(Keyword::Temporary)
                 {
-                    // CREATE TEMP VIEW or CREATE TEMPORARY VIEW
-                    Ok(vibesql_ast::Statement::CreateView(self.parse_create_view_statement()?))
+                    // CREATE TEMP TABLE or CREATE TEMP VIEW / CREATE TEMPORARY TABLE or VIEW
+                    // Check offset 2 to determine if it's TABLE or VIEW
+                    if matches!(self.peek_at_offset(2), Token::Keyword { keyword: Keyword::Table, .. }) {
+                        Ok(vibesql_ast::Statement::CreateTable(self.parse_create_table_statement()?))
+                    } else {
+                        Ok(vibesql_ast::Statement::CreateView(self.parse_create_view_statement()?))
+                    }
                 } else if self.peek_next_keyword(Keyword::Trigger) {
                     Ok(vibesql_ast::Statement::CreateTrigger(
                         self.parse_create_trigger_statement()?,

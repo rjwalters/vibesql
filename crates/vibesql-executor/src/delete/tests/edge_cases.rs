@@ -81,14 +81,12 @@ fn test_delete_column_not_found() {
         })),
     };
 
-    // Error should be caught during evaluation, rows kept (safe default)
+    // Column validation happens upfront - should return NoSuchColumn error
     let result = DeleteExecutor::execute(&stmt, &mut db);
+    assert!(result.is_err());
+    assert!(matches!(result.unwrap_err(), ExecutorError::NoSuchColumn { .. }));
 
-    // Should succeed with 0 deletions (errors kept rows safe)
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), 0);
-
-    // All rows should still exist
+    // All rows should still exist (error prevented any deletions)
     let table = db.get_table("users").unwrap();
     assert_eq!(table.row_count(), 3);
 }

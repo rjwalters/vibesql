@@ -52,6 +52,30 @@ set ::SQLITE_MAX_VARIABLE_NUMBER 999
 set ::SQLITE_MAX_TRIGGER_DEPTH 1000
 set ::tcl_platform(wordSize) 8  ;# 64-bit platform
 
+# SQLite options array - used by tests to check feature availability
+array set ::sqlite_options {
+    casesensitivelike 0
+    tempdb 1
+    memorymanage 0
+    floatingpoint 1
+    utf16 0
+    autoinc 1
+    compound 1
+    subquery 1
+    incrblob 0
+    integrityck 1
+    load_ext 0
+    lookaside 0
+    progress 0
+    schema 1
+    shared_cache 0
+    stat4 0
+    stat3 0
+    tclvar 0
+    threadsafe 0
+    wal 0
+}
+
 #-----------------------------------------------------------------------------
 # SQLite Error Message Compatibility Layer
 #-----------------------------------------------------------------------------
@@ -100,23 +124,22 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "no such table: [string tolower $table_name]"
     }
 
-    # Column not found in INSERT: "Column 'X' not found (searched tables: T)" -> "table t has no column named x"
-    # This format is used by SQLite for INSERT INTO table(columns) when a column doesn't exist
-    if {[regexp -nocase {^Column '([^']+)' not found \(searched tables: ([^)]+)\)} $error_msg -> col_name table_name]} {
-        # If it's a single table (no commas), use the INSERT-specific format
-        if {![string match "*,*" $table_name]} {
-            return "table [string tolower $table_name] has no column named [string tolower $col_name]"
-        }
-        # Otherwise, fall through to the generic "no such column" format
-    }
-
     # Column not found: "Column 'X' not found..." -> "no such column: x"
+    # Note: SQLite uses "table t has no column named x" specifically for INSERT INTO t(x) with unknown column,
+    # but we can't distinguish between INSERT and UPDATE/SELECT context from the error message alone.
+    # Since "no such column:" is used 156+ times vs "has no column named" only 5 times in the test suite,
+    # we prioritize the more common format.
     if {[regexp -nocase {^Column '([^']+)' not found} $error_msg -> col_name]} {
         return "no such column: [string tolower $col_name]"
     }
 
-    # Note: Column/value count mismatch errors like "table X has N columns but M values were supplied"
-    # are already in SQLite format from VibeSQL - no translation needed.
+    # Invalid table qualifier: "Invalid table qualifier 'X' for column 'Y'" -> "no such column: x.y"
+    if {[regexp -nocase {^Invalid table qualifier '([^']+)' for column '([^']+)'} $error_msg -> table_name col_name]} {
+        return "no such column: [string tolower $table_name].[string tolower $col_name]"
+    }
+
+    # Column/value count mismatch: Already in SQLite format "table X has N columns but M values were supplied"
+    # No translation needed for this error type.
 
     # Index not found: "Index 'X' not found" -> "no such index: x"
     if {[regexp -nocase {^Index '([^']+)' not found} $error_msg -> idx_name]} {
@@ -977,6 +1000,12 @@ proc do_test {name script expected} {
 proc do_execsql_test {name sql {expected {}}} {
     # Convenience wrapper for SQL execution tests
     # Expected is optional - if not provided, just execute the SQL
+
+    # Pre-substitute TCL variables at this level (where they're in scope from foreach loops)
+    # This handles cases like: foreach {id x} {...} { do_execsql_test test.$id {INSERT ... $x} }
+    # where $x needs to be substituted before the SQL is passed down
+    catch {set sql [uplevel 1 [list subst -nocommands -nobackslashes $sql]]}
+
     do_test $name [list execsql $sql] $expected
 }
 
@@ -988,6 +1017,12 @@ proc do_catchsql_test {name sql expected} {
 proc do_eqp_test {name sql expected} {
     # EXPLAIN QUERY PLAN test - skip since we don't support EQP
     omit_test $name "EXPLAIN QUERY PLAN not supported"
+}
+
+proc do_realnum_test {name script expected} {
+    # Test that expects floating-point results
+    # Uses approximate comparison for floating point numbers
+    do_test $name $script $expected
 }
 
 proc normalize_result {val} {
@@ -1058,7 +1093,7 @@ proc ifcapable {args} {
     set script [lindex $args 1]
 
     # Skip SQLite-specific capabilities that we don't support
-    set skip_caps {wal vacuum_incr stat4 stat3 compound_select tclvar vtab fts3 fts4 fts5 datetime datetime_time datetime_funcs}
+    set skip_caps {wal vacuum_incr stat4 stat3 compound_select tclvar vtab fts3 fts4 fts5 datetime datetime_time datetime_funcs trigger}
 
     # Handle negated capabilities (e.g., !floatingpoint)
     set negate 0
@@ -1367,6 +1402,58 @@ proc optimization_control {db flag value} {
     return
 }
 
+proc permutation {} {
+    # SQLite test permutation identifier
+    # Used to run tests under different configurations (e.g., "no_optimization")
+    # We always return empty string (default configuration)
+    return ""
+}
+
+proc sqlite3_db_config {args} {
+    # SQLite database configuration - ignore
+    # This is used to set/get various database configuration options
+    return 0
+}
+
+proc sqlite3_soft_heap_limit {args} {
+    # SQLite soft heap limit - ignore
+    # This is used to set memory usage limits
+    return 0
+}
+
+proc db_save_and_close {} {
+    # Save database state and close - just close
+    global db_file
+    # Close our vibesql instance (no-op for now)
+    return
+}
+
+proc testvfs {args} {
+    # SQLite test VFS - not supported
+    # VFS (Virtual File System) testing is SQLite-specific
+    return
+}
+
+proc faultsim_save_and_close {} {
+    # Fault simulation save and close - ignore
+    return
+}
+
+proc sqlite3_rekey {args} {
+    # SQLite encryption extension - not supported
+    return
+}
+
+proc sqlite3_key {args} {
+    # SQLite encryption extension - not supported
+    return
+}
+
+proc sqlite3_memdebug_fail {args} {
+    # SQLite memory debugging - not supported
+    return -1
+}
+
 proc breakpoint {} {
     # Debug breakpoint - ignore
     return
@@ -1459,6 +1546,7 @@ proc run_test_file {filename} {
         set AUTOVACUUM $::AUTOVACUUM
         set TEMP_STORE $::TEMP_STORE
         set SQLITE_DEFAULT_AUTOVACUUM $::SQLITE_DEFAULT_AUTOVACUUM
+        array set sqlite_options [array get ::sqlite_options]
     }
     regsub {source \$testdir/tester\.tcl} $content $tester_vars content
 

@@ -53,7 +53,7 @@ fn test_issue_990_multiple_unary_plus() {
                     )),
                     op: vibesql_ast::BinaryOperator::Multiply,
                     right: Box::new(vibesql_ast::Expression::AggregateFunction {
-                        name: "COUNT".to_string(),
+                        name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                         distinct: false,
                         args: vec![vibesql_ast::Expression::Wildcard],
                         order_by: None,
@@ -132,7 +132,7 @@ fn test_issue_990_simpler_case() {
                     )),
                     op: vibesql_ast::BinaryOperator::Multiply,
                     right: Box::new(vibesql_ast::Expression::AggregateFunction {
-                        name: "COUNT".to_string(),
+                        name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                         distinct: false,
                         args: vec![vibesql_ast::Expression::Wildcard],
                         order_by: None,

@@ -167,9 +167,12 @@ impl SelectExecutor<'_> {
         // Stage 5.5: Apply implicit ordering for deterministic results
         // Queries without explicit ORDER BY get sorted by all columns in schema order
         // This ensures SQLLogicTest compatibility and deterministic behavior
-        // Skip sorting if data is already sorted from index scan
-        let needs_implicit_sort =
-            stmt.order_by.is_none() && sorted_by.is_none() && !filtered_rows.is_empty();
+        // Skip sorting if:
+        // - Data is already sorted from index scan
+        // - FROM clause is a derived table (subquery) whose order might be intentional
+        //   (e.g., UNION ALL preserves insertion order - SQL standard behavior)
+        let from_is_subquery = matches!(stmt.from.as_ref(), Some(vibesql_ast::FromClause::Subquery { .. }));
+        let needs_implicit_sort = stmt.order_by.is_none() && sorted_by.is_none() && !filtered_rows.is_empty() && !from_is_subquery;
 
         if needs_implicit_sort {
             use crate::select::grouping::compare_sql_values;

@@ -6,7 +6,7 @@ mod detection;
 mod evaluation;
 mod window;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::builder::SelectExecutor;
 use crate::{
@@ -23,7 +23,7 @@ use crate::{
         grouping::{
             expand_group_by_clause, get_base_expressions, group_rows,
             resolve_base_expressions_aliases, resolve_grouping_set_aliases,
-            resolve_having_aliases, GroupingContext,
+            resolve_having_aliases_with_schema, GroupingContext,
         },
         helpers::{apply_distinct, apply_limit_offset},
     },
@@ -45,9 +45,11 @@ impl SelectExecutor<'_> {
             // If table doesn't exist, fall through to normal path which will produce proper error
             if let Some(table) = self.database.get_table(&table_name) {
                 let count = table.row_count();
-                return Ok(vec![vibesql_storage::Row::new(vec![
-                    vibesql_types::SqlValue::Integer(count as i64),
-                ])]);
+                let result = vec![vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(count as i64)])];
+                // Apply LIMIT/OFFSET even in fast path
+                let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
+                let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
+                return Ok(apply_limit_offset(result, limit, offset));
             }
         }
 
@@ -265,6 +267,14 @@ impl SelectExecutor<'_> {
             self.set_pivot_group(pivot_group);
         }
 
+        // Build set of schema column names for HAVING alias resolution (#4531)
+        // Table columns take precedence over SELECT aliases in HAVING clauses
+        let schema_columns: HashSet<String> = schema
+            .table_schemas
+            .values()
+            .flat_map(|(_, table_schema)| table_schema.columns.iter().map(|c| c.name.to_lowercase()))
+            .collect();
+
         // Process GROUP BY clause (handles ROLLUP, CUBE, GROUPING SETS)
         let mut result_rows = Vec::new();
 
@@ -347,10 +357,12 @@ impl SelectExecutor<'_> {
                         // Resolve SELECT list aliases in HAVING (e.g., HAVING y >= 4 where y is count(*))
                         // Pass ORIGINAL GROUP BY expressions so aliases that shadow GROUP BY columns
                         // aren't resolved (HAVING should use GROUP BY columns, not SELECT aliases)
-                        let resolved_having = resolve_having_aliases(
+                        // Also pass schema_columns so table columns take precedence over aliases (#4531)
+                        let resolved_having = resolve_having_aliases_with_schema(
                             having_expr,
                             &expanded_select_list,
                             &original_group_by_exprs,
+                            &schema_columns,
                         );
                         let having_result = self.evaluate_with_aggregates_and_grouping(
                             &resolved_having,
@@ -464,8 +476,9 @@ impl SelectExecutor<'_> {
                 let include_group = if let Some(having_expr) = &stmt.having {
                     // Resolve SELECT list aliases in HAVING (e.g., HAVING y >= 4 where y is count(*))
                     // No GROUP BY, so no GROUP BY expressions to exclude from alias resolution
+                    // Still pass schema_columns so table columns take precedence over aliases (#4531)
                     let resolved_having =
-                        resolve_having_aliases(having_expr, &expanded_select_list, &[]);
+                        resolve_having_aliases_with_schema(having_expr, &expanded_select_list, &[], &schema_columns);
                     let having_result = self.evaluate_with_aggregates_and_grouping(
                         &resolved_having,
                         &group_rows,

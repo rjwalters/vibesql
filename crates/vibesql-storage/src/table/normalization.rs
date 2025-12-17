@@ -122,12 +122,41 @@ impl<'a> RowNormalizer<'a> {
                 }
             }
             DataType::Real => {
-                if !matches!(value, SqlValue::Real(_)) {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "REAL".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
+                // REAL affinity: Accept and convert any numeric type to Real (f32)
+                // This implements SQLite's flexible type affinity where REAL columns
+                // accept INTEGER, REAL, DOUBLE, NUMERIC, etc. and convert to floating point
+                match value {
+                    SqlValue::Real(_) => {
+                        // Already correct type
+                    }
+                    SqlValue::Integer(i) => {
+                        *value = SqlValue::Real(*i as f32);
+                    }
+                    SqlValue::Bigint(i) => {
+                        *value = SqlValue::Real(*i as f32);
+                    }
+                    SqlValue::Smallint(i) => {
+                        *value = SqlValue::Real(*i as f32);
+                    }
+                    SqlValue::Double(d) => {
+                        *value = SqlValue::Real(*d as f32);
+                    }
+                    SqlValue::Float(f) => {
+                        *value = SqlValue::Real(*f);
+                    }
+                    SqlValue::Numeric(n) => {
+                        *value = SqlValue::Real(*n as f32);
+                    }
+                    SqlValue::Unsigned(u) => {
+                        *value = SqlValue::Real(*u as f32);
+                    }
+                    _ => {
+                        return Err(StorageError::TypeMismatch {
+                            column: column_name.to_string(),
+                            expected: "REAL".to_string(),
+                            actual: value.type_name().to_string(),
+                        });
+                    }
                 }
             }
             DataType::DoublePrecision => {
