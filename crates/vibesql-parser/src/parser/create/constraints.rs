@@ -251,6 +251,31 @@ impl Parser {
                         kind: vibesql_ast::ColumnConstraintKind::Key,
                     });
                 }
+                Token::Keyword { keyword: Keyword::Collate, .. } => {
+                    self.advance(); // consume COLLATE
+                    let collation_name = match self.peek() {
+                        Token::Identifier(n) | Token::DelimitedIdentifier(n) => {
+                            let coll = n.clone();
+                            self.advance();
+                            coll
+                        }
+                        Token::Keyword { original, .. } => {
+                            // Allow keyword-like collation names (e.g., NOCASE, BINARY)
+                            let coll = original.clone();
+                            self.advance();
+                            coll
+                        }
+                        _ => {
+                            return Err(ParseError {
+                                message: "Expected collation name after COLLATE".to_string(),
+                            })
+                        }
+                    };
+                    constraints.push(vibesql_ast::ColumnConstraint {
+                        name,
+                        kind: vibesql_ast::ColumnConstraintKind::Collate(collation_name),
+                    });
+                }
                 _ => {
                     // If we parsed a CONSTRAINT name but no constraint type, error
                     if name.is_some() {

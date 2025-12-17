@@ -126,6 +126,7 @@ pub enum ColumnConstraintKind<'arena> {
     },
     AutoIncrement,
     Key,
+    Collate(Symbol),
 }
 
 /// Table-level constraint

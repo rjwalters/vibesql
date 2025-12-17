@@ -604,7 +604,9 @@ impl SelectExecutor<'_> {
         // Handle set operations (UNION, INTERSECT, EXCEPT)
         // Process operations left-to-right to ensure correct associativity
         if let Some(set_op) = &stmt.set_operation {
-            results = self.execute_set_operations(results, set_op, cte_results)?;
+            // Extract collations from the leftmost SELECT list for set operation comparisons
+            let collations = Self::extract_collations_from_select_list(&stmt.select_list);
+            results = self.execute_set_operations(results, set_op, cte_results, &collations)?;
 
             // Apply ORDER BY after set operations (if specified)
             // The UNION's default sort is overridden by explicit ORDER BY
@@ -1017,17 +1019,43 @@ impl SelectExecutor<'_> {
         }
     }
 
+    /// Extract collation information from a SELECT list.
+    ///
+    /// Returns a Vec of Option<String> where each element corresponds to a SELECT item.
+    /// If the SELECT item has a COLLATE clause (e.g., `a COLLATE NOCASE`), the collation
+    /// name is returned; otherwise None.
+    fn extract_collations_from_select_list(
+        select_list: &[vibesql_ast::SelectItem],
+    ) -> Vec<Option<String>> {
+        select_list
+            .iter()
+            .map(|item| {
+                if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                    // Check if the expression is a COLLATE expression
+                    if let vibesql_ast::Expression::Collate { collation, .. } = expr {
+                        return Some(collation.clone());
+                    }
+                }
+                None
+            })
+            .collect()
+    }
+
     /// Execute a chain of set operations left-to-right
     ///
     /// SQL set operations are left-associative, so:
     /// A EXCEPT B EXCEPT C should evaluate as (A EXCEPT B) EXCEPT C
     ///
     /// The parser creates a right-recursive AST structure, but we need to execute left-to-right.
+    ///
+    /// The `collations` parameter specifies the collation for each column from the leftmost
+    /// SELECT statement in the set operation chain. This is used for collation-aware comparisons.
     fn execute_set_operations(
         &self,
         mut left_results: Vec<vibesql_storage::Row>,
         set_op: &vibesql_ast::SetOperation,
         cte_results: &HashMap<String, CteResult>,
+        collations: &[Option<String>],
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         // Execute the immediate right query WITHOUT its set operations
         // This prevents right-recursive evaluation
@@ -1063,8 +1091,8 @@ impl SelectExecutor<'_> {
         let right_size = estimate_result_size(&right_results);
         self.track_memory_allocation(right_size)?;
 
-        // Apply the current operation
-        left_results = apply_set_operation(left_results, right_results, set_op)?;
+        // Apply the current operation with collation-aware comparison
+        left_results = apply_set_operation(left_results, right_results, set_op, collations)?;
 
         // Track memory for combined result after set operation
         let combined_size = estimate_result_size(&left_results);
@@ -1073,7 +1101,7 @@ impl SelectExecutor<'_> {
         // If the right side has more set operations, continue processing them
         // This creates the left-to-right evaluation: ((A op B) op C) op D
         if let Some(next_set_op) = &right_stmt.set_operation {
-            left_results = self.execute_set_operations(left_results, next_set_op, cte_results)?;
+            left_results = self.execute_set_operations(left_results, next_set_op, cte_results, collations)?;
         }
 
         Ok(left_results)

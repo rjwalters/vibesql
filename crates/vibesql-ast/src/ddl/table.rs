@@ -183,6 +183,9 @@ pub enum ColumnConstraintKind {
     /// KEY (MySQL-specific)
     /// Creates an index on the column
     Key,
+    /// COLLATE clause (SQLite/MySQL)
+    /// Specifies the collation for the column
+    Collate(String),
 }
 
 /// Table-level constraint

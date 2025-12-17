@@ -109,6 +109,11 @@ impl ConstraintValidator {
                         // For MVP, we parse it but don't enforce indexing behavior
                         // No constraint validation needed here
                     }
+                    ColumnConstraintKind::Collate(_) => {
+                        // COLLATE specifies the collation for string comparisons
+                        // For MVP, we parse it but don't enforce collation behavior
+                        // No constraint validation needed here
+                    }
                 }
             }
         }
