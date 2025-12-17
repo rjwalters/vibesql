@@ -180,7 +180,7 @@ help:
 	@echo "  make fmt-check          - Check formatting without making changes"
 	@echo "  make clean              - Clean build artifacts"
 	@echo "  make website            - Regenerate web dashboard data from benchmark database"
-	@echo "  make all                - Build and test (foreground, blocking)"
+	@echo "  make all                - Build, test, and run TCL tests (foreground)"
 	@echo "  make all-bg             - Run 'make all' in background"
 	@echo "  make logs               - Tail the background make output"
 	@echo "  make status             - Check if background make is running and show recent output"

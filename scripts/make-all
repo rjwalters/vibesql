@@ -5,13 +5,14 @@
 # Runs the full build + test suite with timing breakdown:
 # 1. Build all (Rust crates + Python bindings)
 # 2. Test suite (unit tests + SQLLogicTest + analysis)
+# 3. TCL tests (Priority 1 - core SQL conformance)
 #
 # Usage:
 #   ./scripts/make-all
-#   make all-fg
+#   make all
 #
 # For background execution, use:
-#   make all
+#   make all-bg
 #
 
 set -euo pipefail
@@ -31,8 +32,10 @@ NC='\033[0m'
 # Timing data (bash 3 compatible - use separate variables)
 PHASE1_TIME=0
 PHASE2_TIME=0
+PHASE3_TIME=0
 PHASE1_STATUS=""
 PHASE2_STATUS=""
+PHASE3_STATUS=""
 TOTAL_START=$(date +%s)
 
 # Format seconds into human-readable duration
@@ -77,15 +80,22 @@ print_summary() {
         printf "%-25s %10s %10s\n" "Test Suite" "$(format_duration $PHASE2_TIME)" "$icon"
     fi
 
+    if [ -n "$PHASE3_STATUS" ]; then
+        local icon="✓"
+        [ "$PHASE3_STATUS" != "success" ] && icon="✗"
+        printf "%-25s %10s %10s\n" "TCL Tests (P1)" "$(format_duration $PHASE3_TIME)" "$icon"
+    fi
+
     echo "═════════════════════════════════════════════════════"
     printf "${BOLD}%-25s %10s${NC}\n" "TOTAL:" "$(format_duration $total_duration)"
     echo ""
 
     # Show what to do next
     echo -e "${BOLD}Next steps:${NC}"
-    if [ "$PHASE1_STATUS" = "success" ] && [ "$PHASE2_STATUS" = "success" ]; then
+    if [ "$PHASE1_STATUS" = "success" ] && [ "$PHASE2_STATUS" = "success" ] && [ "$PHASE3_STATUS" = "success" ]; then
         echo "  Run 'make benchmark' for performance benchmarks"
         echo "  Run 'make analyze' to see test results analysis"
+        echo "  Run 'make test-tcl-all' for full TCL suite (1174 files)"
     else
         echo "  Check errors above and fix failing tests/builds"
     fi
@@ -103,6 +113,7 @@ main() {
     echo "Running full build and test suite:"
     echo "  1. Build all (Rust crates + Python bindings)"
     echo "  2. Test suite (unit + integration + SQLLogicTest)"
+    echo "  3. TCL tests (Priority 1 - core SQL conformance)"
     echo ""
     echo "Started at: $(date)"
 
@@ -143,6 +154,25 @@ main() {
             echo -e "${RED}✗ [Test Suite] failed after $(format_duration $(($(date +%s) - phase_start)))${NC}"
         fi
         PHASE2_TIME=$(($(date +%s) - phase_start))
+    fi
+
+    # Phase 3: TCL Tests (only if build passed)
+    if [ $failed -eq 0 ]; then
+        echo ""
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${BOLD}[TCL Tests]${NC} Starting Priority 1 (core SQL)..."
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        phase_start=$(date +%s)
+
+        if make test-tcl; then
+            PHASE3_STATUS="success"
+            echo -e "${GREEN}✓ [TCL Tests] completed in $(format_duration $(($(date +%s) - phase_start)))${NC}"
+        else
+            PHASE3_STATUS="failed"
+            failed=1
+            echo -e "${RED}✗ [TCL Tests] failed after $(format_duration $(($(date +%s) - phase_start)))${NC}"
+        fi
+        PHASE3_TIME=$(($(date +%s) - phase_start))
     fi
 
     # Print summary
