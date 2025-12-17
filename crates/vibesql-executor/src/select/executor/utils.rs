@@ -149,11 +149,14 @@ impl SelectExecutor<'_> {
     /// LIMIT and OFFSET accept arbitrary expressions (e.g., `5+3`, `(SELECT 10)`)
     /// that must evaluate to a non-negative integer at runtime.
     ///
+    /// SQLite compatibility:
+    /// - Any negative LIMIT means unlimited (returns usize::MAX)
+    /// - Any negative OFFSET is treated as 0
+    ///
     /// # Errors
     ///
     /// - Expression evaluation fails
     /// - Result is not an integer
-    /// - Result is negative
     pub(super) fn eval_limit_offset_expr(
         &self,
         expr: &vibesql_ast::Expression,
@@ -170,18 +173,17 @@ impl SelectExecutor<'_> {
         let value = evaluator.eval(expr, &empty_row)?;
 
         // Convert to integer
-        // SQLite compatibility: LIMIT -1 means unlimited
+        // SQLite compatibility: negative values have special meanings
         match value {
             vibesql_types::SqlValue::Integer(n) => {
-                if n < -1 {
-                    Err(crate::errors::ExecutorError::InvalidLimitOffset {
-                        clause: clause_name.to_string(),
-                        value: n.to_string(),
-                        reason: "must be non-negative or -1".to_string(),
-                    })
-                } else if n == -1 {
-                    // -1 means unlimited - return MAX which caller interprets as no limit
-                    Ok(usize::MAX)
+                if n < 0 {
+                    if clause_name == "OFFSET" {
+                        // Negative offset is treated as 0
+                        Ok(0)
+                    } else {
+                        // Negative limit means unlimited - return MAX
+                        Ok(usize::MAX)
+                    }
                 } else {
                     Ok(n as usize)
                 }

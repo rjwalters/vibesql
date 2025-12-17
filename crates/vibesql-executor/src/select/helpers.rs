@@ -65,15 +65,35 @@ pub(super) fn apply_distinct(rows: Vec<vibesql_storage::Row>) -> Vec<vibesql_sto
     result
 }
 
-/// Evaluate a LIMIT or OFFSET expression to a usize value
+/// Evaluate a LIMIT expression to a usize value
 ///
-/// Evaluates arbitrary expressions (e.g., `5+3`, `(SELECT 10)`) at runtime
-/// and converts the result to a non-negative integer.
-pub(super) fn evaluate_limit_offset_expr(
+/// SQLite compatibility: any negative LIMIT means unlimited (returns usize::MAX)
+/// Callers should treat usize::MAX as "no limit".
+pub(crate) fn evaluate_limit_offset_expr(
     expr: &vibesql_ast::Expression,
     database: &vibesql_storage::Database,
     clause_name: &str,
 ) -> Result<usize, crate::ExecutorError> {
+    let raw = evaluate_limit_offset_expr_raw(expr, database, clause_name)?;
+    if clause_name == "OFFSET" {
+        // Negative offset is treated as 0
+        Ok(if raw < 0 { 0 } else { raw as usize })
+    } else {
+        // Negative limit means unlimited
+        Ok(if raw < 0 { usize::MAX } else { raw as usize })
+    }
+}
+
+/// Evaluate a LIMIT or OFFSET expression to an i64 value
+///
+/// Evaluates arbitrary expressions (e.g., `5+3`, `(SELECT 10)`) at runtime
+/// and returns the integer result. Negative values are allowed for SQLite
+/// compatibility - the caller will interpret them appropriately.
+fn evaluate_limit_offset_expr_raw(
+    expr: &vibesql_ast::Expression,
+    database: &vibesql_storage::Database,
+    clause_name: &str,
+) -> Result<i64, crate::ExecutorError> {
     use crate::evaluator::ExpressionEvaluator;
 
     // Create empty schema and row for expression evaluation
@@ -86,22 +106,7 @@ pub(super) fn evaluate_limit_offset_expr(
 
     // Convert to integer
     match value {
-        vibesql_types::SqlValue::Integer(n) => {
-            if n < -1 {
-                // Only truly negative values (< -1) are errors
-                // -1 is handled specially by evaluate_limit() to mean unlimited
-                Err(crate::ExecutorError::InvalidLimitOffset {
-                    clause: clause_name.to_string(),
-                    value: n.to_string(),
-                    reason: "must be non-negative or -1".to_string(),
-                })
-            } else if n < 0 {
-                // n == -1: return as-is, caller will interpret as unlimited
-                Ok(n as usize) // Will wrap to usize::MAX, handled by caller
-            } else {
-                Ok(n as usize)
-            }
-        }
+        vibesql_types::SqlValue::Integer(n) => Ok(n),
         vibesql_types::SqlValue::Null => Err(crate::ExecutorError::InvalidLimitOffset {
             clause: clause_name.to_string(),
             value: "NULL".to_string(),
@@ -116,23 +121,37 @@ pub(super) fn evaluate_limit_offset_expr(
 }
 
 /// Evaluate optional LIMIT expression to Option<usize>
-/// SQLite compatibility: LIMIT -1 means unlimited (returns None)
+/// SQLite compatibility: any negative LIMIT means unlimited (returns None)
 pub(super) fn evaluate_limit(
     limit: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
 ) -> Result<Option<usize>, crate::ExecutorError> {
-    match limit.as_ref().map(|e| evaluate_limit_offset_expr(e, database, "LIMIT")).transpose()? {
-        Some(n) if n == usize::MAX => Ok(None), // -1 wrapped to MAX means unlimited
-        other => Ok(other),
+    match limit
+        .as_ref()
+        .map(|e| evaluate_limit_offset_expr_raw(e, database, "LIMIT"))
+        .transpose()?
+    {
+        Some(n) if n < 0 => Ok(None), // Any negative value means unlimited
+        Some(n) => Ok(Some(n as usize)),
+        None => Ok(None),
     }
 }
 
 /// Evaluate optional OFFSET expression to Option<usize>
+/// SQLite compatibility: any negative OFFSET is treated as 0 (no offset)
 pub(super) fn evaluate_offset(
     offset: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
 ) -> Result<Option<usize>, crate::ExecutorError> {
-    offset.as_ref().map(|e| evaluate_limit_offset_expr(e, database, "OFFSET")).transpose()
+    match offset
+        .as_ref()
+        .map(|e| evaluate_limit_offset_expr_raw(e, database, "OFFSET"))
+        .transpose()?
+    {
+        Some(n) if n < 0 => Ok(Some(0)), // Negative offset treated as 0
+        Some(n) => Ok(Some(n as usize)),
+        None => Ok(None),
+    }
 }
 
 /// Apply LIMIT and OFFSET to a result set
