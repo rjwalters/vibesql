@@ -908,7 +908,7 @@ impl<'arena> ArenaParser<'arena> {
         // while MIN/MAX with a single argument are aggregate functions
         let might_be_aggregate = matches!(
             name_upper.as_str(),
-            "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "GROUP_CONCAT" | "TOTAL"
+            "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "GROUP_CONCAT" | "STRING_AGG" | "TOTAL"
         );
 
         if might_be_aggregate {
@@ -933,7 +933,7 @@ impl<'arena> ArenaParser<'arena> {
             // GROUP_CONCAT accepts 1 or 2 arguments (expr, separator)
             let is_aggregate = match name_upper.as_str() {
                 "COUNT" | "SUM" | "AVG" | "TOTAL" => true,
-                "GROUP_CONCAT" => args.len() <= 2, // 1 or 2 args
+                "GROUP_CONCAT" | "STRING_AGG" => args.len() <= 2, // 1 or 2 args
                 "MIN" | "MAX" => args.len() <= 1 && !distinct,
                 _ => false,
             };

@@ -120,7 +120,7 @@ impl Parser {
         let function_name_upper = first.to_uppercase();
         let might_be_aggregate = matches!(
             function_name_upper.as_str(),
-            "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "GROUP_CONCAT" | "TOTAL"
+            "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "GROUP_CONCAT" | "STRING_AGG" | "TOTAL"
         );
 
         // Parse optional DISTINCT or ALL for potential aggregate functions
@@ -234,7 +234,7 @@ impl Parser {
         // GROUP_CONCAT accepts 1 or 2 arguments (expr, separator)
         let is_aggregate = match function_name_upper.as_str() {
             "COUNT" | "SUM" | "AVG" | "TOTAL" => true,
-            "GROUP_CONCAT" => args.len() <= 2, // 1 or 2 args
+            "GROUP_CONCAT" | "STRING_AGG" => args.len() <= 2, // 1 or 2 args
             "MIN" | "MAX" => args.len() <= 1 && !distinct, // multi-arg or DISTINCT with >1 arg = scalar
             _ => false,
         };

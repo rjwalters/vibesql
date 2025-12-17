@@ -98,7 +98,7 @@ impl AggregateAccumulator {
             }),
             "MIN" => Ok(AggregateAccumulator::Min { value: None, distinct, seen }),
             "MAX" => Ok(AggregateAccumulator::Max { value: None, distinct, seen }),
-            "GROUP_CONCAT" => Ok(AggregateAccumulator::GroupConcat {
+            "GROUP_CONCAT" | "STRING_AGG" => Ok(AggregateAccumulator::GroupConcat {
                 values: Vec::new(),
                 separator: separator.to_string(),
                 distinct,

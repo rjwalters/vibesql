@@ -52,8 +52,8 @@ fn validate_aggregate_args(name: &str, args: &[vibesql_ast::Expression]) -> Resu
             }
             Ok(())
         }
-        "GROUP_CONCAT" => {
-            // GROUP_CONCAT requires 1 or 2 arguments
+        "GROUP_CONCAT" | "STRING_AGG" => {
+            // GROUP_CONCAT/STRING_AGG requires 1 or 2 arguments
             if arg_count == 0 || arg_count > 2 {
                 return Err(ExecutorError::WrongNumberOfArguments {
                     function_name: name.to_string(), // Preserve original case
@@ -153,11 +153,13 @@ pub(super) fn evaluate(
         return Ok(result);
     }
 
-    // Handle GROUP_CONCAT with optional separator (2nd argument)
+    // Handle GROUP_CONCAT/STRING_AGG with optional separator (2nd argument)
     // GROUP_CONCAT(expr) - uses comma separator
     // GROUP_CONCAT(expr, separator) - uses custom separator
     // GROUP_CONCAT(expr ORDER BY ...) - sorted concatenation
-    if name.to_uppercase() == "GROUP_CONCAT" {
+    // STRING_AGG is an alias for GROUP_CONCAT (SQLite 3.44+)
+    let name_upper = name.to_uppercase();
+    if name_upper == "GROUP_CONCAT" || name_upper == "STRING_AGG" {
         let separator = if args.len() == 2 {
             // Evaluate separator (second argument)
             // SQLite uses the LAST row's value when separator is an expression
@@ -180,8 +182,8 @@ pub(super) fn evaluate(
             ",".to_string() // Default separator
         } else {
             return Err(ExecutorError::UnsupportedExpression(format!(
-                "GROUP_CONCAT expects 1 or 2 arguments, got {}",
-                args.len()
+                "{} expects 1 or 2 arguments, got {}",
+                name, args.len()
             )));
         };
 
