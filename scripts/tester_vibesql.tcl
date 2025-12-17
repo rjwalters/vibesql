@@ -130,6 +130,18 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "no such function: $func_name"
     }
 
+    # "COUNT(DISTINCT *) is not valid SQL" -> "near "*": syntax error"
+    # SQLite treats DISTINCT * as a syntax error at the parser level
+    if {[regexp -nocase {COUNT\(DISTINCT \*\) is not valid SQL} $error_msg]} {
+        return {near "*": syntax error}
+    }
+
+    # Note: "wrong number of arguments to function count()" can come from:
+    # 1. count(DISTINCT) - no args after DISTINCT (should be "DISTINCT aggregates must have exactly one argument")
+    # 2. count(a, b) - too many args (should be "wrong number of arguments to function count()")
+    # We can't distinguish these cases without SQL context, so we DON'T translate here.
+    # The more specific case (count(DISTINCT)) would need VibeSQL to produce a different error message.
+
     # Wrong number of arguments to function:
     # "Unsupported feature: wrong number of arguments to function substr()" -> "wrong number of arguments to function substr()"
     # Note: SQLite preserves the case from the SQL query, so we preserve it too
