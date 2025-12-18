@@ -466,9 +466,9 @@ mod tests {
     }
 
     #[test]
-    fn test_cast_folding_preserves_failed_casts() {
-        // CAST('abc' AS INTEGER) should fail at runtime, not plan time
-        // Keep as CAST expression to get proper error message at runtime
+    fn test_cast_folding_permissive_string_to_integer() {
+        // SQLite-compatible behavior: CAST('abc' AS INTEGER) returns 0
+        // Non-numeric strings convert to 0 (permissive conversion)
         let expr = Expression::Cast {
             expr: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("abc")))),
             data_type: DataType::Integer,
@@ -481,10 +481,13 @@ mod tests {
 
         let optimized = optimize_expression(&expr, &evaluator).unwrap();
 
-        // Should keep as CAST expression (not folded due to error)
+        // SQLite: non-numeric string converts to 0, so CAST is folded to literal
         match optimized {
-            Expression::Cast { .. } => {} // Good, preserved for runtime error
-            _ => panic!("Expected CAST to be preserved for failed cast, got {:?}", optimized),
+            Expression::Literal(SqlValue::Integer(0)) => {} // Good, folded to 0
+            _ => panic!(
+                "Expected CAST('abc' AS INTEGER) to fold to Integer(0), got {:?}",
+                optimized
+            ),
         }
     }
 

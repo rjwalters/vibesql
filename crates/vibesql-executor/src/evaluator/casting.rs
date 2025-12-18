@@ -236,16 +236,12 @@ pub(crate) fn cast_value(
             SqlValue::Real(f) => Ok(SqlValue::Integer(float_to_int(*f as f64, sql_mode))),
             SqlValue::Double(f) => Ok(SqlValue::Integer(float_to_int(*f, sql_mode))),
             SqlValue::Boolean(b) => Ok(SqlValue::Integer(if *b { 1 } else { 0 })),
-            SqlValue::Varchar(s) => {
-                s.parse::<i64>().map(SqlValue::Integer).map_err(|_| ExecutorError::CastError {
-                    from_type: format!("{:?}", value),
-                    to_type: "INTEGER".to_string(),
-                })
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                // SQLite: Permissive conversion - extract leading numeric portion, default to 0
+                let (int_val, _, _) = string_to_number(s);
+                Ok(SqlValue::Integer(int_val))
             }
-            _ => Err(ExecutorError::CastError {
-                from_type: format!("{:?}", value),
-                to_type: "INTEGER".to_string(),
-            }),
+            _ => Ok(SqlValue::Integer(0)), // SQLite: Default to 0 for unknown types
         },
 
         // Cast to SMALLINT
@@ -259,16 +255,12 @@ pub(crate) fn cast_value(
             SqlValue::Real(f) => Ok(SqlValue::Smallint(float_to_int(*f as f64, sql_mode) as i16)),
             SqlValue::Double(f) => Ok(SqlValue::Smallint(float_to_int(*f, sql_mode) as i16)),
             SqlValue::Boolean(b) => Ok(SqlValue::Smallint(if *b { 1 } else { 0 })),
-            SqlValue::Varchar(s) => {
-                s.parse::<i16>().map(SqlValue::Smallint).map_err(|_| ExecutorError::CastError {
-                    from_type: format!("{:?}", value),
-                    to_type: "SMALLINT".to_string(),
-                })
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                // SQLite: Permissive conversion - extract leading numeric portion, default to 0
+                let (int_val, _, _) = string_to_number(s);
+                Ok(SqlValue::Smallint(int_val as i16))
             }
-            _ => Err(ExecutorError::CastError {
-                from_type: format!("{:?}", value),
-                to_type: "SMALLINT".to_string(),
-            }),
+            _ => Ok(SqlValue::Smallint(0)), // SQLite: Default to 0 for unknown types
         },
 
         // Cast to BIGINT
@@ -282,16 +274,12 @@ pub(crate) fn cast_value(
             SqlValue::Real(f) => Ok(SqlValue::Bigint(float_to_int(*f as f64, sql_mode))),
             SqlValue::Double(f) => Ok(SqlValue::Bigint(float_to_int(*f, sql_mode))),
             SqlValue::Boolean(b) => Ok(SqlValue::Bigint(if *b { 1 } else { 0 })),
-            SqlValue::Varchar(s) => {
-                s.parse::<i64>().map(SqlValue::Bigint).map_err(|_| ExecutorError::CastError {
-                    from_type: format!("{:?}", value),
-                    to_type: "BIGINT".to_string(),
-                })
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                // SQLite: Permissive conversion - extract leading numeric portion, default to 0
+                let (int_val, _, _) = string_to_number(s);
+                Ok(SqlValue::Bigint(int_val))
             }
-            _ => Err(ExecutorError::CastError {
-                from_type: format!("{:?}", value),
-                to_type: "BIGINT".to_string(),
-            }),
+            _ => Ok(SqlValue::Bigint(0)), // SQLite: Default to 0 for unknown types
         },
 
         // Cast to UNSIGNED
@@ -329,40 +317,50 @@ pub(crate) fn cast_value(
                 // Boolean to unsigned: true=1, false=0 (SQL standard)
                 Ok(SqlValue::Unsigned(if *b { 1 } else { 0 }))
             }
-            SqlValue::Varchar(s) => {
-                s.parse::<u64>().map(SqlValue::Unsigned).map_err(|_| ExecutorError::CastError {
-                    from_type: format!("{:?}", value),
-                    to_type: "UNSIGNED".to_string(),
-                })
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                // SQLite: Permissive conversion - extract leading numeric portion, default to 0
+                let (int_val, _, _) = string_to_number(s);
+                Ok(SqlValue::Unsigned(int_val as u64))
             }
-            _ => Err(ExecutorError::CastError {
-                from_type: format!("{:?}", value),
-                to_type: "UNSIGNED".to_string(),
-            }),
+            _ => Ok(SqlValue::Unsigned(0)), // SQLite: Default to 0 for unknown types
         },
 
         // Cast to NUMERIC
-        Numeric { .. } => match value {
-            SqlValue::Numeric(f) => Ok(SqlValue::Numeric(*f)),
-            SqlValue::Integer(n) => Ok(SqlValue::Numeric(*n as f64)),
-            SqlValue::Smallint(n) => Ok(SqlValue::Numeric(*n as f64)),
-            SqlValue::Bigint(n) => Ok(SqlValue::Numeric(*n as f64)),
-            SqlValue::Unsigned(n) => Ok(SqlValue::Numeric(*n as f64)),
-            SqlValue::Float(n) => Ok(SqlValue::Numeric(*n as f64)),
-            SqlValue::Real(n) => Ok(SqlValue::Numeric(*n as f64)),
-            SqlValue::Double(n) => Ok(SqlValue::Numeric(*n)),
-            SqlValue::Boolean(b) => Ok(SqlValue::Numeric(if *b { 1.0 } else { 0.0 })),
-            SqlValue::Varchar(s) => {
-                s.parse::<f64>().map(SqlValue::Numeric).map_err(|_| ExecutorError::CastError {
-                    from_type: format!("{:?}", value),
-                    to_type: "NUMERIC".to_string(),
-                })
+        // SQLite NUMERIC affinity: return INTEGER if value is exact integer, REAL otherwise
+        Numeric { .. } => {
+            let float_val = match value {
+                SqlValue::Numeric(f) => *f,
+                SqlValue::Integer(n) => *n as f64,
+                SqlValue::Smallint(n) => *n as f64,
+                SqlValue::Bigint(n) => *n as f64,
+                SqlValue::Unsigned(n) => *n as f64,
+                SqlValue::Float(n) => *n as f64,
+                SqlValue::Real(n) => *n as f64,
+                SqlValue::Double(n) => *n,
+                SqlValue::Boolean(b) => {
+                    if *b {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }
+                SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                    // SQLite: Permissive conversion - extract leading numeric portion
+                    let (_, fval, _) = string_to_number(s);
+                    fval
+                }
+                _ => 0.0, // SQLite: Default to 0.0 for unknown types
+            };
+            // SQLite NUMERIC affinity: return INTEGER if value is exact integer
+            if float_val.fract() == 0.0
+                && float_val >= i64::MIN as f64
+                && float_val <= i64::MAX as f64
+            {
+                Ok(SqlValue::Integer(float_val as i64))
+            } else {
+                Ok(SqlValue::Numeric(float_val))
             }
-            _ => Err(ExecutorError::CastError {
-                from_type: format!("{:?}", value),
-                to_type: "NUMERIC".to_string(),
-            }),
-        },
+        }
 
         // Cast to FLOAT
         Float { .. } => match value {
@@ -375,16 +373,12 @@ pub(crate) fn cast_value(
             SqlValue::Unsigned(n) => Ok(SqlValue::Float(*n as f32)),
             SqlValue::Numeric(f) => Ok(SqlValue::Float(*f as f32)),
             SqlValue::Boolean(b) => Ok(SqlValue::Float(if *b { 1.0 } else { 0.0 })),
-            SqlValue::Varchar(s) => {
-                s.parse::<f32>().map(SqlValue::Float).map_err(|_| ExecutorError::CastError {
-                    from_type: format!("{:?}", value),
-                    to_type: "FLOAT".to_string(),
-                })
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                // SQLite: Permissive conversion - extract leading numeric portion, default to 0.0
+                let (_, float_val, _) = string_to_number(s);
+                Ok(SqlValue::Float(float_val as f32))
             }
-            _ => Err(ExecutorError::CastError {
-                from_type: format!("{:?}", value),
-                to_type: "FLOAT".to_string(),
-            }),
+            _ => Ok(SqlValue::Float(0.0)), // SQLite: Default to 0.0 for unknown types
         },
 
         // Cast to REAL
@@ -398,16 +392,12 @@ pub(crate) fn cast_value(
             SqlValue::Unsigned(n) => Ok(SqlValue::Real(*n as f32)),
             SqlValue::Numeric(f) => Ok(SqlValue::Real(*f as f32)),
             SqlValue::Boolean(b) => Ok(SqlValue::Real(if *b { 1.0 } else { 0.0 })),
-            SqlValue::Varchar(s) => {
-                s.parse::<f32>().map(SqlValue::Real).map_err(|_| ExecutorError::CastError {
-                    from_type: format!("{:?}", value),
-                    to_type: "REAL".to_string(),
-                })
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                // SQLite: Permissive conversion - extract leading numeric portion, default to 0.0
+                let (_, float_val, _) = string_to_number(s);
+                Ok(SqlValue::Real(float_val as f32))
             }
-            _ => Err(ExecutorError::CastError {
-                from_type: format!("{:?}", value),
-                to_type: "REAL".to_string(),
-            }),
+            _ => Ok(SqlValue::Real(0.0)), // SQLite: Default to 0.0 for unknown types
         },
 
         // Cast to DOUBLE PRECISION
@@ -421,16 +411,12 @@ pub(crate) fn cast_value(
             SqlValue::Unsigned(n) => Ok(SqlValue::Double(*n as f64)),
             SqlValue::Numeric(f) => Ok(SqlValue::Double(*f)),
             SqlValue::Boolean(b) => Ok(SqlValue::Double(if *b { 1.0 } else { 0.0 })),
-            SqlValue::Varchar(s) => {
-                s.parse::<f64>().map(SqlValue::Double).map_err(|_| ExecutorError::CastError {
-                    from_type: format!("{:?}", value),
-                    to_type: "DOUBLE PRECISION".to_string(),
-                })
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                // SQLite: Permissive conversion - extract leading numeric portion, default to 0.0
+                let (_, float_val, _) = string_to_number(s);
+                Ok(SqlValue::Double(float_val))
             }
-            _ => Err(ExecutorError::CastError {
-                from_type: format!("{:?}", value),
-                to_type: "DOUBLE PRECISION".to_string(),
-            }),
+            _ => Ok(SqlValue::Double(0.0)), // SQLite: Default to 0.0 for unknown types
         },
 
         // Cast to VARCHAR
@@ -449,15 +435,8 @@ pub(crate) fn cast_value(
                 SqlValue::Date(s) => arcstr::ArcStr::from(s.to_string().as_str()),
                 SqlValue::Time(s) => arcstr::ArcStr::from(s.to_string().as_str()),
                 SqlValue::Timestamp(s) => arcstr::ArcStr::from(s.to_string().as_str()),
-                _ => {
-                    return Err(ExecutorError::CastError {
-                        from_type: format!("{:?}", value),
-                        to_type: match max_length {
-                            Some(len) => format!("VARCHAR({})", len),
-                            None => "VARCHAR".to_string(),
-                        },
-                    })
-                }
+                SqlValue::Character(s) => s.clone(),
+                _ => arcstr::ArcStr::from(""), // SQLite: Default to empty string for unknown types
             };
 
             // Truncate if exceeds max_length (when specified)
@@ -550,6 +529,36 @@ pub(crate) fn cast_value(
                 to_type: "TIMESTAMP".to_string(),
             }),
         },
+
+        // Cast to CHARACTER
+        Character { length } => {
+            let string_val: arcstr::ArcStr = match value {
+                SqlValue::Character(s) => s.clone(),
+                SqlValue::Varchar(s) => s.clone(),
+                SqlValue::Integer(n) => arcstr::ArcStr::from(n.to_string().as_str()),
+                SqlValue::Smallint(n) => arcstr::ArcStr::from(n.to_string().as_str()),
+                SqlValue::Bigint(n) => arcstr::ArcStr::from(n.to_string().as_str()),
+                SqlValue::Unsigned(n) => arcstr::ArcStr::from(n.to_string().as_str()),
+                SqlValue::Float(n) => arcstr::ArcStr::from(n.to_string().as_str()),
+                SqlValue::Real(n) => arcstr::ArcStr::from(n.to_string().as_str()),
+                SqlValue::Double(n) => arcstr::ArcStr::from(n.to_string().as_str()),
+                SqlValue::Numeric(n) => arcstr::ArcStr::from(n.to_string().as_str()),
+                SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "TRUE" } else { "FALSE" }),
+                _ => arcstr::ArcStr::from(""),
+            };
+            // Truncate or pad to exact length
+            if string_val.len() > *length {
+                Ok(SqlValue::Character(arcstr::ArcStr::from(
+                    &string_val[..*length],
+                )))
+            } else if string_val.len() < *length {
+                // Pad with spaces to reach exact length
+                let padded = format!("{:<width$}", string_val, width = *length);
+                Ok(SqlValue::Character(arcstr::ArcStr::from(padded.as_str())))
+            } else {
+                Ok(SqlValue::Character(string_val))
+            }
+        }
 
         // Unsupported target types
         _ => Err(ExecutorError::UnsupportedFeature(format!(
