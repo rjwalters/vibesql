@@ -159,6 +159,7 @@ pub(super) fn random(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 /// RANDOMBLOB(N) - Return N bytes of pseudo-random data
 ///
 /// Returns a blob containing N bytes of pseudo-random data.
+/// SQLite returns an empty blob for negative or zero sizes.
 /// Note: VibeSQL doesn't have a native Blob type, so we return as a string
 /// using Latin-1 encoding (each byte maps to one character) to preserve
 /// the exact byte count.
@@ -170,16 +171,52 @@ pub(super) fn randomblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         )));
     }
 
+    // SQLite returns empty blob for negative sizes
     let n = match &args[0] {
         SqlValue::Null => return Ok(SqlValue::Null),
-        SqlValue::Integer(i) => *i as usize,
-        SqlValue::Bigint(i) => *i as usize,
-        SqlValue::Smallint(i) => *i as usize,
+        SqlValue::Integer(i) => {
+            if *i <= 0 {
+                return Ok(SqlValue::Varchar("".into()));
+            }
+            *i as usize
+        }
+        SqlValue::Bigint(i) => {
+            if *i <= 0 {
+                return Ok(SqlValue::Varchar("".into()));
+            }
+            *i as usize
+        }
+        SqlValue::Smallint(i) => {
+            if *i <= 0 {
+                return Ok(SqlValue::Varchar("".into()));
+            }
+            *i as usize
+        }
         SqlValue::Unsigned(u) => *u as usize,
-        SqlValue::Numeric(n) => *n as usize,
-        SqlValue::Real(r) => *r as usize,
-        SqlValue::Double(d) => *d as usize,
-        SqlValue::Float(f) => *f as usize,
+        SqlValue::Numeric(n) => {
+            if *n <= 0.0 {
+                return Ok(SqlValue::Varchar("".into()));
+            }
+            *n as usize
+        }
+        SqlValue::Real(r) => {
+            if *r <= 0.0 {
+                return Ok(SqlValue::Varchar("".into()));
+            }
+            *r as usize
+        }
+        SqlValue::Double(d) => {
+            if *d <= 0.0 {
+                return Ok(SqlValue::Varchar("".into()));
+            }
+            *d as usize
+        }
+        SqlValue::Float(f) => {
+            if *f <= 0.0 {
+                return Ok(SqlValue::Varchar("".into()));
+            }
+            *f as usize
+        }
         _ => {
             return Err(ExecutorError::UnsupportedFeature(
                 "RANDOMBLOB argument must be numeric".to_string(),
@@ -959,18 +996,24 @@ mod tests {
 
     #[test]
     fn test_randomblob() {
-        // randomblob returns a string of N bytes
+        // randomblob returns a string of N bytes (Latin-1 encoded, so char count = byte count)
         let result = randomblob(&[SqlValue::Integer(10)]).unwrap();
         match result {
             SqlValue::Varchar(s) => {
-                // Length might vary due to UTF-8 encoding, but should be non-empty
-                assert!(!s.is_empty() || s.len() <= 10);
+                assert_eq!(s.chars().count(), 10);
             }
             _ => panic!("Expected Varchar"),
         }
 
         // randomblob(0) returns empty
         let result = randomblob(&[SqlValue::Integer(0)]).unwrap();
+        match result {
+            SqlValue::Varchar(s) => assert_eq!(s.len(), 0),
+            _ => panic!("Expected Varchar"),
+        }
+
+        // SQLite returns empty blob for negative sizes
+        let result = randomblob(&[SqlValue::Integer(-5)]).unwrap();
         match result {
             SqlValue::Varchar(s) => assert_eq!(s.len(), 0),
             _ => panic!("Expected Varchar"),
