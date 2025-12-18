@@ -109,6 +109,7 @@ pub fn hash_value(value: &SqlValue) -> u64 {
                 hasher.write_u32(f.to_bits());
             }
         }
+        SqlValue::Blob(b) => b.hash(&mut hasher),
     }
 
     hasher.finish()

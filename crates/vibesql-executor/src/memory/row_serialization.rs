@@ -46,6 +46,7 @@ mod tags {
     pub const TIMESTAMP: u8 = 15;
     pub const INTERVAL: u8 = 16;
     pub const VECTOR: u8 = 17;
+    pub const BLOB: u8 = 18;
 }
 
 /// Serialize a single SqlValue to the writer
@@ -145,6 +146,12 @@ pub fn serialize_value<W: Write>(value: &SqlValue, writer: &mut W) -> io::Result
             for f in v {
                 writer.write_all(&f.to_le_bytes())?;
             }
+        }
+        SqlValue::Blob(b) => {
+            writer.write_all(&[tags::BLOB])?;
+            let len = b.len() as u32;
+            writer.write_all(&len.to_le_bytes())?;
+            writer.write_all(b)?;
         }
     }
     Ok(())
@@ -303,6 +310,15 @@ pub fn deserialize_value<R: Read>(reader: &mut R) -> io::Result<SqlValue> {
             }
             Ok(SqlValue::Vector(v))
         }
+        tags::BLOB => {
+            let mut len_buf = [0u8; 4];
+            reader.read_exact(&mut len_buf)?;
+            let len = u32::from_le_bytes(len_buf) as usize;
+
+            let mut b = vec![0u8; len];
+            reader.read_exact(&mut b)?;
+            Ok(SqlValue::Blob(b))
+        }
         _ => {
             Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown type tag: {}", tag[0])))
         }
@@ -416,6 +432,7 @@ fn estimate_value_size(value: &SqlValue) -> usize {
         SqlValue::Timestamp(_) => 1 + 4 + 1 + 1 + 1 + 1 + 1 + 4, // tag + date + time components
         SqlValue::Interval(i) => 1 + 4 + i.value.len(), // tag + length + string
         SqlValue::Vector(v) => 1 + 4 + (v.len() * 4),
+        SqlValue::Blob(b) => 1 + 4 + b.len(),
     }
 }
 

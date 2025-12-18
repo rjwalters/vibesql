@@ -95,6 +95,13 @@ impl fmt::Display for SqlValue {
                 let formatted: Vec<String> = v.iter().map(|x| x.to_string()).collect();
                 write!(f, "[{}]", formatted.join(", "))
             }
+            SqlValue::Blob(b) => {
+                // Format blob as hex string (without x'' prefix for raw display)
+                for byte in b {
+                    write!(f, "{:02X}", byte)?;
+                }
+                Ok(())
+            }
             SqlValue::Null => write!(f, "NULL"),
         }
     }

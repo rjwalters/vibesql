@@ -70,6 +70,7 @@ impl Hash for SqlValue {
                     }
                 }
             }
+            Blob(b) => b.hash(state),
 
             // NULL hashes to nothing (discriminant is enough)
             Null => {}

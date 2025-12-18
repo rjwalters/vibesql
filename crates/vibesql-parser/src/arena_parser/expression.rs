@@ -601,6 +601,11 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Some(Expression::Literal(SqlValue::Varchar(s)))
             }
+            Token::BlobLiteral(bytes) => {
+                let blob = bytes.clone();
+                self.advance();
+                Some(Expression::Literal(SqlValue::Blob(blob)))
+            }
             Token::Keyword { keyword: Keyword::True, .. } => {
                 self.advance();
                 Some(Expression::Literal(SqlValue::Boolean(true)))

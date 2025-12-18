@@ -175,7 +175,17 @@ impl<'a> Lexer<'a> {
             '`' => self.tokenize_backtick_identifier(),
             '[' => self.tokenize_bracket_identifier(),
             '0'..='9' => self.tokenize_number(),
-            'a'..='z' | 'A'..='Z' | '_' => self.tokenize_identifier_or_keyword(),
+            'x' | 'X' => {
+                // Check if this is a hex blob literal (x'...' or X'...')
+                if self.peek_byte(1) == Some(b'\'') {
+                    self.tokenize_blob_literal()
+                } else {
+                    self.tokenize_identifier_or_keyword()
+                }
+            }
+            'a'..='w' | 'y'..='z' | 'A'..='W' | 'Y'..='Z' | '_' => {
+                self.tokenize_identifier_or_keyword()
+            }
             '?' => {
                 self.advance();
                 Ok(Token::Placeholder)

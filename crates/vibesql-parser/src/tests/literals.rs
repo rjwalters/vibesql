@@ -312,11 +312,11 @@ fn test_parse_hex_literal_lowercase() {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
-                    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) => {
-                        // x'303132' = bytes [0x30, 0x31, 0x32] = "012"
-                        assert_eq!(s.as_str(), "012");
+                    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Blob(bytes)) => {
+                        // x'303132' = bytes [0x30, 0x31, 0x32]
+                        assert_eq!(bytes, &[0x30, 0x31, 0x32]);
                     }
-                    _ => panic!("Expected VARCHAR literal, got {:?}", expr),
+                    _ => panic!("Expected Blob literal, got {:?}", expr),
                 },
                 _ => panic!("Expected expression"),
             }
@@ -334,11 +334,11 @@ fn test_parse_hex_literal_uppercase() {
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) => {
-                    // X'48656C6C6F' = "Hello"
-                    assert_eq!(s.as_str(), "Hello");
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Blob(bytes)) => {
+                    // X'48656C6C6F' = bytes for "Hello"
+                    assert_eq!(bytes, &[0x48, 0x65, 0x6C, 0x6C, 0x6F]);
                 }
-                _ => panic!("Expected VARCHAR literal"),
+                _ => panic!("Expected Blob literal, got {:?}", expr),
             },
             _ => panic!("Expected expression"),
         },
@@ -355,10 +355,11 @@ fn test_parse_hex_literal_empty() {
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) => {
-                    assert_eq!(s.as_str(), "");
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Blob(bytes)) => {
+                    // Empty blob
+                    assert!(bytes.is_empty());
                 }
-                _ => panic!("Expected VARCHAR literal"),
+                _ => panic!("Expected Blob literal, got {:?}", expr),
             },
             _ => panic!("Expected expression"),
         },

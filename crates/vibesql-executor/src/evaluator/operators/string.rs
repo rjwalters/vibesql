@@ -48,6 +48,12 @@ impl StringOps {
                 format!("[{}]", formatted.join(", "))
             }
 
+            // Blob - format as hex string
+            Blob(b) => {
+                let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+                hex
+            }
+
             // NULL - should not reach here as NULL is handled at the operator registry level
             Null => "NULL".to_string(),
         }

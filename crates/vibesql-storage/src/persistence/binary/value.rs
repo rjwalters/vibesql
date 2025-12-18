@@ -118,6 +118,17 @@ pub fn write_sql_value<W: Write>(writer: &mut W, value: &SqlValue) -> Result<(),
                 write_f32(writer, val)?;
             }
         }
+        SqlValue::Blob(b) => {
+            writer
+                .write_all(&[TypeTag::Blob as u8])
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            // Write blob length
+            write_u32(writer, b.len() as u32)?;
+            // Write raw bytes
+            writer
+                .write_all(b)
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        }
     }
     Ok(())
 }
@@ -174,6 +185,14 @@ pub fn read_sql_value<R: Read>(reader: &mut R) -> Result<SqlValue, StorageError>
                 vec.push(read_f32(reader)?);
             }
             Ok(SqlValue::Vector(vec))
+        }
+        TypeTag::Blob => {
+            let len = read_u32(reader)? as usize;
+            let mut blob = vec![0u8; len];
+            reader
+                .read_exact(&mut blob)
+                .map_err(|e| StorageError::NotImplemented(format!("Read error: {}", e)))?;
+            Ok(SqlValue::Blob(blob))
         }
     }
 }

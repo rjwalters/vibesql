@@ -465,6 +465,7 @@ impl ExpressionHasher {
                     f.to_bits().hash(hasher);
                 }
             }
+            vibesql_types::SqlValue::Blob(b) => b.hash(hasher),
         }
     }
 

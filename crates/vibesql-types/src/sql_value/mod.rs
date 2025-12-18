@@ -47,6 +47,9 @@ pub enum SqlValue {
     // Vector type (for AI/ML workloads)
     Vector(Vec<f32>),
 
+    // Binary/blob type
+    Blob(Vec<u8>),
+
     Null,
 }
 
@@ -75,6 +78,7 @@ impl SqlValue {
             SqlValue::Timestamp(_) => "TIMESTAMP",
             SqlValue::Interval(_) => "INTERVAL",
             SqlValue::Vector(_) => "VECTOR",
+            SqlValue::Blob(_) => "BLOB",
             SqlValue::Null => "NULL",
         }
     }
@@ -104,6 +108,7 @@ impl SqlValue {
                 end_field: None,
             },
             SqlValue::Vector(v) => DataType::Vector { dimensions: v.len() as u32 },
+            SqlValue::Blob(_) => DataType::BinaryLargeObject,
             SqlValue::Null => DataType::Null,
         }
     }
@@ -133,6 +138,10 @@ impl SqlValue {
             SqlValue::Vector(v) => {
                 // Vector: base + heap capacity (each f32 is 4 bytes)
                 base_size + (v.capacity() * std::mem::size_of::<f32>())
+            }
+            SqlValue::Blob(b) => {
+                // Blob: base + heap capacity
+                base_size + b.capacity()
             }
             // Fixed-size types: just the enum size
             SqlValue::Integer(_)

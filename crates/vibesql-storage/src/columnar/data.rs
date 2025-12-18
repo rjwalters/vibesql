@@ -43,6 +43,8 @@ pub enum ColumnData {
     Interval { values: Arc<Vec<Interval>>, nulls: Arc<Vec<bool>> },
     /// Vector values (for AI/ML workloads)
     Vector { values: Arc<Vec<Vec<f32>>>, nulls: Arc<Vec<bool>> },
+    /// Blob values (binary data)
+    Blob { values: Arc<Vec<Vec<u8>>>, nulls: Arc<Vec<bool>> },
 }
 
 #[allow(clippy::type_complexity)]
@@ -59,6 +61,7 @@ impl ColumnData {
             ColumnData::Timestamp { nulls, .. } => nulls.len(),
             ColumnData::Interval { nulls, .. } => nulls.len(),
             ColumnData::Vector { nulls, .. } => nulls.len(),
+            ColumnData::Blob { nulls, .. } => nulls.len(),
         }
     }
 
@@ -137,6 +140,15 @@ impl ColumnData {
                     + vector_data
                     + nulls.capacity() * std::mem::size_of::<bool>()
             }
+            ColumnData::Blob { values, nulls } => {
+                // Blob contains Vec<u8>, so we need to account for each inner vector
+                let vec_overhead = std::mem::size_of::<Vec<u8>>();
+                let blob_data: usize = values.iter().map(|v| v.capacity()).sum();
+                VEC_OVERHEAD * 2
+                    + values.capacity() * vec_overhead
+                    + blob_data
+                    + nulls.capacity() * std::mem::size_of::<bool>()
+            }
         }
     }
 
@@ -152,6 +164,7 @@ impl ColumnData {
             ColumnData::Timestamp { nulls, .. } => nulls[index],
             ColumnData::Interval { nulls, .. } => nulls[index],
             ColumnData::Vector { nulls, .. } => nulls[index],
+            ColumnData::Blob { nulls, .. } => nulls[index],
         }
     }
 
@@ -173,6 +186,7 @@ impl ColumnData {
             ColumnData::Timestamp { values, .. } => SqlValue::Timestamp(values[index]),
             ColumnData::Interval { values, .. } => SqlValue::Interval(values[index].clone()),
             ColumnData::Vector { values, .. } => SqlValue::Vector(values[index].clone()),
+            ColumnData::Blob { values, .. } => SqlValue::Blob(values[index].clone()),
         }
     }
 

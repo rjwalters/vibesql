@@ -431,6 +431,11 @@ fn sql_value_to_json(value: &SqlValue) -> serde_json::Value {
             // Serialize vector as JSON array of floats
             serde_json::Value::Array(v.iter().map(|f| serde_json::json!(f)).collect())
         }
+        SqlValue::Blob(b) => {
+            // Serialize blob as hex string with x'' prefix
+            let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+            serde_json::Value::String(format!("x'{}'", hex))
+        }
         SqlValue::Null => serde_json::Value::Null,
     }
 }

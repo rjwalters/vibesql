@@ -70,6 +70,10 @@ fn derive_column_name_from_expr(expr: &vibesql_ast::Expression) -> String {
                 let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
                 format!("[{}]", formatted.join(", "))
             }
+            vibesql_types::SqlValue::Blob(b) => {
+                let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+                format!("x'{}'", hex)
+            }
             vibesql_types::SqlValue::Null => "NULL".to_string(),
         },
         _ => "?column?".to_string(),

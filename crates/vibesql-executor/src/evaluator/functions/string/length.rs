@@ -134,5 +134,9 @@ pub(in crate::evaluator::functions) fn length(
             // For vectors, return the number of dimensions
             Ok(vibesql_types::SqlValue::Integer(v.len() as i64))
         }
+        vibesql_types::SqlValue::Blob(b) => {
+            // For blobs, return the number of bytes
+            Ok(vibesql_types::SqlValue::Integer(b.len() as i64))
+        }
     }
 }

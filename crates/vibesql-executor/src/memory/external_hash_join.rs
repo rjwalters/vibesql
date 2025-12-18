@@ -709,6 +709,10 @@ fn hash_sql_value<H: std::hash::Hasher>(value: &SqlValue, hasher: &mut H) {
                 f.to_bits().hash(hasher);
             }
         }
+        SqlValue::Blob(b) => {
+            16u8.hash(hasher);
+            b.hash(hasher);
+        }
     }
 }
 
