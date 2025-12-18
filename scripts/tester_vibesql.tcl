@@ -334,6 +334,9 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {^Parse error: (unknown join type: .+)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
+    if {[regexp -nocase {^Parse error: (DISTINCT aggregates must have exactly one argument)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
     # Fallback for other parse errors (e.g., descriptive messages like "Expected identifier")
     if {[regexp -nocase {^Parse error: (.+)$} $error_msg -> parse_msg]} {
         return "near \"$parse_msg\": syntax error"

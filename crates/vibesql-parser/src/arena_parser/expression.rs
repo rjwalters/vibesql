@@ -939,6 +939,12 @@ impl<'arena> ArenaParser<'arena> {
             };
 
             if is_aggregate {
+                // DISTINCT aggregates must have exactly one argument (SQLite compatibility)
+                if distinct && args.len() != 1 {
+                    return Err(ParseError {
+                        message: "DISTINCT aggregates must have exactly one argument".to_string(),
+                    });
+                }
                 return Ok(Expression::Extended(
                     self.arena.alloc(ExtendedExpr::AggregateFunction {
                         name: name_sym,
