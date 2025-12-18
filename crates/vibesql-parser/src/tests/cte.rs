@@ -179,3 +179,54 @@ fn test_parse_cte_join_with_regular_table() {
     );
     assert!(result.is_ok(), "CTE joined with regular table should parse: {:?}", result);
 }
+
+// ========================================================================
+// CTE with VALUES Tests (Issue #4546)
+// ========================================================================
+
+#[test]
+fn test_parse_cte_with_values_single_row() {
+    let result = Parser::parse_sql("WITH t AS (VALUES(1)) SELECT * FROM t;");
+    assert!(result.is_ok(), "CTE with VALUES single row should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_cte_with_values_multiple_rows() {
+    let result = Parser::parse_sql("WITH t AS (VALUES(1), (2), (3)) SELECT * FROM t;");
+    assert!(result.is_ok(), "CTE with VALUES multiple rows should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_cte_with_values_multiple_columns() {
+    let result =
+        Parser::parse_sql("WITH t AS (VALUES(1, 'a'), (2, 'b'), (3, 'c')) SELECT * FROM t;");
+    assert!(result.is_ok(), "CTE with VALUES multiple columns should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_cte_with_values_and_column_names() {
+    let result = Parser::parse_sql("WITH t(x, y) AS (VALUES(1, 'a'), (2, 'b')) SELECT x, y FROM t;");
+    assert!(result.is_ok(), "CTE with VALUES and column names should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_recursive_cte_with_values() {
+    let result = Parser::parse_sql(
+        "WITH RECURSIVE cnt(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM cnt WHERE x<10) SELECT x FROM cnt;",
+    );
+    assert!(result.is_ok(), "Recursive CTE with VALUES should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_cte_with_values_union_select() {
+    let result = Parser::parse_sql(
+        "WITH t AS (VALUES(1) UNION SELECT 2) SELECT * FROM t;",
+    );
+    assert!(result.is_ok(), "CTE with VALUES UNION SELECT should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_cte_with_values_sum() {
+    let result = Parser::parse_sql("WITH t(x) AS (VALUES(1), (2), (3)) SELECT SUM(x) FROM t;");
+    assert!(result.is_ok(), "CTE with VALUES and aggregate should parse: {:?}", result);
+}

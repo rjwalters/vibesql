@@ -23,7 +23,7 @@ mod join_scan;
 mod predicates;
 mod reorder;
 mod table;
-mod values;
+pub(crate) mod values;
 
 /// Execute a FROM clause (table, join, or subquery) and return combined schema and rows
 ///

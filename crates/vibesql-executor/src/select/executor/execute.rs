@@ -639,12 +639,41 @@ impl SelectExecutor<'_> {
     /// Execute SELECT without FROM clause (ExpressionOnly strategy)
     ///
     /// This is a special case that doesn't use the pipeline trait since there's
-    /// no table scan involved. Handles both simple expressions and aggregates.
+    /// no table scan involved. Handles both simple expressions, aggregates,
+    /// and standalone VALUES statements.
     fn execute_expression_only(
         &self,
         stmt: &vibesql_ast::SelectStmt,
         cte_results: &HashMap<String, CteResult>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        // Handle standalone VALUES statements (Issue #4546)
+        // VALUES(1,2), (3,4) returns rows directly without a SELECT list
+        if let Some(values_rows) = &stmt.values {
+            let from_result =
+                crate::select::scan::values::execute_values(values_rows, "_values_", None)?;
+            let mut results = from_result.into_rows();
+
+            // Apply ORDER BY if specified
+            if let Some(order_by) = &stmt.order_by {
+                // For VALUES, column names are column1, column2, etc.
+                // We need to map ORDER BY expressions to column indices
+                results = self.apply_values_order_by(results, order_by, values_rows)?;
+            }
+
+            // Apply LIMIT/OFFSET
+            let limit_val = stmt
+                .limit
+                .as_ref()
+                .map(|expr| self.eval_limit_offset_expr(expr, "LIMIT"))
+                .transpose()?;
+            let offset_val = stmt
+                .offset
+                .as_ref()
+                .map(|expr| self.eval_limit_offset_expr(expr, "OFFSET"))
+                .transpose()?;
+            return Ok(apply_limit_offset(results, limit_val, offset_val));
+        }
+
         let has_aggregates = self.has_aggregates(&stmt.select_list) || stmt.having.is_some();
 
         if has_aggregates {
@@ -654,6 +683,56 @@ impl SelectExecutor<'_> {
             // Simple expression evaluation (e.g., SELECT 1 + 1)
             self.execute_select_without_from(stmt)
         }
+    }
+
+    /// Apply ORDER BY to VALUES statement results
+    fn apply_values_order_by(
+        &self,
+        mut rows: Vec<vibesql_storage::Row>,
+        order_by: &[vibesql_ast::OrderByItem],
+        values_rows: &[Vec<vibesql_ast::Expression>],
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        // For VALUES, we sort by column position (1-indexed)
+        // or by column name (column1, column2, etc.)
+        let num_cols = values_rows.first().map(|r| r.len()).unwrap_or(0);
+
+        rows.sort_by(|a, b| {
+            for item in order_by {
+                // Get the column index from the ORDER BY expression
+                let col_idx = match &item.expr {
+                    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) => {
+                        // 1-indexed column position
+                        (*n as usize).saturating_sub(1)
+                    }
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+                        // column1, column2, etc.
+                        let col_name = col_id.column_canonical();
+                        if let Some(stripped) = col_name.strip_prefix("column") {
+                            stripped.parse::<usize>().unwrap_or(0).saturating_sub(1)
+                        } else {
+                            0
+                        }
+                    }
+                    _ => 0, // Default to first column for complex expressions
+                };
+
+                if col_idx < num_cols {
+                    let cmp = a.values[col_idx].partial_cmp(&b.values[col_idx]);
+                    if let Some(ord) = cmp {
+                        let ord = match item.direction {
+                            vibesql_ast::OrderDirection::Asc => ord,
+                            vibesql_ast::OrderDirection::Desc => ord.reverse(),
+                        };
+                        if ord != std::cmp::Ordering::Equal {
+                            return ord;
+                        }
+                    }
+                }
+            }
+            std::cmp::Ordering::Equal
+        });
+
+        Ok(rows)
     }
 
     /// Execute a query using the specified execution pipeline
@@ -1083,6 +1162,11 @@ impl SelectExecutor<'_> {
                 Some(&right_stmt.select_list),
             )?;
             self.execute_without_aggregation(right_stmt, from_result, cte_results)?
+        } else if let Some(values_rows) = &right_stmt.values {
+            // Handle standalone VALUES in set operation right side (Issue #4546)
+            let from_result =
+                crate::select::scan::values::execute_values(values_rows, "_values_", None)?;
+            from_result.into_rows()
         } else {
             self.execute_select_without_from(right_stmt)?
         };
