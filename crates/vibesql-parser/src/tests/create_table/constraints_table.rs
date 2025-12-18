@@ -106,7 +106,7 @@ fn test_parse_create_table_with_foreign_key_on_delete_update() {
                     ..
                 } => {
                     assert_eq!(table, "parent");
-                    assert_eq!(col, "id");
+                    assert_eq!(col, &Some("id".to_string()));
                     assert_eq!(on_delete, &Some(vibesql_ast::ReferentialAction::Cascade));
                     assert_eq!(on_update, &Some(vibesql_ast::ReferentialAction::SetNull));
                 }

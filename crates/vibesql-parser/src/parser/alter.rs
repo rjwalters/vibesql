@@ -120,9 +120,15 @@ fn parse_add_column(
             Token::Keyword { keyword: Keyword::References, .. } => {
                 parser.advance();
                 let ref_table = parser.parse_identifier()?;
-                parser.expect_token(crate::token::Token::LParen)?;
-                let ref_column = parser.parse_identifier()?;
-                parser.expect_token(crate::token::Token::RParen)?;
+                // Column specification is optional in SQLite - defaults to PK
+                let ref_column = if parser.peek() == &crate::token::Token::LParen {
+                    parser.advance(); // consume LParen
+                    let col = parser.parse_identifier()?;
+                    parser.expect_token(crate::token::Token::RParen)?;
+                    Some(col)
+                } else {
+                    None
+                };
                 constraints.push(ColumnConstraint {
                     name: None,
                     kind: ColumnConstraintKind::References {
@@ -302,9 +308,15 @@ fn parse_modify_column(
             Token::Keyword { keyword: Keyword::References, .. } => {
                 parser.advance();
                 let ref_table = parser.parse_identifier()?;
-                parser.expect_token(crate::token::Token::LParen)?;
-                let ref_column = parser.parse_identifier()?;
-                parser.expect_token(crate::token::Token::RParen)?;
+                // Column specification is optional in SQLite - defaults to PK
+                let ref_column = if parser.peek() == &crate::token::Token::LParen {
+                    parser.advance(); // consume LParen
+                    let col = parser.parse_identifier()?;
+                    parser.expect_token(crate::token::Token::RParen)?;
+                    Some(col)
+                } else {
+                    None
+                };
                 constraints.push(ColumnConstraint {
                     name: None,
                     kind: ColumnConstraintKind::References {
@@ -379,9 +391,15 @@ fn parse_change_column(
             Token::Keyword { keyword: Keyword::References, .. } => {
                 parser.advance();
                 let ref_table = parser.parse_identifier()?;
-                parser.expect_token(crate::token::Token::LParen)?;
-                let ref_column = parser.parse_identifier()?;
-                parser.expect_token(crate::token::Token::RParen)?;
+                // Column specification is optional in SQLite - defaults to PK
+                let ref_column = if parser.peek() == &crate::token::Token::LParen {
+                    parser.advance(); // consume LParen
+                    let col = parser.parse_identifier()?;
+                    parser.expect_token(crate::token::Token::RParen)?;
+                    Some(col)
+                } else {
+                    None
+                };
                 constraints.push(ColumnConstraint {
                     name: None,
                     kind: ColumnConstraintKind::References {

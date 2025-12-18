@@ -169,6 +169,10 @@ impl Parser {
                 Token::Keyword { keyword: Keyword::Primary, .. } => {
                     self.advance(); // consume PRIMARY
                     self.expect_keyword(Keyword::Key)?;
+                    // SQLite allows optional ASC or DESC after PRIMARY KEY
+                    if self.peek_keyword(Keyword::Asc) || self.peek_keyword(Keyword::Desc) {
+                        self.advance(); // consume ASC or DESC (ignored - SQLite ignores it too)
+                    }
                     constraints.push(vibesql_ast::ColumnConstraint {
                         name,
                         kind: vibesql_ast::ColumnConstraintKind::PrimaryKey,
@@ -210,20 +214,26 @@ impl Parser {
                         }
                     };
 
-                    self.expect_token(Token::LParen)?;
-                    let column = match self.peek() {
-                        Token::Identifier(c) => {
-                            let col_name = c.clone();
-                            self.advance();
-                            col_name
-                        }
-                        _ => {
-                            return Err(ParseError {
-                                message: "Expected column name in REFERENCES".to_string(),
-                            })
-                        }
+                    // Column specification is optional in SQLite - defaults to PK
+                    let column = if self.peek() == &Token::LParen {
+                        self.advance(); // consume LParen
+                        let col_name = match self.peek() {
+                            Token::Identifier(c) => {
+                                let name = c.clone();
+                                self.advance();
+                                name
+                            }
+                            _ => {
+                                return Err(ParseError {
+                                    message: "Expected column name in REFERENCES".to_string(),
+                                })
+                            }
+                        };
+                        self.expect_token(Token::RParen)?;
+                        Some(col_name)
+                    } else {
+                        None // Column not specified, defaults to PK
                     };
-                    self.expect_token(Token::RParen)?;
 
                     let (on_delete, on_update) = self.parse_referential_actions()?;
 

@@ -120,7 +120,8 @@ pub enum ColumnConstraintKind<'arena> {
     Check(&'arena Expression<'arena>),
     References {
         table: Symbol,
-        column: Symbol,
+        /// Column in the referenced table. If None, defaults to the primary key.
+        column: Option<Symbol>,
         on_delete: Option<ReferentialAction>,
         on_update: Option<ReferentialAction>,
     },

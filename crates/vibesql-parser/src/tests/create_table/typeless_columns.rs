@@ -210,7 +210,7 @@ fn test_parse_create_table_typeless_with_references() {
             assert!(create.columns[0].constraints.iter().any(|c| matches!(
                 &c.kind,
                 vibesql_ast::ColumnConstraintKind::References { table, column, .. }
-                    if table == "other" && column == "id"
+                    if table == "other" && column == &Some("id".to_string())
             )));
         }
         _ => panic!("Expected CREATE TABLE statement"),

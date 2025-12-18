@@ -461,9 +461,15 @@ impl<'arena> ArenaParser<'arena> {
                 Token::Keyword { keyword: Keyword::References, .. } => {
                     self.advance();
                     let ref_table = self.parse_table_name()?;
-                    self.expect_token(Token::LParen)?;
-                    let ref_column = self.parse_column_name()?;
-                    self.expect_token(Token::RParen)?;
+                    // Column specification is optional in SQLite - defaults to PK
+                    let ref_column = if self.peek() == &Token::LParen {
+                        self.advance(); // consume LParen
+                        let col = self.parse_column_name()?;
+                        self.expect_token(Token::RParen)?;
+                        Some(col)
+                    } else {
+                        None
+                    };
                     constraints.push(ColumnConstraint {
                         name: None,
                         kind: ColumnConstraintKind::References {
@@ -709,9 +715,15 @@ impl<'arena> ArenaParser<'arena> {
                 Token::Keyword { keyword: Keyword::References, .. } => {
                     self.advance();
                     let ref_table = self.parse_table_name()?;
-                    self.expect_token(Token::LParen)?;
-                    let ref_column = self.parse_column_name()?;
-                    self.expect_token(Token::RParen)?;
+                    // Column specification is optional in SQLite - defaults to PK
+                    let ref_column = if self.peek() == &Token::LParen {
+                        self.advance(); // consume LParen
+                        let col = self.parse_column_name()?;
+                        self.expect_token(Token::RParen)?;
+                        Some(col)
+                    } else {
+                        None
+                    };
                     constraints.push(ColumnConstraint {
                         name: None,
                         kind: ColumnConstraintKind::References {

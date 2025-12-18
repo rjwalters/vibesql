@@ -94,7 +94,7 @@ fn test_parse_create_table_with_references() {
                     ..
                 } => {
                     assert_eq!(table, "customers");
-                    assert_eq!(column, "id");
+                    assert_eq!(column, &Some("id".to_string()));
                     assert!(on_delete.is_none());
                     assert!(on_update.is_none());
                 }
@@ -232,6 +232,48 @@ fn test_parse_create_table_key_constraint() {
                 .constraints
                 .iter()
                 .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::NotNull)));
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+#[test]
+fn test_parse_create_table_references_without_column() {
+    // SQLite allows REFERENCES table without specifying the column
+    // The column defaults to the primary key of the referenced table
+    let result = Parser::parse_sql(
+        "CREATE TABLE track (
+            tid INTEGER PRIMARY KEY,
+            aid INTEGER NOT NULL REFERENCES album,
+            name TEXT
+        );",
+    );
+    assert!(result.is_ok(), "Should parse REFERENCES without column specification");
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert_eq!(create.table_name, "track");
+            assert_eq!(create.columns.len(), 3);
+
+            // aid has NOT NULL and REFERENCES album (no column specified)
+            assert_eq!(create.columns[1].name, "aid");
+            assert_eq!(create.columns[1].constraints.len(), 2);
+
+            // Find the REFERENCES constraint
+            let refs_constraint = create.columns[1]
+                .constraints
+                .iter()
+                .find(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::References { .. }));
+
+            assert!(refs_constraint.is_some(), "Should have REFERENCES constraint");
+            match &refs_constraint.unwrap().kind {
+                vibesql_ast::ColumnConstraintKind::References { table, column, .. } => {
+                    assert_eq!(table, "album");
+                    assert_eq!(column, &None); // Column not specified
+                }
+                _ => panic!("Expected REFERENCES constraint"),
+            }
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
