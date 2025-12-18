@@ -244,6 +244,12 @@ impl Parser {
         // (canonical lowercase for comparison, display preserves original case)
         let func_id = vibesql_ast::FunctionIdentifier::new(&first);
         if is_aggregate {
+            // DISTINCT aggregates must have exactly one argument (SQLite compatibility)
+            if distinct && args.len() != 1 {
+                return Err(ParseError {
+                    message: "DISTINCT aggregates must have exactly one argument".to_string(),
+                });
+            }
             Ok(Some(vibesql_ast::Expression::AggregateFunction {
                 name: func_id,
                 distinct,
