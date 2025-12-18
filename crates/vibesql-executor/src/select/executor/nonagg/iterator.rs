@@ -164,68 +164,12 @@ impl SelectExecutor<'_> {
             filtered_rows.push(row_result?);
         }
 
-        // Stage 5.5: Apply implicit ordering for deterministic results
-        // Queries without explicit ORDER BY get sorted by all columns in schema order
-        // This ensures SQLLogicTest compatibility and deterministic behavior
-        // Skip sorting if:
-        // - Data is already sorted from index scan
-        // - FROM clause is a derived table (subquery) whose order might be intentional
-        //   (e.g., UNION ALL preserves insertion order - SQL standard behavior)
-        let from_is_subquery = matches!(stmt.from.as_ref(), Some(vibesql_ast::FromClause::Subquery { .. }));
-        let needs_implicit_sort = stmt.order_by.is_none() && sorted_by.is_none() && !filtered_rows.is_empty() && !from_is_subquery;
-
-        if needs_implicit_sort {
-            use crate::select::grouping::compare_sql_values;
-
-            #[cfg(feature = "parallel")]
-            {
-                use rayon::prelude::*;
-
-                use crate::select::parallel::ParallelConfig;
-
-                // Use parallel sorting for larger datasets
-                let should_parallel =
-                    ParallelConfig::global().should_parallelize_sort(filtered_rows.len());
-
-                if should_parallel {
-                    filtered_rows.par_sort_by(|row_a, row_b| {
-                        // Compare column by column until we find a difference
-                        for i in 0..row_a.values.len().min(row_b.values.len()) {
-                            let cmp = compare_sql_values(&row_a.values[i], &row_b.values[i]);
-                            if cmp != std::cmp::Ordering::Equal {
-                                return cmp;
-                            }
-                        }
-                        std::cmp::Ordering::Equal
-                    });
-                } else {
-                    filtered_rows.sort_by(|row_a, row_b| {
-                        // Compare column by column until we find a difference
-                        for i in 0..row_a.values.len().min(row_b.values.len()) {
-                            let cmp = compare_sql_values(&row_a.values[i], &row_b.values[i]);
-                            if cmp != std::cmp::Ordering::Equal {
-                                return cmp;
-                            }
-                        }
-                        std::cmp::Ordering::Equal
-                    });
-                }
-            }
-
-            #[cfg(not(feature = "parallel"))]
-            {
-                filtered_rows.sort_by(|row_a, row_b| {
-                    // Compare column by column until we find a difference
-                    for i in 0..row_a.values.len().min(row_b.values.len()) {
-                        let cmp = compare_sql_values(&row_a.values[i], &row_b.values[i]);
-                        if cmp != std::cmp::Ordering::Equal {
-                            return cmp;
-                        }
-                    }
-                    std::cmp::Ordering::Equal
-                });
-            }
-        }
+        // SQLite compatibility: Do NOT apply implicit value-based sorting (issue #4537)
+        // SQLite returns rows in storage order (insertion order / rowid order) when no ORDER BY
+        // is specified. Implicit sorting by value breaks this behavior and causes TCL test failures.
+        //
+        // Previously we sorted for "deterministic results", but SQLite's deterministic behavior
+        // is based on physical storage order, not value-based sorting.
 
         // Stage 6: Project columns (handles wildcards, expressions, etc.)
         // Try batch SIMD projection first for large datasets
