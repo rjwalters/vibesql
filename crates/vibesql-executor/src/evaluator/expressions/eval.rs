@@ -122,8 +122,58 @@ impl ExpressionEvaluator<'_> {
                     }
                     // For all other operators, evaluate both sides as before
                     _ => {
+                        // Check for COLLATE expressions on either side for comparison operators
+                        let is_comparison = matches!(
+                            op,
+                            vibesql_ast::BinaryOperator::Equal
+                                | vibesql_ast::BinaryOperator::NotEqual
+                                | vibesql_ast::BinaryOperator::LessThan
+                                | vibesql_ast::BinaryOperator::LessThanOrEqual
+                                | vibesql_ast::BinaryOperator::GreaterThan
+                                | vibesql_ast::BinaryOperator::GreaterThanOrEqual
+                        );
+
+                        // Extract collation if present
+                        let collation = if is_comparison {
+                            // Check left side for COLLATE
+                            if let vibesql_ast::Expression::Collate { collation, .. } = left.as_ref() {
+                                Some(collation.clone())
+                            } else if let vibesql_ast::Expression::Collate { collation, .. } = right.as_ref() {
+                                Some(collation.clone())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
                         let left_val = self.eval(left, row)?;
                         let right_val = self.eval(right, row)?;
+
+                        // Apply collation to string values if needed
+                        let (left_val, right_val) = if let Some(ref collation_name) = collation {
+                            let collation_lower = collation_name.to_lowercase();
+                            if collation_lower == "nocase" {
+                                // For NOCASE collation, uppercase both string values
+                                let left_transformed = match &left_val {
+                                    SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())),
+                                    SqlValue::Character(s) => SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())),
+                                    other => other.clone(),
+                                };
+                                let right_transformed = match &right_val {
+                                    SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())),
+                                    SqlValue::Character(s) => SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())),
+                                    other => other.clone(),
+                                };
+                                (left_transformed, right_transformed)
+                            } else {
+                                // For BINARY or other collations, use values as-is
+                                (left_val, right_val)
+                            }
+                        } else {
+                            (left_val, right_val)
+                        };
+
                         self.eval_binary_op(&left_val, op, &right_val)
                     }
                 }

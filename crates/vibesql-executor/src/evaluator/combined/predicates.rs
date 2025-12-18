@@ -30,10 +30,43 @@ impl CombinedExpressionEvaluator<'_> {
         symmetric: bool,
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        use vibesql_types::SqlValue;
+
         let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+
+        // Check if expr has a COLLATE clause BEFORE evaluation
+        let collation = if let vibesql_ast::Expression::Collate { collation, .. } = expr {
+            Some(collation.clone())
+        } else {
+            None
+        };
+
         let expr_val = self.eval(expr, row)?;
-        let mut low_val = self.eval(low, row)?;
-        let mut high_val = self.eval(high, row)?;
+        let low_val = self.eval(low, row)?;
+        let high_val = self.eval(high, row)?;
+
+        // Apply collation transformation if needed (for NOCASE, uppercase all strings)
+        let transform_for_collation = |val: SqlValue, collation_name: &str| -> SqlValue {
+            if collation_name.eq_ignore_ascii_case("nocase") {
+                match val {
+                    SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())),
+                    SqlValue::Character(s) => SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())),
+                    other => other,
+                }
+            } else {
+                val
+            }
+        };
+
+        let (expr_val, mut low_val, mut high_val) = if let Some(ref collation_name) = collation {
+            (
+                transform_for_collation(expr_val, collation_name),
+                transform_for_collation(low_val, collation_name),
+                transform_for_collation(high_val, collation_name),
+            )
+        } else {
+            (expr_val, low_val, high_val)
+        };
 
         // Check if bounds are reversed (low > high)
         let gt_result = ExpressionEvaluator::eval_binary_op_static(
