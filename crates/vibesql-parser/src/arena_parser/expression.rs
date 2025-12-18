@@ -1127,6 +1127,53 @@ impl<'arena> ArenaParser<'arena> {
             "DATE" => Ok(vibesql_types::DataType::Date),
             "TIME" => Ok(vibesql_types::DataType::Time { with_timezone: false }),
             "TIMESTAMP" => Ok(vibesql_types::DataType::Timestamp { with_timezone: false }),
+            "NUMERIC" | "DECIMAL" | "DEC" => {
+                // Parse optional precision and scale
+                if self.try_consume(&Token::LParen) {
+                    let precision = if let Token::Number(n) = self.peek() {
+                        let p = n.parse::<u8>().unwrap_or(38);
+                        self.advance();
+                        p
+                    } else {
+                        38
+                    };
+                    let scale = if self.try_consume(&Token::Comma) {
+                        if let Token::Number(n) = self.peek() {
+                            let s = n.parse::<u8>().unwrap_or(0);
+                            self.advance();
+                            s
+                        } else {
+                            0
+                        }
+                    } else {
+                        0
+                    };
+                    self.expect_token(Token::RParen)?;
+                    Ok(vibesql_types::DataType::Numeric { precision, scale })
+                } else {
+                    Ok(vibesql_types::DataType::Numeric { precision: 38, scale: 0 })
+                }
+            }
+            "UNSIGNED" => Ok(vibesql_types::DataType::Unsigned),
+            "SIGNED" => Ok(vibesql_types::DataType::Integer),
+            "BLOB" => Ok(vibesql_types::DataType::BinaryLargeObject),
+            "CHAR" => {
+                // Parse optional length
+                let length = if self.try_consume(&Token::LParen) {
+                    let len = if let Token::Number(n) = self.peek() {
+                        let l = n.parse::<usize>().unwrap_or(1);
+                        self.advance();
+                        l
+                    } else {
+                        1
+                    };
+                    self.expect_token(Token::RParen)?;
+                    len
+                } else {
+                    1
+                };
+                Ok(vibesql_types::DataType::Character { length })
+            }
             _ => {
                 // Unknown type - default to varchar
                 Ok(vibesql_types::DataType::Varchar { max_length: None })
