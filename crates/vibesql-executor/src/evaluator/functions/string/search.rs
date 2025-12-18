@@ -4,10 +4,13 @@
 //! Includes POSITION (SQL standard), INSTR and LOCATE (MySQL/Oracle)
 
 use crate::errors::ExecutorError;
+use crate::evaluator::functions::coercion::{coerce_to_integer, coerce_to_string};
 
 /// POSITION(substring IN string) - Find position (1-indexed)
 /// SQL:1999 Section 6.29: String value functions
 /// Note: This is called as POSITION('sub', 'string') in our implementation
+///
+/// SQLite compatibility: Automatically coerces numeric types to strings.
 pub(in crate::evaluator::functions) fn position(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
@@ -18,50 +21,19 @@ pub(in crate::evaluator::functions) fn position(
         )));
     }
 
-    match (&args[0], &args[1]) {
-        (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => {
-            Ok(vibesql_types::SqlValue::Null)
-        }
-        (
-            vibesql_types::SqlValue::Varchar(needle) | vibesql_types::SqlValue::Character(needle),
-            vibesql_types::SqlValue::Varchar(haystack)
-            | vibesql_types::SqlValue::Character(haystack),
-        ) => {
-            // Find returns 0-indexed position, SQL needs 1-indexed
-            match haystack.find(&**needle) {
-                Some(pos) => Ok(vibesql_types::SqlValue::Integer((pos + 1) as i64)),
-                None => Ok(vibesql_types::SqlValue::Integer(0)),
-            }
-        }
-        (a, b) => Err(ExecutorError::UnsupportedFeature(format!(
-            "POSITION requires string arguments, got {:?} and {:?}",
-            a, b
-        ))),
-    }
-}
+    // Coerce both arguments to strings
+    let needle = match coerce_to_string(&args[0]) {
+        Some(s) => s,
+        None => return Ok(vibesql_types::SqlValue::Null),
+    };
+    let haystack = match coerce_to_string(&args[1]) {
+        Some(s) => s,
+        None => return Ok(vibesql_types::SqlValue::Null),
+    };
 
-/// Convert SqlValue to string for INSTR/POSITION/LOCATE functions
-/// SQLite converts numeric values to strings for these functions
-fn sql_value_to_string(val: &vibesql_types::SqlValue) -> Option<String> {
-    match val {
-        vibesql_types::SqlValue::Null => None,
-        vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
-            Some(s.to_string())
-        }
-        vibesql_types::SqlValue::Integer(n) | vibesql_types::SqlValue::Bigint(n) => {
-            Some(n.to_string())
-        }
-        vibesql_types::SqlValue::Smallint(n) => Some(n.to_string()),
-        vibesql_types::SqlValue::Unsigned(n) => Some(n.to_string()),
-        vibesql_types::SqlValue::Double(n) | vibesql_types::SqlValue::Numeric(n) => {
-            Some(n.to_string())
-        }
-        vibesql_types::SqlValue::Float(n) | vibesql_types::SqlValue::Real(n) => {
-            Some(n.to_string())
-        }
-        vibesql_types::SqlValue::Boolean(b) => Some(if *b { "1" } else { "0" }.to_string()),
-        _ => None,
-    }
+    // Find character position (not byte position)
+    let position = find_char_position(&haystack, &needle);
+    Ok(vibesql_types::SqlValue::Integer(position))
 }
 
 /// Find character position (1-indexed) of needle in haystack
@@ -83,7 +55,8 @@ fn find_char_position(haystack: &str, needle: &str) -> i64 {
 
 /// INSTR(string, substring) - Find position of substring (1-indexed, 0 if not found)
 /// MySQL/Oracle function - returns first occurrence position
-/// SQLite converts numeric arguments to strings automatically
+///
+/// SQLite compatibility: Automatically coerces numeric types to strings.
 pub(in crate::evaluator::functions) fn instr(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
@@ -94,27 +67,15 @@ pub(in crate::evaluator::functions) fn instr(
         )));
     }
 
-    // Handle NULL arguments
-    if matches!(&args[0], vibesql_types::SqlValue::Null)
-        || matches!(&args[1], vibesql_types::SqlValue::Null)
-    {
-        return Ok(vibesql_types::SqlValue::Null);
-    }
-
-    // Convert both arguments to strings (SQLite does this for numbers)
-    let haystack = sql_value_to_string(&args[0]).ok_or_else(|| {
-        ExecutorError::UnsupportedFeature(format!(
-            "INSTR cannot convert first argument to string: {:?}",
-            args[0]
-        ))
-    })?;
-
-    let needle = sql_value_to_string(&args[1]).ok_or_else(|| {
-        ExecutorError::UnsupportedFeature(format!(
-            "INSTR cannot convert second argument to string: {:?}",
-            args[1]
-        ))
-    })?;
+    // Coerce both arguments to strings
+    let haystack = match coerce_to_string(&args[0]) {
+        Some(s) => s,
+        None => return Ok(vibesql_types::SqlValue::Null),
+    };
+    let needle = match coerce_to_string(&args[1]) {
+        Some(s) => s,
+        None => return Ok(vibesql_types::SqlValue::Null),
+    };
 
     // Find character position (not byte position)
     let position = find_char_position(&haystack, &needle);
@@ -123,6 +84,8 @@ pub(in crate::evaluator::functions) fn instr(
 
 /// LOCATE(substring, string, [start]) - Find position of substring with optional start
 /// Note: Arguments reversed compared to INSTR (needle, haystack vs haystack, needle)
+///
+/// SQLite compatibility: Automatically coerces numeric types to strings.
 pub(in crate::evaluator::functions) fn locate(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
@@ -133,48 +96,38 @@ pub(in crate::evaluator::functions) fn locate(
         )));
     }
 
-    match (&args[0], &args[1]) {
-        (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => {
-            Ok(vibesql_types::SqlValue::Null)
-        }
-        (
-            vibesql_types::SqlValue::Varchar(needle) | vibesql_types::SqlValue::Character(needle),
-            vibesql_types::SqlValue::Varchar(haystack)
-            | vibesql_types::SqlValue::Character(haystack),
-        ) => {
-            // Optional start position (1-indexed, default to 1)
-            let start_pos = if args.len() == 3 {
-                match &args[2] {
-                    vibesql_types::SqlValue::Integer(s) => {
-                        // Convert from 1-indexed to 0-indexed, clamp to 0
-                        ((*s - 1).max(0) as usize).min(haystack.len())
-                    }
-                    vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
-                    val => {
-                        return Err(ExecutorError::UnsupportedFeature(format!(
-                            "LOCATE start position must be integer, got {:?}",
-                            val
-                        )))
-                    }
-                }
-            } else {
-                0
-            };
+    // Coerce first two arguments to strings
+    let needle = match coerce_to_string(&args[0]) {
+        Some(s) => s,
+        None => return Ok(vibesql_types::SqlValue::Null),
+    };
+    let haystack = match coerce_to_string(&args[1]) {
+        Some(s) => s,
+        None => return Ok(vibesql_types::SqlValue::Null),
+    };
 
-            // Search from start position
-            let position = if start_pos >= haystack.len() {
-                0 // Start beyond string length -> not found
-            } else {
-                haystack[start_pos..].find(&**needle)
-                    .map(|pos| (pos + start_pos + 1) as i64) // Convert to 1-indexed
-                    .unwrap_or(0)
-            };
-
-            Ok(vibesql_types::SqlValue::Integer(position))
+    // Optional start position (1-indexed, default to 1) with coercion
+    let start_pos = if args.len() == 3 {
+        match coerce_to_integer(&args[2]) {
+            Some(s) => {
+                // Convert from 1-indexed to 0-indexed, clamp to 0
+                ((s - 1).max(0) as usize).min(haystack.len())
+            }
+            None => return Ok(vibesql_types::SqlValue::Null),
         }
-        (needle, haystack) => Err(ExecutorError::UnsupportedFeature(format!(
-            "LOCATE requires string arguments, got {:?} and {:?}",
-            needle, haystack
-        ))),
-    }
+    } else {
+        0
+    };
+
+    // Search from start position
+    let position = if start_pos >= haystack.len() {
+        0 // Start beyond string length -> not found
+    } else {
+        haystack[start_pos..]
+            .find(&needle)
+            .map(|pos| (pos + start_pos + 1) as i64) // Convert to 1-indexed
+            .unwrap_or(0)
+    };
+
+    Ok(vibesql_types::SqlValue::Integer(position))
 }

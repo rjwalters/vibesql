@@ -3,10 +3,13 @@
 //! SQL:1999 Section 6.29: String value functions
 
 use crate::errors::ExecutorError;
+use crate::evaluator::functions::coercion::coerce_to_string;
 
 /// CHAR_LENGTH(string [USING unit]) / CHARACTER_LENGTH(string [USING unit])
 /// Return string length in characters or octets
 /// SQL:1999 Section 6.29: String value functions
+///
+/// SQLite compatibility: Automatically coerces numeric types to strings.
 pub(in crate::evaluator::functions) fn char_length(
     args: &[vibesql_types::SqlValue],
     name: &str,
@@ -20,9 +23,9 @@ pub(in crate::evaluator::functions) fn char_length(
         )));
     }
 
-    match &args[0] {
-        vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
-        vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+    match coerce_to_string(&args[0]) {
+        None => Ok(vibesql_types::SqlValue::Null),
+        Some(s) => {
             // Determine unit: CHARACTERS (default) or OCTETS
             let length = match character_unit {
                 Some(vibesql_ast::CharacterUnit::Octets) => {
@@ -36,10 +39,6 @@ pub(in crate::evaluator::functions) fn char_length(
             };
             Ok(vibesql_types::SqlValue::Integer(length))
         }
-        val => Err(ExecutorError::UnsupportedFeature(format!(
-            "{} requires string argument, got {:?}",
-            name, val
-        ))),
     }
 }
 
@@ -48,6 +47,9 @@ pub(in crate::evaluator::functions) fn char_length(
 /// Returns byte length, not character count. For UTF-8:
 /// - ASCII characters: 1 byte each
 /// - Multi-byte characters: 2-4 bytes each
+///
+/// SQLite compatibility: Automatically coerces numeric types to strings.
+/// - OCTET_LENGTH(7.5) returns 3 (length of "7.5")
 pub(in crate::evaluator::functions) fn octet_length(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
@@ -58,16 +60,9 @@ pub(in crate::evaluator::functions) fn octet_length(
         )));
     }
 
-    match &args[0] {
-        vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
-        vibesql_types::SqlValue::Varchar(s) => Ok(vibesql_types::SqlValue::Integer(s.len() as i64)),
-        vibesql_types::SqlValue::Character(s) => {
-            Ok(vibesql_types::SqlValue::Integer(s.len() as i64))
-        }
-        val => Err(ExecutorError::UnsupportedFeature(format!(
-            "OCTET_LENGTH requires string argument, got {:?}",
-            val
-        ))),
+    match coerce_to_string(&args[0]) {
+        None => Ok(vibesql_types::SqlValue::Null),
+        Some(s) => Ok(vibesql_types::SqlValue::Integer(s.len() as i64)),
     }
 }
 

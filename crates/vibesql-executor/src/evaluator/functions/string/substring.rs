@@ -2,9 +2,8 @@
 //!
 //! SQL:1999 Section 6.29: String value functions
 
-use std::borrow::Cow;
-
 use crate::errors::ExecutorError;
+use crate::evaluator::functions::coercion::{coerce_to_integer, coerce_to_string};
 
 /// SUBSTRING(string, start [, length]) - Extract substring (SQLite compatible)
 ///
@@ -14,6 +13,9 @@ use crate::errors::ExecutorError;
 /// - Zero start: treated as position before first character
 /// - Negative length: extract leftward from start position
 /// - Zero length: return empty string
+///
+/// SQLite compatibility: Automatically coerces numeric types to strings.
+/// - SUBSTR(12345, 2, 3) returns "234"
 pub(in crate::evaluator::functions) fn substring(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
@@ -35,43 +37,21 @@ pub(in crate::evaluator::functions) fn substring(
         return Ok(vibesql_types::SqlValue::Null);
     }
 
-    // Extract string - supports implicit coercion from Date/Timestamp to string
-    // This enables TPC-H Q9 pattern: SUBSTR(o_orderdate, 1, 4) to extract year
-    let s: Cow<str> = match string_val {
-        vibesql_types::SqlValue::Varchar(s) => Cow::Borrowed(&**s),
-        vibesql_types::SqlValue::Character(s) => Cow::Borrowed(&**s),
-        vibesql_types::SqlValue::Date(d) => Cow::Owned(d.to_string()),
-        vibesql_types::SqlValue::Timestamp(ts) => Cow::Owned(ts.to_string()),
-        _ => {
-            return Err(ExecutorError::UnsupportedFeature(format!(
-                "SUBSTRING requires string or date/timestamp argument, got {:?}",
-                string_val
-            )))
-        }
+    // Extract string with coercion (supports numeric types)
+    let s = match coerce_to_string(string_val) {
+        Some(s) => s,
+        None => return Ok(vibesql_types::SqlValue::Null),
     };
 
-    // Extract start position (1-based in SQL)
-    let start = match start_val {
-        vibesql_types::SqlValue::Integer(n) => *n,
-        _ => {
-            return Err(ExecutorError::UnsupportedFeature(format!(
-                "SUBSTRING start position must be integer, got {:?}",
-                start_val
-            )))
-        }
+    // Extract start position (1-based in SQL) with coercion
+    let start = match coerce_to_integer(start_val) {
+        Some(n) => n,
+        None => return Ok(vibesql_types::SqlValue::Null),
     };
 
-    // Extract optional length
+    // Extract optional length with coercion
     let length = if let Some(len_val) = length_val {
-        match len_val {
-            vibesql_types::SqlValue::Integer(n) => Some(*n),
-            _ => {
-                return Err(ExecutorError::UnsupportedFeature(format!(
-                    "SUBSTRING length must be integer, got {:?}",
-                    len_val
-                )))
-            }
-        }
+        coerce_to_integer(len_val)
     } else {
         None
     };
