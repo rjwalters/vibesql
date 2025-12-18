@@ -130,6 +130,8 @@ pub(super) fn eval_scalar_function(
         "UNLIKELY" => sqlite_compat::unlikely(args),
         "LIKELIHOOD" => sqlite_compat::likelihood(args),
         "IFNULL" => sqlite_compat::ifnull(args),
+        "RANDOM" => sqlite_compat::random(args),
+        "RANDOMBLOB" => sqlite_compat::randomblob(args),
         "HEX" => sqlite_compat::hex(args),
         "UNHEX" => sqlite_compat::unhex(args),
         "ZEROBLOB" => sqlite_compat::zeroblob(args),

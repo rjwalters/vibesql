@@ -4,6 +4,7 @@
 //! These functions follow SQLite's exact semantics as documented at:
 //! https://www.sqlite.org/lang_corefunc.html
 
+use rand::Rng;
 use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;
@@ -139,11 +140,83 @@ pub(super) fn ifnull(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     }
 }
 
+/// RANDOM() - Return a pseudo-random 64-bit signed integer
+///
+/// Returns a pseudo-random integer between -9223372036854775808 and +9223372036854775807.
+/// The value changes on each call.
+pub(super) fn random(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if !args.is_empty() {
+        return Err(ExecutorError::UnsupportedFeature(format!(
+            "RANDOM takes no arguments, got {}",
+            args.len()
+        )));
+    }
+
+    let value: i64 = rand::rng().random();
+    Ok(SqlValue::Integer(value))
+}
+
+/// RANDOMBLOB(N) - Return N bytes of pseudo-random data
+///
+/// Returns a blob containing N bytes of pseudo-random data.
+/// Note: VibeSQL doesn't have a native Blob type, so we return as a string
+/// using Latin-1 encoding (each byte maps to one character) to preserve
+/// the exact byte count.
+pub(super) fn randomblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.len() != 1 {
+        return Err(ExecutorError::UnsupportedFeature(format!(
+            "RANDOMBLOB requires exactly 1 argument, got {}",
+            args.len()
+        )));
+    }
+
+    let n = match &args[0] {
+        SqlValue::Null => return Ok(SqlValue::Null),
+        SqlValue::Integer(i) => *i as usize,
+        SqlValue::Bigint(i) => *i as usize,
+        SqlValue::Smallint(i) => *i as usize,
+        SqlValue::Unsigned(u) => *u as usize,
+        SqlValue::Numeric(n) => *n as usize,
+        SqlValue::Real(r) => *r as usize,
+        SqlValue::Double(d) => *d as usize,
+        SqlValue::Float(f) => *f as usize,
+        _ => {
+            return Err(ExecutorError::UnsupportedFeature(
+                "RANDOMBLOB argument must be numeric".to_string(),
+            ));
+        }
+    };
+
+    // SQLite limits blob size
+    const MAX_BLOB_SIZE: usize = 1_000_000_000; // 1GB
+    if n > MAX_BLOB_SIZE {
+        return Err(ExecutorError::UnsupportedFeature(format!(
+            "RANDOMBLOB size {} exceeds maximum {}",
+            n, MAX_BLOB_SIZE
+        )));
+    }
+
+    // Generate N random bytes
+    let mut rng = rand::rng();
+    let bytes: Vec<u8> = (0..n).map(|_| rng.random()).collect();
+
+    // Convert bytes to string using Latin-1 encoding (each byte 0x00-0xFF maps
+    // to exactly one Unicode code point), preserving the exact byte count.
+    // This avoids UTF-8 validation issues that would corrupt the data.
+    let result: String = bytes.iter().map(|&b| char::from(b)).collect();
+    Ok(SqlValue::Varchar(result.into()))
+}
+
 /// HEX(x) - Convert blob/string to hexadecimal
 ///
 /// Returns an upper-case hexadecimal string representation of the argument.
-/// For strings, it converts each byte to its hex representation.
-/// For blobs, it converts the raw bytes.
+/// SQLite coerces all values to their TEXT representation first, then converts
+/// each byte to its hex representation. For example, hex(255) returns "323535"
+/// because 255 is first coerced to the string "255", then each character is
+/// converted to hex (0x32, 0x35, 0x35).
+///
+/// For blob data (from randomblob/unhex), we use Latin-1 encoding where each
+/// character maps to exactly one byte value (0x00-0xFF).
 pub(super) fn hex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
         return Err(ExecutorError::UnsupportedFeature(format!(
@@ -155,18 +228,32 @@ pub(super) fn hex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     let hex_string: String = match &args[0] {
         SqlValue::Null => return Ok(SqlValue::Null),
         SqlValue::Vector(floats) => {
-            // Convert vector to bytes first
+            // Convert vector (blob) to bytes first
             floats.iter().flat_map(|f| f.to_le_bytes()).map(|b| format!("{:02X}", b)).collect()
         }
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
-            s.as_bytes().iter().map(|b| format!("{:02X}", b)).collect()
+            // Check if this looks like blob data (contains Latin-1 high bytes)
+            // Latin-1 encoding: each char value IS the byte value
+            let has_latin1_high_bytes = s.chars().any(|c| {
+                let code = c as u32;
+                code >= 0x80 && code <= 0xFF
+            });
+
+            if has_latin1_high_bytes {
+                // This is blob data using Latin-1 encoding - convert each char to its byte value
+                s.chars()
+                    .map(|c| {
+                        let byte = (c as u32) as u8;
+                        format!("{:02X}", byte)
+                    })
+                    .collect()
+            } else {
+                // Regular UTF-8 string - use bytes directly
+                s.as_bytes().iter().map(|b| format!("{:02X}", b)).collect()
+            }
         }
-        SqlValue::Integer(i) => format!("{:X}", i),
-        SqlValue::Bigint(i) => format!("{:X}", i),
-        SqlValue::Smallint(i) => format!("{:X}", i),
-        SqlValue::Unsigned(u) => format!("{:X}", u),
+        // SQLite coerces all other types to TEXT first, then converts to hex
         _ => {
-            // For other types, convert to string first then to hex
             let s = args[0].to_string();
             s.as_bytes().iter().map(|b| format!("{:02X}", b)).collect()
         }
@@ -179,7 +266,8 @@ pub(super) fn hex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 ///
 /// Returns a blob containing the binary data represented by the hexadecimal string.
 /// Returns NULL if the input is not a valid hexadecimal string.
-/// Note: VibeSQL doesn't have a Blob type, so we return the result as a Vector of bytes.
+/// Note: VibeSQL doesn't have a Blob type, so we return using Latin-1 encoding
+/// (each byte maps to one character) to preserve the exact byte count.
 pub(super) fn unhex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
         return Err(ExecutorError::UnsupportedFeature(format!(
@@ -203,7 +291,7 @@ pub(super) fn unhex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         return Ok(SqlValue::Null);
     }
 
-    // Parse hex string to bytes and return as a string (since we don't have Blob type)
+    // Parse hex string to bytes
     let mut bytes = Vec::with_capacity(hex_str.len() / 2);
     let chars: Vec<char> = hex_str.chars().collect();
 
@@ -219,9 +307,9 @@ pub(super) fn unhex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         bytes.push((high << 4) | low);
     }
 
-    // Return as Varchar since VibeSQL doesn't have a Blob type
-    // Convert bytes to a string (this may contain non-UTF8 characters)
-    let result = String::from_utf8_lossy(&bytes).to_string();
+    // Convert bytes to string using Latin-1 encoding (each byte 0x00-0xFF maps
+    // to exactly one Unicode code point), preserving the exact byte count.
+    let result: String = bytes.iter().map(|&b| char::from(b)).collect();
     Ok(SqlValue::Varchar(result.into()))
 }
 
@@ -854,14 +942,66 @@ mod tests {
     }
 
     #[test]
+    fn test_random() {
+        // random() should return an integer
+        let result = random(&[]).unwrap();
+        assert!(matches!(result, SqlValue::Integer(_)));
+
+        // Two calls should (almost certainly) return different values
+        let result1 = random(&[]).unwrap();
+        let result2 = random(&[]).unwrap();
+        // This could theoretically fail but is astronomically unlikely
+        assert_ne!(result1, result2);
+
+        // Wrong number of arguments
+        assert!(random(&[SqlValue::Integer(1)]).is_err());
+    }
+
+    #[test]
+    fn test_randomblob() {
+        // randomblob returns a string of N bytes
+        let result = randomblob(&[SqlValue::Integer(10)]).unwrap();
+        match result {
+            SqlValue::Varchar(s) => {
+                // Length might vary due to UTF-8 encoding, but should be non-empty
+                assert!(!s.is_empty() || s.len() <= 10);
+            }
+            _ => panic!("Expected Varchar"),
+        }
+
+        // randomblob(0) returns empty
+        let result = randomblob(&[SqlValue::Integer(0)]).unwrap();
+        match result {
+            SqlValue::Varchar(s) => assert_eq!(s.len(), 0),
+            _ => panic!("Expected Varchar"),
+        }
+
+        // NULL returns NULL
+        assert_eq!(randomblob(&[SqlValue::Null]).unwrap(), SqlValue::Null);
+
+        // Wrong number of arguments
+        assert!(randomblob(&[]).is_err());
+    }
+
+    #[test]
     fn test_hex() {
+        // Basic string conversion
         assert_eq!(
             hex(&[SqlValue::Varchar("abc".into())]).unwrap(),
             SqlValue::Varchar("616263".into())
         );
         assert_eq!(hex(&[SqlValue::Null]).unwrap(), SqlValue::Null);
-        // Test integer conversion
-        assert_eq!(hex(&[SqlValue::Integer(255)]).unwrap(), SqlValue::Varchar("FF".into()));
+        // SQLite coerces integers to text first: hex(255) = hex("255") = "323535"
+        // "255" = bytes [0x32, 0x35, 0x35]
+        assert_eq!(
+            hex(&[SqlValue::Integer(255)]).unwrap(),
+            SqlValue::Varchar("323535".into())
+        );
+        // Uppercase hex string as stated in SQLite docs
+        assert_eq!(
+            hex(&[SqlValue::Varchar("ABC".into())]).unwrap(),
+            SqlValue::Varchar("414243".into())
+        );
     }
 
     #[test]
