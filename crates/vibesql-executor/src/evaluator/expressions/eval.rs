@@ -1,11 +1,119 @@
 //! Main evaluation entry point and basic expression types
 
-use vibesql_types::SqlValue;
+use vibesql_types::{SqlValue, TypeAffinity};
 
 use super::super::core::ExpressionEvaluator;
 use crate::errors::ExecutorError;
 
 impl ExpressionEvaluator<'_> {
+    /// Get the SQLite type affinity of an expression if it's a column reference.
+    ///
+    /// Returns Some(affinity) if the expression is a column reference and we can
+    /// determine its declared type from the schema. Returns None for literals,
+    /// function calls, and other non-column expressions.
+    ///
+    /// This is used to implement SQLite's type affinity rules for comparisons:
+    /// - TEXT column vs INTEGER literal → convert INTEGER to TEXT, string compare
+    /// - Bare column (NONE affinity) vs INTEGER → type ordering (TEXT > INTEGER)
+    pub(super) fn get_expression_affinity(&self, expr: &vibesql_ast::Expression) -> Option<TypeAffinity> {
+        match expr {
+            vibesql_ast::Expression::ColumnRef(col_id) => {
+                // Look up the column in the schema to get its declared type
+                let column_name = col_id.column_canonical();
+                if let Some(col_idx) = self.schema.get_column_index(column_name) {
+                    let col_schema = &self.schema.columns[col_idx];
+                    Some(col_schema.data_type.sqlite_affinity())
+                } else {
+                    // Column not found in schema - treat as NONE affinity
+                    Some(TypeAffinity::None)
+                }
+            }
+            // For COLLATE expressions, get affinity of the inner expression
+            vibesql_ast::Expression::Collate { expr, .. } => self.get_expression_affinity(expr),
+            // Literals, functions, and other expressions don't have column affinity
+            _ => None,
+        }
+    }
+
+    /// Check if an expression is a numeric literal (INTEGER or REAL).
+    pub(super) fn is_numeric_literal(&self, expr: &vibesql_ast::Expression) -> bool {
+        match expr {
+            vibesql_ast::Expression::Literal(val) => {
+                matches!(
+                    val,
+                    SqlValue::Integer(_)
+                        | SqlValue::Smallint(_)
+                        | SqlValue::Bigint(_)
+                        | SqlValue::Unsigned(_)
+                        | SqlValue::Float(_)
+                        | SqlValue::Real(_)
+                        | SqlValue::Double(_)
+                        | SqlValue::Numeric(_)
+                )
+            }
+            _ => false,
+        }
+    }
+
+    /// Apply SQLite affinity rules for comparisons.
+    ///
+    /// When comparing a TEXT-affinity column to an INTEGER literal, SQLite:
+    /// 1. Converts the INTEGER to TEXT
+    /// 2. Performs string comparison
+    ///
+    /// This function returns modified values based on affinity rules.
+    pub(super) fn apply_affinity_for_comparison(
+        &self,
+        left_expr: &vibesql_ast::Expression,
+        left_val: SqlValue,
+        right_expr: &vibesql_ast::Expression,
+        right_val: SqlValue,
+    ) -> (SqlValue, SqlValue) {
+        let left_affinity = self.get_expression_affinity(left_expr);
+        let right_affinity = self.get_expression_affinity(right_expr);
+
+        // Case 1: Left is TEXT column, right is numeric literal
+        // Convert the numeric literal to text for string comparison
+        if left_affinity == Some(TypeAffinity::Text) && self.is_numeric_literal(right_expr) {
+            let right_as_text = match &right_val {
+                SqlValue::Integer(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Smallint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Bigint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Unsigned(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                _ => right_val,
+            };
+            return (left_val, right_as_text);
+        }
+
+        // Case 2: Right is TEXT column, left is numeric literal
+        // Convert the numeric literal to text for string comparison
+        if right_affinity == Some(TypeAffinity::Text) && self.is_numeric_literal(left_expr) {
+            let left_as_text = match &left_val {
+                SqlValue::Integer(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Smallint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Bigint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Unsigned(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                _ => left_val,
+            };
+            return (left_as_text, right_val);
+        }
+
+        // No affinity conversion needed - use original values
+        // This includes:
+        // - Bare columns (NONE affinity) vs numeric → type ordering (handled in compare)
+        // - Literal vs literal → type ordering (handled in compare)
+        // - Same-type comparisons → direct comparison
+        (left_val, right_val)
+    }
+
     /// Evaluate an expression in the context of a row
     #[inline]
     pub fn eval(
@@ -170,6 +278,14 @@ impl ExpressionEvaluator<'_> {
                                 // For BINARY or other collations, use values as-is
                                 (left_val, right_val)
                             }
+                        } else {
+                            (left_val, right_val)
+                        };
+
+                        // Apply SQLite type affinity rules for comparisons
+                        // TEXT column vs INTEGER literal → convert INTEGER to TEXT, string compare
+                        let (left_val, right_val) = if is_comparison {
+                            self.apply_affinity_for_comparison(left, left_val, right, right_val)
                         } else {
                             (left_val, right_val)
                         };

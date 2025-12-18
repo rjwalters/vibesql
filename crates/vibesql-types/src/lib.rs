@@ -12,7 +12,7 @@ mod sql_value;
 mod temporal;
 
 // Re-export all public types to maintain the same public API
-pub use data_type::DataType;
+pub use data_type::{DataType, TypeAffinity};
 pub use sql_mode::{
     types::{TypeBehavior, ValueType},
     ConcatOperator, DivisionBehavior, MySqlModeFlags, OperatorBehavior, SqlMode,
