@@ -56,7 +56,7 @@ impl ExpressionEvaluator<'_> {
             }
         };
 
-        let (expr_val, mut low_val, mut high_val) = if let Some(ref collation_name) = collation {
+        let (expr_val, low_val, high_val) = if let Some(ref collation_name) = collation {
             (
                 transform_for_collation(expr_val, collation_name),
                 transform_for_collation(low_val, collation_name),
@@ -65,6 +65,11 @@ impl ExpressionEvaluator<'_> {
         } else {
             (expr_val, low_val, high_val)
         };
+
+        // Apply SQLite type affinity rules for BETWEEN comparisons
+        // TEXT column vs INTEGER literal → convert INTEGER to TEXT, string compare
+        let (expr_val, mut low_val) = self.apply_affinity_for_comparison(expr, expr_val, low, low_val);
+        let (expr_val, mut high_val) = self.apply_affinity_for_comparison(expr, expr_val, high, high_val);
 
         // Check if bounds are reversed (low > high)
         let gt_result = Self::eval_binary_op_static(

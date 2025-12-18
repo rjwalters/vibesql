@@ -2,6 +2,33 @@
 
 use crate::temporal::IntervalField;
 
+/// SQLite Type Affinity
+///
+/// SQLite uses type affinity to determine how values are compared and stored.
+/// This enum represents the five affinity types defined by SQLite:
+/// - TEXT: String comparison semantics
+/// - NUMERIC: Numeric comparison, converts strings to numbers when possible
+/// - INTEGER: Prefers integer storage
+/// - REAL: Floating-point storage
+/// - BLOB/NONE: No affinity, uses type ordering for cross-type comparisons
+///
+/// See: https://www.sqlite.org/datatype3.html
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeAffinity {
+    /// TEXT affinity - string comparison semantics
+    /// When comparing TEXT vs INTEGER, converts INTEGER to TEXT
+    Text,
+    /// NUMERIC affinity - tries to convert to number first
+    Numeric,
+    /// INTEGER affinity - prefers integer storage
+    Integer,
+    /// REAL affinity - floating-point storage
+    Real,
+    /// BLOB/NONE affinity - no type preference, uses type ordering
+    /// This is used for bare columns with no declared type
+    None,
+}
+
 /// SQL:1999 Data Types
 ///
 /// Represents the type of a column or expression in SQL.
@@ -385,5 +412,58 @@ impl DataType {
         };
 
         ENUM_OVERHEAD + value_size
+    }
+
+    /// Returns the SQLite type affinity for this data type.
+    ///
+    /// SQLite determines affinity based on the declared type name:
+    /// 1. If the type contains "INT" → INTEGER affinity
+    /// 2. If the type contains "CHAR", "CLOB", or "TEXT" → TEXT affinity
+    /// 3. If the type contains "BLOB" or has no type → BLOB/NONE affinity
+    /// 4. If the type contains "REAL", "FLOA", or "DOUB" → REAL affinity
+    /// 5. Otherwise → NUMERIC affinity
+    ///
+    /// See: https://www.sqlite.org/datatype3.html#type_affinity
+    pub fn sqlite_affinity(&self) -> TypeAffinity {
+        match self {
+            // Integer types → INTEGER affinity
+            DataType::Integer | DataType::Smallint | DataType::Bigint | DataType::Unsigned => {
+                TypeAffinity::Integer
+            }
+
+            // Character/Text types → TEXT affinity
+            DataType::Character { .. }
+            | DataType::Varchar { .. }
+            | DataType::CharacterLargeObject
+            | DataType::Name => TypeAffinity::Text,
+
+            // Floating-point types → REAL affinity
+            DataType::Real | DataType::Float { .. } | DataType::DoublePrecision => {
+                TypeAffinity::Real
+            }
+
+            // Decimal/Numeric → NUMERIC affinity
+            DataType::Decimal { .. } | DataType::Numeric { .. } => TypeAffinity::Numeric,
+
+            // Binary types → NONE/BLOB affinity
+            DataType::BinaryLargeObject | DataType::Bit { .. } => TypeAffinity::None,
+
+            // Boolean → NUMERIC affinity (SQLite stores as 0/1)
+            DataType::Boolean => TypeAffinity::Numeric,
+
+            // Temporal types → NUMERIC affinity (SQLite stores as numbers or text)
+            DataType::Date | DataType::Time { .. } | DataType::Timestamp { .. } => {
+                TypeAffinity::Numeric
+            }
+
+            // Interval → NUMERIC affinity
+            DataType::Interval { .. } => TypeAffinity::Numeric,
+
+            // Vector → NONE affinity (custom type)
+            DataType::Vector { .. } => TypeAffinity::None,
+
+            // User-defined and NULL → NONE affinity
+            DataType::UserDefined { .. } | DataType::Null => TypeAffinity::None,
+        }
     }
 }
