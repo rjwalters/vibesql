@@ -26,6 +26,10 @@ pub struct TableSchema {
     pub foreign_keys: Vec<ForeignKeyConstraint>,
     /// Storage format for this table (row-oriented or columnar)
     pub storage_format: StorageFormat,
+    /// Index of INTEGER PRIMARY KEY column that serves as rowid alias (SQLite compatibility)
+    /// When set, this column's value IS the rowid, and references to rowid should return this
+    /// column's value. Only set for single-column INTEGER (exact type) PRIMARY KEYs.
+    pub rowid_alias_column: Option<usize>,
 }
 
 impl TableSchema {
@@ -46,6 +50,7 @@ impl TableSchema {
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
             storage_format: StorageFormat::default(),
+            rowid_alias_column: None,
         }
     }
 
@@ -67,6 +72,7 @@ impl TableSchema {
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
             storage_format: StorageFormat::default(),
+            rowid_alias_column: None,
         }
     }
 
@@ -88,6 +94,7 @@ impl TableSchema {
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
             storage_format: StorageFormat::default(),
+            rowid_alias_column: None,
         }
     }
 
@@ -109,6 +116,7 @@ impl TableSchema {
             check_constraints: Vec::new(),
             foreign_keys,
             storage_format: StorageFormat::default(),
+            rowid_alias_column: None,
         }
     }
 
@@ -131,6 +139,7 @@ impl TableSchema {
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
             storage_format: StorageFormat::default(),
+            rowid_alias_column: None,
         }
     }
 
@@ -155,6 +164,7 @@ impl TableSchema {
             check_constraints,
             foreign_keys,
             storage_format: StorageFormat::default(),
+            rowid_alias_column: None,
         }
     }
 
@@ -176,12 +186,19 @@ impl TableSchema {
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
             storage_format,
+            rowid_alias_column: None,
         }
     }
 
     /// Set the storage format for this table
     pub fn set_storage_format(&mut self, storage_format: StorageFormat) {
         self.storage_format = storage_format;
+    }
+
+    /// Set the rowid alias column (for INTEGER PRIMARY KEY columns)
+    /// This column's value IS the rowid in SQLite compatibility mode
+    pub fn set_rowid_alias_column(&mut self, column_index: Option<usize>) {
+        self.rowid_alias_column = column_index;
     }
 
     /// Check if this table uses columnar storage

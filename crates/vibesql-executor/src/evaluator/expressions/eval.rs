@@ -572,6 +572,16 @@ impl ExpressionEvaluator<'_> {
         if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
             // First check if schema has a real column with this name
             if self.schema.get_column_index(column).is_none() {
+                // Issue #4536: Check for INTEGER PRIMARY KEY alias column
+                // If the table has an INTEGER PRIMARY KEY, it acts as an alias for rowid.
+                // The column's value IS the rowid, so return that column's value.
+                if let Some(ipk_col_idx) = self.schema.rowid_alias_column {
+                    return row
+                        .get(ipk_col_idx)
+                        .cloned()
+                        .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: ipk_col_idx });
+                }
+
                 // Use get_row_id_for_table to handle both single-table and multi-table (JOIN) rows
                 // This fixes issue #4370 where qualified ROWIDs like `t1.rowid` returned NULL in JOINs
                 if let Some(row_id) = row.get_row_id_for_table(table_qualifier) {

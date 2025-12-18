@@ -175,6 +175,21 @@ impl CreateTableExecutor {
         // Apply constraint results to schema (sets PK, unique, and check constraints)
         ConstraintValidator::apply_to_schema(&mut table_schema, &constraint_result);
 
+        // Detect INTEGER PRIMARY KEY for SQLite rowid aliasing (Issue #4536)
+        // In SQLite, a single-column PRIMARY KEY with INTEGER type is an alias for rowid.
+        // The column's value IS the rowid, and SELECT rowid returns this column's value.
+        if let Some(pk_cols) = &table_schema.primary_key {
+            if pk_cols.len() == 1 {
+                if let Some(col_idx) = table_schema.get_column_index(&pk_cols[0]) {
+                    let col_type = &table_schema.columns[col_idx].data_type;
+                    // Only INTEGER (not BIGINT, INT, etc.) qualifies for rowid aliasing
+                    if matches!(col_type, DataType::Integer) {
+                        table_schema.set_rowid_alias_column(Some(col_idx));
+                    }
+                }
+            }
+        }
+
         // Check for STORAGE table option and apply storage format
         for option in &stmt.table_options {
             if let vibesql_ast::TableOption::Storage(format) = option {
