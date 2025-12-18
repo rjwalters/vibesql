@@ -358,6 +358,56 @@ proc translate_error_to_sqlite {vibesql_error} {
 # Core SQL execution
 #-----------------------------------------------------------------------------
 
+# Stack-walking TCL variable substitution
+# This emulates SQLite's parameter binding where $var in SQL refers to TCL variables.
+# Unlike simple `uplevel 1 subst`, this walks the call stack to find variables
+# defined in outer scopes (e.g., for loops, foreach, parent procs).
+#
+# The algorithm:
+# 1. Try progressively higher stack levels (1, 2, 3, ...)
+# 2. At each level, attempt variable substitution
+# 3. Check if all $var patterns have been resolved
+# 4. Return the first fully-substituted result, or best effort if none fully succeed
+proc substitute_tcl_vars {sql} {
+    # Quick check: if no $ variables, return immediately
+    if {![regexp {\$[a-zA-Z_]} $sql]} {
+        return $sql
+    }
+
+    # Get the maximum stack depth to search
+    set max_level [info level]
+
+    # Track the best result we've found (fewest remaining $vars)
+    set best_result $sql
+    set best_unresolved_count [regexp -all {\$[a-zA-Z_]\w*} $sql]
+
+    # Try progressively higher stack levels
+    for {set level 1} {$level <= $max_level} {incr level} {
+        # Try substitution at this level
+        if {[catch {set result [uplevel $level [list subst -nocommands -nobackslashes $sql]]} err]} {
+            # Substitution failed at this level (variable not found) - continue to next level
+            continue
+        }
+
+        # Count remaining unresolved $variables
+        set unresolved [regexp -all {\$[a-zA-Z_]\w*} $result]
+
+        # If all variables resolved, return immediately
+        if {$unresolved == 0} {
+            return $result
+        }
+
+        # Track if this is better than our current best
+        if {$unresolved < $best_unresolved_count} {
+            set best_result $result
+            set best_unresolved_count $unresolved
+        }
+    }
+
+    # Return the best result we found
+    return $best_result
+}
+
 # Build PRAGMA prefix to prepend to SQL for consistent session state
 proc build_pragma_prefix {} {
     set prefix ""
@@ -527,9 +577,8 @@ proc execsql {sql {db ""}} {
 
     # Substitute TCL variables in the SQL string (emulate SQLite's parameter binding)
     # SQLite's TCL interface binds $variable to TCL variables of the same name.
-    # We emulate this by substituting variables from the caller's scope.
-    # Use -nocommands to avoid evaluating [commands] and -nobackslashes for literal \
-    catch {set sql [uplevel 1 [list subst -nocommands -nobackslashes $sql]]}
+    # We use stack-walking substitution to find variables in outer scopes (for loops, etc.)
+    set sql [substitute_tcl_vars $sql]
 
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
@@ -887,7 +936,8 @@ proc execsql_with_headers {sql {db ""}} {
     # Execute SQL and return {headers rows} for iteration
 
     # Substitute TCL variables in the SQL string (emulate SQLite's parameter binding)
-    catch {set sql [uplevel 1 [list subst -nocommands -nobackslashes $sql]]}
+    # We use stack-walking substitution to find variables in outer scopes (for loops, etc.)
+    set sql [substitute_tcl_vars $sql]
 
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
@@ -921,7 +971,8 @@ proc execsql2 {sql {db ""}} {
     #   Output: a 3 b 4 a 3 b 4 (using last value for each column name occurrence)
 
     # Substitute TCL variables in the SQL string (emulate SQLite's parameter binding)
-    catch {set sql [uplevel 1 [list subst -nocommands -nobackslashes $sql]]}
+    # We use stack-walking substitution to find variables in outer scopes (for loops, etc.)
+    set sql [substitute_tcl_vars $sql]
 
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
@@ -1059,10 +1110,10 @@ proc do_execsql_test {name sql {expected {}}} {
     # Convenience wrapper for SQL execution tests
     # Expected is optional - if not provided, just execute the SQL
 
-    # Pre-substitute TCL variables at this level (where they're in scope from foreach loops)
+    # Pre-substitute TCL variables using stack-walking substitution
     # This handles cases like: foreach {id x} {...} { do_execsql_test test.$id {INSERT ... $x} }
     # where $x needs to be substituted before the SQL is passed down
-    catch {set sql [uplevel 1 [list subst -nocommands -nobackslashes $sql]]}
+    set sql [substitute_tcl_vars $sql]
 
     do_test $name [list execsql $sql] $expected
 }
@@ -1280,8 +1331,8 @@ proc db {cmd args} {
     switch $cmd {
         eval {
             set sql [lindex $args 0]
-            # Substitute TCL variables from caller's scope (emulate SQLite's parameter binding)
-            catch {set sql [uplevel 1 [list subst -nocommands -nobackslashes $sql]]}
+            # Substitute TCL variables using stack-walking substitution
+            set sql [substitute_tcl_vars $sql]
             if {[llength $args] == 1} {
                 # Simple case: just return the results
                 return [execsql $sql]
@@ -1318,8 +1369,8 @@ proc db {cmd args} {
         one {
             # Return single value (first column of first row)
             set sql [lindex $args 0]
-            # Substitute TCL variables from caller's scope
-            catch {set sql [uplevel 1 [list subst -nocommands -nobackslashes $sql]]}
+            # Substitute TCL variables using stack-walking substitution
+            set sql [substitute_tcl_vars $sql]
             set result [execsql $sql]
             if {[llength $result] > 0} {
                 return [lindex $result 0]
@@ -1504,6 +1555,12 @@ proc sqlite3_rekey {args} {
 
 proc sqlite3_key {args} {
     # SQLite encryption extension - not supported
+    return
+}
+
+proc sqlite_register_test_function {args} {
+    # SQLite test function registration - not supported
+    # This is used to register custom test functions at the C level
     return
 }
 
