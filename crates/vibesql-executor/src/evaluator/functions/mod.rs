@@ -18,6 +18,7 @@
 use crate::errors::ExecutorError;
 
 // Module declarations
+pub(crate) mod coercion;
 mod control;
 mod conversion;
 pub(crate) mod datetime;

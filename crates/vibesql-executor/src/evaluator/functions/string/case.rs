@@ -3,9 +3,14 @@
 //! SQL:1999 Section 6.29: String value functions
 
 use crate::errors::ExecutorError;
+use crate::evaluator::functions::coercion::coerce_to_string;
 
 /// UPPER(string) - Convert string to uppercase
 /// SQL:1999 Section 6.29: String value functions
+///
+/// SQLite compatibility: Automatically coerces numeric types to strings.
+/// - UPPER(123) returns "123"
+/// - UPPER(7.5) returns "7.5"
 pub(in crate::evaluator::functions) fn upper(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
@@ -16,23 +21,20 @@ pub(in crate::evaluator::functions) fn upper(
         )));
     }
 
-    match &args[0] {
-        vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
-        vibesql_types::SqlValue::Varchar(s) => {
-            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())))
-        }
-        vibesql_types::SqlValue::Character(s) => {
-            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())))
-        }
-        val => Err(ExecutorError::UnsupportedFeature(format!(
-            "UPPER requires string argument, got {:?}",
-            val
+    match coerce_to_string(&args[0]) {
+        None => Ok(vibesql_types::SqlValue::Null),
+        Some(s) => Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            s.to_uppercase(),
         ))),
     }
 }
 
 /// LOWER(string) - Convert string to lowercase
 /// SQL:1999 Section 6.29: String value functions
+///
+/// SQLite compatibility: Automatically coerces numeric types to strings.
+/// - LOWER(123) returns "123"
+/// - LOWER(7.5) returns "7.5"
 pub(in crate::evaluator::functions) fn lower(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
@@ -43,17 +45,10 @@ pub(in crate::evaluator::functions) fn lower(
         )));
     }
 
-    match &args[0] {
-        vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
-        vibesql_types::SqlValue::Varchar(s) => {
-            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.to_lowercase())))
-        }
-        vibesql_types::SqlValue::Character(s) => {
-            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.to_lowercase())))
-        }
-        val => Err(ExecutorError::UnsupportedFeature(format!(
-            "LOWER requires string argument, got {:?}",
-            val
+    match coerce_to_string(&args[0]) {
+        None => Ok(vibesql_types::SqlValue::Null),
+        Some(s) => Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            s.to_lowercase(),
         ))),
     }
 }

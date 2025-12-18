@@ -100,14 +100,18 @@ fn test_upper_wrong_arg_count() {
 
 #[test]
 fn test_upper_wrong_type() {
+    // SQLite compatibility: numeric types are coerced to strings
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("UPPER"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123))],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    assert_eq!(
+        result,
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("123"))
+    );
 }
 
 #[test]
@@ -171,14 +175,18 @@ fn test_lower_wrong_arg_count() {
 
 #[test]
 fn test_lower_wrong_type() {
+    // SQLite compatibility: numeric types are coerced to strings
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("LOWER"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123))],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    assert_eq!(
+        result,
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("123"))
+    );
 }
 
 #[test]

@@ -228,6 +228,7 @@ fn test_substring_wrong_arg_count_too_many() {
 
 #[test]
 fn test_substring_wrong_type_string() {
+    // SQLite compatibility: numeric types are coerced to strings
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
@@ -237,12 +238,17 @@ fn test_substring_wrong_type_string() {
         ],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    // SUBSTR(123, 1) = SUBSTR("123", 1) = "123"
+    assert_eq!(
+        result,
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("123"))
+    );
 }
 
 #[test]
 fn test_substring_wrong_type_start() {
+    // SQLite compatibility: string start position is coerced to integer
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
@@ -256,12 +262,17 @@ fn test_substring_wrong_type_start() {
         ],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    // "one" coerces to 0, start=0 returns whole string
+    assert_eq!(
+        result,
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))
+    );
 }
 
 #[test]
 fn test_substring_wrong_type_length() {
+    // SQLite compatibility: string length is coerced to integer
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
@@ -276,8 +287,12 @@ fn test_substring_wrong_type_length() {
         ],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    // "two" coerces to 0, length=0 returns empty string
+    assert_eq!(
+        result,
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(""))
+    );
 }
 
 // ============================================================================

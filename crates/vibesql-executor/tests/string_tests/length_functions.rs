@@ -273,14 +273,16 @@ fn test_char_length_wrong_arg_count() {
 
 #[test]
 fn test_char_length_wrong_type() {
+    // SQLite compatibility: numeric types are coerced to strings
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("CHAR_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123))],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    // "123" has 3 characters
+    assert_eq!(result, vibesql_types::SqlValue::Integer(3));
 }
 
 #[test]
@@ -304,14 +306,16 @@ fn test_octet_length_wrong_arg_count() {
 
 #[test]
 fn test_octet_length_wrong_type() {
+    // SQLite compatibility: numeric types are coerced to strings
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("OCTET_LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123))],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    // "123" has 3 bytes
+    assert_eq!(result, vibesql_types::SqlValue::Integer(3));
 }
 
 #[test]

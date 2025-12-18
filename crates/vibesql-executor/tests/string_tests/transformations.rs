@@ -285,6 +285,7 @@ fn test_replace_wrong_arg_count() {
 
 #[test]
 fn test_replace_wrong_type() {
+    // SQLite compatibility: numeric types are coerced to strings
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("REPLACE"),
@@ -299,8 +300,12 @@ fn test_replace_wrong_type() {
         ],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    // "123" not found in "hello", so returns "hello" unchanged
+    assert_eq!(
+        result,
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))
+    );
 }
 
 #[test]
@@ -418,14 +423,19 @@ fn test_reverse_wrong_arg_count() {
 
 #[test]
 fn test_reverse_wrong_type() {
+    // SQLite compatibility: numeric types are coerced to strings
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("REVERSE"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123))],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    // REVERSE(123) = REVERSE("123") = "321"
+    assert_eq!(
+        result,
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("321"))
+    );
 }
 
 #[test]

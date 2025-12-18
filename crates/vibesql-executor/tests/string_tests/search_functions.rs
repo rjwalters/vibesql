@@ -126,6 +126,7 @@ fn test_position_wrong_arg_count() {
 
 #[test]
 fn test_position_wrong_type() {
+    // SQLite compatibility: numeric types are coerced to strings
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("POSITION"),
@@ -137,8 +138,9 @@ fn test_position_wrong_type() {
         ],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    // "123" is not found in "hello", so returns 0
+    assert_eq!(result, vibesql_types::SqlValue::Integer(0));
 }
 
 #[test]
@@ -368,6 +370,7 @@ fn test_locate_wrong_arg_count() {
 
 #[test]
 fn test_locate_wrong_type_needle() {
+    // SQLite compatibility: numeric types are coerced to strings
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("LOCATE"),
@@ -379,12 +382,14 @@ fn test_locate_wrong_type_needle() {
         ],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    // "123" is not found in "hello", so returns 0
+    assert_eq!(result, vibesql_types::SqlValue::Integer(0));
 }
 
 #[test]
 fn test_locate_wrong_type_start() {
+    // SQLite compatibility: string start position is coerced to integer (becomes 0)
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("LOCATE"),
@@ -401,8 +406,9 @@ fn test_locate_wrong_type_start() {
         ],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    // "one" coerces to 0, so search starts at beginning, finds "l" at position 3
+    assert_eq!(result, vibesql_types::SqlValue::Integer(3));
 }
 
 #[test]
