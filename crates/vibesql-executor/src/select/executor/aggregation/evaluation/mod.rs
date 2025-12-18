@@ -76,6 +76,7 @@ impl SelectExecutor<'_> {
             | vibesql_ast::Expression::Between { .. }
             | vibesql_ast::Expression::InList { .. }
             | vibesql_ast::Expression::Like { .. }
+            | vibesql_ast::Expression::Glob { .. }
             | vibesql_ast::Expression::IsNull { .. }
             | vibesql_ast::Expression::IsDistinctFrom { .. }
             | vibesql_ast::Expression::IsTruthValue { .. }

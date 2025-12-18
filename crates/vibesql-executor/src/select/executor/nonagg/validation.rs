@@ -515,7 +515,8 @@ fn validate_expression_column_refs(
         }
 
         // LIKE pattern matching
-        Expression::Like { expr, pattern, .. } => {
+        Expression::Like { expr, pattern, .. }
+        | Expression::Glob { expr, pattern, .. } => {
             validate_expression_column_refs(expr, schema, outer_schema, allowed_aliases)?;
             validate_expression_column_refs(pattern, schema, outer_schema, allowed_aliases)
         }

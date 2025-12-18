@@ -42,6 +42,7 @@ fn test_auto_increment_basic_inserts() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -121,6 +122,7 @@ fn test_multiple_auto_increment_error() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -163,6 +165,7 @@ fn test_last_insert_rowid_basic() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -238,6 +241,7 @@ fn test_last_insert_rowid_multi_row_insert() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -310,6 +314,7 @@ fn test_last_insert_rowid_no_auto_increment() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -369,6 +374,7 @@ fn test_last_insert_rowid_via_select() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);

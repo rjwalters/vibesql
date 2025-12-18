@@ -140,6 +140,9 @@ pub struct CreateTableStmt {
     pub table_options: Vec<TableOption>,
     /// Whether the table name was quoted (delimited) in the original SQL.
     pub quoted: bool,
+    /// Optional AS SELECT query for CREATE TABLE ... AS SELECT syntax
+    /// When present, columns are derived from the query result
+    pub as_query: Option<Box<crate::SelectStmt>>,
 }
 
 /// Column definition

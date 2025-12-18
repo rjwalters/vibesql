@@ -272,7 +272,7 @@ pub fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<Column
             collect_columns_from_expr(high, columns);
         }
 
-        Expression::Like { expr, pattern, .. } => {
+        Expression::Like { expr, pattern, .. } | Expression::Glob { expr, pattern, .. } => {
             collect_columns_from_expr(expr, columns);
             collect_columns_from_expr(pattern, columns);
         }

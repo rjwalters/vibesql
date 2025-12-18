@@ -391,6 +391,14 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
             walk_expression(visitor, pattern)
         }
 
+        Expression::Glob { expr: inner, pattern, .. } => {
+            let result = walk_expression(visitor, inner);
+            if result.should_stop() {
+                return VisitResult::Stop;
+            }
+            walk_expression(visitor, pattern)
+        }
+
         Expression::Exists { subquery, .. } => {
             walk_select(visitor, subquery);
             VisitResult::Continue
@@ -693,6 +701,12 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
         }
 
         Expression::Like { expr: inner, pattern, negated } => Expression::Like {
+            expr: Box::new(transform_expression(visitor, *inner)),
+            pattern: Box::new(transform_expression(visitor, *pattern)),
+            negated,
+        },
+
+        Expression::Glob { expr: inner, pattern, negated } => Expression::Glob {
             expr: Box::new(transform_expression(visitor, *inner)),
             pattern: Box::new(transform_expression(visitor, *pattern)),
             negated,

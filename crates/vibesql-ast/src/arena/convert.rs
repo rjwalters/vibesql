@@ -256,6 +256,11 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 pattern: Box::new(self.convert_expression(pattern)),
                 negated: *negated,
             },
+            arena_expr::ExtendedExpr::Glob { expr, pattern, negated } => Expression::Glob {
+                expr: Box::new(self.convert_expression(expr)),
+                pattern: Box::new(self.convert_expression(pattern)),
+                negated: *negated,
+            },
             arena_expr::ExtendedExpr::Exists { subquery, negated } => Expression::Exists {
                 subquery: Box::new(self.convert_select(subquery)),
                 negated: *negated,

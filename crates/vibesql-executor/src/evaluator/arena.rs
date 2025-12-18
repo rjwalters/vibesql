@@ -434,6 +434,13 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 self.eval_like(&val, &pattern_val, *negated)
             }
 
+            // GLOB pattern matching (SQLite)
+            ArenaExtendedExpr::Glob { expr: inner, pattern, negated } => {
+                let val = self.eval_with_depth(inner, row)?;
+                let pattern_val = self.eval_with_depth(pattern, row)?;
+                self.eval_glob(&val, &pattern_val, *negated)
+            }
+
             // CAST expression - delegate to casting module
             ArenaExtendedExpr::Cast { expr: inner, data_type } => {
                 let val = self.eval_with_depth(inner, row)?;
@@ -637,6 +644,29 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             }
             _ => Err(ExecutorError::TypeError(format!(
                 "LIKE requires string operands, got {:?} and {:?}",
+                value, pattern
+            ))),
+        }
+    }
+
+    /// Evaluate GLOB pattern matching (SQLite).
+    fn eval_glob(
+        &self,
+        value: &SqlValue,
+        pattern: &SqlValue,
+        negated: bool,
+    ) -> Result<SqlValue, ExecutorError> {
+        match (value, pattern) {
+            (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
+            (SqlValue::Varchar(s), SqlValue::Varchar(p))
+            | (SqlValue::Character(s), SqlValue::Varchar(p))
+            | (SqlValue::Varchar(s), SqlValue::Character(p))
+            | (SqlValue::Character(s), SqlValue::Character(p)) => {
+                let matches = super::pattern::glob_match(s, p);
+                Ok(SqlValue::Boolean(if negated { !matches } else { matches }))
+            }
+            _ => Err(ExecutorError::TypeError(format!(
+                "GLOB requires string operands, got {:?} and {:?}",
                 value, pattern
             ))),
         }

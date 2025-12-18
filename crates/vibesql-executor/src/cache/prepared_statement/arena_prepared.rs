@@ -465,7 +465,8 @@ where
             ExtendedExpr::Extract { expr: inner, .. } => {
                 visit_arena_expression(inner, visitor);
             }
-            ExtendedExpr::Like { expr: inner, pattern, .. } => {
+            ExtendedExpr::Like { expr: inner, pattern, .. }
+            | ExtendedExpr::Glob { expr: inner, pattern, .. } => {
                 visit_arena_expression(inner, visitor);
                 visit_arena_expression(pattern, visitor);
             }

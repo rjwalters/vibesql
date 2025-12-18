@@ -37,6 +37,7 @@ fn test_truncate_single_table() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -91,6 +92,7 @@ fn test_truncate_multiple_tables() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt1, &mut db).unwrap();
 
@@ -110,6 +112,7 @@ fn test_truncate_multiple_tables() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt2, &mut db).unwrap();
 
@@ -129,6 +132,7 @@ fn test_truncate_multiple_tables() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt3, &mut db).unwrap();
 
@@ -214,6 +218,7 @@ fn test_truncate_multiple_tables_if_exists_mixed() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -257,6 +262,7 @@ fn test_truncate_multiple_tables_all_or_nothing_validation() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -298,6 +304,7 @@ fn test_truncate_empty_table() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -357,6 +364,7 @@ fn test_truncate_resets_auto_increment() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&stmt, &mut db).unwrap();
 
@@ -451,6 +459,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&stmt, &mut db).unwrap();
 
@@ -532,6 +541,7 @@ fn test_truncate_without_auto_increment() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 

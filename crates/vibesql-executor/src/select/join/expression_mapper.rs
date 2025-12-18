@@ -257,7 +257,8 @@ impl ExpressionMapper {
             Expression::Extract { expr, .. } => {
                 self.walk_expression(expr, tables, columns, resolvable);
             }
-            Expression::Like { expr: e, pattern, .. } => {
+            Expression::Like { expr: e, pattern, .. }
+            | Expression::Glob { expr: e, pattern, .. } => {
                 self.walk_expression(e, tables, columns, resolvable);
                 self.walk_expression(pattern, tables, columns, resolvable);
             }

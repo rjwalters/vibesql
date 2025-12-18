@@ -39,6 +39,7 @@ fn test_create_table_with_column_primary_key() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -94,6 +95,7 @@ fn test_create_table_with_table_primary_key() {
         }],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -135,6 +137,7 @@ fn test_create_table_with_multiple_primary_keys_fails() {
         }],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -173,6 +176,7 @@ fn test_create_table_with_column_unique_constraint() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -228,6 +232,7 @@ fn test_create_table_with_table_unique_constraint() {
         }],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -268,6 +273,7 @@ fn test_create_table_with_check_constraint() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -304,6 +310,7 @@ fn test_auto_index_for_single_column_primary_key() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -367,6 +374,7 @@ fn test_auto_index_for_composite_primary_key() {
         }],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -414,6 +422,7 @@ fn test_auto_index_for_single_unique_constraint() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -474,6 +483,7 @@ fn test_auto_index_for_multiple_unique_constraints() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -529,6 +539,7 @@ fn test_auto_index_for_composite_unique_constraint() {
         }],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -579,6 +590,7 @@ fn test_auto_index_for_primary_key_plus_unique() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -624,6 +636,7 @@ fn test_auto_index_visible_in_catalog() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);

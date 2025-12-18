@@ -124,7 +124,8 @@ impl ExpressionHasher {
                 Self::is_deterministic(expr) && values.iter().all(Self::is_deterministic)
             }
 
-            vibesql_ast::Expression::Like { expr, pattern, .. } => {
+            vibesql_ast::Expression::Like { expr, pattern, .. }
+            | vibesql_ast::Expression::Glob { expr, pattern, .. } => {
                 Self::is_deterministic(expr) && Self::is_deterministic(pattern)
             }
 
@@ -261,7 +262,8 @@ impl ExpressionHasher {
                 negated.hash(hasher);
             }
 
-            vibesql_ast::Expression::Like { expr, pattern, negated } => {
+            vibesql_ast::Expression::Like { expr, pattern, negated }
+            | vibesql_ast::Expression::Glob { expr, pattern, negated } => {
                 Self::hash_expression(expr, hasher);
                 Self::hash_expression(pattern, hasher);
                 negated.hash(hasher);

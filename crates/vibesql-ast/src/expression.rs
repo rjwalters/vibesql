@@ -226,6 +226,16 @@ pub enum Expression {
         negated: bool, // false = LIKE, true = NOT LIKE
     },
 
+    /// GLOB pattern matching (SQLite)
+    /// Example: filename GLOB '*.txt'
+    /// Example: path NOT GLOB '/etc/*'
+    /// Pattern wildcards: * (any chars), ? (single char), [...] (character class)
+    Glob {
+        expr: Box<Expression>,
+        pattern: Box<Expression>,
+        negated: bool, // false = GLOB, true = NOT GLOB
+    },
+
     /// EXISTS predicate
     /// Example: WHERE EXISTS (SELECT 1 FROM orders WHERE customer_id = c.id)
     /// Example: WHERE NOT EXISTS (SELECT 1 FROM orders WHERE customer_id = c.id)

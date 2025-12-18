@@ -2,7 +2,7 @@
 
 use chrono::{Datelike, Timelike};
 
-use super::super::{casting::cast_value, core::ExpressionEvaluator, pattern::like_match};
+use super::super::{casting::cast_value, core::ExpressionEvaluator, pattern::{like_match, glob_match}};
 use crate::errors::ExecutorError;
 
 impl ExpressionEvaluator<'_> {
@@ -429,6 +429,52 @@ impl ExpressionEvaluator<'_> {
         };
 
         let matches = like_match(&text, &pattern_str);
+        let result = if negated { !matches } else { matches };
+
+        Ok(vibesql_types::SqlValue::Boolean(result))
+    }
+
+    /// Evaluate GLOB predicate (SQLite)
+    #[inline]
+    pub(super) fn eval_glob(
+        &self,
+        expr: &vibesql_ast::Expression,
+        pattern: &vibesql_ast::Expression,
+        negated: bool,
+        row: &vibesql_storage::Row,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        let expr_val = self.eval(expr, row)?;
+        let pattern_val = self.eval(pattern, row)?;
+
+        let text = match expr_val {
+            vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => {
+                s.clone()
+            }
+            vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+            _ => {
+                return Err(ExecutorError::TypeMismatch {
+                    left: expr_val,
+                    op: "GLOB".to_string(),
+                    right: pattern_val,
+                })
+            }
+        };
+
+        let pattern_str = match pattern_val {
+            vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => {
+                s.clone()
+            }
+            vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+            _ => {
+                return Err(ExecutorError::TypeMismatch {
+                    left: expr_val,
+                    op: "GLOB".to_string(),
+                    right: pattern_val,
+                })
+            }
+        };
+
+        let matches = glob_match(&text, &pattern_str);
         let result = if negated { !matches } else { matches };
 
         Ok(vibesql_types::SqlValue::Boolean(result))

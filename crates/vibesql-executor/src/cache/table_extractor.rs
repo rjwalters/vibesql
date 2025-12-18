@@ -151,7 +151,8 @@ fn extract_from_expression(expr: &vibesql_ast::Expression, tables: &mut HashSet<
         vibesql_ast::Expression::Cast { expr, .. } => {
             extract_from_expression(expr, tables);
         }
-        vibesql_ast::Expression::Like { expr, pattern, .. } => {
+        vibesql_ast::Expression::Like { expr, pattern, .. }
+        | vibesql_ast::Expression::Glob { expr, pattern, .. } => {
             extract_from_expression(expr, tables);
             extract_from_expression(pattern, tables);
         }

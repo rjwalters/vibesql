@@ -61,6 +61,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "ASYMMETRIC" => Keyword::Asymmetric,
     "SYMMETRIC" => Keyword::Symmetric,
     "LIKE" => Keyword::Like,
+    "GLOB" => Keyword::Glob,
     "EXISTS" => Keyword::Exists,
     "IF" => Keyword::If,
     "IS" => Keyword::Is,
@@ -233,6 +234,11 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "SPACE" => Keyword::Space,
     "COLLATE" => Keyword::Collate,
     "COMMENT" => Keyword::Comment,
+    // Generated column keywords (SQLite)
+    "GENERATED" => Keyword::Generated,
+    "ALWAYS" => Keyword::Always,
+    "STORED" => Keyword::Stored,
+    "VIRTUAL" => Keyword::Virtual,
     // CURSOR keywords
     "DECLARE" => Keyword::Declare,
     "CURSOR" => Keyword::Cursor,

@@ -529,6 +529,7 @@ mod tests {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
+            as_query: None,
         };
 
         CreateTableExecutor::execute(&stmt, db).unwrap();
@@ -838,6 +839,7 @@ mod tests {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
+            as_query: None,
         };
 
         CreateTableExecutor::execute(&stmt, db).unwrap();

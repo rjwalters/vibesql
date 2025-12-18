@@ -33,6 +33,28 @@ impl Parser {
         // Parse table name with quoted flag (supports schema.table)
         let table = self.parse_table_ref()?;
 
+        // Check for CREATE TABLE ... AS SELECT syntax
+        if self.peek_keyword(Keyword::As) {
+            self.advance(); // consume AS
+            // Parse the SELECT statement
+            let select_stmt = self.parse_select_statement()?;
+
+            // Expect semicolon or EOF
+            if matches!(self.peek(), Token::Semicolon) {
+                self.advance();
+            }
+
+            return Ok(vibesql_ast::CreateTableStmt {
+                if_not_exists,
+                table_name: table.full_name(),
+                columns: Vec::new(),
+                table_constraints: Vec::new(),
+                table_options: Vec::new(),
+                quoted: table.is_any_quoted(),
+                as_query: Some(Box::new(select_stmt)),
+            });
+        }
+
         // Parse column definitions and table constraints
         self.expect_token(Token::LParen)?;
         let mut columns = Vec::new();
@@ -75,13 +97,17 @@ impl Parser {
 
             // Parse data type (optional for SQLite compatibility)
             // SQLite allows typeless columns with BLOB affinity
-            // Also check for generated column syntax: AS(expression)
-            let (data_type, generated_expr) = if self.peek_keyword(Keyword::As) {
-                // Generated column: AS(expression)
+            // Also check for generated column syntax: AS(expression) or GENERATED ALWAYS AS(expression)
+            let (data_type, mut generated_expr) = if self.peek_keyword(Keyword::As) {
+                // Generated column (short form): AS(expression)
                 self.advance(); // consume AS
                 self.expect_token(Token::LParen)?;
                 let expr = self.parse_expression()?;
                 self.expect_token(Token::RParen)?;
+                // Skip optional STORED or VIRTUAL keyword
+                if self.peek_keyword(Keyword::Stored) || self.peek_keyword(Keyword::Virtual) {
+                    self.advance();
+                }
                 // Generated columns have the type inferred from the expression
                 // For now, use BLOB affinity (will be refined by type inference)
                 (DataType::BinaryLargeObject, Some(Box::new(expr)))
@@ -91,6 +117,34 @@ impl Parser {
             } else {
                 (self.parse_data_type()?, None)
             };
+
+            // Check for GENERATED ALWAYS AS (expression) [STORED|VIRTUAL] after data type
+            if generated_expr.is_none() && self.peek_keyword(Keyword::Generated) {
+                self.advance(); // consume GENERATED
+                self.expect_keyword(Keyword::Always)?;
+                self.expect_keyword(Keyword::As)?;
+                self.expect_token(Token::LParen)?;
+                let expr = self.parse_expression()?;
+                self.expect_token(Token::RParen)?;
+                // Skip optional STORED or VIRTUAL keyword
+                if self.peek_keyword(Keyword::Stored) || self.peek_keyword(Keyword::Virtual) {
+                    self.advance();
+                }
+                generated_expr = Some(Box::new(expr));
+            }
+
+            // Also check for short form AS (expression) after data type
+            if generated_expr.is_none() && self.peek_keyword(Keyword::As) {
+                self.advance(); // consume AS
+                self.expect_token(Token::LParen)?;
+                let expr = self.parse_expression()?;
+                self.expect_token(Token::RParen)?;
+                // Skip optional STORED or VIRTUAL keyword
+                if self.peek_keyword(Keyword::Stored) || self.peek_keyword(Keyword::Virtual) {
+                    self.advance();
+                }
+                generated_expr = Some(Box::new(expr));
+            }
 
             // Parse optional DEFAULT clause (before COMMENT, per MySQL standard)
             let default_value = if self.peek_keyword(Keyword::Default) {
@@ -173,6 +227,7 @@ impl Parser {
             table_constraints,
             table_options,
             quoted: table.is_any_quoted(),
+            as_query: None,
         })
     }
 
@@ -203,6 +258,11 @@ impl Parser {
             // Column modifiers (appear after data type normally)
             Token::Keyword { keyword: Keyword::Default, .. } => true,
             Token::Keyword { keyword: Keyword::Comment, .. } => true,
+            Token::Keyword { keyword: Keyword::Collate, .. } => true,
+
+            // Generated column keywords (SQLite)
+            Token::Keyword { keyword: Keyword::Generated, .. } => true,
+            Token::Keyword { keyword: Keyword::As, .. } => true,
 
             // Not a constraint/separator - likely a data type
             _ => false,

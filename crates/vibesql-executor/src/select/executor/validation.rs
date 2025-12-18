@@ -93,7 +93,8 @@ fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
         Expression::Cast { expr, .. } => {
             extract_column_refs(expr, refs);
         }
-        Expression::Like { expr, pattern, .. } => {
+        Expression::Like { expr, pattern, .. }
+        | Expression::Glob { expr, pattern, .. } => {
             extract_column_refs(expr, refs);
             extract_column_refs(pattern, refs);
         }

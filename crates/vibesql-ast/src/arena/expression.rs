@@ -190,6 +190,9 @@ pub enum ExtendedExpr<'arena> {
     /// LIKE pattern matching
     Like { expr: ExprRef<'arena>, pattern: ExprRef<'arena>, negated: bool },
 
+    /// GLOB pattern matching (SQLite)
+    Glob { expr: ExprRef<'arena>, pattern: ExprRef<'arena>, negated: bool },
+
     /// EXISTS predicate
     Exists { subquery: &'arena SelectStmt<'arena>, negated: bool },
 

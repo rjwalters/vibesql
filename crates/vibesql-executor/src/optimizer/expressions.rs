@@ -339,8 +339,8 @@ pub fn optimize_expression(
             Ok(expr.clone())
         }
 
-        // LIKE - cannot optimize generally
-        Expression::Like { .. } => Ok(expr.clone()),
+        // LIKE/GLOB - cannot optimize generally
+        Expression::Like { .. } | Expression::Glob { .. } => Ok(expr.clone()),
 
         // EXISTS - cannot optimize
         Expression::Exists { .. } => Ok(expr.clone()),

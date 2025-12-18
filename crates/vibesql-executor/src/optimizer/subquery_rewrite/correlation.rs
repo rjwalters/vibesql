@@ -197,7 +197,7 @@ pub(crate) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt)
 
         Expression::Extract { expr, .. } => has_external_column_refs(expr, subquery),
 
-        Expression::Like { expr, pattern, .. } => {
+        Expression::Like { expr, pattern, .. } | Expression::Glob { expr, pattern, .. } => {
             has_external_column_refs(expr, subquery) || has_external_column_refs(pattern, subquery)
         }
 

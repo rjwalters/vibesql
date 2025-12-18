@@ -47,6 +47,7 @@ fn create_test_table(db: &mut Database, table_name: &str) {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt, db).unwrap();
 }
@@ -529,6 +530,7 @@ fn test_truncate_preserves_table_structure() {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 

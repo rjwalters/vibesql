@@ -1131,6 +1131,13 @@ fn resolve_where_expression_with_schema(
             negated: *negated,
         },
 
+        // GLOB
+        Expression::Glob { expr: inner, pattern, negated } => Expression::Glob {
+            expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
+            pattern: Box::new(resolve_where_expression_with_schema(pattern, select_list, table_columns)),
+            negated: *negated,
+        },
+
         // CAST
         Expression::Cast { expr: inner, data_type } => Expression::Cast {
             expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
@@ -1334,7 +1341,8 @@ fn collect_aggregates_from_expr(
         | Expression::WindowFunction { .. } => {}
 
         // Other expressions we might need to handle
-        Expression::Like { expr, pattern, .. } => {
+        Expression::Like { expr, pattern, .. }
+        | Expression::Glob { expr, pattern, .. } => {
             collect_aggregates_from_expr(expr, aggregates);
             collect_aggregates_from_expr(pattern, aggregates);
         }

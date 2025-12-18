@@ -43,6 +43,7 @@ pub(super) fn create_audit_table(db: &mut Database) {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&stmt, db).expect("Failed to create audit_log table");
 }
@@ -75,6 +76,7 @@ pub(super) fn create_users_table(db: &mut Database) {
         table_constraints: vec![],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&stmt, db).expect("Failed to create users table");
 }

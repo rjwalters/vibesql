@@ -50,6 +50,7 @@ impl Parser {
             if self.peek_keyword(Keyword::In)
                 || self.peek_keyword(Keyword::Between)
                 || self.peek_keyword(Keyword::Like)
+                || self.peek_keyword(Keyword::Glob)
                 || self.peek_keyword(Keyword::Exists)
             {
                 // Restore position and let the other parsers handle it
@@ -208,8 +209,20 @@ impl Parser {
                     pattern: Box::new(pattern),
                     negated: true,
                 });
+            } else if self.peek_keyword(Keyword::Glob) {
+                // It's NOT GLOB (SQLite)
+                self.consume_keyword(Keyword::Glob)?;
+
+                // Parse pattern expression
+                let pattern = self.parse_additive_expression()?;
+
+                return Ok(vibesql_ast::Expression::Glob {
+                    expr: Box::new(left),
+                    pattern: Box::new(pattern),
+                    negated: true,
+                });
             } else {
-                // Not "NOT IN", "NOT BETWEEN", or "NOT LIKE", restore position and continue
+                // Not "NOT IN", "NOT BETWEEN", "NOT LIKE", or "NOT GLOB", restore position and continue
                 // Note: NOT EXISTS is handled in parse_primary_expression()
                 self.position = saved_pos;
             }
@@ -279,6 +292,18 @@ impl Parser {
             let pattern = self.parse_additive_expression()?;
 
             return Ok(vibesql_ast::Expression::Like {
+                expr: Box::new(left),
+                pattern: Box::new(pattern),
+                negated: false,
+            });
+        } else if self.peek_keyword(Keyword::Glob) {
+            // It's GLOB (SQLite) (not negated)
+            self.consume_keyword(Keyword::Glob)?;
+
+            // Parse pattern expression
+            let pattern = self.parse_additive_expression()?;
+
+            return Ok(vibesql_ast::Expression::Glob {
                 expr: Box::new(left),
                 pattern: Box::new(pattern),
                 negated: false,

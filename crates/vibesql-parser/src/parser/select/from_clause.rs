@@ -134,8 +134,11 @@ impl Parser {
 
                     // Parse alias - keywords allowed as aliases (except clause keywords)
                     // SQLite allows derived tables without aliases; auto-generate if not provided
+                    // SQLite also allows single-quoted strings as aliases (non-standard but common)
                     let alias = match self.peek() {
-                        Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
+                        Token::Identifier(id)
+                        | Token::DelimitedIdentifier(id)
+                        | Token::String(id) => {
                             let alias = id.clone();
                             self.advance();
                             alias
@@ -213,8 +216,11 @@ impl Parser {
 
                     // Parse alias (optional for VALUES tables) - keywords allowed as aliases
                     // If no alias is provided, generate a default one
+                    // SQLite also allows single-quoted strings as aliases (non-standard but common)
                     let alias = match self.peek() {
-                        Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
+                        Token::Identifier(id)
+                        | Token::DelimitedIdentifier(id)
+                        | Token::String(id) => {
                             let alias = id.clone();
                             self.advance();
                             alias
@@ -389,6 +395,7 @@ impl Parser {
                 | Token::Keyword { keyword: Keyword::Cross, .. }
                 | Token::Keyword { keyword: Keyword::Full, .. }
                 | Token::Keyword { keyword: Keyword::Natural, .. }
+                | Token::Keyword { keyword: Keyword::Outer, .. }
         )
     }
 
@@ -464,6 +471,37 @@ impl Parser {
                 }
                 self.expect_keyword(Keyword::Join)?;
                 vibesql_ast::JoinType::FullOuter
+            }
+            // Support "OUTER LEFT/RIGHT/FULL JOIN" syntax (SQLite compatibility)
+            Token::Keyword { keyword: Keyword::Outer, .. } => {
+                self.advance(); // Consume OUTER
+                match self.peek() {
+                    Token::Keyword { keyword: Keyword::Left, .. } => {
+                        self.advance();
+                        self.expect_keyword(Keyword::Join)?;
+                        vibesql_ast::JoinType::LeftOuter
+                    }
+                    Token::Keyword { keyword: Keyword::Right, .. } => {
+                        self.advance();
+                        self.expect_keyword(Keyword::Join)?;
+                        vibesql_ast::JoinType::RightOuter
+                    }
+                    Token::Keyword { keyword: Keyword::Full, .. } => {
+                        self.advance();
+                        self.expect_keyword(Keyword::Join)?;
+                        vibesql_ast::JoinType::FullOuter
+                    }
+                    Token::Keyword { keyword: Keyword::Join, .. } => {
+                        // "OUTER JOIN" without LEFT/RIGHT/FULL defaults to LEFT OUTER JOIN
+                        self.advance();
+                        vibesql_ast::JoinType::LeftOuter
+                    }
+                    _ => {
+                        return Err(ParseError {
+                            message: "Expected LEFT, RIGHT, FULL, or JOIN after OUTER".to_string(),
+                        })
+                    }
+                }
             }
             _ => return Err(ParseError { message: "Expected JOIN keyword".to_string() }),
         };

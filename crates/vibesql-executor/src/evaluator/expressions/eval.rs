@@ -170,6 +170,11 @@ impl ExpressionEvaluator<'_> {
                 self.eval_like(expr, pattern, *negated, row)
             }
 
+            // GLOB pattern matching (SQLite)
+            vibesql_ast::Expression::Glob { expr, pattern, negated } => {
+                self.eval_glob(expr, pattern, *negated, row)
+            }
+
             // IN list (value list)
             vibesql_ast::Expression::InList { expr, values, negated } => {
                 self.eval_in_list(expr, values, *negated, row)

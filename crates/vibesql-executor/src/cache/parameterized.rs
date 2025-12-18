@@ -443,6 +443,11 @@ impl LiteralExtractor {
                 Self::extract_from_expression(pattern, literals);
             }
 
+            Expression::Glob { expr, pattern, .. } => {
+                Self::extract_from_expression(expr, literals);
+                Self::extract_from_expression(pattern, literals);
+            }
+
             Expression::Exists { subquery, .. } => {
                 Self::extract_from_select(subquery, literals);
             }

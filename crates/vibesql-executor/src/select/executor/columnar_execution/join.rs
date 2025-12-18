@@ -504,6 +504,7 @@ fn expression_has_rowid(expr: &vibesql_ast::Expression) -> bool {
         | vibesql_ast::Expression::Trim { .. }
         | vibesql_ast::Expression::Extract { .. }
         | vibesql_ast::Expression::Like { .. }
+        | vibesql_ast::Expression::Glob { .. }
         | vibesql_ast::Expression::Exists { .. }
         | vibesql_ast::Expression::QuantifiedComparison { .. }
         | vibesql_ast::Expression::CurrentDate

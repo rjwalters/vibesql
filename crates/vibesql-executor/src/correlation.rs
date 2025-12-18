@@ -334,7 +334,7 @@ fn is_expression_correlated(
                 || is_expression_correlated(high, outer_schema, subquery_tables)
         }
 
-        Expression::Like { expr, pattern, .. } => {
+        Expression::Like { expr, pattern, .. } | Expression::Glob { expr, pattern, .. } => {
             is_expression_correlated(expr, outer_schema, subquery_tables)
                 || is_expression_correlated(pattern, outer_schema, subquery_tables)
         }

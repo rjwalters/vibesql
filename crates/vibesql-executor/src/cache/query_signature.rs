@@ -476,6 +476,13 @@ impl QuerySignature {
                 negated.hash(hasher);
             }
 
+            Expression::Glob { expr, pattern, negated } => {
+                "GLOB".hash(hasher);
+                Self::hash_expression(expr, hasher);
+                Self::hash_expression(pattern, hasher);
+                negated.hash(hasher);
+            }
+
             Expression::Exists { subquery, negated } => {
                 "EXISTS".hash(hasher);
                 Self::hash_select(subquery, hasher);
@@ -942,6 +949,13 @@ impl QuerySignature {
 
             ArenaExtendedExpr::Like { expr, pattern, negated } => {
                 "LIKE".hash(hasher);
+                Self::hash_arena_expression(expr, hasher);
+                Self::hash_arena_expression(pattern, hasher);
+                negated.hash(hasher);
+            }
+
+            ArenaExtendedExpr::Glob { expr, pattern, negated } => {
+                "GLOB".hash(hasher);
                 Self::hash_arena_expression(expr, hasher);
                 Self::hash_arena_expression(pattern, hasher);
                 negated.hash(hasher);

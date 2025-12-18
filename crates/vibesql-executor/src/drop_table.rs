@@ -44,6 +44,7 @@ impl DropTableExecutor {
     ///     table_constraints: vec![],
     ///     table_options: vec![],
     ///     quoted: false,
+    ///     as_query: None,
     /// };
     /// CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
     ///
@@ -126,6 +127,7 @@ mod tests {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
+            as_query: None,
         };
         CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
         assert!(db.catalog.table_exists("users"));
@@ -184,6 +186,7 @@ mod tests {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
+            as_query: None,
         };
         CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -229,6 +232,7 @@ mod tests {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
+            as_query: None,
         };
         CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -273,6 +277,7 @@ mod tests {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
+            as_query: None,
         };
         CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -307,6 +312,7 @@ mod tests {
                 table_constraints: vec![],
                 table_options: vec![],
             quoted: false,
+            as_query: None,
             };
             CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
         }
@@ -343,6 +349,7 @@ mod tests {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
+            as_query: None,
         };
         CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -387,6 +394,7 @@ mod tests {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
+            as_query: None,
         };
         CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -469,6 +477,7 @@ mod tests {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
+            as_query: None,
         };
         CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -526,6 +535,7 @@ mod tests {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
+            as_query: None,
         };
         CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 

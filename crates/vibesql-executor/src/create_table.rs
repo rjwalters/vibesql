@@ -3,10 +3,11 @@
 use vibesql_ast::{CreateTableStmt, IndexColumn, OrderDirection};
 use vibesql_catalog::{ColumnSchema, TableIdentifier, TableSchema};
 use vibesql_storage::Database;
+use vibesql_types::DataType;
 
 use crate::{
     constraint_validator::ConstraintValidator, errors::ExecutorError,
-    privilege_checker::PrivilegeChecker,
+    privilege_checker::PrivilegeChecker, SelectExecutor,
 };
 
 /// Executor for CREATE TABLE statements
@@ -59,6 +60,7 @@ impl CreateTableExecutor {
     ///     table_constraints: vec![],
     ///     table_options: vec![],
     ///     quoted: false,
+    ///     as_query: None,
     /// };
     ///
     /// let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -84,6 +86,18 @@ impl CreateTableExecutor {
 
         // Check CREATE privilege on the schema
         PrivilegeChecker::check_create(database, &schema_name)?;
+
+        // Handle CREATE TABLE AS SELECT syntax
+        if let Some(query) = &stmt.as_query {
+            return Self::execute_create_as_select(
+                database,
+                &table_name,
+                &schema_name,
+                identifier,
+                stmt.if_not_exists,
+                query,
+            );
+        }
 
         // Check if table already exists using identifier (respects quoted semantics)
         if database.catalog.table_exists_by_identifier(&identifier) {
@@ -404,5 +418,223 @@ impl CreateTableExecutor {
         }
 
         Ok(())
+    }
+
+    /// Execute CREATE TABLE ... AS SELECT
+    ///
+    /// Creates a new table with schema derived from the SELECT result,
+    /// and populates it with the query results.
+    fn execute_create_as_select(
+        database: &mut Database,
+        table_name: &str,
+        schema_name: &str,
+        identifier: TableIdentifier,
+        if_not_exists: bool,
+        query: &vibesql_ast::SelectStmt,
+    ) -> Result<String, ExecutorError> {
+        // Check if table already exists
+        if database.catalog.table_exists_by_identifier(&identifier) {
+            if if_not_exists {
+                return Ok(format!(
+                    "Table '{}' already exists in schema '{}' (skipped)",
+                    table_name, schema_name
+                ));
+            }
+            return Err(ExecutorError::TableAlreadyExists(format!(
+                "{}.{}",
+                schema_name,
+                identifier.display()
+            )));
+        }
+
+        // Execute the SELECT query to get results
+        let rows = SelectExecutor::new(database).execute(query)?;
+
+        // Derive column names from the SELECT list (expanding wildcards if needed)
+        let column_names =
+            Self::derive_column_names_from_select_list(&query.select_list, &query.from, database)?;
+
+        // Derive column schema from the first row (if any) or default to BLOB
+        let columns: Vec<ColumnSchema> = column_names
+            .iter()
+            .enumerate()
+            .map(|(idx, col_name)| {
+                // Try to infer data type from the first row if available
+                let data_type = if !rows.is_empty() && idx < rows[0].values.len() {
+                    Self::infer_data_type(&rows[0].values[idx])
+                } else {
+                    // No rows or column - default to BLOB affinity
+                    DataType::BinaryLargeObject
+                };
+
+                ColumnSchema {
+                    name: col_name.clone(),
+                    data_type,
+                    nullable: true, // Default to nullable for CTAS
+                    default_value: None,
+                    generated_expr: None,
+                }
+            })
+            .collect();
+
+        // Create the table schema
+        let table_schema = TableSchema::new(table_name.to_string(), columns);
+
+        // Create the table
+        database
+            .create_table_with_identifier(table_schema, identifier)
+            .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+
+        // Insert the result rows into the new table
+        let row_count = rows.len();
+        for row in rows {
+            database
+                .insert_row(table_name, row)
+                .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+        }
+
+        Ok(format!(
+            "Table '{}' created successfully in schema '{}' with {} rows",
+            table_name, schema_name, row_count
+        ))
+    }
+
+    /// Derive column names from a SELECT list, expanding wildcards using the database schema
+    fn derive_column_names_from_select_list(
+        select_list: &[vibesql_ast::SelectItem],
+        from: &Option<vibesql_ast::FromClause>,
+        database: &Database,
+    ) -> Result<Vec<String>, ExecutorError> {
+        let mut names = Vec::new();
+        let mut counter = 0;
+
+        for item in select_list {
+            match item {
+                vibesql_ast::SelectItem::Wildcard { .. } => {
+                    // Expand wildcard using the FROM clause tables
+                    let table_names = Self::get_table_names_from_from(from)?;
+                    for table_name in table_names {
+                        if let Some(schema) = database.catalog.get_table(&table_name) {
+                            for col in &schema.columns {
+                                names.push(col.name.clone());
+                            }
+                        } else {
+                            return Err(ExecutorError::TableNotFound(table_name));
+                        }
+                    }
+                }
+                vibesql_ast::SelectItem::QualifiedWildcard { qualifier, .. } => {
+                    // Expand table.* using the specific table's schema
+                    if let Some(schema) = database.catalog.get_table(qualifier) {
+                        for col in &schema.columns {
+                            names.push(col.name.clone());
+                        }
+                    } else {
+                        return Err(ExecutorError::TableNotFound(qualifier.clone()));
+                    }
+                }
+                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
+                    let name = if let Some(alias) = alias {
+                        alias.clone()
+                    } else {
+                        // Try to derive from expression
+                        Self::derive_column_name_from_expr(expr, &mut counter)
+                    };
+                    names.push(name);
+                }
+            }
+        }
+
+        Ok(names)
+    }
+
+    /// Extract table names from a FROM clause
+    fn get_table_names_from_from(
+        from: &Option<vibesql_ast::FromClause>,
+    ) -> Result<Vec<String>, ExecutorError> {
+        let mut names = Vec::new();
+
+        match from {
+            None => {
+                // No FROM clause - can't expand wildcard
+                return Err(ExecutorError::UnsupportedFeature(
+                    "CREATE TABLE AS SELECT * requires a FROM clause".to_string(),
+                ));
+            }
+            Some(vibesql_ast::FromClause::Table { name, .. }) => {
+                names.push(name.clone());
+            }
+            Some(vibesql_ast::FromClause::Join { left, right, .. }) => {
+                // Recursively get tables from join
+                names.extend(Self::get_table_names_from_from(&Some(*left.clone()))?);
+                names.extend(Self::get_table_names_from_from(&Some(*right.clone()))?);
+            }
+            Some(vibesql_ast::FromClause::Subquery { alias, .. }) => {
+                // For derived tables (subqueries), we can't easily expand *
+                // because we'd need to recursively process the subquery
+                return Err(ExecutorError::UnsupportedFeature(format!(
+                    "CREATE TABLE AS SELECT * from subquery '{}' not supported - please specify columns explicitly",
+                    alias
+                )));
+            }
+            Some(vibesql_ast::FromClause::Values { alias, .. }) => {
+                // VALUES clause - can't determine column names from schema
+                return Err(ExecutorError::UnsupportedFeature(format!(
+                    "CREATE TABLE AS SELECT * from VALUES '{}' not supported - please specify columns explicitly",
+                    alias
+                )));
+            }
+        }
+
+        Ok(names)
+    }
+
+    /// Derive a column name from an expression
+    fn derive_column_name_from_expr(
+        expr: &vibesql_ast::Expression,
+        counter: &mut usize,
+    ) -> String {
+        match expr {
+            vibesql_ast::Expression::ColumnRef(col_id) => {
+                col_id.column_canonical().to_string()
+            }
+            vibesql_ast::Expression::Literal(_) => {
+                *counter += 1;
+                format!("column{}", counter)
+            }
+            vibesql_ast::Expression::Function { name, .. } => {
+                // Use the function name as the column name
+                name.to_string().to_lowercase()
+            }
+            _ => {
+                *counter += 1;
+                format!("column{}", counter)
+            }
+        }
+    }
+
+    /// Infer DataType from an SqlValue
+    fn infer_data_type(value: &vibesql_types::SqlValue) -> DataType {
+        use vibesql_types::SqlValue;
+        match value {
+            SqlValue::Null => DataType::BinaryLargeObject,
+            SqlValue::Boolean(_) => DataType::Boolean,
+            SqlValue::Integer(_) => DataType::Integer,
+            SqlValue::Bigint(_) => DataType::Bigint,
+            SqlValue::Smallint(_) => DataType::Smallint,
+            SqlValue::Unsigned(_) => DataType::Unsigned,
+            SqlValue::Float(_) | SqlValue::Real(_) => DataType::Real,
+            SqlValue::Double(_) | SqlValue::Numeric(_) => DataType::DoublePrecision,
+            SqlValue::Character(_) => DataType::Character { length: 255 },
+            SqlValue::Varchar(_) => DataType::Varchar { max_length: None },
+            SqlValue::Date(_) => DataType::Date,
+            SqlValue::Time(_) => DataType::Time { with_timezone: false },
+            SqlValue::Timestamp(_) => DataType::Timestamp { with_timezone: false },
+            SqlValue::Interval(_) => DataType::Interval {
+                start_field: vibesql_types::IntervalField::Day,
+                end_field: None,
+            },
+            SqlValue::Vector(v) => DataType::Vector { dimensions: v.len() as u32 },
+        }
     }
 }

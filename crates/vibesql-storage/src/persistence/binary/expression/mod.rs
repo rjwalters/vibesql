@@ -77,6 +77,7 @@ enum ExprTag {
     IsTruthValue = 0x22,
     RowValueConstructor = 0x23,
     Collate = 0x24,
+    Glob = 0x25,
 }
 
 impl ExprTag {
@@ -119,6 +120,7 @@ impl ExprTag {
             0x22 => Ok(ExprTag::IsTruthValue),
             0x23 => Ok(ExprTag::RowValueConstructor),
             0x24 => Ok(ExprTag::Collate),
+            0x25 => Ok(ExprTag::Glob),
             _ => {
                 Err(StorageError::NotImplemented(format!("Unknown expression tag: 0x{:02X}", tag)))
             }
@@ -298,6 +300,12 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
         }
         Expression::Like { expr, pattern, negated } => {
             write_tag!(writer, ExprTag::Like);
+            write_expression(writer, expr)?;
+            write_expression(writer, pattern)?;
+            write_bool(writer, *negated)?;
+        }
+        Expression::Glob { expr, pattern, negated } => {
+            write_tag!(writer, ExprTag::Glob);
             write_expression(writer, expr)?;
             write_expression(writer, pattern)?;
             write_bool(writer, *negated)?;
@@ -595,6 +603,12 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             let pattern = Box::new(read_expression(reader)?);
             let negated = read_bool(reader)?;
             Ok(Expression::Like { expr, pattern, negated })
+        }
+        ExprTag::Glob => {
+            let expr = Box::new(read_expression(reader)?);
+            let pattern = Box::new(read_expression(reader)?);
+            let negated = read_bool(reader)?;
+            Ok(Expression::Glob { expr, pattern, negated })
         }
         ExprTag::Exists => Err(StorageError::NotImplemented(
             "EXISTS deserialization not yet implemented".to_string(),

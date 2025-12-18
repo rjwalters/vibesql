@@ -362,7 +362,8 @@ fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
             bind_expression_mut(inner, params);
         }
 
-        Expression::Like { expr: inner, pattern, .. } => {
+        Expression::Like { expr: inner, pattern, .. }
+        | Expression::Glob { expr: inner, pattern, .. } => {
             bind_expression_mut(inner, params);
             bind_expression_mut(pattern, params);
         }
@@ -742,7 +743,8 @@ fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String, Sql
             bind_expression_named_mut(inner, params);
         }
 
-        Expression::Like { expr: inner, pattern, .. } => {
+        Expression::Like { expr: inner, pattern, .. }
+        | Expression::Glob { expr: inner, pattern, .. } => {
             bind_expression_named_mut(inner, params);
             bind_expression_named_mut(pattern, params);
         }

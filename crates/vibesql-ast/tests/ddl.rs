@@ -17,7 +17,7 @@ fn test_create_table_statement() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -26,12 +26,13 @@ fn test_create_table_statement() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        as_query: None,
     });
 
     match stmt {

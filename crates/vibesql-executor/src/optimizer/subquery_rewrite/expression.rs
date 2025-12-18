@@ -321,6 +321,20 @@ pub(super) fn rewrite_expression_with_context(
             negated: *negated,
         },
 
+        Expression::Glob { expr, pattern, negated } => Expression::Glob {
+            expr: Box::new(rewrite_expression_with_context(
+                expr,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
+            pattern: Box::new(rewrite_expression_with_context(
+                pattern,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
+            negated: *negated,
+        },
+
         Expression::Interval { value, unit, leading_precision, fractional_precision } => {
             Expression::Interval {
                 value: Box::new(rewrite_expression_with_context(

@@ -57,6 +57,7 @@ impl SelectIntoExecutor {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false, // Synthesized from SELECT INTO, treat as unquoted
+            as_query: None,
         };
 
         crate::CreateTableExecutor::execute(&create_stmt, database)?;

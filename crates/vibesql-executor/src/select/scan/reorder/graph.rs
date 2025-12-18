@@ -242,7 +242,8 @@ pub(super) fn extract_referenced_tables_with_schema(
                 column_to_table,
             );
         }
-        Expression::Like { expr, pattern, .. } => {
+        Expression::Like { expr, pattern, .. }
+        | Expression::Glob { expr, pattern, .. } => {
             extract_referenced_tables_with_schema(expr, output, available_tables, column_to_table);
             extract_referenced_tables_with_schema(
                 pattern,

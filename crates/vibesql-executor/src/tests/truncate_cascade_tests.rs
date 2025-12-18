@@ -44,6 +44,7 @@ fn create_table_with_pk(db: &mut Database, table_name: &str, pk_column: &str) {
         }],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&stmt, db).unwrap();
 }
@@ -107,6 +108,7 @@ fn create_table_with_fk(
         ],
         table_options: vec![],
             quoted: false,
+            as_query: None,
     };
     CreateTableExecutor::execute(&stmt, db).unwrap();
 }

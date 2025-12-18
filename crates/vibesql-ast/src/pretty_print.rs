@@ -480,6 +480,11 @@ impl ToSql for Expression {
                 format!("{} {}LIKE {}", expr.to_sql(), not_str, pattern.to_sql())
             }
 
+            Expression::Glob { expr, pattern, negated } => {
+                let not_str = if *negated { "NOT " } else { "" };
+                format!("{} {}GLOB {}", expr.to_sql(), not_str, pattern.to_sql())
+            }
+
             Expression::Exists { subquery, negated } => {
                 let not_str = if *negated { "NOT " } else { "" };
                 format!("{}EXISTS ({})", not_str, subquery.to_sql())
