@@ -40,6 +40,7 @@ fn create_table_with_pk(db: &mut Database, table_name: &str, pk_column: &str) {
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
                 }],
+                on_conflict: None,
             },
         }],
         table_options: vec![],
@@ -92,6 +93,7 @@ fn create_table_with_fk(
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
                     }],
+                    on_conflict: None,
                 },
             },
             // Add FK as table-level constraint (ensures catalog.foreign_keys is populated)

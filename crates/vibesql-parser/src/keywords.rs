@@ -334,6 +334,7 @@ pub enum Keyword {
     // SQLite conflict resolution keywords
     Abort,
     Fail,
+    Conflict,
 }
 
 impl Keyword {
@@ -671,6 +672,7 @@ impl fmt::Display for Keyword {
             // SQLite conflict resolution keywords
             Keyword::Abort => "ABORT",
             Keyword::Fail => "FAIL",
+            Keyword::Conflict => "CONFLICT",
         };
         write!(f, "{}", keyword_str)
     }

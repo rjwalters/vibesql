@@ -331,6 +331,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     // SQLite conflict resolution keywords
     "ABORT" => Keyword::Abort,
     "FAIL" => Keyword::Fail,
+    "CONFLICT" => Keyword::Conflict,
 };
 
 /// Map an uppercase string to its corresponding Keyword using perfect hash lookup.

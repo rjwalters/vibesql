@@ -20,7 +20,7 @@ fn test_create_table_with_column_primary_key() {
                 nullable: true, // This should be overridden by the PK constraint
                 constraints: vec![ColumnConstraint {
                     name: None,
-                    kind: ColumnConstraintKind::PrimaryKey,
+                    kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
                 }],
                 default_value: None,
                 comment: None,
@@ -91,6 +91,7 @@ fn test_create_table_with_table_primary_key() {
                         prefix_length: None,
                     },
                 ],
+                on_conflict: None,
             },
         }],
         table_options: vec![],
@@ -119,7 +120,7 @@ fn test_create_table_with_multiple_primary_keys_fails() {
             nullable: false,
             constraints: vec![ColumnConstraint {
                 name: None,
-                kind: ColumnConstraintKind::PrimaryKey,
+                kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
             }],
             default_value: None,
             comment: None,
@@ -133,6 +134,7 @@ fn test_create_table_with_multiple_primary_keys_fails() {
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
                 }],
+                on_conflict: None,
             },
         }],
         table_options: vec![],
@@ -166,7 +168,7 @@ fn test_create_table_with_column_unique_constraint() {
                 nullable: false,
                 constraints: vec![ColumnConstraint {
                     name: None,
-                    kind: ColumnConstraintKind::Unique,
+                    kind: ColumnConstraintKind::Unique { on_conflict: None },
                 }],
                 default_value: None,
                 comment: None,
@@ -228,6 +230,7 @@ fn test_create_table_with_table_unique_constraint() {
                         prefix_length: None,
                     },
                 ],
+                on_conflict: None,
             },
         }],
         table_options: vec![],
@@ -301,7 +304,7 @@ fn test_auto_index_for_single_column_primary_key() {
             nullable: false,
             constraints: vec![ColumnConstraint {
                 name: None,
-                kind: ColumnConstraintKind::PrimaryKey,
+                kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
             }],
             default_value: None,
             comment: None,
@@ -370,6 +373,7 @@ fn test_auto_index_for_composite_primary_key() {
                         prefix_length: None,
                     },
                 ],
+                on_conflict: None,
             },
         }],
         table_options: vec![],
@@ -412,7 +416,7 @@ fn test_auto_index_for_single_unique_constraint() {
                 nullable: false,
                 constraints: vec![ColumnConstraint {
                     name: None,
-                    kind: ColumnConstraintKind::Unique,
+                    kind: ColumnConstraintKind::Unique { on_conflict: None },
                 }],
                 default_value: None,
                 comment: None,
@@ -461,7 +465,7 @@ fn test_auto_index_for_multiple_unique_constraints() {
                 nullable: false,
                 constraints: vec![ColumnConstraint {
                     name: None,
-                    kind: ColumnConstraintKind::Unique,
+                    kind: ColumnConstraintKind::Unique { on_conflict: None },
                 }],
                 default_value: None,
                 comment: None,
@@ -473,7 +477,7 @@ fn test_auto_index_for_multiple_unique_constraints() {
                 nullable: false,
                 constraints: vec![ColumnConstraint {
                     name: None,
-                    kind: ColumnConstraintKind::Unique,
+                    kind: ColumnConstraintKind::Unique { on_conflict: None },
                 }],
                 default_value: None,
                 comment: None,
@@ -535,6 +539,7 @@ fn test_auto_index_for_composite_unique_constraint() {
                         prefix_length: None,
                     },
                 ],
+                on_conflict: None,
             },
         }],
         table_options: vec![],
@@ -568,7 +573,7 @@ fn test_auto_index_for_primary_key_plus_unique() {
                 nullable: false,
                 constraints: vec![ColumnConstraint {
                     name: None,
-                    kind: ColumnConstraintKind::PrimaryKey,
+                    kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
                 }],
                 default_value: None,
                 comment: None,
@@ -580,7 +585,7 @@ fn test_auto_index_for_primary_key_plus_unique() {
                 nullable: false,
                 constraints: vec![ColumnConstraint {
                     name: None,
-                    kind: ColumnConstraintKind::Unique,
+                    kind: ColumnConstraintKind::Unique { on_conflict: None },
                 }],
                 default_value: None,
                 comment: None,
@@ -614,7 +619,7 @@ fn test_auto_index_visible_in_catalog() {
                 nullable: false,
                 constraints: vec![ColumnConstraint {
                     name: None,
-                    kind: ColumnConstraintKind::PrimaryKey,
+                    kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
                 }],
                 default_value: None,
                 comment: None,
@@ -626,7 +631,7 @@ fn test_auto_index_visible_in_catalog() {
                 nullable: false,
                 constraints: vec![ColumnConstraint {
                     name: None,
-                    kind: ColumnConstraintKind::Unique,
+                    kind: ColumnConstraintKind::Unique { on_conflict: None },
                 }],
                 default_value: None,
                 comment: None,

@@ -3,6 +3,53 @@
 use super::super::*;
 
 impl Parser {
+    /// Parse an optional ON CONFLICT clause for constraints
+    /// Returns None if no ON CONFLICT clause is present
+    /// Syntax: ON CONFLICT ROLLBACK|ABORT|FAIL|IGNORE|REPLACE
+    pub(in crate::parser) fn parse_constraint_conflict_clause(
+        &mut self,
+    ) -> Result<Option<vibesql_ast::ConflictClause>, ParseError> {
+        // Check for ON keyword
+        if !self.peek_keyword(Keyword::On) {
+            return Ok(None);
+        }
+
+        // Peek ahead to see if next is CONFLICT (vs ON DELETE/UPDATE for foreign keys)
+        if self.position + 1 < self.tokens.len() {
+            if let Token::Keyword { keyword: Keyword::Conflict, .. } = &self.tokens[self.position + 1]
+            {
+                self.advance(); // consume ON
+                self.advance(); // consume CONFLICT
+
+                // Parse the conflict resolution algorithm
+                if self.peek_keyword(Keyword::Rollback) {
+                    self.advance();
+                    return Ok(Some(vibesql_ast::ConflictClause::Rollback));
+                } else if self.peek_keyword(Keyword::Abort) {
+                    self.advance();
+                    return Ok(Some(vibesql_ast::ConflictClause::Abort));
+                } else if self.peek_keyword(Keyword::Fail) {
+                    self.advance();
+                    return Ok(Some(vibesql_ast::ConflictClause::Fail));
+                } else if self.peek_keyword(Keyword::Ignore) {
+                    self.advance();
+                    return Ok(Some(vibesql_ast::ConflictClause::Ignore));
+                } else if self.peek_keyword(Keyword::Replace) {
+                    self.advance();
+                    return Ok(Some(vibesql_ast::ConflictClause::Replace));
+                } else {
+                    return Err(ParseError {
+                        message:
+                            "Expected ROLLBACK, ABORT, FAIL, IGNORE, or REPLACE after ON CONFLICT"
+                                .to_string(),
+                    });
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Parse an index column specification with optional prefix length or expression
     ///
     /// Supports both simple column references and expression indexes:
@@ -208,9 +255,11 @@ impl Parser {
                     if self.peek_keyword(Keyword::Asc) || self.peek_keyword(Keyword::Desc) {
                         self.advance(); // consume ASC or DESC (ignored - SQLite ignores it too)
                     }
+                    // Parse optional ON CONFLICT clause
+                    let on_conflict = self.parse_constraint_conflict_clause()?;
                     constraints.push(vibesql_ast::ColumnConstraint {
                         name,
-                        kind: vibesql_ast::ColumnConstraintKind::PrimaryKey,
+                        kind: vibesql_ast::ColumnConstraintKind::PrimaryKey { on_conflict },
                     });
                 }
                 Token::Keyword { keyword: Keyword::Unique, .. } => {
@@ -219,9 +268,11 @@ impl Parser {
                     if self.peek_keyword(Keyword::Key) {
                         self.advance(); // consume KEY
                     }
+                    // Parse optional ON CONFLICT clause
+                    let on_conflict = self.parse_constraint_conflict_clause()?;
                     constraints.push(vibesql_ast::ColumnConstraint {
                         name,
-                        kind: vibesql_ast::ColumnConstraintKind::Unique,
+                        kind: vibesql_ast::ColumnConstraintKind::Unique { on_conflict },
                     });
                 }
                 Token::Keyword { keyword: Keyword::Check, .. } => {
@@ -377,7 +428,9 @@ impl Parser {
                 }
 
                 self.expect_token(Token::RParen)?;
-                vibesql_ast::TableConstraintKind::PrimaryKey { columns }
+                // Parse optional ON CONFLICT clause
+                let on_conflict = self.parse_constraint_conflict_clause()?;
+                vibesql_ast::TableConstraintKind::PrimaryKey { columns, on_conflict }
             }
             Token::Keyword { keyword: Keyword::Foreign, .. } => {
                 self.advance(); // consume FOREIGN
@@ -472,7 +525,9 @@ impl Parser {
                 }
 
                 self.expect_token(Token::RParen)?;
-                vibesql_ast::TableConstraintKind::Unique { columns }
+                // Parse optional ON CONFLICT clause
+                let on_conflict = self.parse_constraint_conflict_clause()?;
+                vibesql_ast::TableConstraintKind::Unique { columns, on_conflict }
             }
             Token::Keyword { keyword: Keyword::Check, .. } => {
                 self.advance(); // consume CHECK
