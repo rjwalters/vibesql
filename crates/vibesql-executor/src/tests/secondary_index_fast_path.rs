@@ -90,7 +90,7 @@ fn test_secondary_index_single_column_lookup() {
         "idx_customer_last".to_string(),
         "customer".to_string(),
         false, // not unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "c_last".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -133,17 +133,17 @@ fn test_secondary_index_composite_lookup() {
         "customer".to_string(),
         false, // not unique
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "c_w_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "c_d_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "c_last".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
@@ -185,17 +185,17 @@ fn test_secondary_index_with_order_by() {
         "customer".to_string(),
         false,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "c_w_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "c_d_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "c_last".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
@@ -231,7 +231,7 @@ fn test_secondary_index_select_star() {
         "idx_customer_last".to_string(),
         "customer".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "c_last".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -268,7 +268,7 @@ fn test_secondary_index_no_match() {
         "idx_customer_last".to_string(),
         "customer".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "c_last".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -301,7 +301,7 @@ fn test_secondary_index_with_limit() {
         "idx_customer_last".to_string(),
         "customer".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "c_last".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -358,7 +358,7 @@ fn test_secondary_index_residual_predicate_filter() {
         "idx_tab1_3".to_string(),
         "tab1".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "col3".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -413,7 +413,7 @@ fn test_secondary_index_residual_predicate_match() {
         "idx_tab1_3".to_string(),
         "tab1".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "col3".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,

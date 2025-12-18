@@ -80,12 +80,12 @@ fn test_create_table_with_table_primary_key() {
             name: None,
             kind: TableConstraintKind::PrimaryKey {
                 columns: vec![
-                    vibesql_ast::IndexColumn {
+                    vibesql_ast::IndexColumn::Column {
                         column_name: "id".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
                     },
-                    vibesql_ast::IndexColumn {
+                    vibesql_ast::IndexColumn::Column {
                         column_name: "tenant_id".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
@@ -128,7 +128,7 @@ fn test_create_table_with_multiple_primary_keys_fails() {
         table_constraints: vec![TableConstraint {
             name: None,
             kind: TableConstraintKind::PrimaryKey {
-                columns: vec![vibesql_ast::IndexColumn {
+                columns: vec![vibesql_ast::IndexColumn::Column {
                     column_name: "id".to_string(),
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
@@ -217,12 +217,12 @@ fn test_create_table_with_table_unique_constraint() {
             name: None,
             kind: TableConstraintKind::Unique {
                 columns: vec![
-                    vibesql_ast::IndexColumn {
+                    vibesql_ast::IndexColumn::Column {
                         column_name: "first_name".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
                     },
-                    vibesql_ast::IndexColumn {
+                    vibesql_ast::IndexColumn::Column {
                         column_name: "last_name".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
@@ -359,12 +359,12 @@ fn test_auto_index_for_composite_primary_key() {
             name: None,
             kind: TableConstraintKind::PrimaryKey {
                 columns: vec![
-                    vibesql_ast::IndexColumn {
+                    vibesql_ast::IndexColumn::Column {
                         column_name: "a".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
                     },
-                    vibesql_ast::IndexColumn {
+                    vibesql_ast::IndexColumn::Column {
                         column_name: "b".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
@@ -524,12 +524,12 @@ fn test_auto_index_for_composite_unique_constraint() {
             name: None,
             kind: TableConstraintKind::Unique {
                 columns: vec![
-                    vibesql_ast::IndexColumn {
+                    vibesql_ast::IndexColumn::Column {
                         column_name: "a".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
                     },
-                    vibesql_ast::IndexColumn {
+                    vibesql_ast::IndexColumn::Column {
                         column_name: "b".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,

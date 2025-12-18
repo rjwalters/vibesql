@@ -213,7 +213,7 @@ impl CreateTableExecutor {
                     .map(|col_name| {
                         table_schema.get_column_index(col_name).ok_or_else(|| {
                             ExecutorError::ColumnNotFound {
-                                column_name: col_name.clone(),
+                                column_name: col_name.to_string(),
                                 table_name: table_name.clone(),
                                 searched_tables: vec![table_name.clone()],
                                 available_columns: table_schema
@@ -237,7 +237,7 @@ impl CreateTableExecutor {
                     .map(|col_name| {
                         parent_schema.get_column_index(col_name).ok_or_else(|| {
                             ExecutorError::ColumnNotFound {
-                                column_name: col_name.clone(),
+                                column_name: col_name.to_string(),
                                 table_name: references_table.clone(),
                                 searched_tables: vec![references_table.clone()],
                                 available_columns: parent_schema
@@ -359,8 +359,8 @@ impl CreateTableExecutor {
             // Create IndexColumn specs for the PRIMARY KEY columns
             let index_columns: Vec<IndexColumn> = pk_cols
                 .iter()
-                .map(|col_name| IndexColumn {
-                    column_name: col_name.clone(),
+                .map(|col_name| IndexColumn::Column {
+                    column_name: col_name.to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
                 })
@@ -374,7 +374,7 @@ impl CreateTableExecutor {
                 index_columns
                     .iter()
                     .map(|col| vibesql_catalog::IndexedColumn {
-                        column_name: col.column_name.clone(),
+                        column_name: col.expect_column_name().to_string(),
                         order: vibesql_catalog::SortOrder::Ascending,
                         prefix_length: None,
                     })
@@ -399,8 +399,8 @@ impl CreateTableExecutor {
             // Create IndexColumn specs for the UNIQUE columns
             let index_columns: Vec<IndexColumn> = unique_cols
                 .iter()
-                .map(|col_name| IndexColumn {
-                    column_name: col_name.clone(),
+                .map(|col_name| IndexColumn::Column {
+                    column_name: col_name.to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
                 })
@@ -414,7 +414,7 @@ impl CreateTableExecutor {
                 index_columns
                     .iter()
                     .map(|col| vibesql_catalog::IndexedColumn {
-                        column_name: col.column_name.clone(),
+                        column_name: col.expect_column_name().to_string(),
                         order: vibesql_catalog::SortOrder::Ascending,
                         prefix_length: None,
                     })
@@ -483,7 +483,7 @@ impl CreateTableExecutor {
                 };
 
                 ColumnSchema {
-                    name: col_name.clone(),
+                    name: col_name.to_string(),
                     data_type,
                     nullable: true, // Default to nullable for CTAS
                     default_value: None,

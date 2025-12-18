@@ -152,7 +152,7 @@ fn test_disk_backed_index_creation_with_bulk_load() {
         &table_schema,
         &table_rows,
         false, // non-unique
-        vec![vibesql_ast::IndexColumn {
+        vec![vibesql_ast::IndexColumn::Column {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -193,7 +193,7 @@ fn test_in_memory_index_for_small_tables() {
         &table_schema,
         &table_rows,
         false,
-        vec![vibesql_ast::IndexColumn {
+        vec![vibesql_ast::IndexColumn::Column {
             column_name: "value".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -261,7 +261,7 @@ fn test_budget_enforcement_with_spill_policy() {
         &table_schema,
         &table_rows,
         false,
-        vec![vibesql_ast::IndexColumn {
+        vec![vibesql_ast::IndexColumn::Column {
             column_name: "value".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -276,7 +276,7 @@ fn test_budget_enforcement_with_spill_policy() {
         &table_schema,
         &table_rows,
         false,
-        vec![vibesql_ast::IndexColumn {
+        vec![vibesql_ast::IndexColumn::Column {
             column_name: "value".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -331,7 +331,7 @@ fn test_lru_eviction_order() {
             &table_schema,
             &table_rows,
             false,
-            vec![vibesql_ast::IndexColumn {
+            vec![vibesql_ast::IndexColumn::Column {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -349,7 +349,7 @@ fn test_lru_eviction_order() {
             &table_schema,
             &table_rows,
             false,
-            vec![vibesql_ast::IndexColumn {
+            vec![vibesql_ast::IndexColumn::Column {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -372,7 +372,7 @@ fn test_lru_eviction_order() {
             &table_schema,
             &table_rows,
             false,
-            vec![vibesql_ast::IndexColumn {
+            vec![vibesql_ast::IndexColumn::Column {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -419,7 +419,7 @@ fn test_access_tracking() {
             &table_schema,
             &table_rows,
             false,
-            vec![vibesql_ast::IndexColumn {
+            vec![vibesql_ast::IndexColumn::Column {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -475,7 +475,7 @@ fn test_resource_cleanup_on_drop() {
             &table_schema,
             &table_rows,
             false,
-            vec![vibesql_ast::IndexColumn {
+            vec![vibesql_ast::IndexColumn::Column {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -561,7 +561,7 @@ fn test_index_scan_after_database_reset() {
             "idx_col0".to_string(),
             "tab1".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "col0".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -741,7 +741,7 @@ fn test_thread_local_pool_pattern() {
             "idx_col0".to_string(),
             "tab1".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "col0".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -822,7 +822,7 @@ fn test_lookup_by_index_single_column() {
         "idx_users_id".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -872,7 +872,7 @@ fn test_lookup_one_by_index() {
         "idx_items_pk".to_string(),
         "items".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -952,17 +952,17 @@ fn test_lookup_by_index_composite_key() {
         "orders".to_string(),
         true,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "w_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "d_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "o_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -1028,7 +1028,7 @@ fn test_lookup_by_index_batch() {
         "idx_products_pk".to_string(),
         "products".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -1089,7 +1089,7 @@ fn test_lookup_one_by_index_batch() {
         "idx_items_id".to_string(),
         "items".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -1217,17 +1217,17 @@ fn test_lookup_by_index_prefix_basic() {
         "new_order".to_string(),
         true,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "w_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "d_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "o_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -1323,12 +1323,12 @@ fn test_lookup_by_index_prefix_single_column() {
         "test_data".to_string(),
         false,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "warehouse".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "district".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -1376,12 +1376,12 @@ fn test_lookup_by_index_prefix_no_match() {
         "test_table".to_string(),
         false,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "a".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "b".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -1436,17 +1436,17 @@ fn test_lookup_by_index_prefix_batch_basic() {
         "new_order".to_string(),
         true,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "w_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "d_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "o_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -1513,17 +1513,17 @@ fn test_lookup_by_index_prefix_batch_tpcc_delivery() {
         "new_order".to_string(),
         true,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "no_w_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "no_d_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "no_o_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -1602,12 +1602,12 @@ fn test_lookup_by_index_prefix_empty_prefix() {
         "test_table".to_string(),
         false,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "a".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "b".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,

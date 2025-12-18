@@ -404,7 +404,7 @@ mod tests {
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "email".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
@@ -417,7 +417,7 @@ mod tests {
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
@@ -487,7 +487,7 @@ mod tests {
             if_not_exists: false,
             table_name: "products".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "name".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,

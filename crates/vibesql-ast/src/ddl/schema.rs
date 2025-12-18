@@ -234,14 +234,92 @@ pub enum VectorDistanceMetric {
     InnerProduct,
 }
 
-/// Index column specification
+/// Index column specification - can be either a simple column reference or an expression
 #[derive(Debug, Clone, PartialEq)]
-pub struct IndexColumn {
-    pub column_name: String,
-    pub direction: crate::select::OrderDirection,
-    /// Optional prefix length for indexed columns (MySQL/SQLite feature)
-    /// Example: UNIQUE (name(10)) creates index on first 10 characters of 'name'
-    pub prefix_length: Option<u64>,
+pub enum IndexColumn {
+    /// Simple column reference with optional prefix length
+    Column {
+        column_name: String,
+        direction: crate::select::OrderDirection,
+        /// Optional prefix length for indexed columns (MySQL/SQLite feature)
+        /// Example: UNIQUE (name(10)) creates index on first 10 characters of 'name'
+        prefix_length: Option<u64>,
+    },
+    /// Expression index (functional index)
+    /// Example: CREATE INDEX idx ON t(lower(name)) or CREATE INDEX idx ON t(a + b)
+    Expression {
+        expr: Box<Expression>,
+        direction: crate::select::OrderDirection,
+    },
+}
+
+impl IndexColumn {
+    /// Create a new simple column index
+    pub fn new_column(column_name: String, direction: crate::select::OrderDirection) -> Self {
+        IndexColumn::Column { column_name, direction, prefix_length: None }
+    }
+
+    /// Create a new column index with prefix length
+    pub fn new_column_with_prefix(
+        column_name: String,
+        direction: crate::select::OrderDirection,
+        prefix_length: u64,
+    ) -> Self {
+        IndexColumn::Column { column_name, direction, prefix_length: Some(prefix_length) }
+    }
+
+    /// Create a new expression index
+    pub fn new_expression(expr: Expression, direction: crate::select::OrderDirection) -> Self {
+        IndexColumn::Expression { expr: Box::new(expr), direction }
+    }
+
+    /// Get the column name if this is a simple column reference
+    pub fn column_name(&self) -> Option<&str> {
+        match self {
+            IndexColumn::Column { column_name, .. } => Some(column_name),
+            IndexColumn::Expression { .. } => None,
+        }
+    }
+
+    /// Get the column name, panicking if this is an expression index.
+    /// Use this in code paths that don't support expression indexes yet.
+    pub fn expect_column_name(&self) -> &str {
+        match self {
+            IndexColumn::Column { column_name, .. } => column_name,
+            IndexColumn::Expression { .. } => {
+                panic!("Expression indexes are not supported in this context")
+            }
+        }
+    }
+
+    /// Get the direction of this index column
+    pub fn direction(&self) -> crate::select::OrderDirection {
+        match self {
+            IndexColumn::Column { direction, .. } => direction.clone(),
+            IndexColumn::Expression { direction, .. } => direction.clone(),
+        }
+    }
+
+    /// Get the prefix length if this is a column with prefix
+    pub fn prefix_length(&self) -> Option<u64> {
+        match self {
+            IndexColumn::Column { prefix_length, .. } => *prefix_length,
+            IndexColumn::Expression { .. } => None,
+        }
+    }
+
+    /// Check if this is an expression index
+    pub fn is_expression(&self) -> bool {
+        matches!(self, IndexColumn::Expression { .. })
+    }
+
+    /// Get the expression if this is an expression index
+    pub fn get_expression(&self) -> Option<&Expression> {
+        match self {
+            IndexColumn::Expression { expr, .. } => Some(expr),
+            IndexColumn::Column { .. } => None,
+        }
+    }
 }
 
 /// DROP INDEX statement

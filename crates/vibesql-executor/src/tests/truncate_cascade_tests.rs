@@ -35,7 +35,7 @@ fn create_table_with_pk(db: &mut Database, table_name: &str, pk_column: &str) {
         table_constraints: vec![TableConstraint {
             name: None,
             kind: TableConstraintKind::PrimaryKey {
-                columns: vec![vibesql_ast::IndexColumn {
+                columns: vec![vibesql_ast::IndexColumn::Column {
                     column_name: pk_column.to_string(),
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
@@ -87,7 +87,7 @@ fn create_table_with_fk(
             TableConstraint {
                 name: None,
                 kind: TableConstraintKind::PrimaryKey {
-                    columns: vec![vibesql_ast::IndexColumn {
+                    columns: vec![vibesql_ast::IndexColumn::Column {
                         column_name: pk_column.to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,

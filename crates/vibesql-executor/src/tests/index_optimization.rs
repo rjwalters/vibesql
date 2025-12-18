@@ -115,7 +115,7 @@ fn test_index_range_scan_between_numeric_types() {
         "idx_int_value".to_string(),
         "measurements".to_string(),
         false, // not unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "int_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -127,7 +127,7 @@ fn test_index_range_scan_between_numeric_types() {
         "idx_real_value".to_string(),
         "measurements".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "real_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -139,7 +139,7 @@ fn test_index_range_scan_between_numeric_types() {
         "idx_double_value".to_string(),
         "measurements".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "double_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -225,7 +225,7 @@ fn test_index_multi_lookup_large_value_set() {
         "idx_items_value".to_string(),
         "items".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -291,7 +291,7 @@ fn test_index_commuted_comparisons() {
         "idx_numbers_value".to_string(),
         "numbers".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -370,7 +370,7 @@ fn test_index_numeric_type_normalization() {
         "idx_int".to_string(),
         "measurements".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "int_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -382,7 +382,7 @@ fn test_index_numeric_type_normalization() {
         "idx_real".to_string(),
         "measurements".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "real_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -394,7 +394,7 @@ fn test_index_numeric_type_normalization() {
         "idx_double".to_string(),
         "measurements".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "double_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -406,7 +406,7 @@ fn test_index_numeric_type_normalization() {
         "idx_numeric".to_string(),
         "measurements".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "numeric_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,

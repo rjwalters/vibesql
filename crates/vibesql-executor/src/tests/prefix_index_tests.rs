@@ -42,7 +42,7 @@ fn test_create_index_with_prefix_length() {
         "idx_email_prefix".to_string(),
         "users".to_string(),
         false, // not unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(50),
@@ -62,7 +62,7 @@ fn test_create_unique_index_with_prefix_length() {
         "idx_email_unique_prefix".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(50),
@@ -82,7 +82,7 @@ fn test_unique_prefix_index_enforces_prefix_uniqueness() {
         "idx_email_prefix10".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(10),
@@ -124,7 +124,7 @@ fn test_unique_prefix_index_allows_different_prefixes() {
         "idx_email_prefix10".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(10),
@@ -165,7 +165,7 @@ fn test_prefix_index_with_short_strings() {
         "idx_email_prefix50".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(50),
@@ -208,12 +208,12 @@ fn test_composite_prefix_index() {
         "users".to_string(),
         true, // unique
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: Some(10),
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "name".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: Some(5),
@@ -271,7 +271,7 @@ fn test_prefix_index_with_utf8_strings() {
         "idx_email_utf8".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(6),
@@ -325,7 +325,7 @@ fn test_non_unique_prefix_index_allows_duplicates() {
         "idx_email_prefix10".to_string(),
         "users".to_string(),
         false, // NOT unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(10),

@@ -614,7 +614,7 @@ impl SqlExecutor {
                             Some(if index_meta.unique { "0" } else { "1" }.to_string()), // Non_unique
                             Some(index_meta.index_name.clone()),                         // Key_name
                             Some((seq + 1).to_string()), // Seq_in_index
-                            Some(col.column_name.clone()), // Column_name
+                            Some(col.expect_column_name().to_string()), // Column_name
                             Some("A".to_string()), // Collation (always Ascending for now)
                             Some(String::new()),   // Cardinality
                             Some(String::new()),   // Sub_part

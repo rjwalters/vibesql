@@ -802,7 +802,7 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse index column list for constraints.
-    fn parse_index_column_list(&mut self) -> Result<BumpVec<'arena, IndexColumn>, ParseError> {
+    fn parse_index_column_list(&mut self) -> Result<BumpVec<'arena, IndexColumn<'arena>>, ParseError> {
         let mut columns = BumpVec::new_in(self.arena);
 
         loop {
@@ -833,7 +833,7 @@ impl<'arena> ArenaParser<'arena> {
                 OrderDirection::Asc
             };
 
-            columns.push(IndexColumn { column_name, direction, prefix_length });
+            columns.push(IndexColumn::Column { column_name, direction, prefix_length });
 
             if !self.try_consume(&Token::Comma) {
                 break;
@@ -936,7 +936,7 @@ impl<'arena> ArenaParser<'arena> {
     // ========================================================================
 
     /// Parse index column specifications.
-    fn parse_index_columns(&mut self) -> Result<BumpVec<'arena, IndexColumn>, ParseError> {
+    fn parse_index_columns(&mut self) -> Result<BumpVec<'arena, IndexColumn<'arena>>, ParseError> {
         let mut columns = BumpVec::new_in(self.arena);
         loop {
             let column_name = self.parse_arena_identifier()?;
@@ -968,7 +968,7 @@ impl<'arena> ArenaParser<'arena> {
                 OrderDirection::Asc
             };
 
-            columns.push(IndexColumn { column_name, direction, prefix_length });
+            columns.push(IndexColumn::Column { column_name, direction, prefix_length });
 
             if !self.try_consume(&Token::Comma) {
                 break;

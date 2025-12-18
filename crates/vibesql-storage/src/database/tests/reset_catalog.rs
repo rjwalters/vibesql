@@ -41,7 +41,7 @@ fn test_reset_clears_catalog_and_indexes() {
         "idx_users_id".to_string(),
         "users".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -91,7 +91,7 @@ fn test_reset_clears_catalog_and_indexes() {
         "idx_users_id".to_string(),
         "users".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -228,7 +228,7 @@ fn test_reset_preserves_database_config() {
         "idx_test2".to_string(),
         "test2".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -271,7 +271,7 @@ fn test_reset_multiple_tables_and_indexes() {
                 index_name,
                 table_name.clone(),
                 false,
-                vec![IndexColumn {
+                vec![IndexColumn::Column {
                     column_name: col_name.to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,

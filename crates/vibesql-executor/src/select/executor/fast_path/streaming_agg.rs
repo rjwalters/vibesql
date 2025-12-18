@@ -79,7 +79,7 @@ impl SelectExecutor<'_> {
         let pk_index_data = index_names.iter().find_map(|idx_name| {
             let metadata = self.database.get_index(idx_name)?;
             if metadata.columns.len() == 1
-                && metadata.columns[0].column_name.eq_ignore_ascii_case(pk_col)
+                && metadata.columns[0].expect_column_name().eq_ignore_ascii_case(pk_col)
             {
                 self.database.get_index_data(idx_name)
             } else {

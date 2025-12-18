@@ -1267,7 +1267,7 @@ fn collect_select_aliases(
                 if from_col_idx < from_columns.len() {
                     // Push all remaining columns from FROM clause
                     for col_name in &from_columns[from_col_idx..] {
-                        aliases.push(Some(col_name.clone()));
+                        aliases.push(Some(col_name.to_string()));
                     }
                     from_col_idx = from_columns.len();
                 } else {

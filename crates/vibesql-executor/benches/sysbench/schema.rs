@@ -180,7 +180,7 @@ fn create_sbtest_indexes_vibesql(db: &mut VibeDB) {
         "idx_sbtest1_pk".to_string(),
         "SBTEST1".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -193,7 +193,7 @@ fn create_sbtest_indexes_vibesql(db: &mut VibeDB) {
         "k_1".to_string(),
         "SBTEST1".to_string(),
         false, // not unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "k".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,

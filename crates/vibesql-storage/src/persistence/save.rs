@@ -163,9 +163,9 @@ impl Database {
                     write!(writer, ", ")
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
                 }
-                write!(writer, "{}", col.column_name)
+                write!(writer, "{}", col.expect_column_name())
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-                write!(writer, " {:?}", col.direction)
+                write!(writer, " {:?}", col.direction())
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
             }
 

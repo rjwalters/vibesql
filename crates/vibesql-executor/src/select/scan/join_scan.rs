@@ -1205,7 +1205,7 @@ fn try_prefix_scan_semi_join(
     for index_name in &index_names {
         if let Some(idx_metadata) = database.get_index(index_name) {
             if let Some(first_col) = idx_metadata.columns.first() {
-                if first_col.column_name.to_lowercase() == right_col_upper {
+                if first_col.expect_column_name().to_lowercase() == right_col_upper {
                     usable_index_name = Some(index_name.clone());
                     break;
                 }
@@ -1354,7 +1354,7 @@ fn generate_using_join_condition(
                 })
             })
             .ok_or_else(|| ExecutorError::JoinUsingColumnNotPresent {
-                column_name: col_name.clone(),
+                column_name: col_name.to_string(),
             })?;
 
         // Find column in right schema (case-insensitive)
@@ -1371,7 +1371,7 @@ fn generate_using_join_condition(
                 })
             })
             .ok_or_else(|| ExecutorError::JoinUsingColumnNotPresent {
-                column_name: col_name.clone(),
+                column_name: col_name.to_string(),
             })?;
 
         // Create equality condition with qualified column references

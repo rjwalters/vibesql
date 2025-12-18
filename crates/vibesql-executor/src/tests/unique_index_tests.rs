@@ -64,7 +64,7 @@ fn test_unique_index_basic_insert_enforcement() {
         "idx_users_email".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -116,7 +116,7 @@ fn test_unique_index_null_values_allowed() {
         "idx_users_email".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -176,12 +176,12 @@ fn test_unique_index_composite_key() {
         "users".to_string(),
         true, // unique
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "first_name".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "last_name".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
@@ -261,12 +261,12 @@ fn test_unique_index_composite_with_null() {
         "users".to_string(),
         true, // unique
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "first_name".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "last_name".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
@@ -315,7 +315,7 @@ fn test_unique_index_update_enforcement() {
         "idx_users_email".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -382,7 +382,7 @@ fn test_unique_index_update_same_value_allowed() {
         "idx_users_email".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -427,7 +427,7 @@ fn test_unique_index_update_to_different_value() {
         "idx_users_email".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -475,7 +475,7 @@ fn test_unique_index_update_to_null() {
         "idx_users_email".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -522,7 +522,7 @@ fn test_unique_index_multiple_indexes_on_table() {
         "idx_users_email".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -534,7 +534,7 @@ fn test_unique_index_multiple_indexes_on_table() {
         "idx_users_phone".to_string(),
         "users".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "phone".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,

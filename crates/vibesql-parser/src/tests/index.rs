@@ -19,8 +19,8 @@ fn test_create_index_simple() {
                 other => panic!("Expected BTree index, got: {:?}", other),
             }
             assert_eq!(stmt.columns.len(), 1);
-            assert_eq!(stmt.columns[0].column_name, "email");
-            assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Asc);
+            assert_eq!(stmt.columns[0].expect_column_name(), "email");
+            assert_eq!(stmt.columns[0].direction(), vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }
@@ -43,8 +43,8 @@ fn test_create_unique_index() {
             assert_eq!(stmt.index_name, "idx");
             assert_eq!(stmt.table_name, "users");
             assert_eq!(stmt.columns.len(), 1);
-            assert_eq!(stmt.columns[0].column_name, "email");
-            assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Asc);
+            assert_eq!(stmt.columns[0].expect_column_name(), "email");
+            assert_eq!(stmt.columns[0].direction(), vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }
@@ -65,12 +65,12 @@ fn test_create_index_multi_column() {
                 other => panic!("Expected BTree index, got: {:?}", other),
             }
             assert_eq!(stmt.columns.len(), 3);
-            assert_eq!(stmt.columns[0].column_name, "first_name");
-            assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Asc);
-            assert_eq!(stmt.columns[1].column_name, "last_name");
-            assert_eq!(stmt.columns[1].direction, vibesql_ast::OrderDirection::Asc);
-            assert_eq!(stmt.columns[2].column_name, "email");
-            assert_eq!(stmt.columns[2].direction, vibesql_ast::OrderDirection::Asc);
+            assert_eq!(stmt.columns[0].expect_column_name(), "first_name");
+            assert_eq!(stmt.columns[0].direction(), vibesql_ast::OrderDirection::Asc);
+            assert_eq!(stmt.columns[1].expect_column_name(), "last_name");
+            assert_eq!(stmt.columns[1].direction(), vibesql_ast::OrderDirection::Asc);
+            assert_eq!(stmt.columns[2].expect_column_name(), "email");
+            assert_eq!(stmt.columns[2].direction(), vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }
@@ -91,10 +91,10 @@ fn test_create_unique_index_multi_column() {
             assert_eq!(stmt.index_name, "idx");
             assert_eq!(stmt.table_name, "orders");
             assert_eq!(stmt.columns.len(), 2);
-            assert_eq!(stmt.columns[0].column_name, "customer_id");
-            assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Asc);
-            assert_eq!(stmt.columns[1].column_name, "order_date");
-            assert_eq!(stmt.columns[1].direction, vibesql_ast::OrderDirection::Asc);
+            assert_eq!(stmt.columns[0].expect_column_name(), "customer_id");
+            assert_eq!(stmt.columns[0].direction(), vibesql_ast::OrderDirection::Asc);
+            assert_eq!(stmt.columns[1].expect_column_name(), "order_date");
+            assert_eq!(stmt.columns[1].direction(), vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }
@@ -111,8 +111,8 @@ fn test_create_index_mixed_case_identifiers() {
             assert_eq!(stmt.index_name, "MyIndex");
             assert_eq!(stmt.table_name, "MyTable");
             assert_eq!(stmt.columns.len(), 1);
-            assert_eq!(stmt.columns[0].column_name, "MyColumn");
-            assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Asc);
+            assert_eq!(stmt.columns[0].expect_column_name(), "MyColumn");
+            assert_eq!(stmt.columns[0].direction(), vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }
@@ -129,8 +129,8 @@ fn test_create_index_single_column() {
             assert_eq!(stmt.index_name, "pk");
             assert_eq!(stmt.table_name, "users");
             assert_eq!(stmt.columns.len(), 1);
-            assert_eq!(stmt.columns[0].column_name, "id");
-            assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Asc);
+            assert_eq!(stmt.columns[0].expect_column_name(), "id");
+            assert_eq!(stmt.columns[0].direction(), vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }
@@ -151,10 +151,10 @@ fn test_create_index_with_desc() {
                 other => panic!("Expected BTree index, got: {:?}", other),
             }
             assert_eq!(stmt.columns.len(), 2);
-            assert_eq!(stmt.columns[0].column_name, "email");
-            assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Desc);
-            assert_eq!(stmt.columns[1].column_name, "created_at");
-            assert_eq!(stmt.columns[1].direction, vibesql_ast::OrderDirection::Asc);
+            assert_eq!(stmt.columns[0].expect_column_name(), "email");
+            assert_eq!(stmt.columns[0].direction(), vibesql_ast::OrderDirection::Desc);
+            assert_eq!(stmt.columns[1].expect_column_name(), "created_at");
+            assert_eq!(stmt.columns[1].direction(), vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }
@@ -230,7 +230,7 @@ fn test_create_spatial_index() {
                 stmt.index_type
             );
             assert_eq!(stmt.columns.len(), 1);
-            assert_eq!(stmt.columns[0].column_name, "geom");
+            assert_eq!(stmt.columns[0].expect_column_name(), "geom");
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }
@@ -249,7 +249,147 @@ fn test_create_spatial_index_if_not_exists() {
             assert_eq!(stmt.table_name, "parcels");
             assert!(matches!(stmt.index_type, vibesql_ast::IndexType::Spatial));
             assert_eq!(stmt.columns.len(), 1);
-            assert_eq!(stmt.columns[0].column_name, "boundary");
+            assert_eq!(stmt.columns[0].expect_column_name(), "boundary");
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+// ============================================================================
+// Expression/Functional Index Tests
+// ============================================================================
+
+#[test]
+fn test_create_index_expression_function_call() {
+    // SQLite/PostgreSQL style functional index
+    let sql = "CREATE INDEX idx_lower_name ON users((lower(name)))";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.index_name, "idx_lower_name");
+            assert_eq!(stmt.table_name, "users");
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(stmt.columns[0].is_expression());
+            assert!(stmt.columns[0].get_expression().is_some());
+            assert_eq!(stmt.columns[0].direction(), vibesql_ast::OrderDirection::Asc);
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_expression_arithmetic() {
+    // Arithmetic expression index
+    let sql = "CREATE INDEX idx_sum ON numbers((a + b))";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.index_name, "idx_sum");
+            assert_eq!(stmt.table_name, "numbers");
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(stmt.columns[0].is_expression());
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_expression_with_desc() {
+    // Expression index with DESC
+    let sql = "CREATE INDEX idx_lower_name ON users((lower(name)) DESC)";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(stmt.columns[0].is_expression());
+            assert_eq!(stmt.columns[0].direction(), vibesql_ast::OrderDirection::Desc);
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_mixed_columns_and_expressions() {
+    // Mix of regular columns and expression indexes
+    let sql = "CREATE INDEX idx_mixed ON t(a, (lower(b)), c DESC)";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 3);
+
+            // First: column 'a'
+            assert!(!stmt.columns[0].is_expression());
+            assert_eq!(stmt.columns[0].expect_column_name(), "a");
+
+            // Second: expression lower(b)
+            assert!(stmt.columns[1].is_expression());
+            assert!(stmt.columns[1].column_name().is_none());
+
+            // Third: column 'c' DESC
+            assert!(!stmt.columns[2].is_expression());
+            assert_eq!(stmt.columns[2].expect_column_name(), "c");
+            assert_eq!(stmt.columns[2].direction(), vibesql_ast::OrderDirection::Desc);
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_unique_index_expression() {
+    // Unique expression index
+    let sql = "CREATE UNIQUE INDEX idx_unique_lower ON users((lower(email)))";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            match &stmt.index_type {
+                vibesql_ast::IndexType::BTree { unique } => {
+                    assert!(*unique, "Expected unique=true");
+                }
+                other => panic!("Expected BTree index, got: {:?}", other),
+            }
+            assert!(stmt.columns[0].is_expression());
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_expression_coalesce() {
+    // Expression with COALESCE
+    let sql = "CREATE INDEX idx_coalesce ON t((coalesce(a, b, 0)))";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(stmt.columns[0].is_expression());
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_expression_complex() {
+    // Complex expression
+    let sql = "CREATE INDEX idx_complex ON t((a * 2 + b - 1))";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(stmt.columns[0].is_expression());
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }

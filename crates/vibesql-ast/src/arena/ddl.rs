@@ -141,7 +141,7 @@ pub struct TableConstraint<'arena> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableConstraintKind<'arena> {
     PrimaryKey {
-        columns: BumpVec<'arena, IndexColumn>,
+        columns: BumpVec<'arena, IndexColumn<'arena>>,
     },
     ForeignKey {
         columns: BumpVec<'arena, Symbol>,
@@ -151,14 +151,14 @@ pub enum TableConstraintKind<'arena> {
         on_update: Option<ReferentialAction>,
     },
     Unique {
-        columns: BumpVec<'arena, IndexColumn>,
+        columns: BumpVec<'arena, IndexColumn<'arena>>,
     },
     Check {
         expr: &'arena Expression<'arena>,
     },
     Fulltext {
         index_name: Option<Symbol>,
-        columns: BumpVec<'arena, IndexColumn>,
+        columns: BumpVec<'arena, IndexColumn<'arena>>,
     },
 }
 
@@ -279,7 +279,7 @@ pub struct CreateIndexStmt<'arena> {
     pub index_name: Symbol,
     pub table_name: Symbol,
     pub index_type: IndexType,
-    pub columns: BumpVec<'arena, IndexColumn>,
+    pub columns: BumpVec<'arena, IndexColumn<'arena>>,
 }
 
 /// Index type specification
@@ -290,12 +290,43 @@ pub enum IndexType {
     Spatial,
 }
 
-/// Index column specification
+/// Index column specification - can be either a simple column reference or an expression
 #[derive(Debug, Clone, PartialEq)]
-pub struct IndexColumn {
-    pub column_name: Symbol,
-    pub direction: super::expression::OrderDirection,
-    pub prefix_length: Option<u64>,
+pub enum IndexColumn<'arena> {
+    /// Simple column reference with optional prefix length
+    Column {
+        column_name: Symbol,
+        direction: super::expression::OrderDirection,
+        prefix_length: Option<u64>,
+    },
+    /// Expression index (functional index)
+    Expression {
+        expr: &'arena Expression<'arena>,
+        direction: super::expression::OrderDirection,
+    },
+}
+
+impl<'arena> IndexColumn<'arena> {
+    /// Get the column name if this is a simple column reference
+    pub fn column_name(&self) -> Option<Symbol> {
+        match self {
+            IndexColumn::Column { column_name, .. } => Some(*column_name),
+            IndexColumn::Expression { .. } => None,
+        }
+    }
+
+    /// Get the direction of this index column
+    pub fn direction(&self) -> super::expression::OrderDirection {
+        match self {
+            IndexColumn::Column { direction, .. } => *direction,
+            IndexColumn::Expression { direction, .. } => *direction,
+        }
+    }
+
+    /// Check if this is an expression index
+    pub fn is_expression(&self) -> bool {
+        matches!(self, IndexColumn::Expression { .. })
+    }
 }
 
 /// DROP INDEX statement

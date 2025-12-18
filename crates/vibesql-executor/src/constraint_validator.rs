@@ -128,7 +128,7 @@ impl ConstraintValidator {
                     }
                     // Extract column names from IndexColumn structs
                     let column_names: Vec<String> =
-                        pk_cols.iter().map(|c| c.column_name.clone()).collect();
+                        pk_cols.iter().map(|c| c.expect_column_name().to_string()).collect();
                     result.primary_key = Some(column_names.clone());
                     // SQLite quirk: only INTEGER PRIMARY KEY has implicit NOT NULL
                     // For table-level constraints, check each column's type
@@ -137,7 +137,7 @@ impl ConstraintValidator {
                             if col_def.data_type == DataType::Integer
                                 && !result.not_null_columns.contains(col_name)
                             {
-                                result.not_null_columns.push(col_name.clone());
+                                result.not_null_columns.push(col_name.to_string());
                             }
                         }
                     }
@@ -145,7 +145,7 @@ impl ConstraintValidator {
                 TableConstraintKind::Unique { columns } => {
                     // Extract column names from IndexColumn structs
                     let column_names: Vec<String> =
-                        columns.iter().map(|c| c.column_name.clone()).collect();
+                        columns.iter().map(|c| c.expect_column_name().to_string()).collect();
                     result.unique_constraints.push(column_names);
                 }
                 TableConstraintKind::Check { expr } => {
@@ -253,12 +253,12 @@ mod tests {
             name: None,
             kind: TableConstraintKind::PrimaryKey {
                 columns: vec![
-                    vibesql_ast::IndexColumn {
+                    vibesql_ast::IndexColumn::Column {
                         column_name: "id".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
                     },
-                    vibesql_ast::IndexColumn {
+                    vibesql_ast::IndexColumn::Column {
                         column_name: "tenant_id".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
@@ -280,7 +280,7 @@ mod tests {
         let constraints = vec![TableConstraint {
             name: None,
             kind: TableConstraintKind::PrimaryKey {
-                columns: vec![vibesql_ast::IndexColumn {
+                columns: vec![vibesql_ast::IndexColumn::Column {
                     column_name: "id".to_string(),
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
@@ -301,7 +301,7 @@ mod tests {
         let constraints = vec![TableConstraint {
             name: None,
             kind: TableConstraintKind::Unique {
-                columns: vec![vibesql_ast::IndexColumn {
+                columns: vec![vibesql_ast::IndexColumn::Column {
                     column_name: "username".to_string(),
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
@@ -413,12 +413,12 @@ mod tests {
             name: None,
             kind: TableConstraintKind::PrimaryKey {
                 columns: vec![
-                    vibesql_ast::IndexColumn {
+                    vibesql_ast::IndexColumn::Column {
                         column_name: "id".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
                     },
-                    vibesql_ast::IndexColumn {
+                    vibesql_ast::IndexColumn::Column {
                         column_name: "code".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,

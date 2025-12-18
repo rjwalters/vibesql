@@ -96,12 +96,12 @@ fn create_skip_scan_test_db() -> Database {
         "sales".to_string(),
         false,
         vec![
-            vibesql_ast::IndexColumn {
+            vibesql_ast::IndexColumn::Column {
                 column_name: "region".to_string(),
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,
             },
-            vibesql_ast::IndexColumn {
+            vibesql_ast::IndexColumn::Column {
                 column_name: "sale_date".to_string(),
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,

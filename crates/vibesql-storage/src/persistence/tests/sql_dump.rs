@@ -264,7 +264,7 @@ fn test_sql_dump_with_indexes() {
     db.create_table(schema).unwrap();
 
     // Create indexes (use fully qualified table name)
-    let idx1 = vibesql_ast::IndexColumn {
+    let idx1 = vibesql_ast::IndexColumn::Column {
         column_name: "name".to_string(),
         direction: vibesql_ast::OrderDirection::Asc,
         prefix_length: None,
@@ -272,7 +272,7 @@ fn test_sql_dump_with_indexes() {
     db.create_index("idx_name".to_string(), "public.test_indexes".to_string(), false, vec![idx1])
         .unwrap();
 
-    let idx2 = vibesql_ast::IndexColumn {
+    let idx2 = vibesql_ast::IndexColumn::Column {
         column_name: "email".to_string(),
         direction: vibesql_ast::OrderDirection::Asc,
         prefix_length: None,

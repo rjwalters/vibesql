@@ -18,13 +18,13 @@ pub(super) fn execute_add_constraint(
     match &stmt.constraint.kind {
         TableConstraintKind::PrimaryKey { columns } => {
             // Extract column names from IndexColumn structs
-            let column_names: Vec<String> = columns.iter().map(|c| c.column_name.clone()).collect();
+            let column_names: Vec<String> = columns.iter().map(|c| c.expect_column_name().to_string()).collect();
 
             // Verify all columns exist
             for col_name in &column_names {
                 if !table.schema.has_column(col_name) {
                     return Err(ExecutorError::ColumnNotFound {
-                        column_name: col_name.clone(),
+                        column_name: col_name.to_string(),
                         table_name: stmt.table_name.clone(),
                         searched_tables: vec![stmt.table_name.clone()],
                         available_columns: table
@@ -59,7 +59,7 @@ pub(super) fn execute_add_constraint(
         }
         TableConstraintKind::Unique { columns } => {
             // Extract column names from IndexColumn structs
-            let column_names: Vec<String> = columns.iter().map(|c| c.column_name.clone()).collect();
+            let column_names: Vec<String> = columns.iter().map(|c| c.expect_column_name().to_string()).collect();
             table.schema_mut().add_unique_constraint(column_names)?;
 
             // Rebuild table indexes to create the unique constraint index
@@ -117,7 +117,7 @@ pub(super) fn execute_add_constraint(
             for col_name in columns {
                 let idx = table.schema.get_column_index(col_name).ok_or_else(|| {
                     ExecutorError::ColumnNotFound {
-                        column_name: col_name.clone(),
+                        column_name: col_name.to_string(),
                         table_name: stmt.table_name.clone(),
                         searched_tables: vec![stmt.table_name.clone()],
                         available_columns: table
@@ -141,7 +141,7 @@ pub(super) fn execute_add_constraint(
             for col_name in references_columns {
                 let idx = ref_table.schema.get_column_index(col_name).ok_or_else(|| {
                     ExecutorError::ColumnNotFound {
-                        column_name: col_name.clone(),
+                        column_name: col_name.to_string(),
                         table_name: references_table.clone(),
                         searched_tables: vec![references_table.clone()],
                         available_columns: ref_table

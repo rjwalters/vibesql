@@ -3,9 +3,37 @@
 use super::super::*;
 
 impl Parser {
-    /// Parse a column name with optional prefix length for index/constraint definitions
-    /// Syntax: column_name [ ( integer ) ]
+    /// Parse an index column specification with optional prefix length or expression
+    ///
+    /// Supports both simple column references and expression indexes:
+    /// - Column: `col1`, `col1(10)` (with prefix length)
+    /// - Expression: `(lower(name))`, `(a + b)`
+    ///
+    /// Syntax: column_name [ ( integer ) ] | ( expression )
     fn parse_index_column_spec(&mut self) -> Result<vibesql_ast::IndexColumn, ParseError> {
+        // Check if this is an expression index (starts with parenthesis)
+        if self.peek() == &Token::LParen {
+            self.advance(); // consume LParen
+
+            // Parse the expression
+            let expr = self.parse_expression()?;
+
+            self.expect_token(Token::RParen)?;
+
+            // Check for optional ASC/DESC
+            let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
+                self.advance();
+                vibesql_ast::OrderDirection::Asc
+            } else if self.peek_keyword(crate::keywords::Keyword::Desc) {
+                self.advance();
+                vibesql_ast::OrderDirection::Desc
+            } else {
+                vibesql_ast::OrderDirection::Asc
+            };
+
+            return Ok(vibesql_ast::IndexColumn::new_expression(expr, direction));
+        }
+
         let column_name = self.parse_identifier()?;
 
         // Check for optional prefix length: column_name(length)
@@ -47,11 +75,18 @@ impl Parser {
             None
         };
 
-        Ok(vibesql_ast::IndexColumn {
-            column_name,
-            direction: vibesql_ast::OrderDirection::Asc, // Default for constraints
-            prefix_length,
-        })
+        // Check for optional ASC/DESC
+        let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
+            self.advance();
+            vibesql_ast::OrderDirection::Asc
+        } else if self.peek_keyword(crate::keywords::Keyword::Desc) {
+            self.advance();
+            vibesql_ast::OrderDirection::Desc
+        } else {
+            vibesql_ast::OrderDirection::Asc // Default for constraints
+        };
+
+        Ok(vibesql_ast::IndexColumn::Column { column_name, direction, prefix_length })
     }
     /// Parse ON DELETE/UPDATE referential actions
     fn parse_referential_actions(

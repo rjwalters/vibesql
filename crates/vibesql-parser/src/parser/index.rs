@@ -208,7 +208,7 @@ impl Parser {
             });
         }
 
-        let columns = vec![vibesql_ast::IndexColumn {
+        let columns = vec![vibesql_ast::IndexColumn::Column {
             column_name,
             direction: vibesql_ast::OrderDirection::Asc, // Not meaningful for vector indexes
             prefix_length: None,
@@ -332,7 +332,7 @@ impl Parser {
             });
         }
 
-        let columns = vec![vibesql_ast::IndexColumn {
+        let columns = vec![vibesql_ast::IndexColumn::Column {
             column_name,
             direction: vibesql_ast::OrderDirection::Asc, // Not meaningful for vector indexes
             prefix_length: None,
@@ -367,66 +367,105 @@ impl Parser {
     }
 
     /// Parse index column list (helper for standard indexes)
+    ///
+    /// Supports both simple column references and expression indexes:
+    /// - Column: `col1`, `col1 ASC`, `col1(10)` (with prefix length)
+    /// - Expression: `(lower(name))`, `(a + b) DESC`
+    ///
+    /// SQLite/PostgreSQL syntax: expressions must be wrapped in parentheses
     fn parse_index_column_list(&mut self) -> Result<Vec<vibesql_ast::IndexColumn>, ParseError> {
         let mut columns = Vec::new();
         loop {
-            // Parse column name (use parse_alias_name to allow SQLite-style single-quoted identifiers)
-            // SQLite allows: CREATE INDEX i1xy ON t1(`x`,'y' ASC); -- 'y' is a column name
-            let column_name = self.parse_alias_name()?;
-
-            // Check for optional prefix length: column_name(length)
-            let prefix_length = if self.peek() == &Token::LParen {
+            // Check if this is an expression index (starts with parenthesis)
+            if self.peek() == &Token::LParen {
+                // This could be either:
+                // 1. An expression index: (lower(name))
+                // 2. A prefix length on the previous column: name(10)
+                //
+                // Since we're at the start of a new column spec, it must be an expression
                 self.advance(); // consume LParen
 
-                // Parse the integer length
-                let length = match self.peek() {
-                    Token::Number(n) => {
-                        let value = n.parse::<i64>().map_err(|_| ParseError {
-                            message: "Invalid integer for column prefix length".to_string(),
-                        })?;
-                        self.advance();
-
-                        // Validate prefix length range (MySQL compatibility)
-                        if value < 1 {
-                            return Err(ParseError {
-                                message: format!("Key part '{}' length cannot be 0", column_name),
-                            });
-                        }
-                        // MySQL InnoDB limit: 3072 bytes for index prefix length
-                        if value > 3072 {
-                            return Err(ParseError {
-                                message: "Specified key was too long; max key length is 3072 bytes"
-                                    .to_string(),
-                            });
-                        }
-
-                        value
-                    }
-                    _ => {
-                        return Err(ParseError {
-                            message: "Expected integer for column prefix length".to_string(),
-                        })
-                    }
-                };
+                // Parse the expression
+                let expr = self.parse_expression()?;
 
                 self.expect_token(Token::RParen)?;
-                Some(length as u64)
-            } else {
-                None
-            };
 
-            // Check for optional ASC/DESC
-            let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
-                self.advance(); // consume ASC
-                vibesql_ast::OrderDirection::Asc
-            } else if self.peek_keyword(crate::keywords::Keyword::Desc) {
-                self.advance(); // consume DESC
-                vibesql_ast::OrderDirection::Desc
-            } else {
-                vibesql_ast::OrderDirection::Asc // Default
-            };
+                // Check for optional ASC/DESC
+                let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
+                    self.advance();
+                    vibesql_ast::OrderDirection::Asc
+                } else if self.peek_keyword(crate::keywords::Keyword::Desc) {
+                    self.advance();
+                    vibesql_ast::OrderDirection::Desc
+                } else {
+                    vibesql_ast::OrderDirection::Asc
+                };
 
-            columns.push(vibesql_ast::IndexColumn { column_name, direction, prefix_length });
+                columns.push(vibesql_ast::IndexColumn::new_expression(expr, direction));
+            } else {
+                // Parse column name (use parse_alias_name to allow SQLite-style single-quoted
+                // identifiers)
+                // SQLite allows: CREATE INDEX i1xy ON t1(`x`,'y' ASC); -- 'y' is a column name
+                let column_name = self.parse_alias_name()?;
+
+                // Check for optional prefix length: column_name(length)
+                let prefix_length = if self.peek() == &Token::LParen {
+                    self.advance(); // consume LParen
+
+                    // Parse the integer length
+                    let length = match self.peek() {
+                        Token::Number(n) => {
+                            let value = n.parse::<i64>().map_err(|_| ParseError {
+                                message: "Invalid integer for column prefix length".to_string(),
+                            })?;
+                            self.advance();
+
+                            // Validate prefix length range (MySQL compatibility)
+                            if value < 1 {
+                                return Err(ParseError {
+                                    message: format!("Key part '{}' length cannot be 0", column_name),
+                                });
+                            }
+                            // MySQL InnoDB limit: 3072 bytes for index prefix length
+                            if value > 3072 {
+                                return Err(ParseError {
+                                    message: "Specified key was too long; max key length is 3072 bytes"
+                                        .to_string(),
+                                });
+                            }
+
+                            value
+                        }
+                        _ => {
+                            return Err(ParseError {
+                                message: "Expected integer for column prefix length".to_string(),
+                            })
+                        }
+                    };
+
+                    self.expect_token(Token::RParen)?;
+                    Some(length as u64)
+                } else {
+                    None
+                };
+
+                // Check for optional ASC/DESC
+                let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
+                    self.advance(); // consume ASC
+                    vibesql_ast::OrderDirection::Asc
+                } else if self.peek_keyword(crate::keywords::Keyword::Desc) {
+                    self.advance(); // consume DESC
+                    vibesql_ast::OrderDirection::Desc
+                } else {
+                    vibesql_ast::OrderDirection::Asc // Default
+                };
+
+                columns.push(vibesql_ast::IndexColumn::Column {
+                    column_name,
+                    direction,
+                    prefix_length,
+                });
+            }
 
             if self.peek() == &Token::Comma {
                 self.advance(); // consume comma
@@ -464,73 +503,8 @@ impl Parser {
         // Expect opening parenthesis
         self.expect_token(Token::LParen)?;
 
-        // Parse column list
-        let mut columns = Vec::new();
-        loop {
-            // Parse column name
-            let column_name = self.parse_identifier()?;
-
-            // Check for optional prefix length: column_name(length)
-            let prefix_length = if self.peek() == &Token::LParen {
-                self.advance(); // consume LParen
-
-                // Parse the integer length
-                let length = match self.peek() {
-                    Token::Number(n) => {
-                        let value = n.parse::<i64>().map_err(|_| ParseError {
-                            message: "Invalid integer for column prefix length".to_string(),
-                        })?;
-                        self.advance();
-
-                        // Validate prefix length range (MySQL compatibility)
-                        if value < 1 {
-                            return Err(ParseError {
-                                message: format!("Key part '{}' length cannot be 0", column_name),
-                            });
-                        }
-                        // MySQL InnoDB limit: 3072 bytes for index prefix length
-                        // This is the maximum for utf8mb4 with innodb_large_prefix enabled
-                        if value > 3072 {
-                            return Err(ParseError {
-                                message: "Specified key was too long; max key length is 3072 bytes"
-                                    .to_string(),
-                            });
-                        }
-
-                        value
-                    }
-                    _ => {
-                        return Err(ParseError {
-                            message: "Expected integer for column prefix length".to_string(),
-                        })
-                    }
-                };
-
-                self.expect_token(Token::RParen)?;
-                Some(length as u64)
-            } else {
-                None
-            };
-
-            // Check for optional ASC/DESC
-            let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
-                self.advance(); // consume ASC
-                vibesql_ast::OrderDirection::Asc
-            } else if self.peek_keyword(crate::keywords::Keyword::Desc) {
-                self.advance(); // consume DESC
-                vibesql_ast::OrderDirection::Desc
-            } else {
-                vibesql_ast::OrderDirection::Asc // Default
-            };
-
-            columns.push(vibesql_ast::IndexColumn { column_name, direction, prefix_length });
-
-            if self.peek() == &Token::Comma {
-                self.advance(); // consume comma
-            } else {
-                break;
-            }
-        }
+        // Parse column list (supports both column references and expression indexes)
+        let columns = self.parse_index_column_list()?;
 
         // Expect closing parenthesis
         self.expect_token(Token::RParen)?;

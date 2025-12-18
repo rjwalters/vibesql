@@ -69,7 +69,7 @@ pub(crate) fn execute_index_scan(
 
     // Get column names for the index (in order)
     let index_column_names: Vec<&str> =
-        index_metadata.columns.iter().map(|col| col.column_name.as_str()).collect();
+        index_metadata.columns.iter().map(|col| col.expect_column_name()).collect();
 
     // Get the first indexed column (for single-column predicate extraction fallback)
     let first_indexed_column = index_column_names.first().copied().unwrap_or("");

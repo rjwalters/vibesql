@@ -67,7 +67,7 @@ impl ColumnarBatch {
 
         for col_name in column_names.iter() {
             let storage_col = storage_columnar.get_column(col_name).ok_or_else(|| {
-                ExecutorError::ColumnarColumnNotFoundByName { column_name: col_name.clone() }
+                ExecutorError::ColumnarColumnNotFoundByName { column_name: col_name.to_string() }
             })?;
 
             let column_array = match storage_col {

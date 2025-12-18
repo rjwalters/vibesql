@@ -75,7 +75,7 @@ fn test_index_ordering() {
         if_not_exists: false,
         table_name: "users".to_string(),
         index_type: vibesql_ast::IndexType::BTree { unique: false },
-        columns: vec![IndexColumn {
+        columns: vec![IndexColumn::Column {
             column_name: "name".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,

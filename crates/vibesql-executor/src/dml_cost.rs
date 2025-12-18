@@ -372,7 +372,7 @@ mod tests {
                 format!("idx_{}_{}", table_name, i),
                 table_name.to_string(),
                 false,
-                vec![vibesql_ast::IndexColumn {
+                vec![vibesql_ast::IndexColumn::Column {
                     column_name: "name".to_string(),
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
