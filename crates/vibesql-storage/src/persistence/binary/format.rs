@@ -40,6 +40,7 @@ pub enum TypeTag {
     Timestamp = 0x32,
     Interval = 0x33,
     Vector = 0x40,
+    Blob = 0x50,
 }
 
 impl TypeTag {
@@ -62,6 +63,7 @@ impl TypeTag {
             0x32 => Ok(TypeTag::Timestamp),
             0x33 => Ok(TypeTag::Interval),
             0x40 => Ok(TypeTag::Vector),
+            0x50 => Ok(TypeTag::Blob),
             _ => Err(StorageError::NotImplemented(format!("Unknown type tag: 0x{:02X}", tag))),
         }
     }

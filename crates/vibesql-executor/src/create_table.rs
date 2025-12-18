@@ -635,6 +635,7 @@ impl CreateTableExecutor {
                 end_field: None,
             },
             SqlValue::Vector(v) => DataType::Vector { dimensions: v.len() as u32 },
+            SqlValue::Blob(_) => DataType::BinaryLargeObject,
         }
     }
 }

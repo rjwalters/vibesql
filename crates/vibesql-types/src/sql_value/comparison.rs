@@ -65,6 +65,12 @@ impl PartialEq for SqlValue {
             // Interval
             (Interval(a), Interval(b)) => a == b,
 
+            // Vector
+            (Vector(a), Vector(b)) => a == b,
+
+            // Blob
+            (Blob(a), Blob(b)) => a == b,
+
             // Type mismatch - not equal
             _ => false,
         }
@@ -119,6 +125,12 @@ impl PartialOrd for SqlValue {
 
             // Interval type comparison
             (Interval(a), Interval(b)) => a.partial_cmp(b),
+
+            // Vector type comparison (lexicographic)
+            (Vector(a), Vector(b)) => a.partial_cmp(b),
+
+            // Blob type comparison (lexicographic byte comparison)
+            (Blob(a), Blob(b)) => a.partial_cmp(b),
 
             // Type mismatch - incomparable (SQL:1999 behavior)
             _ => None,
@@ -216,6 +228,7 @@ impl Ord for SqlValue {
                         Timestamp(_) => 14,
                         Interval(_) => 15,
                         Vector(_) => 16,
+                        Blob(_) => 17,
                         Null => 0, // Already handled above, but for completeness
                     }
                 }

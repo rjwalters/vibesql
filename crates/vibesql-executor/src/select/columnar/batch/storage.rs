@@ -174,6 +174,23 @@ impl ColumnarBatch {
                         .collect();
                     ColumnArray::Mixed(Arc::new(sql_values))
                 }
+                ColumnData::Blob { values, nulls } => {
+                    // Convert Blob to Mixed (fallback)
+                    let sql_values: Vec<SqlValue> = values
+                        .iter()
+                        .zip(nulls.iter())
+                        .map(
+                            |(b, &is_null)| {
+                                if is_null {
+                                    SqlValue::Null
+                                } else {
+                                    SqlValue::Blob(b.clone())
+                                }
+                            },
+                        )
+                        .collect();
+                    ColumnArray::Mixed(Arc::new(sql_values))
+                }
             };
 
             columns.push(column_array);

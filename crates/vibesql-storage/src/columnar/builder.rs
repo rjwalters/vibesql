@@ -32,6 +32,7 @@ pub(crate) struct ColumnBuilder {
     time_values: Vec<Time>,
     timestamp_values: Vec<Timestamp>,
     interval_values: Vec<Interval>,
+    blob_values: Vec<Vec<u8>>,
     nulls: Vec<bool>,
     /// String interner for deduplicating low-cardinality string columns
     string_interner: StringInterner,
@@ -54,6 +55,7 @@ impl ColumnBuilder {
             time_values: Vec::new(),
             timestamp_values: Vec::new(),
             interval_values: Vec::new(),
+            blob_values: Vec::new(),
             nulls: Vec::with_capacity(capacity),
             string_interner: StringInterner::default(),
         };
@@ -87,6 +89,9 @@ impl ColumnBuilder {
             ColumnTypeClass::Vector => {
                 // Vector storage is not yet implemented in columnar format
                 // Future phase will add specialized vector storage
+            }
+            ColumnTypeClass::Blob => {
+                builder.blob_values = Vec::with_capacity(capacity);
             }
         }
 
@@ -219,6 +224,25 @@ impl ColumnBuilder {
                 self.nulls.push(true);
             }
 
+            // Vector handling (not yet fully implemented in columnar storage)
+            (ColumnTypeClass::Vector, SqlValue::Null) => {
+                self.nulls.push(true);
+            }
+            (ColumnTypeClass::Vector, _) => {
+                // Vector storage is not yet implemented
+                self.nulls.push(false);
+            }
+
+            // Blob handling
+            (ColumnTypeClass::Blob, SqlValue::Blob(v)) => {
+                self.blob_values.push(v.clone());
+                self.nulls.push(false);
+            }
+            (ColumnTypeClass::Blob, SqlValue::Null) => {
+                self.blob_values.push(Vec::new());
+                self.nulls.push(true);
+            }
+
             // Type mismatch
             (expected, got) => {
                 return Err(format!(
@@ -269,6 +293,9 @@ impl ColumnBuilder {
             ColumnTypeClass::Vector => {
                 // Vector values are stored as Vec<Vec<f32>>
                 ColumnData::Vector { values: Arc::new(Vec::new()), nulls: Arc::new(self.nulls) }
+            }
+            ColumnTypeClass::Blob => {
+                ColumnData::Blob { values: Arc::new(self.blob_values), nulls: Arc::new(self.nulls) }
             }
         }
     }

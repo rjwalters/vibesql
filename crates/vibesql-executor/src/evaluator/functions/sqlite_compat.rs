@@ -35,6 +35,7 @@ pub(super) fn typeof_func(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> 
         SqlValue::Date(_) | SqlValue::Time(_) | SqlValue::Timestamp(_) => "text",
         SqlValue::Interval(_) => "text",
         SqlValue::Vector(_) => "blob",
+        SqlValue::Blob(_) => "blob",
     };
 
     Ok(SqlValue::Varchar(type_name.into()))
@@ -749,6 +750,11 @@ pub(super) fn quote(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Time(t) => Ok(SqlValue::Varchar(format!("'{}'", t).into())),
         SqlValue::Timestamp(ts) => Ok(SqlValue::Varchar(format!("'{}'", ts).into())),
         SqlValue::Interval(i) => Ok(SqlValue::Varchar(format!("'{}'", i).into())),
+        SqlValue::Blob(b) => {
+            // Convert blob to X'...' hex format
+            let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+            Ok(SqlValue::Varchar(format!("X'{}'", hex).into()))
+        }
     }
 }
 

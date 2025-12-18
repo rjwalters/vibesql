@@ -76,6 +76,11 @@ pub fn execute_query(db: &Database, sql: &str) -> Result<JsValue, JsValue> {
                                 .collect(),
                         )
                     }
+                    vibesql_types::SqlValue::Blob(b) => {
+                        // Serialize blob as hex string with x'' prefix
+                        let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+                        serde_json::Value::String(format!("x'{}'", hex))
+                    }
                     vibesql_types::SqlValue::Null => serde_json::Value::Null,
                 })
                 .collect();

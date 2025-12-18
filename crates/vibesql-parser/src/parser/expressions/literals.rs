@@ -30,6 +30,13 @@ impl Parser {
                     string_val,
                 ))))
             }
+            Token::BlobLiteral(bytes) => {
+                let blob_val = bytes.clone();
+                self.advance();
+                Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Blob(
+                    blob_val,
+                ))))
+            }
             Token::Keyword { keyword: Keyword::True, .. } => {
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true))))

@@ -57,6 +57,8 @@ pub enum Token {
     Number(String),
     /// String literal ('hello')
     String(String),
+    /// Blob literal (x'48454C4C4F' or X'1234')
+    BlobLiteral(Vec<u8>),
     /// Single character symbols (+, -, *, /, =, <, >, etc.)
     Symbol(char),
     /// Multi-character operators (<=, >=, !=, <>, ||)
@@ -96,6 +98,10 @@ impl Token {
             Token::DelimitedIdentifier(id) => format!("\"{}\"", id),
             Token::Number(n) => n.clone(),
             Token::String(s) => format!("'{}'", s.replace('\'', "''")),
+            Token::BlobLiteral(bytes) => {
+                let hex: String = bytes.iter().map(|b| format!("{:02X}", b)).collect();
+                format!("x'{}'", hex)
+            }
             Token::Symbol(c) => c.to_string(),
             Token::Operator(op) => op.to_string(),
             Token::SessionVariable(v) => format!("@@{}", v),
@@ -140,6 +146,10 @@ impl fmt::Display for Token {
             Token::DelimitedIdentifier(id) => write!(f, "DelimitedIdentifier(\"{}\")", id),
             Token::Number(n) => write!(f, "Number({})", n),
             Token::String(s) => write!(f, "String('{}')", s),
+            Token::BlobLiteral(bytes) => {
+                let hex: String = bytes.iter().map(|b| format!("{:02X}", b)).collect();
+                write!(f, "BlobLiteral(x'{}')", hex)
+            }
             Token::Symbol(c) => write!(f, "Symbol({})", c),
             Token::Operator(op) => write!(f, "Operator({})", op),
             Token::SessionVariable(v) => write!(f, "SessionVariable({})", v),

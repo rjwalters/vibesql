@@ -167,6 +167,10 @@ impl ToSql for SqlValue {
                 let formatted: Vec<String> = v.iter().map(|x| x.to_string()).collect();
                 format!("[{}]", formatted.join(", "))
             }
+            SqlValue::Blob(b) => {
+                let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+                format!("x'{}'", hex)
+            }
             SqlValue::Null => "NULL".to_string(),
         }
     }

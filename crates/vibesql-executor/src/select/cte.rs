@@ -407,5 +407,6 @@ pub(super) fn infer_type_from_value(value: &vibesql_types::SqlValue) -> vibesql_
         vibesql_types::SqlValue::Vector(v) => {
             vibesql_types::DataType::Vector { dimensions: v.len() as u32 }
         }
+        vibesql_types::SqlValue::Blob(_) => vibesql_types::DataType::BinaryLargeObject,
     }
 }

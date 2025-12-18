@@ -286,5 +286,10 @@ pub(super) fn sql_value_to_literal(value: &vibesql_types::SqlValue) -> String {
             let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
             format!("'{}'", formatted.join(","))
         }
+        SqlValue::Blob(b) => {
+            // Format blob as hex literal
+            let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+            format!("x'{}'", hex)
+        }
     }
 }

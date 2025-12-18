@@ -23,6 +23,7 @@ pub enum LiteralValue {
     Date(String),
     Time(String),
     Timestamp(String),
+    Blob(Vec<u8>),
     Null,
 }
 
@@ -51,6 +52,7 @@ impl LiteralValue {
                 let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
                 LiteralValue::Varchar(format!("[{}]", formatted.join(", ")))
             }
+            SqlValue::Blob(b) => LiteralValue::Blob(b.clone()),
             SqlValue::Null => LiteralValue::Null,
         }
     }
@@ -73,6 +75,10 @@ impl LiteralValue {
             LiteralValue::Date(s) => format!("DATE '{}'", s),
             LiteralValue::Time(s) => format!("TIME '{}'", s),
             LiteralValue::Timestamp(s) => format!("TIMESTAMP '{}'", s),
+            LiteralValue::Blob(b) => {
+                let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+                format!("x'{}'", hex)
+            }
             LiteralValue::Null => "NULL".to_string(),
         }
     }
