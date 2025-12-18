@@ -321,6 +321,37 @@ impl TableSchema {
         self.primary_key.as_ref().is_some_and(|pk| pk.contains(&column_name.to_string()))
     }
 
+    /// Get the column index of the INTEGER PRIMARY KEY column (SQLite semantics)
+    ///
+    /// In SQLite, when a column is declared as `INTEGER PRIMARY KEY`:
+    /// 1. It becomes an alias for the internal `rowid`
+    /// 2. Inserting NULL auto-generates the next rowid value
+    /// 3. The auto-generated value is `max(rowid) + 1` (or 1 if table is empty)
+    ///
+    /// This method returns the column index if:
+    /// - There is exactly one primary key column
+    /// - That column's type is exactly `DataType::Integer` (not INT, not BIGINT)
+    ///
+    /// Returns `None` if the table doesn't have an INTEGER PRIMARY KEY.
+    pub fn get_integer_primary_key_index(&self) -> Option<usize> {
+        // Must have a single-column primary key
+        let pk_cols = self.primary_key.as_ref()?;
+        if pk_cols.len() != 1 {
+            return None;
+        }
+
+        // Get the column index
+        let col_idx = self.get_column_index(&pk_cols[0])?;
+        let col = &self.columns[col_idx];
+
+        // Must be exactly INTEGER type (not Bigint, not Smallint)
+        if matches!(col.data_type, vibesql_types::DataType::Integer) {
+            Some(col_idx)
+        } else {
+            None
+        }
+    }
+
     /// Set nullable property for a column by index
     pub fn set_column_nullable(
         &mut self,

@@ -186,12 +186,67 @@ pub fn evaluate_default_expression(
 ///
 /// Returns the first auto-generated sequence value (for LAST_INSERT_ROWID support),
 /// or None if no sequence values were generated.
+#[allow(dead_code)]
 pub fn apply_default_values(
     schema: &vibesql_catalog::TableSchema,
     row_values: &mut [vibesql_types::SqlValue],
     database: &mut vibesql_storage::Database,
 ) -> Result<Option<i64>, ExecutorError> {
+    apply_default_values_with_table_name(schema, row_values, database, &schema.name)
+}
+
+/// Apply DEFAULT values for unspecified columns, with explicit table name for storage lookup
+///
+/// This variant is used when the storage table name differs from the schema name
+/// (e.g., for schema-qualified tables).
+///
+/// Returns the first auto-generated sequence value (for LAST_INSERT_ROWID support),
+/// or None if no sequence values were generated.
+pub fn apply_default_values_with_table_name(
+    schema: &vibesql_catalog::TableSchema,
+    row_values: &mut [vibesql_types::SqlValue],
+    database: &mut vibesql_storage::Database,
+    storage_table_name: &str,
+) -> Result<Option<i64>, ExecutorError> {
+    apply_default_values_with_batch_context(schema, row_values, database, storage_table_name, None)
+}
+
+/// Apply DEFAULT values for unspecified columns, with batch context for multi-row inserts
+///
+/// The `batch_max_ipk` parameter is used to track the maximum INTEGER PRIMARY KEY value
+/// already assigned within the current batch of inserts. This prevents duplicate values
+/// when multiple rows in the same INSERT have NULL for the INTEGER PRIMARY KEY column.
+///
+/// Returns the first auto-generated sequence value (for LAST_INSERT_ROWID support),
+/// or None if no sequence values were generated.
+pub fn apply_default_values_with_batch_context(
+    schema: &vibesql_catalog::TableSchema,
+    row_values: &mut [vibesql_types::SqlValue],
+    database: &mut vibesql_storage::Database,
+    storage_table_name: &str,
+    batch_max_ipk: Option<i64>,
+) -> Result<Option<i64>, ExecutorError> {
     let mut first_generated_id: Option<i64> = None;
+
+    // Handle INTEGER PRIMARY KEY NULL auto-generation (SQLite semantics)
+    // This must happen before regular default value processing
+    if let Some(ipk_idx) = schema.get_integer_primary_key_index() {
+        if row_values[ipk_idx] == vibesql_types::SqlValue::Null {
+            // Auto-generate: max(existing_pk, batch_max) + 1, or 1 if table is empty
+            let table_max = compute_next_integer_pk_value(database, storage_table_name, ipk_idx)?;
+            // The next value should be max of (table_max, batch_max_ipk + 1)
+            let next_val = match batch_max_ipk {
+                Some(batch_max) => table_max.max(batch_max + 1),
+                None => table_max,
+            };
+            row_values[ipk_idx] = vibesql_types::SqlValue::Integer(next_val);
+
+            // Track for LAST_INSERT_ROWID
+            if first_generated_id.is_none() {
+                first_generated_id = Some(next_val);
+            }
+        }
+    }
 
     for (col_idx, col) in schema.columns.iter().enumerate() {
         // If column is NULL and has a default value, apply it
@@ -227,6 +282,45 @@ pub fn apply_default_values(
         }
     }
     Ok(first_generated_id)
+}
+
+/// Compute the next INTEGER PRIMARY KEY value for auto-generation
+///
+/// Returns max(existing_pk_values) + 1, or 1 if the table is empty.
+/// This implements SQLite's behavior where inserting NULL into an INTEGER PRIMARY KEY
+/// column auto-generates the next available value.
+fn compute_next_integer_pk_value(
+    database: &vibesql_storage::Database,
+    table_name: &str,
+    pk_col_idx: usize,
+) -> Result<i64, ExecutorError> {
+    let table = match database.get_table(table_name) {
+        Some(t) => t,
+        None => {
+            // Table doesn't exist in storage yet, start at 1
+            return Ok(1);
+        }
+    };
+
+    // Find the maximum value in the PRIMARY KEY column
+    let mut max_val: i64 = 0;
+
+    for row in table.scan() {
+        if let Some(value) = row.get(pk_col_idx) {
+            let int_val = match value {
+                vibesql_types::SqlValue::Integer(i) => *i,
+                vibesql_types::SqlValue::Bigint(i) => *i,
+                vibesql_types::SqlValue::Null => continue, // Skip NULL values
+                _ => continue, // Skip non-integer values (shouldn't happen)
+            };
+            if int_val > max_val {
+                max_val = int_val;
+            }
+        }
+    }
+
+    // Return max + 1 (or 1 if table was empty, since max_val starts at 0)
+    Ok(max_val + 1)
 }
 
 /// Apply generated/computed column values

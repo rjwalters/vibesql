@@ -181,6 +181,13 @@ fn execute_insert_internal(
     // the first auto-generated value, not the last
     let mut first_generated_id: Option<i64> = None;
 
+    // Track the maximum INTEGER PRIMARY KEY value assigned within this batch
+    // to handle multi-row INSERTs with NULL values correctly (SQLite semantics)
+    let mut batch_max_ipk: Option<i64> = None;
+
+    // Get INTEGER PRIMARY KEY column index if present
+    let ipk_col_idx = schema.get_integer_primary_key_index();
+
     for value_exprs in &rows_to_insert {
         // Build a complete row with values for all columns
         // Start with NULL for all columns, then fill in provided values
@@ -247,8 +254,15 @@ fn execute_insert_internal(
 
         // Apply DEFAULT values for unspecified columns
         // This returns the first generated sequence value (if any)
-        let generated_id =
-            super::defaults::apply_default_values(&schema, &mut full_row_values, db)?;
+        // Use storage_table_name for correct table lookup (handles schema-qualified tables)
+        // Pass batch_max_ipk to handle multi-row INSERTs with NULL INTEGER PRIMARY KEY
+        let generated_id = super::defaults::apply_default_values_with_batch_context(
+            &schema,
+            &mut full_row_values,
+            db,
+            &storage_table_name,
+            batch_max_ipk,
+        )?;
 
         // Apply generated/computed column values (AS(expression) syntax)
         super::defaults::apply_generated_columns(&schema, &mut full_row_values, db)?;
@@ -256,6 +270,13 @@ fn execute_insert_internal(
         // Track the first generated ID across all rows
         if first_generated_id.is_none() {
             first_generated_id = generated_id;
+        }
+
+        // Update batch_max_ipk if this row has an INTEGER PRIMARY KEY value
+        if let Some(idx) = ipk_col_idx {
+            if let Some(vibesql_types::SqlValue::Integer(val)) = full_row_values.get(idx) {
+                batch_max_ipk = Some(batch_max_ipk.map_or(*val, |prev| prev.max(*val)));
+            }
         }
 
         // Validate all constraints in a single pass and extract index keys
