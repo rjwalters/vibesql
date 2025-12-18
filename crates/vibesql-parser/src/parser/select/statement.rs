@@ -408,8 +408,13 @@ impl Parser {
         }
         self.advance(); // consume '('
 
-        // Parse the SELECT statement
-        let query = Box::new(self.parse_select_statement()?);
+        // Parse the SELECT or VALUES statement
+        // CTE body can be either SELECT or VALUES (both return SelectStmt)
+        let query = if self.peek_keyword(Keyword::Values) {
+            Box::new(self.parse_values_statement()?)
+        } else {
+            Box::new(self.parse_select_statement()?)
+        };
 
         // Expect closing paren
         if !matches!(self.peek(), Token::RParen) {

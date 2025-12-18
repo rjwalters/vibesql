@@ -237,12 +237,13 @@ where
     };
     let recursive_query = &set_op.right;
 
-    // Try static validation first (works for explicit column lists)
+    // Try static validation first (works for explicit column lists and VALUES)
     // This provides better SQLite compatibility by catching errors at prepare time
     // rather than waiting until runtime
+    // Note: For VALUES statements, column count comes from the VALUES rows, not select_list
     if let (Some(base_count), Some(recursive_count)) = (
-        count_explicit_columns(&cte.query.select_list),
-        count_explicit_columns(&recursive_query.select_list),
+        count_stmt_columns(&base_query),
+        count_stmt_columns(recursive_query),
     ) {
         if base_count != recursive_count {
             return Err(ExecutorError::UnsupportedFeature(
@@ -356,6 +357,20 @@ fn count_explicit_columns(select_list: &[vibesql_ast::SelectItem]) -> Option<usi
         }
     }
     Some(count)
+}
+
+/// Count columns in a SELECT statement, considering both select_list and VALUES.
+/// For VALUES statements, the column count comes from the first row of values.
+/// For SELECT statements, the column count comes from the select_list.
+/// Returns None if any wildcards are present (requires schema info to count).
+fn count_stmt_columns(stmt: &vibesql_ast::SelectStmt) -> Option<usize> {
+    // If this is a VALUES statement, count columns from the first VALUES row
+    if let Some(values_rows) = &stmt.values {
+        return values_rows.first().map(|row| row.len());
+    }
+
+    // Otherwise, count columns from the select_list
+    count_explicit_columns(&stmt.select_list)
 }
 
 /// Infer data type from a SQL value
