@@ -321,14 +321,13 @@ impl SelectExecutor<'_> {
                     &stmt.select_list,
                 )?;
             }
-        } else if sorted_by.is_none() && !result_rows.is_empty() {
-            // No explicit ORDER BY - apply implicit ordering for deterministic results
-            // Skip for derived tables (subqueries) whose order might be intentional (e.g., UNION ALL)
-            let from_is_subquery = matches!(stmt.from.as_ref(), Some(vibesql_ast::FromClause::Subquery { .. }));
-            if !from_is_subquery {
-                self.apply_implicit_sorting(result_rows);
-            }
         }
+        // SQLite compatibility: Do NOT apply implicit value-based sorting (issue #4537)
+        // SQLite returns rows in storage order (insertion order / rowid order) when no ORDER BY
+        // is specified. Implicit sorting by value breaks this behavior and causes TCL test failures.
+        //
+        // Previously we sorted for "deterministic results", but SQLite's deterministic behavior
+        // is based on physical storage order, not value-based sorting.
 
         Ok(())
     }
@@ -362,60 +361,6 @@ impl SelectExecutor<'_> {
             }
         }
         false
-    }
-
-    /// Apply implicit sorting for deterministic results
-    fn apply_implicit_sorting(&self, result_rows: &mut Vec<RowWithSortKeys>) {
-        use crate::select::grouping::compare_sql_values;
-
-        #[cfg(feature = "parallel")]
-        {
-            use rayon::prelude::*;
-
-            use crate::select::parallel::ParallelConfig;
-
-            // Use parallel sorting for larger datasets
-            let should_parallel =
-                ParallelConfig::global().should_parallelize_sort(result_rows.len());
-
-            if should_parallel {
-                result_rows.par_sort_by(|(row_a, _), (row_b, _)| {
-                    // Compare column by column until we find a difference
-                    for i in 0..row_a.values.len().min(row_b.values.len()) {
-                        let cmp = compare_sql_values(&row_a.values[i], &row_b.values[i]);
-                        if cmp != std::cmp::Ordering::Equal {
-                            return cmp;
-                        }
-                    }
-                    std::cmp::Ordering::Equal
-                });
-            } else {
-                result_rows.sort_by(|(row_a, _), (row_b, _)| {
-                    // Compare column by column until we find a difference
-                    for i in 0..row_a.values.len().min(row_b.values.len()) {
-                        let cmp = compare_sql_values(&row_a.values[i], &row_b.values[i]);
-                        if cmp != std::cmp::Ordering::Equal {
-                            return cmp;
-                        }
-                    }
-                    std::cmp::Ordering::Equal
-                });
-            }
-        }
-
-        #[cfg(not(feature = "parallel"))]
-        {
-            result_rows.sort_by(|(row_a, _), (row_b, _)| {
-                // Compare column by column until we find a difference
-                for i in 0..row_a.values.len().min(row_b.values.len()) {
-                    let cmp = compare_sql_values(&row_a.values[i], &row_b.values[i]);
-                    if cmp != std::cmp::Ordering::Equal {
-                        return cmp;
-                    }
-                }
-                std::cmp::Ordering::Equal
-            });
-        }
     }
 
     /// Apply projection strategy (eager or lazy based on DISTINCT/SET operations)
