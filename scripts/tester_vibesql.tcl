@@ -133,11 +133,24 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "no such table: [string tolower $table_name]"
     }
 
-    # Column not found: "Column 'X' not found..." -> "no such column: x"
+    # Column not found in INSERT context with table info (MOST SPECIFIC - must come first):
+    # "Column 'four' not found (searched tables: test1)..." -> "table test1 has no column named four"
+    # This pattern appears when INSERT INTO t(col) references an unknown column.
+    if {[regexp -nocase {^Column '([^']+)' not found \(searched tables: ([^)]+)\)} $error_msg -> col_name table_list]} {
+        # If only one table is listed, use the "table T has no column named X" format
+        set tables [split $table_list ","]
+        if {[llength $tables] == 1} {
+            set table_name [string trim [lindex $tables 0]]
+            return "table [string tolower $table_name] has no column named [string tolower $col_name]"
+        }
+        # Multiple tables - fall through to generic "no such column" below
+    }
+
+    # Column not found (generic): "Column 'X' not found..." -> "no such column: x"
     # Note: SQLite uses "table t has no column named x" specifically for INSERT INTO t(x) with unknown column,
-    # but we can't distinguish between INSERT and UPDATE/SELECT context from the error message alone.
+    # which is handled by the more specific pattern above.
     # Since "no such column:" is used 156+ times vs "has no column named" only 5 times in the test suite,
-    # we prioritize the more common format.
+    # we use the more common format for the generic case.
     if {[regexp -nocase {^Column '([^']+)' not found} $error_msg -> col_name]} {
         return "no such column: [string tolower $col_name]"
     }
