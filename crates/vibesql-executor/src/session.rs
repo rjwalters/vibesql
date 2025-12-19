@@ -558,8 +558,9 @@ impl<'a> SessionMut<'a> {
         match self.db.delete_by_pk_fast(&plan.table_name, &pk_values) {
             Ok(deleted) => {
                 let rows_affected = if deleted { 1 } else { 0 };
-                // Track changes count for changes() function
+                // Track changes count for changes() and total_changes() functions
                 self.db.set_last_changes_count(rows_affected);
+                self.db.increment_total_changes_count(rows_affected);
                 Ok(Some(PreparedExecutionResult::RowsAffected(rows_affected)))
             }
             Err(_) => Ok(None), // Fall back to standard path on error
@@ -639,8 +640,9 @@ impl<'a> SessionMut<'a> {
             }
             Statement::Insert(insert_stmt) => {
                 let rows_affected = InsertExecutor::execute(self.db, insert_stmt)?;
-                // Track changes count for changes() function
+                // Track changes count for changes() and total_changes() functions
                 self.db.set_last_changes_count(rows_affected);
+                self.db.increment_total_changes_count(rows_affected);
                 // Note: We don't invalidate prepared statement cache for DML operations.
                 // Prepared statements (parsed AST) don't depend on data values.
                 // Only schema changes (DDL) require cache invalidation.
@@ -649,8 +651,9 @@ impl<'a> SessionMut<'a> {
             }
             Statement::Update(update_stmt) => {
                 let rows_affected = UpdateExecutor::execute(update_stmt, self.db)?;
-                // Track changes count for changes() function
+                // Track changes count for changes() and total_changes() functions
                 self.db.set_last_changes_count(rows_affected);
+                self.db.increment_total_changes_count(rows_affected);
                 // Note: We don't invalidate prepared statement cache for DML operations.
                 // Prepared statements (parsed AST) don't depend on data values.
                 // Only schema changes (DDL) require cache invalidation.
@@ -659,8 +662,9 @@ impl<'a> SessionMut<'a> {
             }
             Statement::Delete(delete_stmt) => {
                 let rows_affected = DeleteExecutor::execute(delete_stmt, self.db)?;
-                // Track changes count for changes() function
+                // Track changes count for changes() and total_changes() functions
                 self.db.set_last_changes_count(rows_affected);
+                self.db.increment_total_changes_count(rows_affected);
                 // Note: We don't invalidate prepared statement cache for DML operations.
                 // Prepared statements (parsed AST) don't depend on data values.
                 // Only schema changes (DDL) require cache invalidation.

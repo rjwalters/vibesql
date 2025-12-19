@@ -205,6 +205,43 @@ impl Database {
     }
 
     // ============================================================================
+    // total_changes() Support (Cumulative Row Modification Count)
+    // ============================================================================
+
+    /// Get the total number of rows changed since the database connection was opened
+    ///
+    /// Returns the cumulative count of rows affected by all INSERT, UPDATE, and DELETE
+    /// operations since the database was created. This is used to implement the
+    /// SQLite total_changes() function.
+    ///
+    /// Returns 0 for a new database connection.
+    ///
+    /// # Example
+    /// ```text
+    /// // Insert rows
+    /// db.execute("INSERT INTO users (name) VALUES ('Alice'), ('Bob')")?;
+    /// assert_eq!(db.last_changes_count(), 2);  // Last operation: 2 rows
+    ///
+    /// // Delete a row
+    /// db.execute("DELETE FROM users WHERE name = 'Alice'")?;
+    /// assert_eq!(db.last_changes_count(), 1);  // Last operation: 1 row
+    ///
+    /// // Total changes accumulates
+    /// assert_eq!(db.total_changes_count(), 3); // 2 + 1 = 3 rows total
+    /// ```
+    pub fn total_changes_count(&self) -> usize {
+        self.total_changes_count
+    }
+
+    /// Increment the total changes count by the specified amount
+    ///
+    /// This is called internally by INSERT, UPDATE, and DELETE executors
+    /// after completing their operations, in addition to set_last_changes_count().
+    pub fn increment_total_changes_count(&mut self, count: usize) {
+        self.total_changes_count += count;
+    }
+
+    // ============================================================================
     // sqlite_search_count Support (TCL Test Compatibility)
     // ============================================================================
 
