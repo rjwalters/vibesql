@@ -34,6 +34,7 @@ pub fn coerce_to_string(value: &SqlValue) -> Option<String> {
         SqlValue::Time(t) => Some(t.to_string()),
         SqlValue::Timestamp(ts) => Some(ts.to_string()),
         SqlValue::Interval(i) => Some(i.to_string()),
+        SqlValue::Blob(bytes) => Some(String::from_utf8_lossy(bytes).to_string()),
     }
 }
 
