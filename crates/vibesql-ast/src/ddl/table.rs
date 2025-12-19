@@ -171,8 +171,24 @@ pub struct ColumnConstraint {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ColumnConstraintKind {
     NotNull,
-    PrimaryKey,
-    Unique,
+    /// PRIMARY KEY constraint with optional conflict resolution
+    PrimaryKey {
+        /// Optional conflict resolution clause (SQLite extension)
+        /// Syntax: PRIMARY KEY ON CONFLICT ROLLBACK|ABORT|FAIL|IGNORE|REPLACE
+        on_conflict: Option<crate::ConflictClause>,
+    },
+    /// UNIQUE constraint with optional conflict resolution
+    Unique {
+        /// Optional conflict resolution clause (SQLite extension)
+        /// Syntax: UNIQUE ON CONFLICT ROLLBACK|ABORT|FAIL|IGNORE|REPLACE
+        on_conflict: Option<crate::ConflictClause>,
+    },
+    /// NOT NULL constraint with optional conflict resolution
+    NotNullWithConflict {
+        /// Optional conflict resolution clause (SQLite extension)
+        /// Syntax: NOT NULL ON CONFLICT ROLLBACK|ABORT|FAIL|IGNORE|REPLACE
+        on_conflict: Option<crate::ConflictClause>,
+    },
     Check(Box<Expression>),
     References {
         table: String,
@@ -204,6 +220,9 @@ pub struct TableConstraint {
 pub enum TableConstraintKind {
     PrimaryKey {
         columns: Vec<crate::IndexColumn>,
+        /// Optional conflict resolution clause (SQLite extension)
+        /// Syntax: PRIMARY KEY (columns) ON CONFLICT ROLLBACK|ABORT|FAIL|IGNORE|REPLACE
+        on_conflict: Option<crate::ConflictClause>,
     },
     ForeignKey {
         columns: Vec<String>,
@@ -214,6 +233,9 @@ pub enum TableConstraintKind {
     },
     Unique {
         columns: Vec<crate::IndexColumn>,
+        /// Optional conflict resolution clause (SQLite extension)
+        /// Syntax: UNIQUE (columns) ON CONFLICT ROLLBACK|ABORT|FAIL|IGNORE|REPLACE
+        on_conflict: Option<crate::ConflictClause>,
     },
     Check {
         expr: Box<Expression>,

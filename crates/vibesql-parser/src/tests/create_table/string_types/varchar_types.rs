@@ -385,7 +385,7 @@ fn test_parse_nvarchar_with_constraint() {
             assert!(create.columns[0]
                 .constraints
                 .iter()
-                .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::Unique)));
+                .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::Unique { .. })));
 
             // Check second column (backtick-quoted, preserves case)
             assert_eq!(create.columns[1].name, "c2");
@@ -560,7 +560,7 @@ fn test_parse_national_varchar_with_constraint() {
             assert!(create.columns[0]
                 .constraints
                 .iter()
-                .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::Unique)));
+                .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::Unique { .. })));
 
             // Check second column (unquoted, normalized to uppercase)
             assert_eq!(create.columns[1].name, "c2");
@@ -572,7 +572,7 @@ fn test_parse_national_varchar_with_constraint() {
             assert!(create.columns[1]
                 .constraints
                 .iter()
-                .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::Unique)));
+                .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::Unique { .. })));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }

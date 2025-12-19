@@ -345,7 +345,7 @@ fn test_truncate_resets_auto_increment() {
                 nullable: false,
                 constraints: vec![
                     ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
-                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } },
                 ],
                 default_value: None,
                 comment: None,
@@ -440,7 +440,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
                 nullable: false,
                 constraints: vec![
                     ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
-                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } },
                 ],
                 default_value: None,
                 comment: None,

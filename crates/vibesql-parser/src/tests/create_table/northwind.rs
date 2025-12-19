@@ -25,7 +25,7 @@ fn test_parse_northwind_categories_table() {
             assert!(matches!(
                 create.columns[0].constraints[0],
                 vibesql_ast::ColumnConstraint {
-                    kind: vibesql_ast::ColumnConstraintKind::PrimaryKey,
+                    kind: vibesql_ast::ColumnConstraintKind::PrimaryKey { on_conflict: None },
                     ..
                 }
             ));
@@ -59,7 +59,7 @@ fn test_parse_northwind_products_table() {
             assert!(matches!(
                 create.columns[0].constraints[0],
                 vibesql_ast::ColumnConstraint {
-                    kind: vibesql_ast::ColumnConstraintKind::PrimaryKey,
+                    kind: vibesql_ast::ColumnConstraintKind::PrimaryKey { on_conflict: None },
                     ..
                 }
             ));

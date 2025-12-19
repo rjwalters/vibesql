@@ -69,7 +69,7 @@ impl ConstraintValidator {
         for col_def in columns {
             for constraint in &col_def.constraints {
                 match &constraint.kind {
-                    ColumnConstraintKind::PrimaryKey => {
+                    ColumnConstraintKind::PrimaryKey { .. } => {
                         if has_column_level_pk {
                             return Err(ExecutorError::MultiplePrimaryKeys);
                         }
@@ -84,7 +84,7 @@ impl ConstraintValidator {
                         }
                         has_column_level_pk = true;
                     }
-                    ColumnConstraintKind::Unique => {
+                    ColumnConstraintKind::Unique { .. } => {
                         result.unique_constraints.push(vec![col_def.name.clone()]);
                     }
                     ColumnConstraintKind::Check(expr) => {
@@ -92,7 +92,7 @@ impl ConstraintValidator {
                         constraint_counter += 1;
                         result.check_constraints.push((constraint_name, (**expr).clone()));
                     }
-                    ColumnConstraintKind::NotNull => {
+                    ColumnConstraintKind::NotNull | ColumnConstraintKind::NotNullWithConflict { .. } => {
                         result.not_null_columns.push(col_def.name.clone());
                     }
                     ColumnConstraintKind::References { .. } => {
@@ -121,7 +121,7 @@ impl ConstraintValidator {
         // Process table-level constraints
         for table_constraint in table_constraints {
             match &table_constraint.kind {
-                TableConstraintKind::PrimaryKey { columns: pk_cols } => {
+                TableConstraintKind::PrimaryKey { columns: pk_cols, .. } => {
                     // Only allow one PRIMARY KEY constraint total (column-level OR table-level)
                     if result.primary_key.is_some() {
                         return Err(ExecutorError::MultiplePrimaryKeys);
@@ -142,7 +142,7 @@ impl ConstraintValidator {
                         }
                     }
                 }
-                TableConstraintKind::Unique { columns } => {
+                TableConstraintKind::Unique { columns, .. } => {
                     // Extract column names from IndexColumn structs
                     let column_names: Vec<String> =
                         columns.iter().map(|c| c.expect_column_name().to_string()).collect();
@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn test_column_level_primary_key() {
-        let columns = vec![make_column_def("id", vec![ColumnConstraintKind::PrimaryKey])];
+        let columns = vec![make_column_def("id", vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }])];
         let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["id".to_string()]));
@@ -264,6 +264,7 @@ mod tests {
                         prefix_length: None,
                     },
                 ],
+                on_conflict: None,
             },
         }];
 
@@ -276,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_multiple_primary_keys_fails() {
-        let columns = vec![make_column_def("id", vec![ColumnConstraintKind::PrimaryKey])];
+        let columns = vec![make_column_def("id", vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }])];
         let constraints = vec![TableConstraint {
             name: None,
             kind: TableConstraintKind::PrimaryKey {
@@ -285,6 +286,7 @@ mod tests {
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
                 }],
+                on_conflict: None,
             },
         }];
 
@@ -295,7 +297,7 @@ mod tests {
     #[test]
     fn test_unique_constraints() {
         let columns = vec![
-            make_column_def("email", vec![ColumnConstraintKind::Unique]),
+            make_column_def("email", vec![ColumnConstraintKind::Unique { on_conflict: None }]),
             make_column_def("username", vec![]),
         ];
         let constraints = vec![TableConstraint {
@@ -306,6 +308,7 @@ mod tests {
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
                 }],
+                on_conflict: None,
             },
         }];
 
@@ -365,7 +368,7 @@ mod tests {
         let columns = vec![make_column_def_with_type(
             "name",
             DataType::Varchar { max_length: None },
-            vec![ColumnConstraintKind::PrimaryKey],
+            vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
         let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
 
@@ -380,7 +383,7 @@ mod tests {
         let columns = vec![make_column_def_with_type(
             "c",
             DataType::Varchar { max_length: None },
-            vec![ColumnConstraintKind::PrimaryKey],
+            vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
         let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
 
@@ -394,7 +397,7 @@ mod tests {
         let columns = vec![make_column_def_with_type(
             "id",
             DataType::Integer,
-            vec![ColumnConstraintKind::PrimaryKey],
+            vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
         let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
 
@@ -424,6 +427,7 @@ mod tests {
                         prefix_length: None,
                     },
                 ],
+                on_conflict: None,
             },
         }];
 
@@ -441,7 +445,7 @@ mod tests {
         let columns = vec![make_column_def_with_type(
             "value",
             DataType::Real,
-            vec![ColumnConstraintKind::PrimaryKey],
+            vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
         let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
 
@@ -455,7 +459,7 @@ mod tests {
         let columns = vec![make_column_def_with_type(
             "big_id",
             DataType::Bigint,
-            vec![ColumnConstraintKind::PrimaryKey],
+            vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
         let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
 

@@ -16,7 +16,7 @@ pub(super) fn execute_add_constraint(
         .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
     match &stmt.constraint.kind {
-        TableConstraintKind::PrimaryKey { columns } => {
+        TableConstraintKind::PrimaryKey { columns, .. } => {
             // Extract column names from IndexColumn structs
             let column_names: Vec<String> = columns.iter().map(|c| c.expect_column_name().to_string()).collect();
 
@@ -57,7 +57,7 @@ pub(super) fn execute_add_constraint(
 
             Ok(format!("PRIMARY KEY constraint added to table '{}'", stmt.table_name))
         }
-        TableConstraintKind::Unique { columns } => {
+        TableConstraintKind::Unique { columns, .. } => {
             // Extract column names from IndexColumn structs
             let column_names: Vec<String> = columns.iter().map(|c| c.expect_column_name().to_string()).collect();
             table.schema_mut().add_unique_constraint(column_names)?;

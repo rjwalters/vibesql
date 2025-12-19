@@ -23,7 +23,7 @@ fn test_auto_increment_basic_inserts() {
                 nullable: false,
                 constraints: vec![
                     ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
-                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } },
                 ],
                 default_value: None,
                 comment: None,
@@ -146,7 +146,7 @@ fn test_last_insert_rowid_basic() {
                 nullable: false,
                 constraints: vec![
                     ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
-                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } },
                 ],
                 default_value: None,
                 comment: None,
@@ -222,7 +222,7 @@ fn test_last_insert_rowid_multi_row_insert() {
                 nullable: false,
                 constraints: vec![
                     ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
-                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } },
                 ],
                 default_value: None,
                 comment: None,
@@ -295,7 +295,7 @@ fn test_last_insert_rowid_no_auto_increment() {
                 nullable: false,
                 constraints: vec![ColumnConstraint {
                     name: None,
-                    kind: ColumnConstraintKind::PrimaryKey,
+                    kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
                 }],
                 default_value: None,
                 comment: None,
@@ -355,7 +355,7 @@ fn test_last_insert_rowid_via_select() {
                 nullable: false,
                 constraints: vec![
                     ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
-                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey },
+                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } },
                 ],
                 default_value: None,
                 comment: None,

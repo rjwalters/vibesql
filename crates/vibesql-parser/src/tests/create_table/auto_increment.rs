@@ -65,7 +65,7 @@ fn test_auto_increment_with_other_constraints() {
             assert!(id_col
                 .constraints
                 .iter()
-                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::PrimaryKey)));
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::PrimaryKey { .. })));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }

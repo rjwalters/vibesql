@@ -68,7 +68,7 @@ fn test_parse_create_table_typeless_with_primary_key() {
             assert!(create.columns[0]
                 .constraints
                 .iter()
-                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::PrimaryKey)));
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::PrimaryKey { .. })));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -103,7 +103,7 @@ fn test_parse_create_table_typeless_with_unique() {
             assert!(create.columns[0]
                 .constraints
                 .iter()
-                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Unique)));
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Unique { .. })));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -166,13 +166,13 @@ fn test_parse_create_table_typeless_with_multiple_constraints() {
             let constraints = &create.columns[0].constraints;
             assert!(constraints
                 .iter()
-                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::PrimaryKey)));
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::PrimaryKey { .. })));
             assert!(constraints
                 .iter()
                 .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::NotNull)));
             assert!(constraints
                 .iter()
-                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Unique)));
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Unique { .. })));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -235,7 +235,7 @@ fn test_parse_create_table_complex_sqlite_pattern() {
             assert!(!create.table_constraints.is_empty());
             assert!(create.table_constraints.iter().any(|c| matches!(
                 &c.kind,
-                vibesql_ast::TableConstraintKind::PrimaryKey { columns } if columns.len() == 2
+                vibesql_ast::TableConstraintKind::PrimaryKey { columns, .. } if columns.len() == 2
             )));
         }
         _ => panic!("Expected CREATE TABLE statement"),
