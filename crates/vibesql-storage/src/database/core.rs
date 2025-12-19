@@ -70,6 +70,9 @@ pub struct Database {
     /// Number of rows changed by the last INSERT/UPDATE/DELETE statement
     /// Used by the changes() function for SQLite compatibility
     pub(super) last_changes_count: usize,
+    /// Total number of rows changed since the database connection was opened
+    /// Used by the total_changes() function for SQLite compatibility
+    pub(super) total_changes_count: usize,
     /// Search count for sqlite_search_count() compatibility
     /// Tracks the number of rows examined during query execution
     /// Used by SQLite TCL tests to verify query optimization behavior

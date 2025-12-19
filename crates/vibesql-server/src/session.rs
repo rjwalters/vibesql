@@ -291,8 +291,9 @@ impl Session {
             Statement::Insert(insert_stmt) => {
                 let mut db = self.db.write().await;
                 let affected = vibesql_executor::InsertExecutor::execute(&mut db, insert_stmt)?;
-                // Track changes count for changes() function
+                // Track changes count for changes() and total_changes() functions
                 db.set_last_changes_count(affected);
+                db.increment_total_changes_count(affected);
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&insert_stmt.table_name);
                 Ok(ExecutionResult::Insert { rows_affected: affected })
@@ -301,8 +302,9 @@ impl Session {
             Statement::Update(update_stmt) => {
                 let mut db = self.db.write().await;
                 let affected = vibesql_executor::UpdateExecutor::execute(update_stmt, &mut db)?;
-                // Track changes count for changes() function
+                // Track changes count for changes() and total_changes() functions
                 db.set_last_changes_count(affected);
+                db.increment_total_changes_count(affected);
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&update_stmt.table_name);
                 Ok(ExecutionResult::Update { rows_affected: affected })
@@ -311,8 +313,9 @@ impl Session {
             Statement::Delete(delete_stmt) => {
                 let mut db = self.db.write().await;
                 let affected = vibesql_executor::DeleteExecutor::execute(delete_stmt, &mut db)?;
-                // Track changes count for changes() function
+                // Track changes count for changes() and total_changes() functions
                 db.set_last_changes_count(affected);
+                db.increment_total_changes_count(affected);
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&delete_stmt.table_name);
                 Ok(ExecutionResult::Delete { rows_affected: affected })
