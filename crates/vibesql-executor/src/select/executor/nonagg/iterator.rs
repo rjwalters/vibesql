@@ -67,7 +67,7 @@ impl SelectExecutor<'_> {
         cte_results: &std::collections::HashMap<String, crate::select::CteResult>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         let schema = from_result.schema.clone();
-        let sorted_by = from_result.sorted_by.clone();
+        let _sorted_by = from_result.sorted_by.clone();
         let rows = from_result.into_rows();
 
         // Create evaluator using consolidated ExecutionContext
