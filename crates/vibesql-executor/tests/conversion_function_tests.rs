@@ -430,5 +430,8 @@ fn test_cast_wrong_arg_count() {
 
 #[test]
 fn test_cast_invalid_conversion() {
-    eval_function_expect_error("CAST", vec![varchar_lit("invalid"), varchar_lit("INTEGER")]);
+    // SQLite returns 0 for CAST('invalid' AS INTEGER), not an error
+    // This matches SQLite's permissive type conversion behavior
+    let result = eval_function("CAST", vec![varchar_lit("invalid"), varchar_lit("INTEGER")]);
+    assert_eq!(result, vibesql_types::SqlValue::Integer(0));
 }
