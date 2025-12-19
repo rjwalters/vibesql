@@ -238,7 +238,37 @@ impl CombinedExpressionEvaluator<'_> {
                 if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
                     // First check if schema has a real column with this name
                     if self.get_column_index_cached(table, column).is_none() {
-                        // No real column - check if we have a row_id for this table
+                        // Issue #4536: Check for INTEGER PRIMARY KEY alias column
+                        // If the table has an INTEGER PRIMARY KEY, it acts as an alias for rowid.
+                        // The column's value IS the rowid, so return that column's value.
+                        // Look up the table's schema to find rowid_alias_column
+                        let table_id = table.map(vibesql_catalog::TableIdentifier::from);
+                        if let Some(table_id) = table_id {
+                            if let Some((start_idx, table_schema)) = self.schema.table_schemas.get(&table_id) {
+                                if let Some(ipk_col_idx) = table_schema.rowid_alias_column {
+                                    // Return the IPK column value (offset by start_idx in combined row)
+                                    let combined_idx = start_idx + ipk_col_idx;
+                                    return row
+                                        .get(combined_idx)
+                                        .cloned()
+                                        .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: combined_idx });
+                                }
+                            }
+                        } else {
+                            // Unqualified rowid - find the first table with rowid_alias_column
+                            // (for single-table queries this will be the only table)
+                            for (start_idx, table_schema) in self.schema.table_schemas.values() {
+                                if let Some(ipk_col_idx) = table_schema.rowid_alias_column {
+                                    let combined_idx = start_idx + ipk_col_idx;
+                                    return row
+                                        .get(combined_idx)
+                                        .cloned()
+                                        .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: combined_idx });
+                                }
+                            }
+                        }
+
+                        // No IPK alias - fall back to row_id tracking
                         // Use the new get_row_id_for_table method that handles both single-table
                         // and multi-table (JOIN) rows (issue #4370)
                         if let Some(row_id) = row.get_row_id_for_table(table) {
