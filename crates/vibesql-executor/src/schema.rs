@@ -183,6 +183,7 @@ impl CombinedSchema {
                 nullable: true,      // Derived table columns are always nullable
                 default_value: None, // Derived table columns have no defaults
                 generated_expr: None, // Derived table columns are not generated
+                collation: None,     // Derived table columns don't inherit collation
             })
             .collect();
 

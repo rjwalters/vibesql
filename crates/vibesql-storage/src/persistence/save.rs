@@ -93,6 +93,12 @@ impl Database {
                     }
                     write!(writer, "{} {}", col.name, format_data_type(&col.data_type))
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                    // Add COLLATE clause if present
+                    if let Some(ref collation) = col.collation {
+                        write!(writer, " COLLATE {}", collation).map_err(|e| {
+                            StorageError::NotImplemented(format!("Write error: {}", e))
+                        })?;
+                    }
                     if !col.nullable {
                         write!(writer, " NOT NULL").map_err(|e| {
                             StorageError::NotImplemented(format!("Write error: {}", e))

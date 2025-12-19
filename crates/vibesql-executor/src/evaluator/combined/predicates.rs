@@ -34,12 +34,8 @@ impl CombinedExpressionEvaluator<'_> {
 
         let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
 
-        // Check if expr has a COLLATE clause BEFORE evaluation
-        let collation = if let vibesql_ast::Expression::Collate { collation, .. } = expr {
-            Some(collation.clone())
-        } else {
-            None
-        };
+        // Get effective collation: explicit COLLATE or column-level collation
+        let collation = self.get_expression_collation(expr);
 
         let expr_val = self.eval(expr, row)?;
         let low_val = self.eval(low, row)?;

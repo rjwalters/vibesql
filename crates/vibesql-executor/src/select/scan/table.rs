@@ -68,6 +68,7 @@ fn apply_column_aliases(
                 nullable: col.nullable,
                 default_value: col.default_value.clone(),
                 generated_expr: col.generated_expr.clone(),
+                collation: col.collation.clone(), // Preserve original collation
             })
             .collect();
         // TableSchema::new() rebuilds the column_index_cache
@@ -266,6 +267,7 @@ pub(crate) fn execute_table_scan(
                         nullable: true, // Views return nullable columns by default
                         default_value: None,
                         generated_expr: None, // Views don't have generated columns
+                        collation: None,      // Views don't preserve collation
                     }
                 })
                 .collect()
@@ -280,6 +282,7 @@ pub(crate) fn execute_table_scan(
                     nullable: true,
                     default_value: None,
                     generated_expr: None, // Views don't have generated columns
+                    collation: None,      // Views don't preserve collation
                 })
                 .collect()
         };

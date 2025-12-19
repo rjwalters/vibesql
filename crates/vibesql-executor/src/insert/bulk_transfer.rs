@@ -364,14 +364,16 @@ mod tests {
                     data_type: DataType::Integer,
                     nullable: false,
                     default_value: None,
-                generated_expr: None,
+                    generated_expr: None,
+                    collation: None,
                 },
                 vibesql_catalog::ColumnSchema {
                     name: "name".to_string(),
                     data_type: DataType::Varchar { max_length: None },
                     nullable: true,
                     default_value: None,
-                generated_expr: None,
+                    generated_expr: None,
+                    collation: None,
                 },
             ],
         );
@@ -391,7 +393,8 @@ mod tests {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
+                collation: None,
             }],
         );
 
@@ -403,14 +406,16 @@ mod tests {
                     data_type: DataType::Integer,
                     nullable: false,
                     default_value: None,
-                generated_expr: None,
+                    generated_expr: None,
+                    collation: None,
                 },
                 vibesql_catalog::ColumnSchema {
                     name: "name".to_string(),
                     data_type: DataType::Varchar { max_length: None },
                     nullable: true,
                     default_value: None,
-                generated_expr: None,
+                    generated_expr: None,
+                    collation: None,
                 },
             ],
         );

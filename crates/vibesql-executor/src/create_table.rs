@@ -152,12 +152,22 @@ impl CreateTableExecutor {
                             col_def.default_value.as_ref().map(|expr| (**expr).clone())
                         };
 
+                    // Extract column-level collation from constraints
+                    let collation = col_def.constraints.iter().find_map(|c| {
+                        if let vibesql_ast::ColumnConstraintKind::Collate(coll) = &c.kind {
+                            Some(coll.clone())
+                        } else {
+                            None
+                        }
+                    });
+
                     ColumnSchema {
                         name: col_def.name.clone(),
                         data_type: col_def.data_type.clone(),
                         nullable: col_def.nullable,
                         default_value,
                         generated_expr: col_def.generated_expr.as_ref().map(|expr| (**expr).clone()),
+                        collation,
                     }
                 })
                 .collect();
@@ -488,6 +498,7 @@ impl CreateTableExecutor {
                     nullable: true, // Default to nullable for CTAS
                     default_value: None,
                     generated_expr: None,
+                    collation: None, // CTAS doesn't preserve collation
                 }
             })
             .collect();

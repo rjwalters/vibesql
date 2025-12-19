@@ -44,6 +44,43 @@ impl CombinedExpressionEvaluator<'_> {
         }
     }
 
+    /// Get the effective collation for an expression.
+    ///
+    /// Returns the collation from:
+    /// 1. Explicit COLLATE clause (highest priority)
+    /// 2. Column-level collation from CREATE TABLE definition
+    /// 3. None (use default binary collation)
+    pub(crate) fn get_expression_collation(&self, expr: &vibesql_ast::Expression) -> Option<String> {
+        match expr {
+            // Explicit COLLATE has highest priority
+            vibesql_ast::Expression::Collate { collation, .. } => Some(collation.clone()),
+            // Column reference - look up column's declared collation
+            vibesql_ast::Expression::ColumnRef(col_id) => {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
+
+                // Look up the column in the combined schema
+                for (_table_id, (_start_idx, table_schema)) in &self.schema.table_schemas {
+                    // If table qualifier is specified, check if this is the right table
+                    if let Some(t) = table {
+                        let table_name_lower = table_schema.name.to_lowercase();
+                        if t.to_lowercase() != table_name_lower {
+                            continue;
+                        }
+                    }
+
+                    // Look up the column in this table
+                    if let Some(col_offset) = table_schema.get_column_index(column) {
+                        return table_schema.columns[col_offset].collation.clone();
+                    }
+                }
+                None
+            }
+            // Other expressions don't have intrinsic collation
+            _ => None,
+        }
+    }
+
     /// Check if an expression is a numeric literal (INTEGER or REAL).
     fn is_numeric_literal(&self, expr: &vibesql_ast::Expression) -> bool {
         match expr {
@@ -445,8 +482,41 @@ impl CombinedExpressionEvaluator<'_> {
                                 | vibesql_ast::BinaryOperator::GreaterThanOrEqual
                         );
 
+                        // Get effective collation from either side
+                        // Priority: explicit COLLATE > column-level collation
+                        let collation = if is_comparison {
+                            self.get_expression_collation(left)
+                                .or_else(|| self.get_expression_collation(right))
+                        } else {
+                            None
+                        };
+
                         let left_val = self.eval(left, row)?;
                         let right_val = self.eval(right, row)?;
+
+                        // Apply collation to string values if needed
+                        let (left_val, right_val) = if let Some(ref collation_name) = collation {
+                            let collation_lower = collation_name.to_lowercase();
+                            if collation_lower == "nocase" {
+                                // For NOCASE collation, uppercase both string values
+                                let left_transformed = match &left_val {
+                                    SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())),
+                                    SqlValue::Character(s) => SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())),
+                                    other => other.clone(),
+                                };
+                                let right_transformed = match &right_val {
+                                    SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())),
+                                    SqlValue::Character(s) => SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())),
+                                    other => other.clone(),
+                                };
+                                (left_transformed, right_transformed)
+                            } else {
+                                // For BINARY or other collations, use values as-is
+                                (left_val, right_val)
+                            }
+                        } else {
+                            (left_val, right_val)
+                        };
 
                         // Apply SQLite type affinity rules for comparisons
                         // TEXT column vs INTEGER literal → convert INTEGER to TEXT, string compare

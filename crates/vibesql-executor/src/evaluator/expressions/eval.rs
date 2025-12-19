@@ -35,6 +35,36 @@ impl ExpressionEvaluator<'_> {
         }
     }
 
+    /// Get the effective collation for an expression.
+    ///
+    /// Returns the collation from:
+    /// 1. Explicit COLLATE clause (highest priority)
+    /// 2. Column-level collation from CREATE TABLE definition
+    /// 3. None (use default binary collation)
+    ///
+    /// SQLite documentation states:
+    /// "A column's collating function can be specified using the COLLATE clause
+    /// in the column definition within the CREATE TABLE statement."
+    ///
+    /// Explicit COLLATE in the query overrides column-level collation.
+    pub(super) fn get_expression_collation(&self, expr: &vibesql_ast::Expression) -> Option<String> {
+        match expr {
+            // Explicit COLLATE has highest priority
+            vibesql_ast::Expression::Collate { collation, .. } => Some(collation.clone()),
+            // Column reference - look up column's declared collation
+            vibesql_ast::Expression::ColumnRef(col_id) => {
+                let column_name = col_id.column_canonical();
+                if let Some(col_idx) = self.schema.get_column_index(column_name) {
+                    self.schema.columns[col_idx].collation.clone()
+                } else {
+                    None
+                }
+            }
+            // Other expressions don't have intrinsic collation
+            _ => None,
+        }
+    }
+
     /// Check if an expression is a numeric literal (INTEGER or REAL).
     pub(super) fn is_numeric_literal(&self, expr: &vibesql_ast::Expression) -> bool {
         match expr {
@@ -241,16 +271,12 @@ impl ExpressionEvaluator<'_> {
                                 | vibesql_ast::BinaryOperator::GreaterThanOrEqual
                         );
 
-                        // Extract collation if present
+                        // Get effective collation from either side
+                        // Priority: explicit COLLATE > column-level collation
+                        // Check left side first, then right side
                         let collation = if is_comparison {
-                            // Check left side for COLLATE
-                            if let vibesql_ast::Expression::Collate { collation, .. } = left.as_ref() {
-                                Some(collation.clone())
-                            } else if let vibesql_ast::Expression::Collate { collation, .. } = right.as_ref() {
-                                Some(collation.clone())
-                            } else {
-                                None
-                            }
+                            self.get_expression_collation(left)
+                                .or_else(|| self.get_expression_collation(right))
                         } else {
                             None
                         };
