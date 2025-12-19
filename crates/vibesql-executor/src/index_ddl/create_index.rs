@@ -39,7 +39,7 @@ impl CreateIndexExecutor {
     ///     if_not_exists: false,
     ///     table_name: "users".to_string(),
     ///     index_type: vibesql_ast::IndexType::BTree { unique: false },
-    ///     columns: vec![IndexColumn {
+    ///     columns: vec![IndexColumn::Column {
     ///         column_name: "email".to_string(),
     ///         direction: OrderDirection::Asc,
     ///         prefix_length: None,
@@ -80,11 +80,11 @@ impl CreateIndexExecutor {
 
         // Validate that all indexed columns exist in the table
         for index_col in &stmt.columns {
-            if table_schema.get_column(&index_col.column_name).is_none() {
+            if table_schema.get_column(&index_col.expect_column_name()).is_none() {
                 let available_columns =
                     table_schema.columns.iter().map(|c| c.name.clone()).collect();
                 return Err(ExecutorError::ColumnNotFound {
-                    column_name: index_col.column_name.clone(),
+                    column_name: index_col.expect_column_name().to_string(),
                     table_name: qualified_table_name.clone(),
                     searched_tables: vec![qualified_table_name.clone()],
                     available_columns,
@@ -94,17 +94,17 @@ impl CreateIndexExecutor {
 
         // Validate prefix length specifications
         for index_col in &stmt.columns {
-            if let Some(prefix_len) = index_col.prefix_length {
+            if let Some(prefix_len) = index_col.prefix_length() {
                 // Prefix length must be positive
                 if prefix_len == 0 {
                     return Err(ExecutorError::InvalidIndexDefinition(format!(
                         "Prefix length must be greater than 0 for column '{}'",
-                        index_col.column_name
+                        index_col.expect_column_name()
                     )));
                 }
 
                 // Prefix length should only be used with string columns
-                let column = table_schema.get_column(&index_col.column_name).unwrap(); // Safe: already validated above
+                let column = table_schema.get_column(&index_col.expect_column_name()).unwrap(); // Safe: already validated above
                 match column.data_type {
                     vibesql_types::DataType::Varchar { .. }
                     | vibesql_types::DataType::Character { .. } => {
@@ -114,7 +114,7 @@ impl CreateIndexExecutor {
                         return Err(ExecutorError::InvalidIndexDefinition(
                             format!(
                                 "Prefix length can only be specified for string columns, but column '{}' has type {:?}",
-                                index_col.column_name, column.data_type
+                                index_col.expect_column_name(), column.data_type
                             ),
                         ));
                     }
@@ -126,7 +126,7 @@ impl CreateIndexExecutor {
                 if prefix_len > MAX_PREFIX_LENGTH {
                     return Err(ExecutorError::InvalidIndexDefinition(format!(
                         "Prefix length {} is too large for column '{}' (maximum: {})",
-                        prefix_len, index_col.column_name, MAX_PREFIX_LENGTH
+                        prefix_len, index_col.expect_column_name(), MAX_PREFIX_LENGTH
                     )));
                 }
             }
@@ -153,7 +153,7 @@ impl CreateIndexExecutor {
                 let column_indices: Vec<u32> = stmt
                     .columns
                     .iter()
-                    .filter_map(|col| table_schema.get_column_index(&col.column_name))
+                    .filter_map(|col| table_schema.get_column_index(col.expect_column_name()))
                     .map(|idx| idx as u32)
                     .collect();
 
@@ -165,8 +165,8 @@ impl CreateIndexExecutor {
                     stmt.columns
                         .iter()
                         .map(|col| vibesql_catalog::IndexedColumn {
-                            column_name: col.column_name.clone(),
-                            order: match col.direction {
+                            column_name: col.expect_column_name().to_string(),
+                            order: match col.direction() {
                                 vibesql_ast::OrderDirection::Asc => {
                                     vibesql_catalog::SortOrder::Ascending
                                 }
@@ -174,7 +174,7 @@ impl CreateIndexExecutor {
                                     vibesql_catalog::SortOrder::Descending
                                 }
                             },
-                            prefix_length: col.prefix_length,
+                            prefix_length: col.prefix_length(),
                         })
                         .collect(),
                     *unique,
@@ -215,12 +215,12 @@ impl CreateIndexExecutor {
                     ));
                 }
 
-                let column_name = &stmt.columns[0].column_name;
+                let column_name = stmt.columns[0].expect_column_name();
 
                 // Get the column index
                 let col_idx = table_schema.get_column_index(column_name).ok_or_else(|| {
                     ExecutorError::ColumnNotFound {
-                        column_name: column_name.clone(),
+                        column_name: column_name.to_string(),
                         table_name: qualified_table_name.clone(),
                         searched_tables: vec![qualified_table_name.clone()],
                         available_columns: table_schema
@@ -249,7 +249,7 @@ impl CreateIndexExecutor {
                 }
 
                 // Build spatial index via bulk_load (more efficient than incremental inserts)
-                let spatial_index = SpatialIndex::bulk_load(column_name.clone(), entries);
+                let spatial_index = SpatialIndex::bulk_load(column_name.to_string(), entries);
 
                 // Add to catalog first (use unqualified table name as stored in catalog)
                 let index_metadata = vibesql_catalog::IndexMetadata::new(
@@ -257,7 +257,7 @@ impl CreateIndexExecutor {
                     table_name.clone(),
                     vibesql_catalog::IndexType::RTree,
                     vec![vibesql_catalog::IndexedColumn {
-                        column_name: column_name.clone(),
+                        column_name: column_name.to_string(),
                         order: vibesql_catalog::SortOrder::Ascending,
                         prefix_length: None, // Spatial indexes don't support prefix indexing
                     }],
@@ -269,7 +269,7 @@ impl CreateIndexExecutor {
                 let metadata = SpatialIndexMetadata {
                     index_name: index_name.clone(),
                     table_name: table_name.clone(),
-                    column_name: column_name.clone(),
+                    column_name: column_name.to_string(),
                     created_at: Some(chrono::Utc::now()),
                 };
 
@@ -297,12 +297,12 @@ impl CreateIndexExecutor {
                     ));
                 }
 
-                let column_name = &stmt.columns[0].column_name;
+                let column_name = stmt.columns[0].expect_column_name();
 
                 // Get the column index and validate it's a vector type
                 let col_idx = table_schema.get_column_index(column_name).ok_or_else(|| {
                     ExecutorError::ColumnNotFound {
-                        column_name: column_name.clone(),
+                        column_name: column_name.to_string(),
                         table_name: qualified_table_name.clone(),
                         searched_tables: vec![qualified_table_name.clone()],
                         available_columns: table_schema
@@ -344,7 +344,7 @@ impl CreateIndexExecutor {
                     table_name.clone(),
                     vibesql_catalog::IndexType::IVFFlat { metric: catalog_metric, lists: *lists },
                     vec![vibesql_catalog::IndexedColumn {
-                        column_name: column_name.clone(),
+                        column_name: column_name.to_string(),
                         order: vibesql_catalog::SortOrder::Ascending, /* Not meaningful for
                                                                        * vector indexes */
                         prefix_length: None,
@@ -357,7 +357,7 @@ impl CreateIndexExecutor {
                 database.create_ivfflat_index(
                     index_name.clone(),
                     table_name.clone(),
-                    column_name.clone(),
+                    column_name.to_string(),
                     col_idx,
                     dimensions,
                     *lists as usize,
@@ -386,12 +386,12 @@ impl CreateIndexExecutor {
                     ));
                 }
 
-                let column_name = &stmt.columns[0].column_name;
+                let column_name = stmt.columns[0].expect_column_name();
 
                 // Get the column index and validate it's a vector type
                 let col_idx = table_schema.get_column_index(column_name).ok_or_else(|| {
                     ExecutorError::ColumnNotFound {
-                        column_name: column_name.clone(),
+                        column_name: column_name.to_string(),
                         table_name: qualified_table_name.clone(),
                         searched_tables: vec![qualified_table_name.clone()],
                         available_columns: table_schema
@@ -437,7 +437,7 @@ impl CreateIndexExecutor {
                         ef_construction: *ef_construction,
                     },
                     vec![vibesql_catalog::IndexedColumn {
-                        column_name: column_name.clone(),
+                        column_name: column_name.to_string(),
                         order: vibesql_catalog::SortOrder::Ascending, /* Not meaningful for
                                                                        * vector indexes */
                         prefix_length: None,
@@ -450,7 +450,7 @@ impl CreateIndexExecutor {
                 database.create_hnsw_index(
                     index_name.clone(),
                     table_name.clone(),
-                    column_name.clone(),
+                    column_name.to_string(),
                     col_idx,
                     dimensions,
                     *m,
@@ -545,7 +545,7 @@ mod tests {
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -573,7 +573,7 @@ mod tests {
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: true },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -596,12 +596,12 @@ mod tests {
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
             columns: vec![
-                IndexColumn {
+                IndexColumn::Column {
                     column_name: "email".to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
                 },
-                IndexColumn {
+                IndexColumn::Column {
                     column_name: "name".to_string(),
                     direction: OrderDirection::Desc,
                     prefix_length: None,
@@ -623,7 +623,7 @@ mod tests {
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -649,7 +649,7 @@ mod tests {
             if_not_exists: false,
             table_name: "nonexistent_table".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -671,7 +671,7 @@ mod tests {
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "nonexistent_column".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -693,7 +693,7 @@ mod tests {
             if_not_exists: true,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -720,7 +720,7 @@ mod tests {
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -734,7 +734,7 @@ mod tests {
             if_not_exists: true,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -756,7 +756,7 @@ mod tests {
             if_not_exists: false,
             table_name: "public.users".to_string(), // Explicitly qualify with public schema
             index_type: vibesql_ast::IndexType::BTree { unique: false },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -787,7 +787,7 @@ mod tests {
             if_not_exists: false,
             table_name: "test_schema.nonexistent_table".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -858,7 +858,7 @@ mod tests {
                 metric: vibesql_ast::VectorDistanceMetric::L2,
                 lists: 4,
             },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -886,7 +886,7 @@ mod tests {
                 metric: vibesql_ast::VectorDistanceMetric::Cosine,
                 lists: 4,
             },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -911,7 +911,7 @@ mod tests {
                 metric: vibesql_ast::VectorDistanceMetric::InnerProduct,
                 lists: 4,
             },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -937,7 +937,7 @@ mod tests {
                 metric: vibesql_ast::VectorDistanceMetric::L2,
                 lists: 4,
             },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "content".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -964,12 +964,12 @@ mod tests {
                 lists: 4,
             },
             columns: vec![
-                IndexColumn {
+                IndexColumn::Column {
                     column_name: "embedding".to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
                 },
-                IndexColumn {
+                IndexColumn::Column {
                     column_name: "id".to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
@@ -995,7 +995,7 @@ mod tests {
                 metric: vibesql_ast::VectorDistanceMetric::L2,
                 lists: 4,
             },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -1071,7 +1071,7 @@ mod tests {
                 metric: vibesql_ast::VectorDistanceMetric::L2,
                 lists: 2, // 2 clusters for small test data
             },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -1112,7 +1112,7 @@ mod tests {
                 metric: vibesql_ast::VectorDistanceMetric::Cosine,
                 lists: 2,
             },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -1145,7 +1145,7 @@ mod tests {
                 metric: vibesql_ast::VectorDistanceMetric::L2,
                 lists: 4,
             },
-            columns: vec![IndexColumn {
+            columns: vec![IndexColumn::Column {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,

@@ -125,7 +125,7 @@ pub(super) fn execute_covering_index_scan(
 
     // Get index column names for predicate extraction
     let index_column_names: Vec<&str> =
-        index_metadata.columns.iter().map(|col| col.column_name.as_str()).collect();
+        index_metadata.columns.iter().map(|col| col.expect_column_name()).collect();
 
     // Try to extract prefix + trailing range (most common pattern for covering scans)
     // e.g., WHERE s_w_id = 1 AND s_quantity < 10
@@ -239,7 +239,7 @@ pub(in crate::select) fn try_covering_index_scan(
 
     // Get index column names
     let index_column_names: Vec<&str> =
-        index_metadata.columns.iter().map(|col| col.column_name.as_str()).collect();
+        index_metadata.columns.iter().map(|col| col.expect_column_name()).collect();
 
     // Check if index covers all needed columns
     let covering_info = match check_covering_index(&index_column_names, needed_columns) {

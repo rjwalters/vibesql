@@ -93,7 +93,7 @@ impl SqlExecutor {
                     let columns_str = index_meta
                         .columns
                         .iter()
-                        .map(|col| col.column_name.clone())
+                        .map(|col| col.expect_column_name().to_string())
                         .collect::<Vec<_>>()
                         .join(", ");
                     let index_type = if index_meta.unique { "UNIQUE" } else { "BTREE" };
@@ -268,7 +268,7 @@ fn print_indexes(db: &Database, table_name: &str) -> anyhow::Result<()> {
         for index in indexes {
             let idx_type = if index.unique { "UNIQUE, btree" } else { "btree" };
             let columns =
-                index.columns.iter().map(|c| c.column_name.clone()).collect::<Vec<_>>().join(", ");
+                index.columns.iter().map(|c| c.expect_column_name().to_string()).collect::<Vec<_>>().join(", ");
 
             println!("    \"{}\" {}, ({})", index.index_name, idx_type, columns);
         }

@@ -623,7 +623,7 @@ fn test_index_data_populated_after_load() {
         "idx_customer".to_string(),
         "test_orders".to_string(),
         false,
-        vec![vibesql_ast::IndexColumn {
+        vec![vibesql_ast::IndexColumn::Column {
             column_name: "customer".to_string(),
             direction: vibesql_ast::OrderDirection::Asc,
             prefix_length: None,

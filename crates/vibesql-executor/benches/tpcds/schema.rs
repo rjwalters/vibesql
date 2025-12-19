@@ -3705,7 +3705,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_date_dim_pk".to_string(),
         "date_dim".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "d_date_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3717,7 +3717,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_time_dim_pk".to_string(),
         "time_dim".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "t_time_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3729,7 +3729,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_item_pk".to_string(),
         "item".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "i_item_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3741,7 +3741,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_customer_pk".to_string(),
         "customer".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "c_customer_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3753,7 +3753,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_customer_address_pk".to_string(),
         "customer_address".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "ca_address_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3765,7 +3765,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_store_pk".to_string(),
         "store".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "s_store_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3779,12 +3779,12 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "store_sales".to_string(),
         true,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "ss_item_sk".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "ss_ticket_number".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -3798,7 +3798,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_store_sales_date".to_string(),
         "store_sales".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "ss_sold_date_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3810,7 +3810,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_store_sales_customer".to_string(),
         "store_sales".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "ss_customer_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3822,7 +3822,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_store_sales_store".to_string(),
         "store_sales".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "ss_store_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3835,7 +3835,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_promotion_pk".to_string(),
         "promotion".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "p_promo_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3847,7 +3847,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_warehouse_pk".to_string(),
         "warehouse".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "w_warehouse_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3859,7 +3859,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_ship_mode_pk".to_string(),
         "ship_mode".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "sm_ship_mode_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3871,7 +3871,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_reason_pk".to_string(),
         "reason".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "r_reason_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3885,12 +3885,12 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "store_returns".to_string(),
         true,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "sr_item_sk".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "sr_ticket_number".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -3903,7 +3903,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_store_returns_date".to_string(),
         "store_returns".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "sr_returned_date_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3915,7 +3915,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_store_returns_customer".to_string(),
         "store_returns".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "sr_customer_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3928,7 +3928,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_catalog_page_pk".to_string(),
         "catalog_page".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "cp_catalog_page_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3940,7 +3940,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_web_page_pk".to_string(),
         "web_page".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "wp_web_page_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3952,7 +3952,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_web_site_pk".to_string(),
         "web_site".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "web_site_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3966,12 +3966,12 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "catalog_sales".to_string(),
         true,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "cs_item_sk".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "cs_order_number".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -3984,7 +3984,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_catalog_sales_date".to_string(),
         "catalog_sales".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "cs_sold_date_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -3996,7 +3996,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_catalog_sales_customer".to_string(),
         "catalog_sales".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "cs_bill_customer_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -4010,12 +4010,12 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "catalog_returns".to_string(),
         true,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "cr_item_sk".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "cr_order_number".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -4028,7 +4028,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_catalog_returns_date".to_string(),
         "catalog_returns".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "cr_returned_date_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -4042,12 +4042,12 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "web_sales".to_string(),
         true,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "ws_item_sk".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "ws_order_number".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -4060,7 +4060,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_web_sales_date".to_string(),
         "web_sales".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "ws_sold_date_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -4072,7 +4072,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_web_sales_customer".to_string(),
         "web_sales".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "ws_bill_customer_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -4086,12 +4086,12 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "web_returns".to_string(),
         true,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "wr_item_sk".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "wr_order_number".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -4104,7 +4104,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_web_returns_date".to_string(),
         "web_returns".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "wr_returned_date_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -4117,7 +4117,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_customer_demographics_pk".to_string(),
         "customer_demographics".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "cd_demo_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -4130,7 +4130,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_household_demographics_pk".to_string(),
         "household_demographics".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "hd_demo_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -4143,7 +4143,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_income_band_pk".to_string(),
         "income_band".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "ib_income_band_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -4156,7 +4156,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "idx_call_center_pk".to_string(),
         "call_center".to_string(),
         true,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "cc_call_center_sk".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -4170,17 +4170,17 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
         "inventory".to_string(),
         true,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "inv_date_sk".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "inv_item_sk".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "inv_warehouse_sk".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,

@@ -199,12 +199,12 @@ impl IndexManager {
                         .iter()
                         .map(|col| {
                             let col_idx = table_schema
-                                .get_column_index(&col.column_name)
+                                .get_column_index(&col.expect_column_name())
                                 .expect("Index column should exist");
                             let value = &row.values[col_idx];
                             let truncated = super::index_maintenance::apply_prefix_truncation(
                                 value,
-                                col.prefix_length,
+                                col.prefix_length(),
                             );
                             crate::database::indexes::index_operations::normalize_for_comparison(
                                 &truncated,
@@ -220,7 +220,7 @@ impl IndexManager {
                                     let column_names: Vec<String> = metadata
                                         .columns
                                         .iter()
-                                        .map(|c| c.column_name.clone())
+                                        .map(|c| c.expect_column_name().to_string())
                                         .collect();
                                     return Err(StorageError::UniqueConstraintViolation(format!(
                                         "UNIQUE constraint '{}' violated: duplicate key value for ({})",
@@ -237,7 +237,7 @@ impl IndexManager {
                                         let column_names: Vec<String> = metadata
                                             .columns
                                             .iter()
-                                            .map(|c| c.column_name.clone())
+                                            .map(|c| c.expect_column_name().to_string())
                                             .collect();
                                         return Err(StorageError::UniqueConstraintViolation(format!(
                                             "UNIQUE constraint '{}' violated: duplicate key value for ({})",

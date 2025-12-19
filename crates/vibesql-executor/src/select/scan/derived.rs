@@ -124,7 +124,7 @@ where
                 } else {
                     // No rows - use column names from subquery metadata
                     for col_name in &subquery_columns {
-                        column_names.push(col_name.clone());
+                        column_names.push(col_name.to_string());
                         column_types.push(vibesql_types::DataType::Null);
                     }
                 }

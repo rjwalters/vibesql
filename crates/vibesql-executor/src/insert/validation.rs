@@ -57,7 +57,7 @@ pub fn resolve_target_columns_with_rowid(
             } else {
                 // Column not found and not a pseudo-column
                 return Err(ExecutorError::ColumnNotFound {
-                    column_name: col_name.clone(),
+                    column_name: col_name.to_string(),
                     table_name: table_name.to_string(),
                     searched_tables: vec![table_name.to_string()],
                     available_columns: schema.columns.iter().map(|c| c.name.clone()).collect(),

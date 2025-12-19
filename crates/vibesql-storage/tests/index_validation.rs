@@ -127,7 +127,7 @@ mod adaptive_backend_tests {
             "idx_small".to_string(),
             "small_table".to_string(),
             false, // not unique
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -170,7 +170,7 @@ mod adaptive_backend_tests {
             "idx_a".to_string(),
             "multi".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "a".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -182,7 +182,7 @@ mod adaptive_backend_tests {
             "idx_b".to_string(),
             "multi".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "b".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -194,7 +194,7 @@ mod adaptive_backend_tests {
             "idx_c".to_string(),
             "multi".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "c".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -233,7 +233,7 @@ mod correctness_tests {
             "idx_empty".to_string(),
             "empty_table".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -279,7 +279,7 @@ mod correctness_tests {
             "idx_nullable".to_string(),
             "nullable_table".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -319,7 +319,7 @@ mod correctness_tests {
             "idx_category".to_string(),
             "duplicates".to_string(),
             false, // NOT unique
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "category".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -380,12 +380,12 @@ mod correctness_tests {
             "multi_col".to_string(),
             false,
             vec![
-                IndexColumn {
+                IndexColumn::Column {
                     column_name: "last_name".to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
                 },
-                IndexColumn {
+                IndexColumn::Column {
                     column_name: "first_name".to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
@@ -430,7 +430,7 @@ mod correctness_tests {
             "idx_email_unique".to_string(),
             "unique_test".to_string(),
             true, // UNIQUE
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -484,7 +484,7 @@ mod persistence_tests {
             "idx_id".to_string(),
             "test_table".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -510,7 +510,7 @@ mod persistence_tests {
             "idx_persist".to_string(),
             "persist_test".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -547,7 +547,7 @@ mod index_operations_tests {
             "idx_to_drop".to_string(),
             "drop_test".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -584,7 +584,7 @@ mod index_operations_tests {
             "idx_cascade_1".to_string(),
             "cascade_test".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -596,7 +596,7 @@ mod index_operations_tests {
             "idx_cascade_2".to_string(),
             "cascade_test".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -636,7 +636,7 @@ mod index_operations_tests {
             "idx_rebuild".to_string(),
             "rebuild_test".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,

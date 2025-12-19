@@ -167,7 +167,7 @@ impl<'a> IndexPlanner<'a> {
                 if let Some(first_col) = index_metadata.columns.first() {
                     crate::select::scan::index_scan::predicate::where_clause_fully_satisfied_by_index(
                         where_expr,
-                        &first_col.column_name,
+                        first_col.expect_column_name(),
                     )
                 } else {
                     false
@@ -251,7 +251,7 @@ impl<'a> IndexPlanner<'a> {
                 let filters_first_col =
                     crate::select::scan::index_scan::selection::expression_filters_column(
                         where_clause,
-                        &first_col.column_name,
+                        first_col.expect_column_name(),
                     );
 
                 if filters_first_col {
@@ -265,7 +265,7 @@ impl<'a> IndexPlanner<'a> {
                     let filters_this_col =
                         crate::select::scan::index_scan::selection::expression_filters_column(
                             where_clause,
-                            &filter_col.column_name,
+                            filter_col.expect_column_name(),
                         );
 
                     if !filters_this_col {
@@ -274,12 +274,12 @@ impl<'a> IndexPlanner<'a> {
 
                     // Found a potential skip-scan: filter on column at index filter_col_idx
                     // Estimate filter selectivity on the filter column
-                    let filter_col_stats = table_stats.columns.get(&filter_col.column_name);
+                    let filter_col_stats = table_stats.columns.get(filter_col.expect_column_name());
                     let filter_selectivity = filter_col_stats
                         .map(|stats| {
                             crate::select::scan::index_scan::selection::estimate_selectivity(
                                 where_clause,
-                                &filter_col.column_name,
+                                filter_col.expect_column_name(),
                                 stats,
                             )
                         })
@@ -291,7 +291,7 @@ impl<'a> IndexPlanner<'a> {
                         // Collect statistics for prefix columns being skipped
                         let prefix_stats: Vec<_> = index_metadata.columns[..skip_depth]
                             .iter()
-                            .filter_map(|c| table_stats.columns.get(&c.column_name))
+                            .filter_map(|c| table_stats.columns.get(c.expect_column_name()))
                             .collect();
 
                         // Skip if we don't have stats for all prefix columns
@@ -320,14 +320,14 @@ impl<'a> IndexPlanner<'a> {
                         if std::env::var("SKIP_SCAN_DEBUG").is_ok() {
                             let prefix_names: Vec<_> = index_metadata.columns[..skip_depth]
                                 .iter()
-                                .map(|c| c.column_name.as_str())
+                                .map(|c| c.expect_column_name())
                                 .collect();
                             eprintln!(
                                 "[SKIP_SCAN] index={}, skip_depth={}, prefix_cols={:?}, filter_col={}, filter_selectivity={:.4}, skip_scan_cost={:.2}, table_scan_cost={:.2}",
                                 index_name,
                                 skip_depth,
                                 prefix_names,
-                                filter_col.column_name,
+                                filter_col.expect_column_name(),
                                 filter_selectivity,
                                 skip_scan_cost,
                                 table_scan_cost
@@ -348,7 +348,7 @@ impl<'a> IndexPlanner<'a> {
                         if is_better {
                             let prefix_columns: Vec<String> = index_metadata.columns[..skip_depth]
                                 .iter()
-                                .map(|c| c.column_name.clone())
+                                .map(|c| c.expect_column_name().to_string())
                                 .collect();
 
                             // Estimate combined cardinality for multi-column prefix
@@ -369,7 +369,7 @@ impl<'a> IndexPlanner<'a> {
                             let skip_info = SkipScanInfo {
                                 skip_columns: skip_depth,
                                 prefix_columns,
-                                filter_column: filter_col.column_name.clone(),
+                                filter_column: filter_col.expect_column_name().to_string(),
                                 prefix_cardinality,
                                 estimated_cost: skip_scan_cost,
                             };
@@ -438,7 +438,7 @@ impl<'a> IndexPlanner<'a> {
         };
 
         // Get column statistics
-        let col_stats = match table_stats.columns.get(&first_col.column_name) {
+        let col_stats = match table_stats.columns.get(first_col.expect_column_name()) {
             Some(stats) => stats,
             None => return 0.33,
         };
@@ -446,7 +446,7 @@ impl<'a> IndexPlanner<'a> {
         // Use the existing selectivity estimation logic
         crate::select::scan::index_scan::selection::estimate_selectivity(
             where_expr,
-            &first_col.column_name,
+            first_col.expect_column_name(),
             col_stats,
         )
     }
@@ -476,7 +476,7 @@ impl<'a> IndexPlanner<'a> {
             .map(|expr| {
                 crate::select::scan::index_scan::selection::expression_filters_column(
                     expr,
-                    &first_col.column_name,
+                    first_col.expect_column_name(),
                 )
             })
             .unwrap_or(false);

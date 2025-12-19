@@ -1157,7 +1157,7 @@ mod tests {
             "idx_products_price".to_string(),
             "products".to_string(),
             false,
-            vec![IndexColumn {
+            vec![IndexColumn::Column {
                 column_name: "price".to_string(),
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,

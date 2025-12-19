@@ -859,7 +859,7 @@ fn test_json_index_roundtrip() {
     db.create_table(schema).unwrap();
 
     // Create index
-    let idx = vibesql_ast::IndexColumn {
+    let idx = vibesql_ast::IndexColumn::Column {
         column_name: "name".to_string(),
         direction: vibesql_ast::OrderDirection::Asc,
         prefix_length: None,

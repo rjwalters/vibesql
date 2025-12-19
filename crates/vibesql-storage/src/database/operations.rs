@@ -348,14 +348,14 @@ impl Operations {
         use vibesql_types::DataType;
 
         for index_col in columns {
-            if let Some(prefix_length) = index_col.prefix_length {
+            if let Some(prefix_length) = index_col.prefix_length() {
                 // Find the column in the table schema
                 let column_schema = table_schema
                     .columns
                     .iter()
-                    .find(|col| col.name == index_col.column_name)
+                    .find(|col| col.name == index_col.expect_column_name())
                     .ok_or_else(|| StorageError::ColumnNotFound {
-                        column_name: index_col.column_name.clone(),
+                        column_name: index_col.expect_column_name().to_string(),
                         table_name: table_schema.name.clone(),
                     })?;
 
@@ -367,7 +367,7 @@ impl Operations {
                         if prefix_length as usize > *length {
                             eprintln!(
                                 "Warning: Key part '{}' prefix length ({}) exceeds column width ({})",
-                                index_col.column_name, prefix_length, length
+                                index_col.expect_column_name(), prefix_length, length
                             );
                         }
                     }
@@ -377,7 +377,7 @@ impl Operations {
                             if prefix_length as usize > *max_len {
                                 eprintln!(
                                     "Warning: Key part '{}' prefix length ({}) exceeds column width ({})",
-                                    index_col.column_name, prefix_length, max_len
+                                    index_col.expect_column_name(), prefix_length, max_len
                                 );
                             }
                         }
@@ -392,7 +392,7 @@ impl Operations {
                     _ => {
                         return Err(StorageError::InvalidIndexColumn(format!(
                             "Incorrect prefix key; the used key part '{}' isn't a string or binary type (type: {:?})",
-                            index_col.column_name, column_schema.data_type
+                            index_col.expect_column_name(), column_schema.data_type
                         )));
                     }
                 }
@@ -670,7 +670,7 @@ impl Operations {
             if let Some(metadata) = self.index_manager.get_index(&index_name) {
                 if metadata.table_name.to_lowercase() == normalized_table {
                     for col in &metadata.columns {
-                        if col.column_name.to_lowercase() == normalized_column {
+                        if col.expect_column_name().to_lowercase() == normalized_column {
                             return true;
                         }
                     }

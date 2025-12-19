@@ -114,14 +114,24 @@ pub struct JsonIndex {
     pub unique: bool,
 }
 
-/// Index column with sort direction
+/// Index column with sort direction - supports both column references and expressions
 #[derive(Debug, Serialize, Deserialize)]
-pub struct JsonIndexColumn {
-    pub name: String,
-    #[serde(default = "default_asc")]
-    pub direction: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prefix_length: Option<u64>,
+#[serde(untagged)]
+pub enum JsonIndexColumn {
+    /// Simple column reference
+    Column {
+        name: String,
+        #[serde(default = "default_asc")]
+        direction: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prefix_length: Option<u64>,
+    },
+    /// Expression index (functional index)
+    Expression {
+        expression: String,
+        #[serde(default = "default_asc")]
+        direction: String,
+    },
 }
 
 fn default_asc() -> String {
@@ -260,13 +270,30 @@ impl Database {
                     columns: metadata
                         .columns
                         .iter()
-                        .map(|col| JsonIndexColumn {
-                            name: col.column_name.clone(),
-                            direction: match col.direction {
+                        .map(|col| {
+                            let direction = match col.direction() {
                                 OrderDirection::Desc => "DESC".to_string(),
                                 OrderDirection::Asc => "ASC".to_string(),
-                            },
-                            prefix_length: col.prefix_length,
+                            };
+                            if let Some(name) = col.column_name() {
+                                JsonIndexColumn::Column {
+                                    name: name.to_string(),
+                                    direction,
+                                    prefix_length: col.prefix_length(),
+                                }
+                            } else if let Some(expr) = col.get_expression() {
+                                JsonIndexColumn::Expression {
+                                    expression: format!("{:?}", expr),
+                                    direction,
+                                }
+                            } else {
+                                // Fallback - shouldn't happen
+                                JsonIndexColumn::Column {
+                                    name: "unknown".to_string(),
+                                    direction,
+                                    prefix_length: None,
+                                }
+                            }
                         })
                         .collect(),
                     unique: metadata.unique,
@@ -498,18 +525,30 @@ fn json_database_to_db(json_db: JsonDatabase) -> Result<Database, StorageError> 
         let columns: Vec<vibesql_ast::IndexColumn> = json_index
             .columns
             .iter()
-            .map(|c| vibesql_ast::IndexColumn {
-                column_name: c.name.clone(),
-                direction: if c.direction == "DESC" {
-                    OrderDirection::Desc
-                } else {
-                    OrderDirection::Asc
-                },
-                prefix_length: None,
+            .filter_map(|c| match c {
+                JsonIndexColumn::Column { name, direction, prefix_length } => {
+                    Some(vibesql_ast::IndexColumn::Column {
+                        column_name: name.clone(),
+                        direction: if direction == "DESC" {
+                            OrderDirection::Desc
+                        } else {
+                            OrderDirection::Asc
+                        },
+                        prefix_length: *prefix_length,
+                    })
+                }
+                JsonIndexColumn::Expression { expression: _, direction: _ } => {
+                    // Expression indexes cannot be recreated without SQL parsing
+                    log::warn!("Skipping expression index column during JSON import - expression indexes require SQL parsing");
+                    None
+                }
             })
             .collect();
 
-        db.create_index(json_index.name, json_index.table, json_index.unique, columns)?;
+        // Only create index if it has at least one column
+        if !columns.is_empty() {
+            db.create_index(json_index.name, json_index.table, json_index.unique, columns)?;
+        }
     }
 
     Ok(db)

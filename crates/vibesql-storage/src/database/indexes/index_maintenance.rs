@@ -80,9 +80,9 @@ impl IndexManager {
         let mut column_indices = Vec::new();
         for index_col in &columns {
             let column_idx =
-                table_schema.get_column_index(&index_col.column_name).ok_or_else(|| {
+                table_schema.get_column_index(&index_col.expect_column_name()).ok_or_else(|| {
                     StorageError::ColumnNotFound {
-                        column_name: index_col.column_name.clone(),
+                        column_name: index_col.expect_column_name().to_string(),
                         table_name: table_name.clone(),
                     }
                 })?;
@@ -136,7 +136,7 @@ impl IndexManager {
                     .zip(columns.iter())
                     .map(|(&idx, col)| {
                         let value = &row.values[idx];
-                        let truncated = apply_prefix_truncation(value, col.prefix_length);
+                        let truncated = apply_prefix_truncation(value, col.prefix_length());
                         // Normalize numeric types to ensure consistent comparison with query bounds
                         super::index_operations::normalize_for_comparison(&truncated)
                     })
@@ -196,7 +196,7 @@ impl IndexManager {
                     .zip(columns.iter())
                     .map(|(&idx, col)| {
                         let value = &row.values[idx];
-                        let truncated = apply_prefix_truncation(value, col.prefix_length);
+                        let truncated = apply_prefix_truncation(value, col.prefix_length());
                         // Normalize numeric types to ensure consistent comparison with query bounds
                         super::index_operations::normalize_for_comparison(&truncated)
                     })
@@ -263,10 +263,10 @@ impl IndexManager {
                         .iter()
                         .map(|col| {
                             let col_idx = table_schema
-                                .get_column_index(&col.column_name)
+                                .get_column_index(&col.expect_column_name())
                                 .expect("Index column should exist");
                             let value = &row.values[col_idx];
-                            let truncated = apply_prefix_truncation(value, col.prefix_length);
+                            let truncated = apply_prefix_truncation(value, col.prefix_length());
                             // Normalize numeric types for consistent ordering/comparison
                             crate::database::indexes::index_operations::normalize_for_comparison(
                                 &truncated,
@@ -360,9 +360,9 @@ impl IndexManager {
                     .iter()
                     .map(|col| {
                         let col_idx = table_schema
-                            .get_column_index(&col.column_name)
+                            .get_column_index(&col.expect_column_name())
                             .expect("Index column should exist");
-                        (col_idx, col.prefix_length)
+                        (col_idx, col.prefix_length())
                     })
                     .collect();
                 (index_name.clone(), column_info)
@@ -454,7 +454,7 @@ impl IndexManager {
                 if let Some(changed) = changed_columns {
                     let index_affected = metadata.columns.iter().any(|col| {
                         table_schema
-                            .get_column_index(&col.column_name)
+                            .get_column_index(&col.expect_column_name())
                             .map(|idx| changed.contains(&idx))
                             .unwrap_or(false)
                     });
@@ -471,10 +471,10 @@ impl IndexManager {
                         .iter()
                         .map(|col| {
                             let col_idx = table_schema
-                                .get_column_index(&col.column_name)
+                                .get_column_index(&col.expect_column_name())
                                 .expect("Index column should exist");
                             let value = &old_row.values[col_idx];
-                            let truncated = apply_prefix_truncation(value, col.prefix_length);
+                            let truncated = apply_prefix_truncation(value, col.prefix_length());
                             crate::database::indexes::index_operations::normalize_for_comparison(
                                 &truncated,
                             )
@@ -486,10 +486,10 @@ impl IndexManager {
                         .iter()
                         .map(|col| {
                             let col_idx = table_schema
-                                .get_column_index(&col.column_name)
+                                .get_column_index(&col.expect_column_name())
                                 .expect("Index column should exist");
                             let value = &new_row.values[col_idx];
-                            let truncated = apply_prefix_truncation(value, col.prefix_length);
+                            let truncated = apply_prefix_truncation(value, col.prefix_length());
                             crate::database::indexes::index_operations::normalize_for_comparison(
                                 &truncated,
                             )
@@ -600,10 +600,10 @@ impl IndexManager {
                         .iter()
                         .map(|col| {
                             let col_idx = table_schema
-                                .get_column_index(&col.column_name)
+                                .get_column_index(&col.expect_column_name())
                                 .expect("Index column should exist");
                             let value = &values[col_idx];
-                            let truncated = apply_prefix_truncation(value, col.prefix_length);
+                            let truncated = apply_prefix_truncation(value, col.prefix_length());
                             // Normalize numeric types for consistent ordering/comparison
                             crate::database::indexes::index_operations::normalize_for_comparison(
                                 &truncated,
@@ -696,9 +696,9 @@ impl IndexManager {
                     .iter()
                     .map(|col| {
                         let col_idx = table_schema
-                            .get_column_index(&col.column_name)
+                            .get_column_index(&col.expect_column_name())
                             .expect("Index column should exist");
-                        (col_idx, col.prefix_length)
+                        (col_idx, col.prefix_length())
                     })
                     .collect();
                 (index_name.clone(), column_info)
@@ -799,10 +799,10 @@ impl IndexManager {
                                     .iter()
                                     .map(|col| {
                                         let col_idx = table_schema
-                                            .get_column_index(&col.column_name)
+                                            .get_column_index(&col.expect_column_name())
                                             .expect("Index column should exist");
                                         let value = &row.values[col_idx];
-                                        let truncated = apply_prefix_truncation(value, col.prefix_length);
+                                        let truncated = apply_prefix_truncation(value, col.prefix_length());
                                         // Normalize numeric types for consistent ordering/comparison
                                         crate::database::indexes::index_operations::normalize_for_comparison(&truncated)
                                     })
@@ -821,10 +821,10 @@ impl IndexManager {
                                     .iter()
                                     .map(|col| {
                                         let col_idx = table_schema
-                                            .get_column_index(&col.column_name)
+                                            .get_column_index(&col.expect_column_name())
                                             .expect("Index column should exist");
                                         let value = &row.values[col_idx];
-                                        let truncated = apply_prefix_truncation(value, col.prefix_length);
+                                        let truncated = apply_prefix_truncation(value, col.prefix_length());
                                         // Normalize numeric types for consistent ordering/comparison
                                         crate::database::indexes::index_operations::normalize_for_comparison(&truncated)
                                     })
@@ -841,7 +841,7 @@ impl IndexManager {
                                 .iter()
                                 .map(|col| {
                                     let col_idx = table_schema
-                                        .get_column_index(&col.column_name)
+                                        .get_column_index(&col.expect_column_name())
                                         .expect("Index column should exist");
                                     table_schema.columns[col_idx].data_type.clone()
                                 })
@@ -1063,7 +1063,7 @@ impl IndexManager {
             index_name: index_name.clone(),
             table_name: table_name.clone(),
             unique: false, // IVFFlat indexes are never unique
-            columns: vec![vibesql_ast::IndexColumn {
+            columns: vec![vibesql_ast::IndexColumn::Column {
                 column_name,
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,
@@ -1133,7 +1133,7 @@ impl IndexManager {
             index_name: index_name.clone(),
             table_name: table_name.clone(),
             unique: false, // IVFFlat indexes are never unique
-            columns: vec![vibesql_ast::IndexColumn {
+            columns: vec![vibesql_ast::IndexColumn::Column {
                 column_name,
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,
@@ -1307,7 +1307,7 @@ impl IndexManager {
             index_name: index_name.clone(),
             table_name: table_name.clone(),
             unique: false, // HNSW indexes are never unique
-            columns: vec![vibesql_ast::IndexColumn {
+            columns: vec![vibesql_ast::IndexColumn::Column {
                 column_name,
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,

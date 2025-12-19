@@ -109,9 +109,9 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
             // Write indexed columns
             write_u32(writer, metadata.columns.len() as u32)?;
             for col in &metadata.columns {
-                write_string(writer, &col.column_name)?;
+                write_string(writer, &col.expect_column_name())?;
                 // Write direction as u8 (0 = Asc, 1 = Desc)
-                let direction = match col.direction {
+                let direction = match col.direction() {
                     vibesql_ast::OrderDirection::Asc => 0u8,
                     vibesql_ast::OrderDirection::Desc => 1u8,
                 };
@@ -366,7 +366,7 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
                 }
             };
 
-            columns.push(vibesql_ast::IndexColumn { column_name, direction, prefix_length: None });
+            columns.push(vibesql_ast::IndexColumn::Column { column_name, direction, prefix_length: None });
         }
 
         index_specs.push((index_name, table_name, unique, columns));

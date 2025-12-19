@@ -148,7 +148,7 @@ fn test_order_by_single_column_asc_with_index() {
         "idx_products_price".to_string(),
         "products".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "price".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -186,7 +186,7 @@ fn test_order_by_single_column_desc_with_index() {
         "idx_products_price".to_string(),
         "products".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "price".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -225,12 +225,12 @@ fn test_order_by_multi_column_with_composite_index() {
         "products".to_string(),
         false,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "category".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "price".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
@@ -281,7 +281,7 @@ fn test_order_by_with_where_clause() {
         "idx_products_price".to_string(),
         "products".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "price".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -318,12 +318,12 @@ fn test_order_by_partial_index_match_falls_back_to_sort() {
         "products".to_string(),
         false,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "category".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "price".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
@@ -422,12 +422,12 @@ fn test_order_by_mixed_asc_desc_no_index() {
         "products".to_string(),
         false,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "category".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "price".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
@@ -470,7 +470,7 @@ fn test_order_by_positional_reference() {
         "idx_products_price".to_string(),
         "products".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "price".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -505,7 +505,7 @@ fn test_order_by_alias() {
         "idx_products_price".to_string(),
         "products".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "price".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -540,7 +540,7 @@ fn test_order_by_with_nulls_asc() {
         "idx_items_value".to_string(),
         "items".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -588,7 +588,7 @@ fn test_order_by_with_nulls_desc() {
         "idx_items_value".to_string(),
         "items".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -637,12 +637,12 @@ fn test_order_by_multi_column_desc_with_index_reversal() {
         "products".to_string(),
         false,
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "category".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "price".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
@@ -692,7 +692,7 @@ fn test_order_by_limit_with_index() {
         "idx_products_price".to_string(),
         "products".to_string(),
         false,
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "price".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,

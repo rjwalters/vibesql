@@ -96,7 +96,7 @@ pub(crate) fn should_use_index_scan(
 
             // Check if this index can be used for WHERE clause
             let can_use_for_where = where_clause
-                .map(|expr| expression_filters_column(expr, &first_indexed_column.column_name))
+                .map(|expr| expression_filters_column(expr, &first_indexed_column.expect_column_name()))
                 .unwrap_or(false);
 
             // Count how many leading index columns are pinned by equality predicates
@@ -341,14 +341,14 @@ pub(crate) fn can_use_index_for_order_by_with_pinned(
         };
 
         // Column names must match (case-insensitive due to SQL identifier normalization)
-        if !order_col_name.eq_ignore_ascii_case(&index_col.column_name) {
+        if !order_col_name.eq_ignore_ascii_case(&index_col.expect_column_name()) {
             return false;
         }
 
         // Check sort directions
-        let directions_match = order_item.direction == index_col.direction;
+        let directions_match = order_item.direction == index_col.direction();
         let directions_opposite = matches!(
-            (&order_item.direction, &index_col.direction),
+            (&order_item.direction, &index_col.direction()),
             (vibesql_ast::OrderDirection::Asc, vibesql_ast::OrderDirection::Desc)
                 | (vibesql_ast::OrderDirection::Desc, vibesql_ast::OrderDirection::Asc)
         );
@@ -387,7 +387,7 @@ pub(crate) fn count_pinned_index_columns(
     for index_col in index_columns {
         // Check if this index column is pinned (case-insensitive match)
         let is_pinned =
-            pinned_columns.iter().any(|c| c.eq_ignore_ascii_case(&index_col.column_name));
+            pinned_columns.iter().any(|c| c.eq_ignore_ascii_case(&index_col.expect_column_name()));
         if is_pinned {
             count += 1;
         } else {
@@ -482,7 +482,7 @@ pub(crate) fn cost_based_index_selection(
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
             let first_indexed_column = index_metadata.columns.first()?;
-            let column_name = &first_indexed_column.column_name;
+            let column_name = &first_indexed_column.expect_column_name();
 
             // Check if this index can be used for WHERE or ORDER BY
             let can_use_for_where = where_clause

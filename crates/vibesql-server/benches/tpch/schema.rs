@@ -693,7 +693,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         "idx_region_pk".to_string(),
         "REGION".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "R_REGIONKEY".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -709,7 +709,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         "idx_nation_pk".to_string(),
         "NATION".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "N_NATIONKEY".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -725,7 +725,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         "idx_customer_pk".to_string(),
         "CUSTOMER".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "C_CUSTKEY".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -741,7 +741,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         "idx_supplier_pk".to_string(),
         "SUPPLIER".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "S_SUPPKEY".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -757,7 +757,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         "idx_orders_pk".to_string(),
         "ORDERS".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "O_ORDERKEY".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -774,12 +774,12 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         "LINEITEM".to_string(),
         true, // unique
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "L_ORDERKEY".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "L_LINENUMBER".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -796,7 +796,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         "idx_part_pk".to_string(),
         "PART".to_string(),
         true, // unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "P_PARTKEY".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -813,12 +813,12 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
         "PARTSUPP".to_string(),
         true, // unique
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "PS_PARTKEY".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "PS_SUPPKEY".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,

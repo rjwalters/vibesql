@@ -287,7 +287,7 @@ fn test_arena_alter_table_add_unique_constraint() {
             match &add.constraint.kind {
                 TableConstraintKind::Unique { columns } => {
                     assert_eq!(columns.len(), 1);
-                    assert_eq!(interner.resolve(columns[0].column_name), "col");
+                    assert_eq!(interner.resolve(columns[0].column_name().unwrap()), "col");
                 }
                 _ => panic!("Expected UNIQUE constraint"),
             }
@@ -312,7 +312,7 @@ fn test_arena_alter_table_add_primary_key_constraint() {
             match &add.constraint.kind {
                 TableConstraintKind::PrimaryKey { columns } => {
                     assert_eq!(columns.len(), 1);
-                    assert_eq!(interner.resolve(columns[0].column_name), "col");
+                    assert_eq!(interner.resolve(columns[0].column_name().unwrap()), "col");
                 }
                 _ => panic!("Expected PRIMARY KEY constraint"),
             }

@@ -718,7 +718,7 @@ fn execute_key_column_usage_query(
                         SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
                         SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
                         SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
-                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())), // column_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.to_string())), // column_name
                         SqlValue::Integer((ordinal + 1) as i64),            // ordinal_position
                         SqlValue::Null, // position_in_unique_constraint
                         SqlValue::Null, // referenced_table_schema
@@ -739,7 +739,7 @@ fn execute_key_column_usage_query(
                         SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
                         SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
                         SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
-                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())), // column_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.to_string())), // column_name
                         SqlValue::Integer((ordinal + 1) as i64),            // ordinal_position
                         SqlValue::Null, // position_in_unique_constraint
                         SqlValue::Null, // referenced_table_schema
@@ -765,12 +765,12 @@ fn execute_key_column_usage_query(
                         SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
                         SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
                         SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
-                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())), // column_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.to_string())), // column_name
                         SqlValue::Integer((ordinal + 1) as i64),            // ordinal_position
                         SqlValue::Integer((ordinal + 1) as i64), // position_in_unique_constraint
                         SqlValue::Varchar(arcstr::ArcStr::from("public")), // referenced_table_schema
                         SqlValue::Varchar(arcstr::ArcStr::from(fk.parent_table.clone())), // referenced_table_name
-                        SqlValue::Varchar(arcstr::ArcStr::from(ref_col_name.clone())), // referenced_column_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(ref_col_name.to_string())), // referenced_column_name
                     ]));
                 }
             }

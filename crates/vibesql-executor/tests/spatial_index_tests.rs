@@ -47,7 +47,7 @@ fn test_create_spatial_index_basic() {
         if_not_exists: false,
         table_name: "places".to_string(),
         index_type: vibesql_ast::IndexType::Spatial,
-        columns: vec![IndexColumn {
+        columns: vec![IndexColumn::Column {
             column_name: "location".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -111,12 +111,12 @@ fn test_spatial_index_multiple_columns_error() {
         table_name: "places".to_string(),
         index_type: vibesql_ast::IndexType::Spatial,
         columns: vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "location1".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "location2".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
@@ -170,7 +170,7 @@ fn test_drop_spatial_index() {
         if_not_exists: false,
         table_name: "places".to_string(),
         index_type: vibesql_ast::IndexType::Spatial,
-        columns: vec![IndexColumn {
+        columns: vec![IndexColumn::Column {
             column_name: "location".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -231,7 +231,7 @@ fn test_spatial_index_if_not_exists() {
         if_not_exists: false,
         table_name: "places".to_string(),
         index_type: vibesql_ast::IndexType::Spatial,
-        columns: vec![IndexColumn {
+        columns: vec![IndexColumn::Column {
             column_name: "location".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
@@ -246,7 +246,7 @@ fn test_spatial_index_if_not_exists() {
         if_not_exists: true,
         table_name: "places".to_string(),
         index_type: vibesql_ast::IndexType::Spatial,
-        columns: vec![IndexColumn {
+        columns: vec![IndexColumn::Column {
             column_name: "location".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,

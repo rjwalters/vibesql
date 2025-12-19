@@ -152,7 +152,7 @@ fn test_parse_create_fulltext_index() {
         assert_eq!(idx_stmt.index_name, "ft_title");
         assert_eq!(idx_stmt.table_name, "articles");
         assert_eq!(idx_stmt.columns.len(), 1);
-        assert_eq!(idx_stmt.columns[0].column_name, "title");
+        assert_eq!(idx_stmt.columns[0].expect_column_name(), "title");
 
         match &idx_stmt.index_type {
             vibesql_ast::IndexType::Fulltext => {
@@ -175,8 +175,8 @@ fn test_parse_create_fulltext_index_multi_column() {
         assert_eq!(idx_stmt.index_name, "ft_search");
         assert_eq!(idx_stmt.table_name, "articles");
         assert_eq!(idx_stmt.columns.len(), 2);
-        assert_eq!(idx_stmt.columns[0].column_name, "title");
-        assert_eq!(idx_stmt.columns[1].column_name, "body");
+        assert_eq!(idx_stmt.columns[0].expect_column_name(), "title");
+        assert_eq!(idx_stmt.columns[1].expect_column_name(), "body");
 
         match &idx_stmt.index_type {
             vibesql_ast::IndexType::Fulltext => {

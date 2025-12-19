@@ -246,7 +246,7 @@ impl<'a> IntrospectionExecutor<'a> {
                     SqlValue::Integer(0), // Non_unique (0 = unique)
                     SqlValue::Varchar("PRIMARY".into()), // Key_name
                     SqlValue::Integer((seq + 1) as i64), // Seq_in_index
-                    SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())), // Column_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(col_name.to_string())), // Column_name
                     SqlValue::Varchar("A".into()), // Collation (A = ascending)
                     SqlValue::Null,       // Cardinality
                     SqlValue::Null,       // Sub_part

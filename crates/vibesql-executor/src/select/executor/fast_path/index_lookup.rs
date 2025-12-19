@@ -98,7 +98,7 @@ impl SelectExecutor<'_> {
 
             // Get index column names in order
             let index_columns: Vec<&str> =
-                metadata.columns.iter().map(|c| c.column_name.as_str()).collect();
+                metadata.columns.iter().map(|c| c.expect_column_name()).collect();
 
             // Need at least 2 columns for prefix + ORDER BY pattern
             if index_columns.len() < 2 {
@@ -258,7 +258,7 @@ impl SelectExecutor<'_> {
 
             // Get index column names in order
             let index_columns: Vec<&str> =
-                metadata.columns.iter().map(|c| c.column_name.as_str()).collect();
+                metadata.columns.iter().map(|c| c.expect_column_name()).collect();
 
             // Try to extract equality values from WHERE clause
             let index_values = match self.extract_pk_values(where_clause, &index_columns) {
@@ -446,7 +446,7 @@ impl SelectExecutor<'_> {
 
             // Get index column names
             let index_column_names: Vec<&str> =
-                metadata.columns.iter().map(|c| c.column_name.as_str()).collect();
+                metadata.columns.iter().map(|c| c.expect_column_name()).collect();
 
             // Check if this index covers all needed columns
             if check_covering_index(&index_column_names, &needed_columns).is_none() {

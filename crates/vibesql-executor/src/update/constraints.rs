@@ -63,9 +63,9 @@ impl<'a> ConstraintValidator<'a> {
                 let mut new_key_values = Vec::new();
                 for index_col in &index_metadata.columns {
                     let col_idx =
-                        self.schema.get_column_index(&index_col.column_name).ok_or_else(|| {
+                        self.schema.get_column_index(&index_col.expect_column_name()).ok_or_else(|| {
                             ExecutorError::ColumnNotFound {
-                                column_name: index_col.column_name.clone(),
+                                column_name: index_col.expect_column_name().to_string(),
                                 table_name: table_name.to_string(),
                                 searched_tables: vec![table_name.to_string()],
                                 available_columns: self
@@ -88,7 +88,7 @@ impl<'a> ConstraintValidator<'a> {
                 // Build the original key values to check if they changed
                 let mut original_key_values = Vec::new();
                 for index_col in &index_metadata.columns {
-                    let col_idx = self.schema.get_column_index(&index_col.column_name).unwrap();
+                    let col_idx = self.schema.get_column_index(&index_col.expect_column_name()).unwrap();
                     original_key_values.push(original_row.values[col_idx].clone());
                 }
 
@@ -102,7 +102,7 @@ impl<'a> ConstraintValidator<'a> {
                     if index_data.contains_key(&new_key_values) {
                         // Format column names for error message
                         let column_names: Vec<String> =
-                            index_metadata.columns.iter().map(|c| c.column_name.clone()).collect();
+                            index_metadata.columns.iter().map(|c| c.expect_column_name().to_string()).collect();
 
                         return Err(ExecutorError::ConstraintViolation(format!(
                             "UNIQUE constraint '{}' violated: duplicate key value for ({})",

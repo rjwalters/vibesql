@@ -26,8 +26,8 @@ fn test_parse_create_table_with_table_level_primary_key() {
                     ..
                 } => {
                     assert_eq!(columns.len(), 2);
-                    assert_eq!(columns[0].column_name, "order_id");
-                    assert_eq!(columns[1].column_name, "product_id");
+                    assert_eq!(columns[0].expect_column_name(), "order_id");
+                    assert_eq!(columns[1].expect_column_name(), "product_id");
                 }
                 _ => panic!("Expected PRIMARY KEY constraint"),
             }
@@ -210,8 +210,8 @@ fn test_parse_create_table_with_table_level_unique() {
                     ..
                 } => {
                     assert_eq!(columns.len(), 2);
-                    assert_eq!(columns[0].column_name, "email");
-                    assert_eq!(columns[1].column_name, "username");
+                    assert_eq!(columns[0].expect_column_name(), "email");
+                    assert_eq!(columns[1].expect_column_name(), "username");
                 }
                 _ => panic!("Expected UNIQUE constraint"),
             }
@@ -264,8 +264,8 @@ fn test_parse_create_table_with_indexed_column_prefix() {
                     ..
                 } => {
                     assert_eq!(columns.len(), 1);
-                    assert_eq!(columns[0].column_name, "a");
-                    assert_eq!(columns[0].prefix_length, Some(1));
+                    assert_eq!(columns[0].expect_column_name(), "a");
+                    assert_eq!(columns[0].prefix_length(), Some(1));
                 }
                 _ => panic!("Expected UNIQUE constraint"),
             }
@@ -289,8 +289,8 @@ fn test_parse_create_table_with_primary_key_prefix() {
                     ..
                 } => {
                     assert_eq!(columns.len(), 1);
-                    assert_eq!(columns[0].column_name, "name");
-                    assert_eq!(columns[0].prefix_length, Some(50));
+                    assert_eq!(columns[0].expect_column_name(), "name");
+                    assert_eq!(columns[0].prefix_length(), Some(50));
                 }
                 _ => panic!("Expected PRIMARY KEY constraint"),
             }
@@ -310,8 +310,8 @@ fn test_parse_create_index_with_column_prefix() {
             assert_eq!(create_idx.index_name, "idx1");
             assert_eq!(create_idx.table_name, "users");
             assert_eq!(create_idx.columns.len(), 1);
-            assert_eq!(create_idx.columns[0].column_name, "email");
-            assert_eq!(create_idx.columns[0].prefix_length, Some(50));
+            assert_eq!(create_idx.columns[0].expect_column_name(), "email");
+            assert_eq!(create_idx.columns[0].prefix_length(), Some(50));
         }
         _ => panic!("Expected CREATE INDEX statement"),
     }

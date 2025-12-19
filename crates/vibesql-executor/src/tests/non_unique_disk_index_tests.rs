@@ -101,7 +101,7 @@ fn test_basic_non_unique_index_with_duplicates() {
         "idx_dept".to_string(),
         "employees".to_string(),
         false, // non-unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "department".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -195,12 +195,12 @@ fn test_multi_column_non_unique_index() {
         "employees".to_string(),
         false, // non-unique
         vec![
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "department".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             },
-            IndexColumn {
+            IndexColumn::Column {
                 column_name: "salary".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
@@ -303,7 +303,7 @@ fn test_range_queries_with_duplicates() {
         "idx_salary".to_string(),
         "employees".to_string(),
         false, // non-unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "salary".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -397,7 +397,7 @@ fn test_updates_affecting_non_unique_indexes() {
         "idx_dept".to_string(),
         "employees".to_string(),
         false, // non-unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "department".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -501,7 +501,7 @@ fn test_deletes_with_duplicates() {
         "idx_dept".to_string(),
         "employees".to_string(),
         false, // non-unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "department".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -573,7 +573,7 @@ fn test_heavy_duplicate_scenario_in_memory() {
         "idx_dept".to_string(),
         "employees".to_string(),
         false, // non-unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "department".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
@@ -637,7 +637,7 @@ fn test_heavy_duplicate_scenario_disk_backed() {
         "idx_dept".to_string(),
         "employees".to_string(),
         false, // non-unique
-        vec![IndexColumn {
+        vec![IndexColumn::Column {
             column_name: "department".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,

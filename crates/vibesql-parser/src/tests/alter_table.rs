@@ -154,7 +154,7 @@ fn test_alter_table_add_unique_no_keyword() {
                 match &add.constraint.kind {
                     vibesql_ast::TableConstraintKind::Unique { columns } => {
                         assert_eq!(columns.len(), 1);
-                        assert_eq!(columns[0].column_name, "col");
+                        assert_eq!(columns[0].expect_column_name(), "col");
                     }
                     _ => panic!("Expected UNIQUE constraint"),
                 }
@@ -179,7 +179,7 @@ fn test_alter_table_add_primary_key_no_keyword() {
                 match &add.constraint.kind {
                     vibesql_ast::TableConstraintKind::PrimaryKey { columns } => {
                         assert_eq!(columns.len(), 1);
-                        assert_eq!(columns[0].column_name, "col");
+                        assert_eq!(columns[0].expect_column_name(), "col");
                     }
                     _ => panic!("Expected PRIMARY KEY constraint"),
                 }

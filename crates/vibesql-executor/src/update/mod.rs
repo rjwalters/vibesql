@@ -1028,7 +1028,7 @@ fn find_conflicting_rows_for_update(
             // Build key values for this index
             let mut key_values = Vec::new();
             for index_col in &index_metadata.columns {
-                if let Some(col_idx) = schema.get_column_index(&index_col.column_name) {
+                if let Some(col_idx) = schema.get_column_index(&index_col.expect_column_name()) {
                     key_values.push(new_row.values[col_idx].clone());
                 }
             }
