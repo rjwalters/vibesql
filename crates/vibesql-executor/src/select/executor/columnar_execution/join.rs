@@ -86,6 +86,13 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
+        // ORDER BY requires sorting after projection - fall back to row-oriented (#4552)
+        // The row-oriented path handles ORDER BY correctly via apply_sorting()
+        if stmt.order_by.is_some() {
+            log::debug!("Columnar join: skipping - ORDER BY not supported");
+            return Ok(None);
+        }
+
         // ROWID pseudo-column references require row-oriented execution (#4370)
         // Columnar batches don't track per-row ROWIDs, so we fall back when ROWID is referenced
         if select_list_has_rowid(&stmt.select_list) {
