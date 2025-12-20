@@ -7,6 +7,75 @@ use crate::{
     select::grouping::{compare_sql_values, AggregateAccumulator},
 };
 
+/// Sort key type: (sort_value, is_descending, nulls_first)
+type SortKey = (vibesql_types::SqlValue, bool, Option<bool>);
+
+/// Compare two sets of sort keys with collation and NULLS FIRST/LAST support.
+/// This is a helper function to eliminate code duplication between GROUP_CONCAT and JSON_GROUP_ARRAY.
+fn compare_sort_keys(
+    a_keys: &[SortKey],
+    b_keys: &[SortKey],
+    collations: &[Option<String>],
+) -> std::cmp::Ordering {
+    for (idx, ((val_a, desc_a, nulls_first_a), (val_b, _, _))) in
+        a_keys.iter().zip(b_keys.iter()).enumerate()
+    {
+        // Handle NULLs with explicit ordering
+        let (a_null, b_null) = (val_a.is_null(), val_b.is_null());
+        if a_null || b_null {
+            if a_null && b_null {
+                continue; // Both NULL, equal for this key
+            }
+            // Determine if NULLs should come first
+            // Default: NULLS LAST for ASC, NULLS FIRST for DESC (SQLite behavior)
+            let nulls_first = nulls_first_a.unwrap_or(*desc_a);
+            if a_null {
+                return if nulls_first {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Greater
+                };
+            } else {
+                return if nulls_first {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Less
+                };
+            }
+        }
+
+        // Use collation-aware comparison if collation specified
+        let cmp = if let Some(Some(collation)) = collations.get(idx) {
+            crate::select::grouping::compare_sql_values_with_collation(
+                val_a,
+                val_b,
+                Some(collation.as_str()),
+            )
+        } else {
+            compare_sql_values(val_a, val_b)
+        };
+
+        if cmp != std::cmp::Ordering::Equal {
+            return if *desc_a { cmp.reverse() } else { cmp };
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+/// Extract collations from ORDER BY expressions (if wrapped in Collate).
+fn extract_collations(order_items: &[vibesql_ast::OrderByItem]) -> Vec<Option<String>> {
+    order_items
+        .iter()
+        .map(|item| {
+            if let vibesql_ast::Expression::Collate { collation, .. } = &item.expr {
+                Some(collation.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 /// Validate aggregate function argument count
 /// Returns error with SQLite-compatible message if validation fails
 fn validate_aggregate_args(name: &str, args: &[vibesql_ast::Expression]) -> Result<(), ExecutorError> {
@@ -190,26 +259,12 @@ pub(super) fn evaluate(
 
         // Handle ORDER BY clause within the aggregate
         if let Some(order_items) = order_by {
-            // Extract collations from ORDER BY expressions (if wrapped in Collate)
-            let collations: Vec<Option<String>> = order_items
-                .iter()
-                .map(|item| {
-                    if let vibesql_ast::Expression::Collate { collation, .. } = &item.expr {
-                        Some(collation.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+            let collations = extract_collations(order_items);
 
             // Collect (value, sort_keys, row_index) for each row
             // We need row_index to find the last row after sorting for separator evaluation
-            // Sort key: (value, is_desc, nulls_first)
-            let mut value_sort_pairs: Vec<(
-                vibesql_types::SqlValue,
-                Vec<(vibesql_types::SqlValue, bool, Option<bool>)>,
-                usize, // row index for separator evaluation
-            )> = Vec::with_capacity(group_rows.len());
+            let mut value_sort_pairs: Vec<(vibesql_types::SqlValue, Vec<SortKey>, usize)> =
+                Vec::with_capacity(group_rows.len());
 
             for (row_idx, row) in group_rows.iter().enumerate() {
                 evaluator.clear_cse_cache();
@@ -225,65 +280,21 @@ pub(super) fn evaluate(
                 for item in order_items {
                     let sort_value = evaluator.eval(&item.expr, row)?;
                     let is_desc = item.direction == vibesql_ast::OrderDirection::Desc;
-                    let nulls_first = item.nulls_order.as_ref().map(|no| {
-                        matches!(no, vibesql_ast::NullsOrder::First)
-                    });
+                    let nulls_first = item
+                        .nulls_order
+                        .as_ref()
+                        .map(|no| matches!(no, vibesql_ast::NullsOrder::First));
                     sort_keys.push((sort_value, is_desc, nulls_first));
                 }
 
                 value_sort_pairs.push((value, sort_keys, row_idx));
             }
 
-            // Sort by the sort keys with collation and NULLS support
-            value_sort_pairs.sort_by(|a, b| {
-                for (idx, ((val_a, desc_a, nulls_first_a), (val_b, _, _))) in
-                    a.1.iter().zip(b.1.iter()).enumerate()
-                {
-                    // Handle NULLs with explicit ordering
-                    let (a_null, b_null) = (val_a.is_null(), val_b.is_null());
-                    if a_null || b_null {
-                        if a_null && b_null {
-                            continue; // Both NULL, equal for this key
-                        }
-                        // Determine if NULLs should come first
-                        // Default: NULLS LAST for ASC, NULLS FIRST for DESC (SQLite behavior)
-                        let nulls_first = nulls_first_a.unwrap_or(*desc_a);
-                        if a_null {
-                            return if nulls_first {
-                                std::cmp::Ordering::Less
-                            } else {
-                                std::cmp::Ordering::Greater
-                            };
-                        } else {
-                            return if nulls_first {
-                                std::cmp::Ordering::Greater
-                            } else {
-                                std::cmp::Ordering::Less
-                            };
-                        }
-                    }
-
-                    // Use collation-aware comparison if collation specified
-                    let cmp = if let Some(Some(collation)) = collations.get(idx) {
-                        crate::select::grouping::compare_sql_values_with_collation(
-                            val_a,
-                            val_b,
-                            Some(collation.as_str()),
-                        )
-                    } else {
-                        compare_sql_values(val_a, val_b)
-                    };
-
-                    if cmp != std::cmp::Ordering::Equal {
-                        return if *desc_a { cmp.reverse() } else { cmp };
-                    }
-                }
-                std::cmp::Ordering::Equal
-            });
+            // Sort using the helper function
+            value_sort_pairs.sort_by(|a, b| compare_sort_keys(&a.1, &b.1, &collations));
 
             // For ORDER BY, get separator from the last row after sorting
             let final_separator = if args.len() == 2 && !value_sort_pairs.is_empty() {
-                // Get the row index of the last element after sorting
                 let last_row_idx = value_sort_pairs.last().map(|(_, _, idx)| *idx).unwrap_or(0);
                 let last_row = &group_rows[last_row_idx];
                 evaluator.clear_cse_cache();
@@ -309,7 +320,10 @@ pub(super) fn evaluate(
             }
 
             let result = acc.finalize();
-            executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
+            executor
+                .get_aggregate_cache()
+                .borrow_mut()
+                .insert(cache_key, result.clone());
             return Ok(result);
         }
 
@@ -337,23 +351,11 @@ pub(super) fn evaluate(
 
         // Handle ORDER BY clause within the aggregate
         if let Some(order_items) = order_by {
-            // Extract collations from ORDER BY expressions (if wrapped in Collate)
-            let collations: Vec<Option<String>> = order_items
-                .iter()
-                .map(|item| {
-                    if let vibesql_ast::Expression::Collate { collation, .. } = &item.expr {
-                        Some(collation.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+            let collations = extract_collations(order_items);
 
             // Collect (value, sort_keys) pairs for each row
-            let mut value_sort_pairs: Vec<(
-                vibesql_types::SqlValue,
-                Vec<(vibesql_types::SqlValue, bool, Option<bool>)>,
-            )> = Vec::with_capacity(group_rows.len());
+            let mut value_sort_pairs: Vec<(vibesql_types::SqlValue, Vec<SortKey>)> =
+                Vec::with_capacity(group_rows.len());
 
             for row in group_rows {
                 evaluator.clear_cse_cache();
@@ -366,58 +368,18 @@ pub(super) fn evaluate(
                 for item in order_items {
                     let sort_value = evaluator.eval(&item.expr, row)?;
                     let is_desc = item.direction == vibesql_ast::OrderDirection::Desc;
-                    let nulls_first = item.nulls_order.as_ref().map(|no| {
-                        matches!(no, vibesql_ast::NullsOrder::First)
-                    });
+                    let nulls_first = item
+                        .nulls_order
+                        .as_ref()
+                        .map(|no| matches!(no, vibesql_ast::NullsOrder::First));
                     sort_keys.push((sort_value, is_desc, nulls_first));
                 }
 
                 value_sort_pairs.push((value, sort_keys));
             }
 
-            // Sort by the sort keys with collation and NULLS support
-            value_sort_pairs.sort_by(|a, b| {
-                for (idx, ((val_a, desc_a, nulls_first_a), (val_b, _, _))) in
-                    a.1.iter().zip(b.1.iter()).enumerate()
-                {
-                    // Handle NULLs with explicit ordering
-                    let (a_null, b_null) = (val_a.is_null(), val_b.is_null());
-                    if a_null || b_null {
-                        if a_null && b_null {
-                            continue;
-                        }
-                        let nulls_first = nulls_first_a.unwrap_or(*desc_a);
-                        if a_null {
-                            return if nulls_first {
-                                std::cmp::Ordering::Less
-                            } else {
-                                std::cmp::Ordering::Greater
-                            };
-                        } else {
-                            return if nulls_first {
-                                std::cmp::Ordering::Greater
-                            } else {
-                                std::cmp::Ordering::Less
-                            };
-                        }
-                    }
-
-                    let cmp = if let Some(Some(collation)) = collations.get(idx) {
-                        crate::select::grouping::compare_sql_values_with_collation(
-                            val_a,
-                            val_b,
-                            Some(collation.as_str()),
-                        )
-                    } else {
-                        compare_sql_values(val_a, val_b)
-                    };
-
-                    if cmp != std::cmp::Ordering::Equal {
-                        return if *desc_a { cmp.reverse() } else { cmp };
-                    }
-                }
-                std::cmp::Ordering::Equal
-            });
+            // Sort using the helper function
+            value_sort_pairs.sort_by(|a, b| compare_sort_keys(&a.1, &b.1, &collations));
 
             // Now accumulate in sorted order
             let mut acc = AggregateAccumulator::new(name.canonical(), distinct)?;
@@ -426,7 +388,10 @@ pub(super) fn evaluate(
             }
 
             let result = acc.finalize();
-            executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
+            executor
+                .get_aggregate_cache()
+                .borrow_mut()
+                .insert(cache_key, result.clone());
             return Ok(result);
         }
 
@@ -440,7 +405,10 @@ pub(super) fn evaluate(
         }
 
         let result = acc.finalize();
-        executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
+        executor
+            .get_aggregate_cache()
+            .borrow_mut()
+            .insert(cache_key, result.clone());
         return Ok(result);
     }
 

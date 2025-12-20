@@ -68,11 +68,6 @@ pub enum AggregateAccumulator {
         distinct: bool,
         seen: Option<HashSet<vibesql_types::SqlValue>>,
     },
-    /// JSON_GROUP_OBJECT - Collects key-value pairs into a JSON object (SQLite compatible)
-    JsonGroupObject {
-        pairs: Vec<(String, vibesql_types::SqlValue)>,
-        distinct: bool,
-    },
 }
 
 impl AggregateAccumulator {
@@ -120,10 +115,6 @@ impl AggregateAccumulator {
                 values: Vec::new(),
                 distinct,
                 seen,
-            }),
-            "JSON_GROUP_OBJECT" => Ok(AggregateAccumulator::JsonGroupObject {
-                pairs: Vec::new(),
-                distinct,
             }),
             _ => Err(crate::errors::ExecutorError::UnsupportedExpression(format!(
                 "Unknown aggregate function: {}",
@@ -316,11 +307,6 @@ impl AggregateAccumulator {
                     values.push(value.clone());
                 }
             }
-
-            // JSON_GROUP_OBJECT - this requires pairs, handled separately
-            AggregateAccumulator::JsonGroupObject { .. } => {
-                // JSON_GROUP_OBJECT needs key-value pairs, use accumulate_pair instead
-            }
         }
     }
 
@@ -418,11 +404,6 @@ impl AggregateAccumulator {
                 // Convert values to JSON array string
                 let json_array = sql_values_to_json_array(values);
                 vibesql_types::SqlValue::Varchar(json_array.into())
-            }
-            AggregateAccumulator::JsonGroupObject { pairs, .. } => {
-                // Convert key-value pairs to JSON object string
-                let json_obj = sql_pairs_to_json_object(pairs);
-                vibesql_types::SqlValue::Varchar(json_obj.into())
             }
         }
     }
@@ -786,6 +767,28 @@ fn sql_value_to_string(value: &vibesql_types::SqlValue) -> String {
     }
 }
 
+/// Escape a string for JSON output, handling all required escape sequences.
+fn escape_json_string(s: &str) -> String {
+    let mut escaped = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\u{0008}' => escaped.push_str("\\b"), // backspace
+            '\u{000C}' => escaped.push_str("\\f"), // form feed
+            // Other control characters U+0000 through U+001F
+            c if c.is_control() && (c as u32) < 0x20 => {
+                escaped.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => escaped.push(c),
+        }
+    }
+    escaped
+}
+
 /// Convert a single SqlValue to a JSON value representation
 fn sql_value_to_json(value: &vibesql_types::SqlValue) -> String {
     use vibesql_types::SqlValue;
@@ -801,32 +804,11 @@ fn sql_value_to_json(value: &vibesql_types::SqlValue) -> String {
         SqlValue::Double(d) => d.to_string(),
         SqlValue::Float(f) => f.to_string(),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
-            // Escape JSON special characters
-            let escaped: String = s
-                .chars()
-                .flat_map(|c| match c {
-                    '"' => vec!['\\', '"'],
-                    '\\' => vec!['\\', '\\'],
-                    '\n' => vec!['\\', 'n'],
-                    '\r' => vec!['\\', 'r'],
-                    '\t' => vec!['\\', 't'],
-                    c => vec![c],
-                })
-                .collect();
-            format!("\"{}\"", escaped)
+            format!("\"{}\"", escape_json_string(s))
         }
         _ => {
             // For other types, convert to string and quote
-            let s = value.to_string();
-            let escaped: String = s
-                .chars()
-                .flat_map(|c| match c {
-                    '"' => vec!['\\', '"'],
-                    '\\' => vec!['\\', '\\'],
-                    c => vec![c],
-                })
-                .collect();
-            format!("\"{}\"", escaped)
+            format!("\"{}\"", escape_json_string(&value.to_string()))
         }
     }
 }
@@ -835,26 +817,6 @@ fn sql_value_to_json(value: &vibesql_types::SqlValue) -> String {
 fn sql_values_to_json_array(values: &[vibesql_types::SqlValue]) -> String {
     let elements: Vec<String> = values.iter().map(sql_value_to_json).collect();
     format!("[{}]", elements.join(","))
-}
-
-/// Convert a vector of key-value pairs to a JSON object string
-fn sql_pairs_to_json_object(pairs: &[(String, vibesql_types::SqlValue)]) -> String {
-    let elements: Vec<String> = pairs
-        .iter()
-        .map(|(k, v)| {
-            // Escape key
-            let escaped_key: String = k
-                .chars()
-                .flat_map(|c| match c {
-                    '"' => vec!['\\', '"'],
-                    '\\' => vec!['\\', '\\'],
-                    c => vec![c],
-                })
-                .collect();
-            format!("\"{}\":{}", escaped_key, sql_value_to_json(v))
-        })
-        .collect();
-    format!("{{{}}}", elements.join(","))
 }
 
 /// Divide a SqlValue by an integer count, handling all numeric types

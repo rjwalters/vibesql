@@ -121,7 +121,7 @@ impl Parser {
         let might_be_aggregate = matches!(
             function_name_upper.as_str(),
             "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "GROUP_CONCAT" | "STRING_AGG" | "TOTAL"
-            | "JSON_GROUP_ARRAY" | "JSON_GROUP_OBJECT"
+            | "JSON_GROUP_ARRAY"
         );
 
         // Parse optional DISTINCT or ALL for potential aggregate functions
@@ -306,7 +306,7 @@ impl Parser {
         let is_aggregate = match function_name_upper.as_str() {
             "COUNT" | "SUM" | "AVG" | "TOTAL" => true,
             "GROUP_CONCAT" | "STRING_AGG" => args.len() <= 2, // 1 or 2 args
-            "JSON_GROUP_ARRAY" | "JSON_GROUP_OBJECT" => true, // JSON aggregate functions
+            "JSON_GROUP_ARRAY" => true, // JSON aggregate function
             "MIN" | "MAX" => args.len() <= 1 && !distinct, // multi-arg or DISTINCT with >1 arg = scalar
             _ => false,
         };
