@@ -78,12 +78,7 @@ pub struct TableRef {
 impl TableRef {
     /// Create a new table reference.
     pub fn new(name: String, quoted: bool) -> Self {
-        Self {
-            schema_name: None,
-            schema_quoted: false,
-            name,
-            quoted,
-        }
+        Self { schema_name: None, schema_quoted: false, name, quoted }
     }
 
     /// Create a qualified table reference with schema.
@@ -179,10 +174,11 @@ pub use ddl::{
     ProceduralStatement, ProcedureBody, ProcedureParameter, ReferentialAction, ReindexStmt,
     ReleaseSavepointStmt, RenameTableStmt, RollbackStmt, RollbackToSavepointStmt, RowFormat,
     SavepointStmt, ScheduleAfterStmt, ScheduleAtStmt, SchemaElement, SetCatalogStmt, SetNamesStmt,
-    SetSchemaStmt, SetTimeZoneStmt, SetTransactionStmt, SetVariableStmt, SqlSecurity, StorageFormat,
-    TableConstraint, TableConstraintKind, TableOption, TimeZoneSpec, TransactionAccessMode,
-    TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming, TruncateCascadeOption,
-    TruncateTableStmt, TypeAttribute, TypeDefinition, VariableScope, VectorDistanceMetric,
+    SetSchemaStmt, SetTimeZoneStmt, SetTransactionStmt, SetVariableStmt, SqlSecurity,
+    StorageFormat, TableConstraint, TableConstraintKind, TableOption, TimeZoneSpec,
+    TransactionAccessMode, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming,
+    TruncateCascadeOption, TruncateTableStmt, TypeAttribute, TypeDefinition, VariableScope,
+    VectorDistanceMetric,
 };
 pub use dml::{
     Assignment, ConflictClause, DeleteStmt, InsertSource, InsertStmt, UpdateStmt, WhereClause,

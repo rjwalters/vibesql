@@ -18,7 +18,7 @@ fn test_trim_both_default() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {
@@ -28,7 +28,9 @@ fn test_trim_both_default() {
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("  hello  ")),
                 )),
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -57,7 +59,7 @@ fn test_trim_leading() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {
@@ -67,7 +69,9 @@ fn test_trim_leading() {
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("  hello  ")),
                 )),
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -96,7 +100,7 @@ fn test_trim_trailing() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {
@@ -106,7 +110,9 @@ fn test_trim_trailing() {
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("  hello  ")),
                 )),
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -135,7 +141,7 @@ fn test_trim_custom_char() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {
@@ -147,7 +153,9 @@ fn test_trim_custom_char() {
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("xxxhelloxxx")),
                 )),
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -176,7 +184,7 @@ fn test_trim_null_string() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {
@@ -184,7 +192,9 @@ fn test_trim_null_string() {
                 removal_char: None,
                 string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -210,7 +220,7 @@ fn test_trim_null_removal_char() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {
@@ -222,7 +232,9 @@ fn test_trim_null_removal_char() {
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")),
                 )),
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,

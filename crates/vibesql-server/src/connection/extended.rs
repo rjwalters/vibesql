@@ -217,13 +217,8 @@ pub async fn handle_bind(
     let bound_query = substitute_parameters(&stmt.query, &param_values, &param_formats);
 
     // Create the portal
-    let portal = Portal {
-        statement_name,
-        param_values,
-        param_formats,
-        result_formats,
-        bound_query,
-    };
+    let portal =
+        Portal { statement_name, param_values, param_formats, result_formats, bound_query };
     extended_state.store_portal(portal_name, portal);
 
     // Send BindComplete
@@ -259,11 +254,8 @@ pub async fn handle_describe(
             };
 
             // Send ParameterDescription
-            let param_types: Vec<i32> = stmt
-                .param_types
-                .iter()
-                .map(|&t| if t == 0 { TEXT_OID } else { t })
-                .collect();
+            let param_types: Vec<i32> =
+                stmt.param_types.iter().map(|&t| if t == 0 { TEXT_OID } else { t }).collect();
             send_message(
                 write_half,
                 write_buf,
@@ -286,12 +278,8 @@ pub async fn handle_describe(
                             format_code: 0,
                         })
                         .collect();
-                    send_message(
-                        write_half,
-                        write_buf,
-                        &BackendMessage::RowDescription { fields },
-                    )
-                    .await?;
+                    send_message(write_half, write_buf, &BackendMessage::RowDescription { fields })
+                        .await?;
                 } else {
                     // Query has wildcards or is not a SELECT - send NoData
                     send_message(write_half, write_buf, &BackendMessage::NoData).await?;
@@ -332,12 +320,8 @@ pub async fn handle_describe(
                             format_code: 0,
                         })
                         .collect();
-                    send_message(
-                        write_half,
-                        write_buf,
-                        &BackendMessage::RowDescription { fields },
-                    )
-                    .await?;
+                    send_message(write_half, write_buf, &BackendMessage::RowDescription { fields })
+                        .await?;
                 } else {
                     // Query has wildcards or is not a SELECT - send NoData
                     send_message(write_half, write_buf, &BackendMessage::NoData).await?;
@@ -414,11 +398,8 @@ pub async fn handle_execute(
                             return Ok(true);
                         }
 
-                        let values: Vec<Option<Vec<u8>>> = row
-                            .values
-                            .iter()
-                            .map(|v| Some(v.to_string().into_bytes()))
-                            .collect();
+                        let values: Vec<Option<Vec<u8>>> =
+                            row.values.iter().map(|v| Some(v.to_string().into_bytes())).collect();
                         send_message(write_half, write_buf, &BackendMessage::DataRow { values })
                             .await?;
                     }
@@ -593,8 +574,7 @@ fn substitute_parameters(
                     format!("'{}'", text.replace('\'', "''"))
                 } else {
                     // Binary format - encode as hex literal
-                    let hex_str: String =
-                        bytes.iter().map(|b| format!("{:02x}", b)).collect();
+                    let hex_str: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
                     format!("X'{}'", hex_str)
                 }
             }

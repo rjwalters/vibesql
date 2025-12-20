@@ -14,9 +14,7 @@ fn test_parse_select_with_where() {
                     assert_eq!(*op, vibesql_ast::BinaryOperator::Equal);
                     match **left {
                         vibesql_ast::Expression::ColumnRef(ref col_id)
-                            if col_id.column_canonical() == "id" =>
-                        {
-                        }
+                            if col_id.column_canonical() == "id" => {}
                         _ => panic!("Expected id column in WHERE"),
                     }
                     match **right {
@@ -342,7 +340,7 @@ fn test_select_sql_column_unquoted() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef(col_id) => {
-            let column = col_id.column_canonical();
+                        let column = col_id.column_canonical();
                         assert_eq!(column, "sql");
                     }
                     _ => panic!("Expected ColumnRef for sql"),
@@ -370,7 +368,7 @@ fn test_select_type_and_sql_columns_together() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef(col_id) => {
-            let column = col_id.column_canonical();
+                        let column = col_id.column_canonical();
                         assert_eq!(column, "type");
                     }
                     _ => panic!("Expected ColumnRef for type"),
@@ -382,7 +380,7 @@ fn test_select_type_and_sql_columns_together() {
             match &select.select_list[2] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef(col_id) => {
-            let column = col_id.column_canonical();
+                        let column = col_id.column_canonical();
                         assert_eq!(column, "sql");
                     }
                     _ => panic!("Expected ColumnRef for sql"),
@@ -405,9 +403,9 @@ fn test_select_qualified_type_column() {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                 vibesql_ast::Expression::ColumnRef(col_id) => {
-            let table = col_id.table_canonical();
-            let column = col_id.column_canonical();
-                    assert_eq!(table.as_deref(), Some("sqlite_master"));
+                    let table = col_id.table_canonical();
+                    let column = col_id.column_canonical();
+                    assert_eq!(table, Some("sqlite_master"));
                     assert_eq!(column, "type");
                 }
                 _ => panic!("Expected ColumnRef"),

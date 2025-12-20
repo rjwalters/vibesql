@@ -123,7 +123,13 @@ impl DeleteExecutor {
 
         // Check if target is a VIEW with INSTEAD OF triggers
         if let Some(view_def) = database.catalog.get_view(&stmt.table_name).cloned() {
-            return execute_delete_on_view(database, stmt, &view_def, procedural_context, trigger_context);
+            return execute_delete_on_view(
+                database,
+                stmt,
+                &view_def,
+                procedural_context,
+                trigger_context,
+            );
         }
 
         // Use TableIdentifier for SQL:1999 case-sensitive lookups when quoted
@@ -159,10 +165,7 @@ impl DeleteExecutor {
                     // Check if we can use the super-fast path (no triggers, no FKs)
                     let has_triggers = database
                         .catalog
-                        .get_triggers_for_table(
-                            table_name,
-                            Some(vibesql_ast::TriggerEvent::Delete),
-                        )
+                        .get_triggers_for_table(table_name, Some(vibesql_ast::TriggerEvent::Delete))
                         .next()
                         .is_some();
 
@@ -174,9 +177,9 @@ impl DeleteExecutor {
                                 .catalog
                                 .get_table(t)
                                 .map(|s| {
-                                    s.foreign_keys.iter().any(|fk| {
-                                        fk.parent_table.eq_ignore_ascii_case(table_name)
-                                    })
+                                    s.foreign_keys
+                                        .iter()
+                                        .any(|fk| fk.parent_table.eq_ignore_ascii_case(table_name))
                                 })
                                 .unwrap_or(false)
                         });
@@ -462,10 +465,10 @@ impl DeleteExecutor {
                 let is_rowid = col_name.eq_ignore_ascii_case("rowid")
                     || col_name.eq_ignore_ascii_case("_rowid_")
                     || col_name.eq_ignore_ascii_case("oid");
-                if !is_rowid && !schema.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&col_name)) {
-                    return Err(ExecutorError::NoSuchColumn {
-                        column_ref: col_name.to_string(),
-                    });
+                if !is_rowid
+                    && !schema.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&col_name))
+                {
+                    return Err(ExecutorError::NoSuchColumn { column_ref: col_name.to_string() });
                 }
                 Ok(())
             }
@@ -473,8 +476,12 @@ impl DeleteExecutor {
                 Self::validate_where_columns(left, schema, table_name)?;
                 Self::validate_where_columns(right, schema, table_name)
             }
-            Expression::UnaryOp { expr, .. } => Self::validate_where_columns(expr, schema, table_name),
-            Expression::IsNull { expr, .. } => Self::validate_where_columns(expr, schema, table_name),
+            Expression::UnaryOp { expr, .. } => {
+                Self::validate_where_columns(expr, schema, table_name)
+            }
+            Expression::IsNull { expr, .. } => {
+                Self::validate_where_columns(expr, schema, table_name)
+            }
             Expression::Between { expr, low, high, .. } => {
                 Self::validate_where_columns(expr, schema, table_name)?;
                 Self::validate_where_columns(low, schema, table_name)?;
@@ -710,17 +717,18 @@ fn build_view_schema(
     let result = select_executor.execute_with_columns(&view_def.query)?;
 
     // Use explicit column names if provided, otherwise derive from SELECT
-    let column_names: Vec<String> = if let Some(ref cols) = view_def.columns {
-        cols.clone()
-    } else {
-        result.columns.clone()
-    };
+    let column_names: Vec<String> =
+        if let Some(ref cols) = view_def.columns { cols.clone() } else { result.columns.clone() };
 
     // Build columns with a generic data type (we just need names for trigger binding)
     let columns: Vec<vibesql_catalog::ColumnSchema> = column_names
         .into_iter()
         .map(|name| {
-            vibesql_catalog::ColumnSchema::new(name, vibesql_types::DataType::Varchar { max_length: None }, true)
+            vibesql_catalog::ColumnSchema::new(
+                name,
+                vibesql_types::DataType::Varchar { max_length: None },
+                true,
+            )
         })
         .collect();
 

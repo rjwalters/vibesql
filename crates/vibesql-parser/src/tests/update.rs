@@ -87,10 +87,7 @@ fn test_parse_update_or_replace() {
     match stmt {
         vibesql_ast::Statement::Update(update) => {
             assert_eq!(update.table_name, "users");
-            assert_eq!(
-                update.conflict_clause,
-                Some(vibesql_ast::ConflictClause::Replace)
-            );
+            assert_eq!(update.conflict_clause, Some(vibesql_ast::ConflictClause::Replace));
         }
         _ => panic!("Expected UPDATE statement"),
     }
@@ -105,10 +102,7 @@ fn test_parse_update_or_ignore() {
     match stmt {
         vibesql_ast::Statement::Update(update) => {
             assert_eq!(update.table_name, "users");
-            assert_eq!(
-                update.conflict_clause,
-                Some(vibesql_ast::ConflictClause::Ignore)
-            );
+            assert_eq!(update.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore));
         }
         _ => panic!("Expected UPDATE statement"),
     }
@@ -123,10 +117,7 @@ fn test_parse_update_or_abort() {
     match stmt {
         vibesql_ast::Statement::Update(update) => {
             assert_eq!(update.table_name, "users");
-            assert_eq!(
-                update.conflict_clause,
-                Some(vibesql_ast::ConflictClause::Abort)
-            );
+            assert_eq!(update.conflict_clause, Some(vibesql_ast::ConflictClause::Abort));
         }
         _ => panic!("Expected UPDATE statement"),
     }
@@ -141,10 +132,7 @@ fn test_parse_update_or_rollback() {
     match stmt {
         vibesql_ast::Statement::Update(update) => {
             assert_eq!(update.table_name, "users");
-            assert_eq!(
-                update.conflict_clause,
-                Some(vibesql_ast::ConflictClause::Rollback)
-            );
+            assert_eq!(update.conflict_clause, Some(vibesql_ast::ConflictClause::Rollback));
         }
         _ => panic!("Expected UPDATE statement"),
     }
@@ -159,10 +147,7 @@ fn test_parse_update_or_fail() {
     match stmt {
         vibesql_ast::Statement::Update(update) => {
             assert_eq!(update.table_name, "users");
-            assert_eq!(
-                update.conflict_clause,
-                Some(vibesql_ast::ConflictClause::Fail)
-            );
+            assert_eq!(update.conflict_clause, Some(vibesql_ast::ConflictClause::Fail));
         }
         _ => panic!("Expected UPDATE statement"),
     }

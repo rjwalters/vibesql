@@ -23,11 +23,14 @@ fn test_auto_increment_basic_inserts() {
                 nullable: false,
                 constraints: vec![
                     ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
-                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } },
+                    ColumnConstraint {
+                        name: None,
+                        kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
+                    },
                 ],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "username".to_string(),
@@ -36,20 +39,23 @@ fn test_auto_increment_basic_inserts() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_ok(), "Failed to create table: {:?}", result.err());
 
     // Insert without specifying id - should auto-generate 1
-    let insert1 = InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert1 = InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "users".to_string(),
         columns: vec!["username".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
@@ -62,7 +68,10 @@ fn test_auto_increment_basic_inserts() {
     assert!(result.is_ok(), "Failed to insert alice: {:?}", result.err());
 
     // Insert without specifying id - should auto-generate 2
-    let insert2 = InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert2 = InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "users".to_string(),
         columns: vec!["username".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
@@ -104,7 +113,7 @@ fn test_multiple_auto_increment_error() {
                 }],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "id2".to_string(),
@@ -116,13 +125,13 @@ fn test_multiple_auto_increment_error() {
                 }],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -146,11 +155,14 @@ fn test_last_insert_rowid_basic() {
                 nullable: false,
                 constraints: vec![
                     ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
-                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } },
+                    ColumnConstraint {
+                        name: None,
+                        kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
+                    },
                 ],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "username".to_string(),
@@ -159,13 +171,13 @@ fn test_last_insert_rowid_basic() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -175,7 +187,10 @@ fn test_last_insert_rowid_basic() {
     assert_eq!(db.last_insert_rowid(), 0);
 
     // Insert first row - should auto-generate id=1
-    let insert1 = InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert1 = InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "users".to_string(),
         columns: vec!["username".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
@@ -191,7 +206,10 @@ fn test_last_insert_rowid_basic() {
     assert_eq!(db.last_insert_rowid(), 1);
 
     // Insert second row - should auto-generate id=2
-    let insert2 = InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert2 = InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "users".to_string(),
         columns: vec!["username".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
@@ -222,11 +240,14 @@ fn test_last_insert_rowid_multi_row_insert() {
                 nullable: false,
                 constraints: vec![
                     ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
-                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } },
+                    ColumnConstraint {
+                        name: None,
+                        kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
+                    },
                 ],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -235,20 +256,23 @@ fn test_last_insert_rowid_multi_row_insert() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_ok(), "Failed to create table: {:?}", result.err());
 
     // Multi-row insert - per MySQL semantics, LAST_INSERT_ID returns the FIRST generated ID
-    let multi_insert = InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let multi_insert = InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "items".to_string(),
         columns: vec!["name".to_string()],
         source: InsertSource::Values(vec![
@@ -299,7 +323,7 @@ fn test_last_insert_rowid_no_auto_increment() {
                 }],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -308,20 +332,23 @@ fn test_last_insert_rowid_no_auto_increment() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_ok(), "Failed to create table: {:?}", result.err());
 
     // Insert with explicit ID - no auto-generation
-    let insert1 = InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert1 = InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "manual".to_string(),
         columns: vec!["id".to_string(), "name".to_string()],
         source: InsertSource::Values(vec![vec![
@@ -355,11 +382,14 @@ fn test_last_insert_rowid_via_select() {
                 nullable: false,
                 constraints: vec![
                     ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
-                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } },
+                    ColumnConstraint {
+                        name: None,
+                        kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
+                    },
                 ],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -368,20 +398,23 @@ fn test_last_insert_rowid_via_select() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_ok(), "Failed to create table: {:?}", result.err());
 
     // Insert a row
-    let insert1 = InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert1 = InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "users".to_string(),
         columns: vec!["name".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(

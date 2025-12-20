@@ -185,7 +185,7 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
                 write_character_unit(writer, unit)?;
             }
         }
-        Expression::AggregateFunction { name, distinct, args, order_by } => {
+        Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
             write_tag!(writer, ExprTag::AggregateFunction);
             write_string(writer, name.canonical())?;
             write_bool(writer, *distinct)?;
@@ -207,6 +207,11 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
                         },
                     )?;
                 }
+            }
+            // Write filter clause (v3 format extension)
+            write_bool(writer, filter.is_some())?;
+            if let Some(f) = filter {
+                write_expression(writer, f)?;
             }
         }
         Expression::IsNull { expr, negated } => {
@@ -460,10 +465,18 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             // Construct ColumnIdentifier based on qualification level
             let col_id = match (schema, table) {
                 (Some(s), Some(t)) => vibesql_ast::ColumnIdentifier::fully_qualified(
-                    &s, schema_quoted, &t, table_quoted, &column, column_quoted,
+                    &s,
+                    schema_quoted,
+                    &t,
+                    table_quoted,
+                    &column,
+                    column_quoted,
                 ),
                 (None, Some(t)) => vibesql_ast::ColumnIdentifier::qualified(
-                    &t, table_quoted, &column, column_quoted,
+                    &t,
+                    table_quoted,
+                    &column,
+                    column_quoted,
                 ),
                 (_, None) => vibesql_ast::ColumnIdentifier::simple(&column, column_quoted),
             };
@@ -519,7 +532,10 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             } else {
                 None
             };
-            Ok(Expression::AggregateFunction { name, distinct, args, order_by })
+            // Read filter clause (v3 format extension)
+            let has_filter = read_bool(reader)?;
+            let filter = if has_filter { Some(Box::new(read_expression(reader)?)) } else { None };
+            Ok(Expression::AggregateFunction { name, distinct, args, order_by, filter })
         }
         ExprTag::IsNull => {
             let expr = Box::new(read_expression(reader)?);
@@ -728,8 +744,9 @@ mod tests {
 
     #[test]
     fn test_column_ref_roundtrip() {
-        let expr =
-            Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false));
+        let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+            "users", false, "id", false,
+        ));
         let mut buf = Vec::new();
         write_expression(&mut buf, &expr).unwrap();
 

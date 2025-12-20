@@ -28,7 +28,9 @@ fn test_simple_case_basic_match() {
     // CASE status WHEN 'active' THEN 'Active User' WHEN 'inactive' THEN 'Inactive User' ELSE
     // 'Unknown' END
     let case_expr = Expression::Case {
-        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false)))),
+        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "status", false,
+        )))),
         when_clauses: vec![
             vibesql_ast::CaseWhen {
                 conditions: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
@@ -85,7 +87,9 @@ fn test_simple_case_null_handling() {
 
     // CASE status WHEN NULL THEN 'Null Status' ELSE 'Not Null' END
     let case_expr = Expression::Case {
-        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false)))),
+        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "status", false,
+        )))),
         when_clauses: vec![vibesql_ast::CaseWhen {
             conditions: vec![Expression::Literal(SqlValue::Null)],
             result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Null Status"))),
@@ -115,7 +119,9 @@ fn test_searched_case_basic() {
             vibesql_ast::CaseWhen {
                 conditions: vec![Expression::BinaryOp {
                     op: vibesql_ast::BinaryOperator::LessThan,
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "value", false,
+                    ))),
                     right: Box::new(Expression::Literal(SqlValue::Integer(50))),
                 }],
                 result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Low"))),
@@ -123,7 +129,9 @@ fn test_searched_case_basic() {
             vibesql_ast::CaseWhen {
                 conditions: vec![Expression::BinaryOp {
                     op: vibesql_ast::BinaryOperator::LessThan,
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "value", false,
+                    ))),
                     right: Box::new(Expression::Literal(SqlValue::Integer(100))),
                 }],
                 result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Medium"))),
@@ -198,7 +206,9 @@ fn test_case_no_else_defaults_to_null() {
     // CASE value WHEN 1 THEN 'one' WHEN 2 THEN 'two' END
     // No ELSE clause, value = 3 -> should return NULL
     let case_expr = Expression::Case {
-        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false)))),
+        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "value", false,
+        )))),
         when_clauses: vec![
             vibesql_ast::CaseWhen {
                 conditions: vec![Expression::Literal(SqlValue::Integer(1))],
@@ -229,7 +239,9 @@ fn test_case_lazy_evaluation() {
     // CASE value WHEN 1 THEN 'first' WHEN 1 THEN 'second' ELSE 'other' END
     // Should return 'first' and not evaluate second WHEN
     let case_expr = Expression::Case {
-        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false)))),
+        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "value", false,
+        )))),
         when_clauses: vec![
             vibesql_ast::CaseWhen {
                 conditions: vec![Expression::Literal(SqlValue::Integer(1))],
@@ -264,7 +276,9 @@ fn test_case_comma_separated_matching_first() {
 
     // CASE value WHEN 2, 3, 4 THEN 'match' ELSE 'no' END
     let case_expr = Expression::Case {
-        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false)))),
+        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "value", false,
+        )))),
         when_clauses: vec![vibesql_ast::CaseWhen {
             conditions: vec![
                 Expression::Literal(SqlValue::Integer(2)),
@@ -295,7 +309,9 @@ fn test_case_comma_separated_matching_last() {
 
     // CASE value WHEN 2, 3, 4 THEN 'match' ELSE 'no' END
     let case_expr = Expression::Case {
-        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false)))),
+        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "value", false,
+        )))),
         when_clauses: vec![vibesql_ast::CaseWhen {
             conditions: vec![
                 Expression::Literal(SqlValue::Integer(2)),
@@ -326,7 +342,9 @@ fn test_case_comma_separated_no_match() {
 
     // CASE value WHEN 2, 3, 4 THEN 'match' ELSE 'no' END
     let case_expr = Expression::Case {
-        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false)))),
+        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "value", false,
+        )))),
         when_clauses: vec![vibesql_ast::CaseWhen {
             conditions: vec![
                 Expression::Literal(SqlValue::Integer(2)),
@@ -358,7 +376,9 @@ fn test_case_comma_separated_duplicate_values() {
 
     // CASE value WHEN 2, 2 THEN 1 ELSE 1 END (duplicate values allowed)
     let case_expr = Expression::Case {
-        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false)))),
+        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "value", false,
+        )))),
         when_clauses: vec![vibesql_ast::CaseWhen {
             conditions: vec![
                 Expression::Literal(SqlValue::Integer(2)),
@@ -386,7 +406,9 @@ fn test_case_comma_separated_with_null() {
 
     // CASE value WHEN 2, 2 THEN 1 ELSE NULL END
     let case_expr = Expression::Case {
-        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false)))),
+        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "value", false,
+        )))),
         when_clauses: vec![vibesql_ast::CaseWhen {
             conditions: vec![
                 Expression::Literal(SqlValue::Integer(2)),
@@ -414,7 +436,9 @@ fn test_case_comma_separated_varchar() {
 
     // CASE status WHEN 'active', 'pending', 'new' THEN 'open' ELSE 'closed' END
     let case_expr = Expression::Case {
-        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false)))),
+        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "status", false,
+        )))),
         when_clauses: vec![vibesql_ast::CaseWhen {
             conditions: vec![
                 Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("active"))),

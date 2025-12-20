@@ -57,12 +57,16 @@ fn test_extract_range_predicate_combined_and() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::LessThan,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(20))),
         }),
     };
@@ -80,7 +84,9 @@ fn test_extract_range_predicate_flipped_comparison() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::LessThan,
         left: Box::new(Expression::Literal(SqlValue::Integer(60))),
-        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "col0", false,
+        ))),
     };
 
     let range = extract_range_predicate(&expr, "col0").unwrap();
@@ -138,12 +144,16 @@ fn test_where_clause_fully_satisfied_combined_range() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::LessThan,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(20))),
         }),
     };
@@ -158,12 +168,16 @@ fn test_where_clause_not_fully_satisfied_multiple_columns() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col1", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         }),
     };
@@ -178,12 +192,16 @@ fn test_where_clause_not_fully_satisfied_or() {
         op: BinaryOperator::Or,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         }),
     };
@@ -202,18 +220,24 @@ fn test_extract_composite_predicates_full_match() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_w_id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_d_id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
     };
@@ -236,12 +260,16 @@ fn test_extract_composite_predicates_partial_match() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_w_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_d_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -260,12 +288,16 @@ fn test_extract_composite_predicates_case_insensitive() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("C_W_ID", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "C_W_ID", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("C_D_ID", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "C_D_ID", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -287,14 +319,19 @@ fn test_extract_composite_predicates_with_string_values() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("department", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "department",
+                false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                 "Engineering",
             )))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "name", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice")))),
         }),
     };
@@ -339,18 +376,25 @@ fn test_extract_prefix_predicates_partial_match() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_w_id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_d_id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_balance", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_balance",
+                false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(100))),
         }),
     };
@@ -377,12 +421,17 @@ fn test_extract_prefix_predicates_single_column() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_w_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_balance", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_balance",
+                false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(100))),
         }),
     };
@@ -406,12 +455,16 @@ fn test_extract_prefix_predicates_gap_in_columns() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_w_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
     };
@@ -432,7 +485,9 @@ fn test_extract_prefix_predicates_no_first_column() {
     // Expected: None (can't use prefix without first column)
     let expr = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "c_d_id", false,
+        ))),
         right: Box::new(Expression::Literal(SqlValue::Integer(2))),
     };
 
@@ -453,18 +508,24 @@ fn test_extract_prefix_predicates_full_match() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_w_id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_d_id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
     };
@@ -492,18 +553,25 @@ fn test_build_residual_where_clause_partial_covered() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_w_id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_d_id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_balance", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_balance",
+                false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(100))),
         }),
     };
@@ -542,12 +610,16 @@ fn test_build_residual_where_clause_all_covered() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_w_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_d_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -570,12 +642,17 @@ fn test_build_residual_where_clause_none_covered() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_balance", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_balance",
+                false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(100))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_credit", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_credit", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("BC")))),
         }),
     };
@@ -598,18 +675,25 @@ fn test_build_residual_where_clause_multiple_uncovered() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_w_id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_balance", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_balance",
+                    false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(100))),
             }),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_credit", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_credit", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("BC")))),
         }),
     };
@@ -634,7 +718,9 @@ fn test_extract_composite_predicates_with_in_basic() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::And,
         left: Box::new(Expression::InList {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_w_id", false,
+            ))),
             values: vec![
                 Expression::Literal(SqlValue::Integer(1)),
                 Expression::Literal(SqlValue::Integer(2)),
@@ -644,7 +730,9 @@ fn test_extract_composite_predicates_with_in_basic() {
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_d_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
     };
@@ -683,11 +771,15 @@ fn test_extract_composite_predicates_with_in_reversed() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_d_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
         right: Box::new(Expression::InList {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_w_id", false,
+            ))),
             values: vec![
                 Expression::Literal(SqlValue::Integer(1)),
                 Expression::Literal(SqlValue::Integer(2)),
@@ -795,12 +887,16 @@ fn test_where_clause_satisfied_by_composite_key_equality_only() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_w_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_d_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -815,7 +911,9 @@ fn test_where_clause_satisfied_by_composite_key_with_in() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::And,
         left: Box::new(Expression::InList {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_w_id", false,
+            ))),
             values: vec![
                 Expression::Literal(SqlValue::Integer(1)),
                 Expression::Literal(SqlValue::Integer(2)),
@@ -825,7 +923,9 @@ fn test_where_clause_satisfied_by_composite_key_with_in() {
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_d_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
     };
@@ -843,18 +943,25 @@ fn test_where_clause_not_satisfied_extra_predicate() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_w_id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_d_id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("extra_col", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "extra_col",
+                false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
     };
@@ -870,7 +977,9 @@ fn test_where_clause_not_satisfied_negated_in() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::And,
         left: Box::new(Expression::InList {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_w_id", false,
+            ))),
             values: vec![
                 Expression::Literal(SqlValue::Integer(1)),
                 Expression::Literal(SqlValue::Integer(2)),
@@ -880,7 +989,9 @@ fn test_where_clause_not_satisfied_negated_in() {
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_d_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(5))),
         }),
     };
@@ -901,18 +1012,24 @@ fn test_composite_key_satisfaction_full_match() {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_w_id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "c_d_id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         }),
     };
@@ -929,12 +1046,16 @@ fn test_composite_key_satisfaction_missing_predicate() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_w_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_d_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -951,12 +1072,16 @@ fn test_composite_key_satisfaction_range_predicate() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_w_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_d_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -973,12 +1098,16 @@ fn test_composite_key_satisfaction_or_predicate() {
         op: BinaryOperator::Or,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_w_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_w_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c_d_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c_d_id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };
@@ -1007,12 +1136,16 @@ fn test_composite_key_satisfaction_case_insensitive() {
         op: BinaryOperator::And,
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("C_W_ID", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "C_W_ID", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("C_D_ID", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "C_D_ID", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         }),
     };

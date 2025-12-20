@@ -250,3 +250,86 @@ fn test_parse_multiple_aggregates() {
         _ => panic!("Expected SELECT"),
     }
 }
+
+// ========================================================================
+// FILTER Clause Tests (SQL:2003)
+// ========================================================================
+
+#[test]
+fn test_parse_count_with_filter() {
+    let result = Parser::parse_sql("SELECT COUNT(*) FILTER (WHERE active = 1) FROM users;");
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert_eq!(select.select_list.len(), 1);
+            match &select.select_list[0] {
+                vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                    vibesql_ast::Expression::AggregateFunction { name, filter, .. } => {
+                        assert_eq!(name.canonical(), "count");
+                        assert!(filter.is_some(), "Expected FILTER clause");
+                    }
+                    _ => panic!("Expected aggregate function"),
+                },
+                _ => panic!("Expected expression"),
+            }
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_sum_with_filter() {
+    let result =
+        Parser::parse_sql("SELECT SUM(amount) FILTER (WHERE status = 'completed') FROM orders;");
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::AggregateFunction { name, filter, .. } => {
+                    assert_eq!(name.canonical(), "sum");
+                    assert!(filter.is_some(), "Expected FILTER clause");
+                }
+                _ => panic!("Expected aggregate function"),
+            },
+            _ => panic!("Expected expression"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_window_aggregate_with_filter() {
+    let result = Parser::parse_sql(
+        "SELECT COUNT(*) FILTER (WHERE x > 0) OVER (PARTITION BY dept) FROM employees;",
+    );
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::WindowFunction { function, .. } => match function {
+                    vibesql_ast::WindowFunctionSpec::Aggregate { name, filter, .. } => {
+                        assert_eq!(name.canonical(), "count");
+                        assert!(filter.is_some(), "Expected FILTER clause in window aggregate");
+                    }
+                    _ => panic!("Expected window aggregate function"),
+                },
+                _ => panic!("Expected window function"),
+            },
+            _ => panic!("Expected expression"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_filter_not_allowed_on_non_aggregate() {
+    // FILTER should only be allowed on aggregate functions
+    let result = Parser::parse_sql("SELECT UPPER(name) FILTER (WHERE active = 1) FROM users;");
+    assert!(result.is_err(), "Expected parse error for FILTER on non-aggregate");
+}

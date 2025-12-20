@@ -5,9 +5,7 @@ use std::cmp::Ordering as CmpOrdering;
 use vibesql_storage::Row;
 use vibesql_types::{DataType, SqlValue};
 
-use super::config::{
-    DEFAULT_MORSEL_SIZE, MAX_MORSEL_SIZE, MIN_MORSEL_SIZE,
-};
+use super::config::{DEFAULT_MORSEL_SIZE, MAX_MORSEL_SIZE, MIN_MORSEL_SIZE};
 use super::{
     create_morsels, global_config, morsel_filter, morsel_map, morsel_parallel_filter,
     morsel_parallel_group, morsel_parallel_map, morsel_parallel_reduce, morsel_parallel_sort,
@@ -207,11 +205,10 @@ fn test_morsel_sort_empty_input() {
     let config = MorselConfig::new(100);
     let rows: Vec<Row> = Vec::new();
 
-    let sorted =
-        morsel_parallel_sort(&rows, &config, |a, b| match (&a.values[0], &b.values[0]) {
-            (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
-            _ => CmpOrdering::Equal,
-        });
+    let sorted = morsel_parallel_sort(&rows, &config, |a, b| match (&a.values[0], &b.values[0]) {
+        (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
+        _ => CmpOrdering::Equal,
+    });
 
     assert!(sorted.is_empty());
 }
@@ -230,11 +227,10 @@ fn test_morsel_sort_small_dataset() {
         })
         .collect();
 
-    let sorted =
-        morsel_parallel_sort(&rows, &config, |a, b| match (&a.values[0], &b.values[0]) {
-            (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
-            _ => CmpOrdering::Equal,
-        });
+    let sorted = morsel_parallel_sort(&rows, &config, |a, b| match (&a.values[0], &b.values[0]) {
+        (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
+        _ => CmpOrdering::Equal,
+    });
 
     // Verify sorted in ascending order
     assert_eq!(sorted.len(), 50);
@@ -257,11 +253,10 @@ fn test_morsel_sort_large_dataset() {
         })
         .collect();
 
-    let sorted =
-        morsel_parallel_sort(&rows, &config, |a, b| match (&a.values[0], &b.values[0]) {
-            (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
-            _ => CmpOrdering::Equal,
-        });
+    let sorted = morsel_parallel_sort(&rows, &config, |a, b| match (&a.values[0], &b.values[0]) {
+        (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
+        _ => CmpOrdering::Equal,
+    });
 
     // Verify sorted in ascending order
     assert_eq!(sorted.len(), 1000);
@@ -425,11 +420,10 @@ fn test_morsel_sort_single_morsel() {
     let rows: Vec<Row> =
         (0..100).rev().map(|i| Row::from_vec(vec![SqlValue::Integer(i as i64)])).collect();
 
-    let sorted =
-        morsel_parallel_sort(&rows, &config, |a, b| match (&a.values[0], &b.values[0]) {
-            (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
-            _ => CmpOrdering::Equal,
-        });
+    let sorted = morsel_parallel_sort(&rows, &config, |a, b| match (&a.values[0], &b.values[0]) {
+        (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
+        _ => CmpOrdering::Equal,
+    });
 
     assert_eq!(sorted.len(), 100);
     for (i, row) in sorted.iter().enumerate() {
@@ -443,11 +437,10 @@ fn test_morsel_sort_all_equal() {
     // All rows have the same value
     let rows: Vec<Row> = (0..200).map(|_| Row::from_vec(vec![SqlValue::Integer(42)])).collect();
 
-    let sorted =
-        morsel_parallel_sort(&rows, &config, |a, b| match (&a.values[0], &b.values[0]) {
-            (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
-            _ => CmpOrdering::Equal,
-        });
+    let sorted = morsel_parallel_sort(&rows, &config, |a, b| match (&a.values[0], &b.values[0]) {
+        (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
+        _ => CmpOrdering::Equal,
+    });
 
     assert_eq!(sorted.len(), 200);
     for row in sorted.iter() {

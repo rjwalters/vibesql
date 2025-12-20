@@ -17,7 +17,7 @@ fn test_column_m_in_select() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef(col_id) => {
-            let column = col_id.column_canonical();
+                        let column = col_id.column_canonical();
                         // Identifiers preserve original case from SQL
                         assert_eq!(column, "m");
                     }
@@ -34,22 +34,14 @@ fn test_column_m_in_select() {
 fn test_column_m_in_where_clause() {
     // From issue: SELECT k FROM t WHERE (j=1 AND m=1);
     let result = Parser::parse_sql("SELECT k FROM t WHERE j=1 AND m=1;");
-    assert!(
-        result.is_ok(),
-        "Failed to parse WHERE with m column: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "Failed to parse WHERE with m column: {:?}", result);
 }
 
 #[test]
 fn test_column_m_in_create_table() {
     // From issue: CREATE TABLE t(i, j, k, m, n);
     let result = Parser::parse_sql("CREATE TABLE t(i, j, k, m, n);");
-    assert!(
-        result.is_ok(),
-        "Failed to parse CREATE TABLE with m column: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "Failed to parse CREATE TABLE with m column: {:?}", result);
     let stmt = result.unwrap();
 
     match stmt {
@@ -70,19 +62,11 @@ fn test_column_m_in_create_table() {
 #[test]
 fn test_column_m_uppercase() {
     let result = Parser::parse_sql("SELECT M FROM t;");
-    assert!(
-        result.is_ok(),
-        "Failed to parse SELECT M FROM t: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "Failed to parse SELECT M FROM t: {:?}", result);
 }
 
 #[test]
 fn test_column_m_in_expression() {
     let result = Parser::parse_sql("SELECT m + 1 FROM t;");
-    assert!(
-        result.is_ok(),
-        "Failed to parse m in expression: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "Failed to parse m in expression: {:?}", result);
 }

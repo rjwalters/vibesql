@@ -163,10 +163,8 @@ fn test_subscription_error_encoding() {
     let mut buf = BytesMut::new();
     let subscription_id = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
 
-    let msg = BackendMessage::SubscriptionError {
-        subscription_id,
-        message: "Query error".to_string(),
-    };
+    let msg =
+        BackendMessage::SubscriptionError { subscription_id, message: "Query error".to_string() };
     msg.encode(&mut buf);
 
     assert_eq!(buf[0], 0xF3);
@@ -230,8 +228,7 @@ fn test_subscription_partial_data_encoding() {
     let partial_row =
         PartialRowUpdate::new(4, &[0, 2], vec![Some(b"id1".to_vec()), Some(b"value".to_vec())]);
 
-    let msg =
-        BackendMessage::SubscriptionPartialData { subscription_id, rows: vec![partial_row] };
+    let msg = BackendMessage::SubscriptionPartialData { subscription_id, rows: vec![partial_row] };
     msg.encode(&mut buf);
 
     // Verify message type (0xF7)
@@ -268,8 +265,7 @@ fn test_subscription_partial_data_encoding_with_null() {
         vec![Some(b"1".to_vec()), None], // Column 1 is NULL
     );
 
-    let msg =
-        BackendMessage::SubscriptionPartialData { subscription_id, rows: vec![partial_row] };
+    let msg = BackendMessage::SubscriptionPartialData { subscription_id, rows: vec![partial_row] };
     msg.encode(&mut buf);
 
     assert_eq!(buf[0], 0xF7);

@@ -250,7 +250,10 @@ impl<'arena> ArenaParser<'arena> {
                 if matches!(self.peek(), Token::Symbol('*')) {
                     self.advance(); // consume asterisk
                     let qualifier_sym = self.intern(&qualifier);
-                    return Ok(SelectItem::QualifiedWildcard { qualifier: qualifier_sym, alias: None });
+                    return Ok(SelectItem::QualifiedWildcard {
+                        qualifier: qualifier_sym,
+                        alias: None,
+                    });
                 }
             }
 
@@ -481,7 +484,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 (self.intern(&name), true)
             }
-            _ => return Err(ParseError { message: self.peek().syntax_error() })
+            _ => return Err(ParseError { message: self.peek().syntax_error() }),
         };
 
         // Check for alias
@@ -653,7 +656,10 @@ impl<'arena> ArenaParser<'arena> {
                     Some(NullsOrder::Last)
                 } else {
                     return Err(crate::ParseError {
-                        message: format!("Expected FIRST or LAST after NULLS, found {:?}", self.peek()),
+                        message: format!(
+                            "Expected FIRST or LAST after NULLS, found {:?}",
+                            self.peek()
+                        ),
                     });
                 }
             } else {
@@ -695,9 +701,7 @@ impl<'arena> ArenaParser<'arena> {
 
     /// Parse a SELECT statement for the right side of a set operation.
     /// This does NOT parse ORDER BY/LIMIT since those should apply to the combined result.
-    fn parse_select_for_set_operation(
-        &mut self,
-    ) -> Result<&'arena SelectStmt<'arena>, ParseError> {
+    fn parse_select_for_set_operation(&mut self) -> Result<&'arena SelectStmt<'arena>, ParseError> {
         // Handle parenthesized subqueries
         if self.try_consume(&Token::LParen) {
             let stmt = self.parse_select_statement()?;
@@ -767,9 +771,9 @@ impl<'arena> ArenaParser<'arena> {
             where_clause,
             group_by,
             having,
-            order_by: None,    // ORDER BY applies to combined result
-            limit: None,       // LIMIT applies to combined result
-            offset: None,      // OFFSET applies to combined result
+            order_by: None, // ORDER BY applies to combined result
+            limit: None,    // LIMIT applies to combined result
+            offset: None,   // OFFSET applies to combined result
             set_operation,
             values: None,
         };

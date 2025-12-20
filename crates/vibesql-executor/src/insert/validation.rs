@@ -65,10 +65,7 @@ pub fn resolve_target_columns_with_rowid(
             }
         }
 
-        Ok(ResolvedInsertColumns {
-            columns,
-            rowid_position,
-        })
+        Ok(ResolvedInsertColumns { columns, rowid_position })
     }
 }
 

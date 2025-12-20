@@ -120,8 +120,15 @@ impl Parser {
         let function_name_upper = first.to_uppercase();
         let might_be_aggregate = matches!(
             function_name_upper.as_str(),
-            "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "GROUP_CONCAT" | "STRING_AGG" | "TOTAL"
-            | "JSON_GROUP_ARRAY"
+            "COUNT"
+                | "SUM"
+                | "AVG"
+                | "MIN"
+                | "MAX"
+                | "GROUP_CONCAT"
+                | "STRING_AGG"
+                | "TOTAL"
+                | "JSON_GROUP_ARRAY"
         );
 
         // Parse optional DISTINCT or ALL for potential aggregate functions
@@ -153,10 +160,12 @@ impl Parser {
             self.advance(); // consume '*'
             self.expect_token(Token::RParen)?;
             // Represent * as a special wildcard expression
-            args.push(vibesql_ast::Expression::ColumnRef(
-                vibesql_ast::ColumnIdentifier::simple("*", false)
-            ));
-        } else if might_be_aggregate && matches!(self.peek(), Token::Keyword { keyword: Keyword::Order, .. }) {
+            args.push(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "*", false,
+            )));
+        } else if might_be_aggregate
+            && matches!(self.peek(), Token::Keyword { keyword: Keyword::Order, .. })
+        {
             // Zero-arg aggregate with ORDER BY: count(ORDER BY a)
             // This is a special SQL extension allowing ORDER BY without arguments
             self.advance(); // consume ORDER
@@ -168,33 +177,38 @@ impl Parser {
                 let expr = self.parse_expression()?;
 
                 // Check for optional ASC/DESC
-                let direction = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Asc, .. }) {
-                    self.advance();
-                    vibesql_ast::OrderDirection::Asc
-                } else if matches!(self.peek(), Token::Keyword { keyword: Keyword::Desc, .. }) {
-                    self.advance();
-                    vibesql_ast::OrderDirection::Desc
-                } else {
-                    vibesql_ast::OrderDirection::Asc // Default
-                };
+                let direction =
+                    if matches!(self.peek(), Token::Keyword { keyword: Keyword::Asc, .. }) {
+                        self.advance();
+                        vibesql_ast::OrderDirection::Asc
+                    } else if matches!(self.peek(), Token::Keyword { keyword: Keyword::Desc, .. }) {
+                        self.advance();
+                        vibesql_ast::OrderDirection::Desc
+                    } else {
+                        vibesql_ast::OrderDirection::Asc // Default
+                    };
 
                 // Check for optional NULLS FIRST/LAST
-                let nulls_order = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Nulls, .. }) {
-                    self.advance(); // consume NULLS
-                    if matches!(self.peek(), Token::Keyword { keyword: Keyword::First, .. }) {
-                        self.advance();
-                        Some(vibesql_ast::NullsOrder::First)
-                    } else if matches!(self.peek(), Token::Keyword { keyword: Keyword::Last, .. }) {
-                        self.advance();
-                        Some(vibesql_ast::NullsOrder::Last)
+                let nulls_order =
+                    if matches!(self.peek(), Token::Keyword { keyword: Keyword::Nulls, .. }) {
+                        self.advance(); // consume NULLS
+                        if matches!(self.peek(), Token::Keyword { keyword: Keyword::First, .. }) {
+                            self.advance();
+                            Some(vibesql_ast::NullsOrder::First)
+                        } else if matches!(
+                            self.peek(),
+                            Token::Keyword { keyword: Keyword::Last, .. }
+                        ) {
+                            self.advance();
+                            Some(vibesql_ast::NullsOrder::Last)
+                        } else {
+                            return Err(ParseError {
+                                message: "Expected FIRST or LAST after NULLS".to_string(),
+                            });
+                        }
                     } else {
-                        return Err(ParseError {
-                            message: "Expected FIRST or LAST after NULLS".to_string(),
-                        });
-                    }
-                } else {
-                    None
-                };
+                        None
+                    };
 
                 order_items.push(vibesql_ast::OrderByItem { expr, direction, nulls_order });
 
@@ -223,7 +237,9 @@ impl Parser {
             // Parse optional ORDER BY clause for aggregate functions
             // SQL:2003 syntax: aggregate(expr ORDER BY order_list)
             // Example: GROUP_CONCAT(name ORDER BY name ASC)
-            if might_be_aggregate && matches!(self.peek(), Token::Keyword { keyword: Keyword::Order, .. }) {
+            if might_be_aggregate
+                && matches!(self.peek(), Token::Keyword { keyword: Keyword::Order, .. })
+            {
                 self.advance(); // consume ORDER
                 self.expect_keyword(Keyword::By)?;
 
@@ -233,33 +249,42 @@ impl Parser {
                     let expr = self.parse_expression()?;
 
                     // Check for optional ASC/DESC
-                    let direction = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Asc, .. }) {
-                        self.advance();
-                        vibesql_ast::OrderDirection::Asc
-                    } else if matches!(self.peek(), Token::Keyword { keyword: Keyword::Desc, .. }) {
-                        self.advance();
-                        vibesql_ast::OrderDirection::Desc
-                    } else {
-                        vibesql_ast::OrderDirection::Asc // Default
-                    };
+                    let direction =
+                        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Asc, .. }) {
+                            self.advance();
+                            vibesql_ast::OrderDirection::Asc
+                        } else if matches!(
+                            self.peek(),
+                            Token::Keyword { keyword: Keyword::Desc, .. }
+                        ) {
+                            self.advance();
+                            vibesql_ast::OrderDirection::Desc
+                        } else {
+                            vibesql_ast::OrderDirection::Asc // Default
+                        };
 
                     // Check for optional NULLS FIRST/LAST
-                    let nulls_order = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Nulls, .. }) {
-                        self.advance(); // consume NULLS
-                        if matches!(self.peek(), Token::Keyword { keyword: Keyword::First, .. }) {
-                            self.advance();
-                            Some(vibesql_ast::NullsOrder::First)
-                        } else if matches!(self.peek(), Token::Keyword { keyword: Keyword::Last, .. }) {
-                            self.advance();
-                            Some(vibesql_ast::NullsOrder::Last)
+                    let nulls_order =
+                        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Nulls, .. }) {
+                            self.advance(); // consume NULLS
+                            if matches!(self.peek(), Token::Keyword { keyword: Keyword::First, .. })
+                            {
+                                self.advance();
+                                Some(vibesql_ast::NullsOrder::First)
+                            } else if matches!(
+                                self.peek(),
+                                Token::Keyword { keyword: Keyword::Last, .. }
+                            ) {
+                                self.advance();
+                                Some(vibesql_ast::NullsOrder::Last)
+                            } else {
+                                return Err(ParseError {
+                                    message: "Expected FIRST or LAST after NULLS".to_string(),
+                                });
+                            }
                         } else {
-                            return Err(ParseError {
-                                message: "Expected FIRST or LAST after NULLS".to_string(),
-                            });
-                        }
-                    } else {
-                        None
-                    };
+                            None
+                        };
 
                     order_items.push(vibesql_ast::OrderByItem { expr, direction, nulls_order });
 
@@ -284,6 +309,19 @@ impl Parser {
             self.expect_token(Token::RParen)?;
         }
 
+        // Parse optional FILTER clause (SQL:2003)
+        // Syntax: aggregate(...) FILTER (WHERE condition) [OVER (...)]
+        let filter = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Filter, .. }) {
+            self.advance(); // consume FILTER
+            self.expect_token(Token::LParen)?;
+            self.expect_keyword(Keyword::Where)?;
+            let condition = self.parse_expression()?;
+            self.expect_token(Token::RParen)?;
+            Some(Box::new(condition))
+        } else {
+            None
+        };
+
         // Check for OVER clause (window function)
         if matches!(self.peek(), Token::Keyword { keyword: Keyword::Over, .. }) {
             self.advance(); // consume OVER
@@ -292,7 +330,7 @@ impl Parser {
             let window_spec = self.parse_window_spec()?;
 
             // Determine window function type based on function name
-            let function_spec = self.classify_window_function(&first, args);
+            let function_spec = self.classify_window_function(&first, args, filter);
 
             return Ok(Some(vibesql_ast::Expression::WindowFunction {
                 function: function_spec,
@@ -306,7 +344,7 @@ impl Parser {
         let is_aggregate = match function_name_upper.as_str() {
             "COUNT" | "SUM" | "AVG" | "TOTAL" => true,
             "GROUP_CONCAT" | "STRING_AGG" => args.len() <= 2, // 1 or 2 args
-            "JSON_GROUP_ARRAY" => true, // JSON aggregate function
+            "JSON_GROUP_ARRAY" => true,                       // JSON aggregate function
             "MIN" | "MAX" => args.len() <= 1 && !distinct, // multi-arg or DISTINCT with >1 arg = scalar
             _ => false,
         };
@@ -327,13 +365,22 @@ impl Parser {
                 distinct,
                 args,
                 order_by,
+                filter,
             }))
         } else {
-            // ORDER BY is only allowed in aggregate functions
+            // ORDER BY and FILTER are only allowed in aggregate functions
             if order_by.is_some() {
                 return Err(ParseError {
                     message: format!(
                         "ORDER BY may not be used with non-aggregate {}()",
+                        first.to_uppercase()
+                    ),
+                });
+            }
+            if filter.is_some() {
+                return Err(ParseError {
+                    message: format!(
+                        "FILTER may not be used with non-aggregate {}()",
                         first.to_uppercase()
                     ),
                 });

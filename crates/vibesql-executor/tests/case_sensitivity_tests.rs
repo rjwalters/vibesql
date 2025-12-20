@@ -243,11 +243,19 @@ fn test_view_lookup_case_insensitive_when_enabled() {
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
-                alias: None, source_text: None },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "id", false,
+                )),
+                alias: None,
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
-                alias: None, source_text: None },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "name", false,
+                )),
+                alias: None,
+                source_text: None,
+            },
         ],
         into_table: None,
         into_variables: None,
@@ -255,7 +263,7 @@ fn test_view_lookup_case_insensitive_when_enabled() {
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -264,7 +272,7 @@ fn test_view_lookup_case_insensitive_when_enabled() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
         with_clause: None,
     };
 
@@ -305,15 +313,19 @@ fn test_drop_view_case_insensitive_when_enabled() {
     let select_stmt = vibesql_ast::SelectStmt {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
-            alias: None, source_text: None }],
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "id", false,
+            )),
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -322,7 +334,7 @@ fn test_drop_view_case_insensitive_when_enabled() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
         with_clause: None,
     };
 
@@ -365,15 +377,19 @@ fn test_view_case_sensitive_mode() {
     let select_stmt = vibesql_ast::SelectStmt {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
-            alias: None, source_text: None }],
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "id", false,
+            )),
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -382,7 +398,7 @@ fn test_view_case_sensitive_mode() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
         with_clause: None,
     };
 

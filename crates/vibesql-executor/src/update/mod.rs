@@ -155,7 +155,13 @@ impl UpdateExecutor {
 
         // Check if target is a VIEW with INSTEAD OF triggers
         if let Some(view_def) = database.catalog.get_view(&stmt.table_name).cloned() {
-            return execute_update_on_view(database, stmt, &view_def, procedural_context, trigger_context);
+            return execute_update_on_view(
+                database,
+                stmt,
+                &view_def,
+                procedural_context,
+                trigger_context,
+            );
         }
 
         // Step 1: Get table schema - clone it to avoid borrow issues
@@ -181,10 +187,7 @@ impl UpdateExecutor {
         let has_triggers = trigger_context.is_none()
             && database
                 .catalog
-                .get_triggers_for_table(
-                    table_name,
-                    Some(vibesql_ast::TriggerEvent::Update(None)),
-                )
+                .get_triggers_for_table(table_name, Some(vibesql_ast::TriggerEvent::Update(None)))
                 .next()
                 .is_some();
 
@@ -281,8 +284,7 @@ impl UpdateExecutor {
         let value_updater = ValueUpdater::new(schema, &evaluator, table_name);
 
         // Check conflict resolution clause
-        let use_ignore =
-            matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore));
+        let use_ignore = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore));
         let use_replace =
             matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace));
 
@@ -321,12 +323,7 @@ impl UpdateExecutor {
             // For REPLACE: find and mark conflicting rows for deletion before validation
             if use_replace {
                 let conflicting_indices = find_conflicting_rows_for_update(
-                    table,
-                    schema,
-                    database,
-                    table_name,
-                    &new_row,
-                    row_index,
+                    table, schema, database, table_name, &new_row, row_index,
                 );
                 rows_to_delete_for_replace.extend(conflicting_indices);
             }
@@ -338,24 +335,15 @@ impl UpdateExecutor {
 
             if use_ignore {
                 // For IGNORE: try validation and skip row on any constraint violation
-                let validation_result = constraint_validator.validate_row(
-                    table,
-                    table_name,
-                    row_index,
-                    &new_row,
-                    &row,
-                );
+                let validation_result =
+                    constraint_validator.validate_row(table, table_name, row_index, &new_row, &row);
                 if validation_result.is_err() {
                     continue; // Skip this row
                 }
 
                 // Validate user-defined UNIQUE indexes
-                let unique_index_result = constraint_validator.validate_unique_indexes(
-                    database,
-                    table_name,
-                    &new_row,
-                    &row,
-                );
+                let unique_index_result = constraint_validator
+                    .validate_unique_indexes(database, table_name, &new_row, &row);
                 if unique_index_result.is_err() {
                     continue; // Skip this row
                 }
@@ -386,21 +374,11 @@ impl UpdateExecutor {
                 }
             } else {
                 // Default: validate all constraints
-                constraint_validator.validate_row(
-                    table,
-                    table_name,
-                    row_index,
-                    &new_row,
-                    &row,
-                )?;
+                constraint_validator.validate_row(table, table_name, row_index, &new_row, &row)?;
 
                 // Validate user-defined UNIQUE indexes (CREATE UNIQUE INDEX)
-                constraint_validator.validate_unique_indexes(
-                    database,
-                    table_name,
-                    &new_row,
-                    &row,
-                )?;
+                constraint_validator
+                    .validate_unique_indexes(database, table_name, &new_row, &row)?;
 
                 // Enforce FOREIGN KEY constraints (child table)
                 if !schema.foreign_keys.is_empty() {
@@ -427,8 +405,7 @@ impl UpdateExecutor {
         // for each PK/UNIQUE value. Earlier updates with conflicting values are removed
         // from updates and their rows are deleted instead.
         if use_replace && updates.len() > 1 {
-            let removed_indices =
-                resolve_cross_update_conflicts_for_replace(&mut updates, schema);
+            let removed_indices = resolve_cross_update_conflicts_for_replace(&mut updates, schema);
             rows_to_delete_for_replace.extend(removed_indices);
         }
 
@@ -490,10 +467,7 @@ impl UpdateExecutor {
         for (_row_index, old_row, new_row, _changed_columns, updates_pk) in &updates {
             if *updates_pk {
                 ForeignKeyValidator::check_no_child_references(
-                    database,
-                    table_name,
-                    old_row,
-                    new_row,
+                    database, table_name, old_row, new_row,
                 )?;
             }
         }
@@ -1055,7 +1029,11 @@ fn execute_update_on_view(
                             column_name: assignment.column.clone(),
                             table_name: view_def.name.clone(),
                             searched_tables: vec![view_def.name.clone()],
-                            available_columns: view_schema.columns.iter().map(|c| c.name.clone()).collect(),
+                            available_columns: view_schema
+                                .columns
+                                .iter()
+                                .map(|c| c.name.clone())
+                                .collect(),
                         })?;
 
                     // Evaluate the new value
@@ -1074,7 +1052,12 @@ fn execute_update_on_view(
     let rows_processed = updates.len();
     for (old_row, new_row) in updates {
         for trigger in &triggers {
-            crate::TriggerFirer::execute_trigger(database, trigger, Some(&old_row), Some(&new_row))?;
+            crate::TriggerFirer::execute_trigger(
+                database,
+                trigger,
+                Some(&old_row),
+                Some(&new_row),
+            )?;
         }
     }
 
@@ -1091,17 +1074,18 @@ fn build_view_schema(
     let result = select_executor.execute_with_columns(&view_def.query)?;
 
     // Use explicit column names if provided, otherwise derive from SELECT
-    let column_names: Vec<String> = if let Some(ref cols) = view_def.columns {
-        cols.clone()
-    } else {
-        result.columns.clone()
-    };
+    let column_names: Vec<String> =
+        if let Some(ref cols) = view_def.columns { cols.clone() } else { result.columns.clone() };
 
     // Build columns with a generic data type (we just need names for trigger binding)
     let columns: Vec<vibesql_catalog::ColumnSchema> = column_names
         .into_iter()
         .map(|name| {
-            vibesql_catalog::ColumnSchema::new(name, vibesql_types::DataType::Varchar { max_length: None }, true)
+            vibesql_catalog::ColumnSchema::new(
+                name,
+                vibesql_types::DataType::Varchar { max_length: None },
+                true,
+            )
         })
         .collect();
 
@@ -1169,7 +1153,7 @@ fn find_conflicting_rows_for_update(
             // Build key values for this index
             let mut key_values = Vec::new();
             for index_col in &index_metadata.columns {
-                if let Some(col_idx) = schema.get_column_index(&index_col.expect_column_name()) {
+                if let Some(col_idx) = schema.get_column_index(index_col.expect_column_name()) {
                     key_values.push(new_row.values[col_idx].clone());
                 }
             }
@@ -1205,9 +1189,8 @@ fn validate_non_uniqueness_constraints(
 ) -> Result<(), ExecutorError> {
     // Check NOT NULL constraints
     for (col_idx, col) in schema.columns.iter().enumerate() {
-        let value = new_row
-            .get(col_idx)
-            .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: col_idx })?;
+        let value =
+            new_row.get(col_idx).ok_or(ExecutorError::ColumnIndexOutOfBounds { index: col_idx })?;
 
         if !col.nullable && *value == vibesql_types::SqlValue::Null {
             return Err(ExecutorError::ConstraintViolation(format!(
@@ -1295,7 +1278,8 @@ fn validate_cross_update_uniqueness(
             }
 
             if !seen_values.insert(unique_values.clone()) {
-                let unique_col_names: Vec<String> = schema.unique_constraints[constraint_idx].clone();
+                let unique_col_names: Vec<String> =
+                    schema.unique_constraints[constraint_idx].clone();
                 return Err(ExecutorError::ConstraintViolation(format!(
                     "UNIQUE constraint failed: {} (multiple rows would have same key)",
                     unique_col_names.join(", ")
@@ -1360,8 +1344,10 @@ fn resolve_cross_update_conflicts_for_replace(
     // Check UNIQUE constraint conflicts
     let unique_constraint_indices = schema.get_unique_constraint_indices();
     for unique_indices in unique_constraint_indices.iter() {
-        let mut unique_map: std::collections::HashMap<Vec<vibesql_types::SqlValue>, (usize, usize)> =
-            std::collections::HashMap::new();
+        let mut unique_map: std::collections::HashMap<
+            Vec<vibesql_types::SqlValue>,
+            (usize, usize),
+        > = std::collections::HashMap::new();
 
         for (pos, (row_index, _old_row, new_row, _changed_columns, _updates_pk)) in
             updates.iter().enumerate()

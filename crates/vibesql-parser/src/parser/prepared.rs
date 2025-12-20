@@ -222,7 +222,7 @@ impl Parser {
                 self.advance();
                 Ok(s)
             }
-            _ => Err(ParseError { message: self.peek().syntax_error() })
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 }

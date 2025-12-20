@@ -23,8 +23,8 @@ fn test_parse_in_subquery() {
                     // Check left expression is 'id'
                     match *expr {
                         Expression::ColumnRef(col_id) => {
-            let table = col_id.table_canonical();
-            let column = col_id.column_canonical();
+                            let table = col_id.table_canonical();
+                            let column = col_id.column_canonical();
                             assert_eq!(table, None);
                             assert_eq!(column, "id");
                         }
@@ -55,8 +55,8 @@ fn test_parse_not_in_subquery() {
                                       // Check left expression is 'status'
                     match *expr {
                         Expression::ColumnRef(col_id) => {
-            let table = col_id.table_canonical();
-            let column = col_id.column_canonical();
+                            let table = col_id.table_canonical();
+                            let column = col_id.column_canonical();
                             assert_eq!(table, None);
                             assert_eq!(column, "status");
                         }
@@ -84,8 +84,8 @@ fn test_parse_in_subquery_simple_column() {
                     assert!(!negated);
                     match *expr {
                         Expression::ColumnRef(col_id) => {
-            let table = col_id.table_canonical();
-            let column = col_id.column_canonical();
+                            let table = col_id.table_canonical();
+                            let column = col_id.column_canonical();
                             assert_eq!(table, None);
                             assert_eq!(column, "user_id");
                         }
@@ -193,7 +193,7 @@ fn test_parse_scalar_subquery_in_select() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     Expression::ColumnRef(col_id) => {
-            let column = col_id.column_canonical();
+                        let column = col_id.column_canonical();
                         assert_eq!(column, "id");
                     }
                     _ => panic!("Expected column reference"),

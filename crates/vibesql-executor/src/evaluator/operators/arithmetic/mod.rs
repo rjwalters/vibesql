@@ -84,11 +84,12 @@ pub(super) fn coerce_numeric_values(
     // Handle string coercion (SQLite compatibility)
     // When either operand is a string, coerce it to a number
     if matches!(left, Varchar(_) | Character(_)) || matches!(right, Varchar(_) | Character(_)) {
-        let left_coerced = coerce_single_value(left).ok_or_else(|| ExecutorError::TypeMismatch {
-            left: left.clone(),
-            op: op.to_string(),
-            right: right.clone(),
-        })?;
+        let left_coerced =
+            coerce_single_value(left).ok_or_else(|| ExecutorError::TypeMismatch {
+                left: left.clone(),
+                op: op.to_string(),
+                right: right.clone(),
+            })?;
 
         let right_coerced =
             coerce_single_value(right).ok_or_else(|| ExecutorError::TypeMismatch {
@@ -771,11 +772,9 @@ mod tests {
     #[test]
     fn test_empty_string() {
         // '' + 1 = 1 (empty string converts to 0)
-        let result = ArithmeticOps::add(
-            &SqlValue::Varchar(arcstr::ArcStr::from("")),
-            &SqlValue::Integer(1),
-        )
-        .unwrap();
+        let result =
+            ArithmeticOps::add(&SqlValue::Varchar(arcstr::ArcStr::from("")), &SqlValue::Integer(1))
+                .unwrap();
         assert_eq!(result, SqlValue::Integer(1));
     }
 

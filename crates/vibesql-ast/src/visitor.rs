@@ -224,13 +224,11 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
 
         Expression::NamedPlaceholder(name) => visitor.visit_named_placeholder(name),
 
-        Expression::ColumnRef(col_id) => {
-            visitor.visit_column_ref(
-                col_id.schema_canonical(),
-                col_id.table_canonical(),
-                col_id.column_canonical(),
-            )
-        }
+        Expression::ColumnRef(col_id) => visitor.visit_column_ref(
+            col_id.schema_canonical(),
+            col_id.table_canonical(),
+            col_id.column_canonical(),
+        ),
 
         Expression::BinaryOp { left, right, .. } => {
             let result = walk_expression(visitor, left);
@@ -604,7 +602,7 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
             character_unit,
         },
 
-        Expression::AggregateFunction { name, distinct, args, order_by } => {
+        Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
             Expression::AggregateFunction {
                 name,
                 distinct,
@@ -619,6 +617,7 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
                         })
                         .collect()
                 }),
+                filter: filter.map(|f| Box::new(transform_expression(visitor, *f))),
             }
         }
 
@@ -749,10 +748,9 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
             values.into_iter().map(|v| transform_expression(visitor, v)).collect(),
         ),
 
-        Expression::Collate { expr: inner, collation } => Expression::Collate {
-            expr: Box::new(transform_expression(visitor, *inner)),
-            collation,
-        },
+        Expression::Collate { expr: inner, collation } => {
+            Expression::Collate { expr: Box::new(transform_expression(visitor, *inner)), collation }
+        }
     };
 
     // Post-order transform
@@ -765,9 +763,10 @@ fn transform_window_function<V: ExpressionMutVisitor>(
     spec: WindowFunctionSpec,
 ) -> WindowFunctionSpec {
     match spec {
-        WindowFunctionSpec::Aggregate { name, args } => WindowFunctionSpec::Aggregate {
+        WindowFunctionSpec::Aggregate { name, args, filter } => WindowFunctionSpec::Aggregate {
             name,
             args: args.into_iter().map(|a| transform_expression(visitor, a)).collect(),
+            filter: filter.map(|f| Box::new(transform_expression(visitor, *f))),
         },
         WindowFunctionSpec::Ranking { name, args } => WindowFunctionSpec::Ranking {
             name,
@@ -1091,13 +1090,11 @@ pub fn transform_select<V: ExpressionMutVisitor>(visitor: &mut V, stmt: SelectSt
             .select_list
             .into_iter()
             .map(|item| match item {
-                SelectItem::Expression { expr, alias, source_text } => {
-                    SelectItem::Expression {
-                        expr: transform_expression(visitor, expr),
-                        alias,
-                        source_text,
-                    }
-                }
+                SelectItem::Expression { expr, alias, source_text } => SelectItem::Expression {
+                    expr: transform_expression(visitor, expr),
+                    alias,
+                    source_text,
+                },
                 other => other,
             })
             .collect(),
@@ -1461,7 +1458,9 @@ mod tests {
 
         let expr = Expression::BinaryOp {
             op: crate::BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(ColumnIdentifier::qualified("users", false, "id", false))),
+            left: Box::new(Expression::ColumnRef(ColumnIdentifier::qualified(
+                "users", false, "id", false,
+            ))),
             right: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("value", false))),
         };
 

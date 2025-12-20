@@ -36,7 +36,7 @@ impl Parser {
         // Check for CREATE TABLE ... AS SELECT syntax
         if self.peek_keyword(Keyword::As) {
             self.advance(); // consume AS
-            // Parse the SELECT statement
+                            // Parse the SELECT statement
             let select_stmt = self.parse_select_statement()?;
 
             // Expect semicolon or EOF

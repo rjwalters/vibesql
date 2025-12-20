@@ -125,13 +125,19 @@ pub(super) fn extract_referenced_tables_with_schema(
     column_to_table: &HashMap<String, String>,
 ) {
     match expr {
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() =>
+        {
             output.insert(col_id.table_canonical().unwrap().to_lowercase());
         }
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+        {
             // Use schema-based lookup
-            if let Some(table) = super::utils::resolve_column_with_fallback(col_id.column_canonical(), column_to_table)
-            {
+            if let Some(table) = super::utils::resolve_column_with_fallback(
+                col_id.column_canonical(),
+                column_to_table,
+            ) {
                 output.insert(table.to_lowercase());
             }
         }
@@ -242,8 +248,7 @@ pub(super) fn extract_referenced_tables_with_schema(
                 column_to_table,
             );
         }
-        Expression::Like { expr, pattern, .. }
-        | Expression::Glob { expr, pattern, .. } => {
+        Expression::Like { expr, pattern, .. } | Expression::Glob { expr, pattern, .. } => {
             extract_referenced_tables_with_schema(expr, output, available_tables, column_to_table);
             extract_referenced_tables_with_schema(
                 pattern,

@@ -45,8 +45,12 @@ impl CombinedExpressionEvaluator<'_> {
         let transform_for_collation = |val: SqlValue, collation_name: &str| -> SqlValue {
             if collation_name.eq_ignore_ascii_case("nocase") {
                 match val {
-                    SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())),
-                    SqlValue::Character(s) => SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())),
+                    SqlValue::Varchar(s) => {
+                        SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase()))
+                    }
+                    SqlValue::Character(s) => {
+                        SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase()))
+                    }
                     other => other,
                 }
             } else {
@@ -66,8 +70,10 @@ impl CombinedExpressionEvaluator<'_> {
 
         // Apply SQLite type affinity rules for BETWEEN comparisons
         // TEXT column vs INTEGER literal → convert INTEGER to TEXT, string compare
-        let (expr_val, mut low_val) = self.apply_affinity_for_comparison(expr, expr_val, low, low_val);
-        let (expr_val, mut high_val) = self.apply_affinity_for_comparison(expr, expr_val, high, high_val);
+        let (expr_val, mut low_val) =
+            self.apply_affinity_for_comparison(expr, expr_val, low, low_val);
+        let (expr_val, mut high_val) =
+            self.apply_affinity_for_comparison(expr, expr_val, high, high_val);
 
         // Check if bounds are reversed (low > high)
         let gt_result = ExpressionEvaluator::eval_binary_op_static(

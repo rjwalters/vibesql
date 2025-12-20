@@ -281,9 +281,9 @@ pub enum ExecutorError {
     },
     /// Invalid LIMIT or OFFSET value (SQLite-compatible error)
     InvalidLimitOffset {
-        clause: String,  // "LIMIT" or "OFFSET"
-        value: String,   // The value that was provided
-        reason: String,  // Why it's invalid
+        clause: String, // "LIMIT" or "OFFSET"
+        value: String,  // The value that was provided
+        reason: String, // Why it's invalid
     },
     /// JOIN USING column not present in both tables (SQLite-compatible error)
     /// Format: "cannot join using column X - column not present in both tables"
@@ -1063,7 +1063,11 @@ impl std::fmt::Display for ExecutorError {
             ExecutorError::AssertionViolation { assertion_name } => {
                 write!(f, "Assertion '{}' violated", assertion_name)
             }
-            ExecutorError::OrderByOutOfRange { term_position, column_number: _, select_list_len } => {
+            ExecutorError::OrderByOutOfRange {
+                term_position,
+                column_number: _,
+                select_list_len,
+            } => {
                 // SQLite-compatible error format: "1st ORDER BY term out of range - should be between 1 and N"
                 let ordinal = match term_position {
                     1 => "1st".to_string(),
@@ -1072,11 +1076,7 @@ impl std::fmt::Display for ExecutorError {
                     n => format!("{}th", n),
                 };
                 if *select_list_len == 0 {
-                    write!(
-                        f,
-                        "{} ORDER BY term out of range - should be between 1 and 1",
-                        ordinal
-                    )
+                    write!(f, "{} ORDER BY term out of range - should be between 1 and 1", ordinal)
                 } else {
                     write!(
                         f,
@@ -1085,7 +1085,11 @@ impl std::fmt::Display for ExecutorError {
                     )
                 }
             }
-            ExecutorError::GroupByOutOfRange { term_position, column_number: _, select_list_len } => {
+            ExecutorError::GroupByOutOfRange {
+                term_position,
+                column_number: _,
+                select_list_len,
+            } => {
                 // SQLite-compatible error format: "1st GROUP BY term out of range - should be between 1 and N"
                 let ordinal = match term_position {
                     1 => "1st".to_string(),
@@ -1094,11 +1098,7 @@ impl std::fmt::Display for ExecutorError {
                     n => format!("{}th", n),
                 };
                 if *select_list_len == 0 {
-                    write!(
-                        f,
-                        "{} GROUP BY term out of range - should be between 1 and 1",
-                        ordinal
-                    )
+                    write!(f, "{} GROUP BY term out of range - should be between 1 and 1", ordinal)
                 } else {
                     write!(
                         f,
@@ -1121,10 +1121,21 @@ impl std::fmt::Display for ExecutorError {
                 write!(f, "{} value {} {}", clause, value, reason)
             }
             ExecutorError::JoinUsingColumnNotPresent { column_name } => {
-                write!(f, "{}", vibe_msg!("executor-join-using-column-not-present", column_name = column_name.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "executor-join-using-column-not-present",
+                        column_name = column_name.as_str()
+                    )
+                )
             }
             ExecutorError::NoSuchColumn { column_ref } => {
-                write!(f, "{}", vibe_msg!("executor-no-such-column", column_ref = column_ref.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!("executor-no-such-column", column_ref = column_ref.as_str())
+                )
             }
             ExecutorError::Other(msg) => {
                 write!(f, "{}", vibe_msg!("executor-other", message = msg.as_str()))

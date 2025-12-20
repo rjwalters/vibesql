@@ -17,7 +17,7 @@ fn test_position_found() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Position {
@@ -29,7 +29,9 @@ fn test_position_found() {
                 )),
                 character_unit: None,
             },
-            alias: Some("pos".to_string()), source_text: None }],
+            alias: Some("pos".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -55,7 +57,7 @@ fn test_position_not_found() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Position {
@@ -67,7 +69,9 @@ fn test_position_not_found() {
                 )),
                 character_unit: None,
             },
-            alias: Some("pos".to_string()), source_text: None }],
+            alias: Some("pos".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -93,7 +97,7 @@ fn test_position_null_substring() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Position {
@@ -105,7 +109,9 @@ fn test_position_null_substring() {
                 )),
                 character_unit: None,
             },
-            alias: Some("pos".to_string()), source_text: None }],
+            alias: Some("pos".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -131,7 +137,7 @@ fn test_position_null_string() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Position {
@@ -141,7 +147,9 @@ fn test_position_null_string() {
                 string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
                 character_unit: None,
             },
-            alias: Some("pos".to_string()), source_text: None }],
+            alias: Some("pos".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,

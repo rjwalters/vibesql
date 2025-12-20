@@ -31,11 +31,7 @@
 
 mod harness;
 
-use std::{
-    env,
-    hint::black_box,
-    time::Instant,
-};
+use std::{env, hint::black_box, time::Instant};
 
 use harness::{print_group_header, BenchConfig, BenchResult, Harness};
 use vibesql_catalog::{ColumnSchema, TableSchema};
@@ -97,24 +93,21 @@ fn create_join_database(probe_count: usize, build_size: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
                 data_type: DataType::Bigint,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
     );
     db.create_table(build_schema).unwrap();
 
     for i in 0..build_size {
-        let row = Row::new(vec![
-            SqlValue::Integer(i as i64),
-            SqlValue::Bigint((i * 100) as i64),
-        ]);
+        let row = Row::new(vec![SqlValue::Integer(i as i64), SqlValue::Bigint((i * 100) as i64)]);
         db.insert_row("BUILD_TABLE", row).unwrap();
     }
 
@@ -127,21 +120,21 @@ fn create_join_database(probe_count: usize, build_size: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "BUILD_ID".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "DATA".to_string(),
                 data_type: DataType::Bigint,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
     );
@@ -218,7 +211,7 @@ fn bench_join_operation(harness: &Harness) {
 
     // Different build:probe ratios
     let ratios = [
-        ("ratio_1_10", 10),  // 1:10 ratio (build is 10% of probe)
+        ("ratio_1_10", 10),   // 1:10 ratio (build is 10% of probe)
         ("ratio_1_100", 100), // 1:100 ratio (build is 1% of probe)
     ];
 
@@ -234,7 +227,8 @@ fn bench_join_operation(harness: &Harness) {
 
             let db = create_join_database(row_count, build_size);
 
-            let query = "SELECT COUNT(*) FROM PROBE_TABLE p JOIN BUILD_TABLE b ON p.BUILD_ID = b.ID";
+            let query =
+                "SELECT COUNT(*) FROM PROBE_TABLE p JOIN BUILD_TABLE b ON p.BUILD_ID = b.ID";
 
             print_morsel_size_header(&morsel_sizes);
 
@@ -276,9 +270,9 @@ fn bench_join_filter_operation(harness: &Harness) {
 
     // Different filter selectivities on join result
     let selectivities = [
-        ("filter_low", 1000),     // p.ID < 1000 (1% at 100K)
-        ("filter_mid", 50000),    // p.ID < 50000 (50%)
-        ("filter_high", 90000),   // p.ID < 90000 (90%)
+        ("filter_low", 1000),   // p.ID < 1000 (1% at 100K)
+        ("filter_mid", 50000),  // p.ID < 50000 (50%)
+        ("filter_high", 90000), // p.ID < 90000 (90%)
     ];
 
     for &row_count in &row_counts {

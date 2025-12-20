@@ -414,10 +414,8 @@ fn test_persistence_emits_insert_entries() {
         SqlValue::Integer(1),
         SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
     ]);
-    let row2 = crate::Row::new(vec![
-        SqlValue::Integer(2),
-        SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
-    ]);
+    let row2 =
+        crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
     db.insert_row("users", row1).unwrap();
     db.insert_row("users", row2).unwrap();
 
@@ -670,10 +668,7 @@ fn test_force_durable_triggers_sync() {
 
     // Check stats - explicit_flushes should have been triggered by sync
     let stats = db.persistence_stats().unwrap();
-    assert!(
-        stats.explicit_flushes >= 1,
-        "ForceDurable should trigger an explicit flush on commit"
-    );
+    assert!(stats.explicit_flushes >= 1, "ForceDurable should trigger an explicit flush on commit");
 }
 
 #[test]

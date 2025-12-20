@@ -31,24 +31,22 @@ fn test_column_reference_expression() {
         Expression::ColumnRef(col_id)
             if col_id.schema_canonical().is_none()
                 && col_id.table_canonical().is_none()
-                && col_id.column_canonical() == "id" =>
-        {
-        } // Success
+                && col_id.column_canonical() == "id" => {} // Success
         _ => panic!("Expected column reference"),
     }
 }
 
 #[test]
 fn test_qualified_column_reference() {
-    let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false));
+    let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+        "users", false, "id", false,
+    ));
 
     match expr {
         Expression::ColumnRef(col_id)
             if col_id.schema_canonical().is_none()
                 && col_id.table_canonical() == Some("users")
-                && col_id.column_canonical() == "id" =>
-        {
-        } // Success
+                && col_id.column_canonical() == "id" => {} // Success
         _ => panic!("Expected qualified column reference"),
     }
 }

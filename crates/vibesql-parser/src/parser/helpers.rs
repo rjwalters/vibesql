@@ -116,7 +116,7 @@ impl Parser {
                 self.advance();
                 Ok(alias)
             }
-            _ => Err(ParseError { message: self.peek().syntax_error() })
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 

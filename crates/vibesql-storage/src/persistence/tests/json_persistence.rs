@@ -942,10 +942,12 @@ fn test_json_view_preservation() {
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: Some(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("active", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "active", false,
+            ))),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Boolean(true))),
         }),
@@ -955,7 +957,7 @@ fn test_json_view_preservation() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     // Create view with SQL definition
@@ -1026,7 +1028,7 @@ fn test_json_view_preservation_without_sql_definition() {
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -1035,7 +1037,7 @@ fn test_json_view_preservation_without_sql_definition() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     let view = ViewDefinition::new("all_products".to_string(), None, select_stmt, false);

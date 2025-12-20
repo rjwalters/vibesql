@@ -61,14 +61,17 @@ fn test_not_in_select_where() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("pk", false)),
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "pk", false,
+            )),
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "tab0".to_string(),
             alias: None,
             column_aliases: None,
@@ -76,7 +79,9 @@ fn test_not_in_select_where() {
         where_clause: Some(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("col0", false),
+                )),
                 op: vibesql_ast::BinaryOperator::LessThan,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(542),
@@ -141,14 +146,17 @@ fn test_not_with_equality() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("pk", false)),
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "pk", false,
+            )),
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "tab0".to_string(),
             alias: None,
             column_aliases: None,
@@ -156,7 +164,9 @@ fn test_not_with_equality() {
         where_clause: Some(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("col0", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(100),
@@ -232,7 +242,9 @@ fn test_not_in_delete_where() {
         where_clause: Some(vibesql_ast::WhereClause::Condition(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("col0", false),
+                )),
                 op: vibesql_ast::BinaryOperator::LessThan,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(542),
@@ -249,10 +261,11 @@ fn test_not_in_delete_where() {
     let verify_stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "tab0".to_string(),
             alias: None,
             column_aliases: None,
@@ -318,14 +331,17 @@ fn test_not_with_null() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("pk", false)),
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "pk", false,
+            )),
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "tab0".to_string(),
             alias: None,
             column_aliases: None,
@@ -333,7 +349,9 @@ fn test_not_with_null() {
         where_clause: Some(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("col0", false),
+                )),
                 op: vibesql_ast::BinaryOperator::LessThan,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(542),

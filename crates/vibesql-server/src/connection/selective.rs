@@ -226,8 +226,14 @@ pub async fn try_send_selective_updates(
     }
 
     // Send the partial updates
-    if let Err(e) =
-        send_subscription_partial_data(write_half, write_buf, observability, subscription_id, partial_updates).await
+    if let Err(e) = send_subscription_partial_data(
+        write_half,
+        write_buf,
+        observability,
+        subscription_id,
+        partial_updates,
+    )
+    .await
     {
         tracing::warn!("Failed to send selective updates: {}", e);
         return false;

@@ -30,11 +30,7 @@
 
 mod harness;
 
-use std::{
-    env,
-    hint::black_box,
-    time::Instant,
-};
+use std::{env, hint::black_box, time::Instant};
 
 use harness::{print_group_header, BenchConfig, BenchResult, Harness};
 use vibesql_catalog::{ColumnSchema, TableSchema};
@@ -91,28 +87,28 @@ fn create_scan_database(row_count: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "CATEGORY".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
                 data_type: DataType::Bigint,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "FLAG".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
     );

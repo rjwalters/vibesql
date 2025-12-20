@@ -42,14 +42,15 @@ fn test_in_subquery_wildcard_multi_column_rejected() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -59,10 +60,11 @@ fn test_in_subquery_wildcard_multi_column_rejected() {
             subquery: Box::new(vibesql_ast::SelectStmt {
                 with_clause: None,
                 set_operation: None,
-            values: None,
+                values: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }], /* * expands to 2 columns! */
-                from: Some(vibesql_ast::FromClause::Table { quoted: false,
+                from: Some(vibesql_ast::FromClause::Table {
+                    quoted: false,
                     name: "t1".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -134,14 +136,15 @@ fn test_in_subquery_explicit_multi_column_rejected() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -151,17 +154,26 @@ fn test_in_subquery_explicit_multi_column_rejected() {
             subquery: Box::new(vibesql_ast::SelectStmt {
                 with_clause: None,
                 set_operation: None,
-            values: None,
+                values: None,
                 distinct: false,
                 select_list: vec![
                     vibesql_ast::SelectItem::Expression {
-                        expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false)),
-                        alias: None, source_text: None },
+                        expr: vibesql_ast::Expression::ColumnRef(
+                            vibesql_ast::ColumnIdentifier::simple("x", false),
+                        ),
+                        alias: None,
+                        source_text: None,
+                    },
                     vibesql_ast::SelectItem::Expression {
-                        expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("y", false)),
-                        alias: None, source_text: None },
+                        expr: vibesql_ast::Expression::ColumnRef(
+                            vibesql_ast::ColumnIdentifier::simple("y", false),
+                        ),
+                        alias: None,
+                        source_text: None,
+                    },
                 ],
-                from: Some(vibesql_ast::FromClause::Table { quoted: false,
+                from: Some(vibesql_ast::FromClause::Table {
+                    quoted: false,
                     name: "t1".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -233,14 +245,15 @@ fn test_in_subquery_single_column_accepted() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -250,14 +263,17 @@ fn test_in_subquery_single_column_accepted() {
             subquery: Box::new(vibesql_ast::SelectStmt {
                 with_clause: None,
                 set_operation: None,
-            values: None,
+                values: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
-                    expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false)),
+                    expr: vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("x", false),
+                    ),
                     alias: None,
                     source_text: None,
                 }],
-                from: Some(vibesql_ast::FromClause::Table { quoted: false,
+                from: Some(vibesql_ast::FromClause::Table {
+                    quoted: false,
                     name: "t1".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -325,16 +341,17 @@ fn test_scalar_subquery_wildcard_multi_column_rejected() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ScalarSubquery(Box::new(vibesql_ast::SelectStmt {
                 with_clause: None,
                 set_operation: None,
-            values: None,
+                values: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }], /* * expands to 2 columns! */
-                from: Some(vibesql_ast::FromClause::Table { quoted: false,
+                from: Some(vibesql_ast::FromClause::Table {
+                    quoted: false,
                     name: "t1".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -351,7 +368,8 @@ fn test_scalar_subquery_wildcard_multi_column_rejected() {
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,

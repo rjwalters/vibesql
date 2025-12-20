@@ -62,8 +62,13 @@ pub async fn handle_subscribe(
             // Send subscription error with a dummy subscription ID (query failed before
             // registration)
             let error_id = [0u8; 16];
-            send_subscription_error(write_half, write_buf, &error_id, &format!("Parse error: {}", e))
-                .await?;
+            send_subscription_error(
+                write_half,
+                write_buf,
+                &error_id,
+                &format!("Parse error: {}", e),
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -306,18 +311,13 @@ pub async fn notify_affected_subscriptions(
     }
 
     // Collect subscriptions for THIS connection that need updating
-    let subscriptions_to_update: Vec<(
-        [u8; 16],
-        String,
-        u64,
-        Option<Vec<Row>>,
-        Option<String>,
-    )> = affected_tables
-        .iter()
-        .flat_map(|table| {
-            subscription_manager.get_affected_subscriptions_for_connection(table, connection_id)
-        })
-        .collect();
+    let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>, Option<String>)> =
+        affected_tables
+            .iter()
+            .flat_map(|table| {
+                subscription_manager.get_affected_subscriptions_for_connection(table, connection_id)
+            })
+            .collect();
 
     if subscriptions_to_update.is_empty() {
         return;
@@ -325,10 +325,8 @@ pub async fn notify_affected_subscriptions(
 
     // De-duplicate subscriptions (a subscription may depend on multiple affected tables)
     let mut seen = std::collections::HashSet::new();
-    let unique_subscriptions: Vec<_> = subscriptions_to_update
-        .into_iter()
-        .filter(|(id, _, _, _, _)| seen.insert(*id))
-        .collect();
+    let unique_subscriptions: Vec<_> =
+        subscriptions_to_update.into_iter().filter(|(id, _, _, _, _)| seen.insert(*id)).collect();
 
     debug!(
         "Notifying {} subscriptions after mutation affecting tables: {:?}",
@@ -380,18 +378,13 @@ pub async fn handle_cross_connection_notification(
     };
 
     // Collect subscriptions for THIS connection that need updating
-    let subscriptions_to_update: Vec<(
-        [u8; 16],
-        String,
-        u64,
-        Option<Vec<Row>>,
-        Option<String>,
-    )> = affected_tables
-        .iter()
-        .flat_map(|table| {
-            subscription_manager.get_affected_subscriptions_for_connection(table, connection_id)
-        })
-        .collect();
+    let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>, Option<String>)> =
+        affected_tables
+            .iter()
+            .flat_map(|table| {
+                subscription_manager.get_affected_subscriptions_for_connection(table, connection_id)
+            })
+            .collect();
 
     if subscriptions_to_update.is_empty() {
         return;
@@ -399,10 +392,8 @@ pub async fn handle_cross_connection_notification(
 
     // De-duplicate subscriptions (a subscription may depend on multiple affected tables)
     let mut seen = std::collections::HashSet::new();
-    let unique_subscriptions: Vec<_> = subscriptions_to_update
-        .into_iter()
-        .filter(|(id, _, _, _, _)| seen.insert(*id))
-        .collect();
+    let unique_subscriptions: Vec<_> =
+        subscriptions_to_update.into_iter().filter(|(id, _, _, _, _)| seen.insert(*id)).collect();
 
     debug!(
         "Cross-connection notification: notifying {} subscriptions for tables: {:?}",

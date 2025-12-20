@@ -130,7 +130,11 @@ fn test_type_mismatch_error() {
     };
 
     let error_msg = format!("{}", error);
-    assert!(error_msg.contains("Type mismatch") || error_msg.contains("type") || error_msg.contains("+"));
+    assert!(
+        error_msg.contains("Type mismatch")
+            || error_msg.contains("type")
+            || error_msg.contains("+")
+    );
 }
 
 #[test]

@@ -10,7 +10,7 @@ fn test_select_star() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -36,7 +36,7 @@ fn test_select_with_columns() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![
             SelectItem::Expression {
@@ -69,7 +69,7 @@ fn test_select_with_alias() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Expression {
             expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
@@ -98,7 +98,7 @@ fn test_select_from_table() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -106,7 +106,8 @@ fn test_select_from_table() {
         from: Some(FromClause::Table {
             name: "users".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -127,7 +128,7 @@ fn test_select_with_where() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -135,11 +136,14 @@ fn test_select_with_where() {
         from: Some(FromClause::Table {
             name: "users".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         where_clause: Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "id", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         }),
         group_by: None,
@@ -157,7 +161,7 @@ fn test_select_with_order_by() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -165,7 +169,8 @@ fn test_select_with_order_by() {
         from: Some(FromClause::Table {
             name: "users".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -192,7 +197,7 @@ fn test_select_distinct() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: true,
         select_list: vec![SelectItem::Expression {
             expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("country", false)),
@@ -204,7 +209,8 @@ fn test_select_distinct() {
         from: Some(FromClause::Table {
             name: "users".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -221,7 +227,7 @@ fn test_select_with_group_by() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Expression {
             expr: Expression::Function {
@@ -237,10 +243,13 @@ fn test_select_with_group_by() {
         from: Some(FromClause::Table {
             name: "orders".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         where_clause: None,
-        group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false))])),
+        group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef(
+            vibesql_ast::ColumnIdentifier::simple("customer_id", false),
+        )])),
         having: None,
         order_by: None,
         limit: None,
@@ -254,7 +263,7 @@ fn test_select_with_having() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -262,15 +271,20 @@ fn test_select_with_having() {
         from: Some(FromClause::Table {
             name: "sales".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         where_clause: None,
-        group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("region", false))])),
+        group_by: Some(GroupByClause::Simple(vec![Expression::ColumnRef(
+            vibesql_ast::ColumnIdentifier::simple("region", false),
+        )])),
         having: Some(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
             left: Box::new(Expression::Function {
                 name: vibesql_ast::FunctionIdentifier::new("SUM"),
-                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "amount", false,
+                ))],
                 character_unit: None,
             }),
             right: Box::new(Expression::Literal(SqlValue::Integer(1000))),
@@ -287,7 +301,7 @@ fn test_select_with_limit() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -295,7 +309,8 @@ fn test_select_with_limit() {
         from: Some(FromClause::Table {
             name: "products".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -312,7 +327,7 @@ fn test_select_with_offset() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -320,7 +335,8 @@ fn test_select_with_offset() {
         from: Some(FromClause::Table {
             name: "items".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -337,7 +353,7 @@ fn test_order_by_desc() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -345,7 +361,8 @@ fn test_order_by_desc() {
         from: Some(FromClause::Table {
             name: "posts".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -372,18 +389,24 @@ fn test_inner_join() {
         left: Box::new(FromClause::Table {
             name: "users".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         right: Box::new(FromClause::Table {
             name: "orders".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         join_type: JoinType::Inner,
         condition: Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
-            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "users", false, "id", false,
+            ))),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "orders", false, "user_id", false,
+            ))),
         }),
         using_columns: None,
         natural: false,
@@ -400,12 +423,14 @@ fn test_left_outer_join() {
         left: Box::new(FromClause::Table {
             name: "customers".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         right: Box::new(FromClause::Table {
             name: "orders".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         join_type: JoinType::LeftOuter,
         condition: None,
@@ -424,12 +449,14 @@ fn test_right_outer_join() {
         left: Box::new(FromClause::Table {
             name: "products".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         right: Box::new(FromClause::Table {
             name: "categories".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         join_type: JoinType::RightOuter,
         condition: None,
@@ -448,12 +475,14 @@ fn test_full_outer_join() {
         left: Box::new(FromClause::Table {
             name: "table1".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         right: Box::new(FromClause::Table {
             name: "table2".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         join_type: JoinType::FullOuter,
         condition: None,
@@ -472,12 +501,14 @@ fn test_cross_join() {
         left: Box::new(FromClause::Table {
             name: "colors".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         right: Box::new(FromClause::Table {
             name: "sizes".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         join_type: JoinType::Cross,
         condition: None,
@@ -499,7 +530,7 @@ fn test_from_subquery() {
     let subquery = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -507,11 +538,14 @@ fn test_from_subquery() {
         from: Some(FromClause::Table {
             name: "users".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         where_clause: Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("active", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "active", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Boolean(true))),
         }),
         group_by: None,
@@ -537,7 +571,8 @@ fn test_table_with_alias() {
     let from = FromClause::Table {
         name: "employees".to_string(),
         alias: Some("e".to_string()),
-        column_aliases: None, quoted: false,
+        column_aliases: None,
+        quoted: false,
     };
     match from {
         FromClause::Table { alias: Some(a), .. } if a == "e" => {} // Success

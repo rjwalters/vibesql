@@ -120,7 +120,7 @@ fn execute_simple_return(
     #[allow(clippy::collapsible_match)]
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         if let Some(first_item) = select_stmt.select_list.first() {
-            if let vibesql_ast::SelectItem::Expression { expr, alias: _ , .. } = first_item {
+            if let vibesql_ast::SelectItem::Expression { expr, alias: _, .. } = first_item {
                 // Evaluate the expression in the procedural context
                 let value = super::executor::evaluate_expression(expr, db, ctx)?;
                 return Ok(value);

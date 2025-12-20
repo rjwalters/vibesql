@@ -72,8 +72,10 @@ pub enum Expression {
     /// Aggregate function call (COUNT, SUM, AVG, MIN, MAX)
     /// SQL:1999 Section 6.16: Set functions
     /// SQL:2003 ordered set functions with ORDER BY clause
+    /// SQL:2003 FILTER clause for conditional aggregation
     /// Example: COUNT(DISTINCT customer_id), SUM(ALL amount)
     /// Example: GROUP_CONCAT(name ORDER BY name ASC)
+    /// Example: COUNT(*) FILTER (WHERE x > 0)
     ///
     /// Uses `FunctionIdentifier` for proper case handling:
     /// - Canonical (lowercase) for case-insensitive comparison
@@ -85,6 +87,9 @@ pub enum Expression {
         /// Optional ORDER BY clause within the aggregate function
         /// Example: GROUP_CONCAT(a ORDER BY b DESC)
         order_by: Option<Vec<OrderByItem>>,
+        /// Optional FILTER clause for conditional aggregation (SQL:2003)
+        /// Example: COUNT(*) FILTER (WHERE x > 0)
+        filter: Option<Box<Expression>>,
     },
 
     /// IS NULL / IS NOT NULL
@@ -418,11 +423,18 @@ pub enum TruthValue {
 /// Window function specification
 ///
 /// Uses `FunctionIdentifier` for proper case handling in all variants.
+/// SQL:2003 FILTER clause is supported for conditional aggregation within windows.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowFunctionSpec {
     /// Aggregate function used as window function
     /// Example: SUM(salary), AVG(price), COUNT(*)
-    Aggregate { name: FunctionIdentifier, args: Vec<Expression> },
+    /// Example with FILTER: COUNT(*) FILTER (WHERE x > 0) OVER (PARTITION BY y)
+    Aggregate {
+        name: FunctionIdentifier,
+        args: Vec<Expression>,
+        /// Optional FILTER clause for conditional aggregation
+        filter: Option<Box<Expression>>,
+    },
 
     /// Ranking function
     /// Example: ROW_NUMBER(), RANK(), DENSE_RANK(), NTILE(4)

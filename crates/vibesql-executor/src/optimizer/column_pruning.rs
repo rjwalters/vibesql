@@ -20,7 +20,6 @@
 //! This reduces rows from 54 columns to 14 columns, cutting memory and CPU overhead
 //! by ~74% for GROUP BY evaluation.
 
-
 use std::collections::HashSet;
 
 use vibesql_ast::{Expression, GroupByClause, GroupingElement, MixedGroupingItem, SelectItem};
@@ -36,18 +35,12 @@ pub struct ColumnRef {
 
 impl ColumnRef {
     pub fn new(table: Option<String>, column: String) -> Self {
-        Self {
-            table: table.map(|t| t.to_lowercase()),
-            column: column.to_lowercase(),
-        }
+        Self { table: table.map(|t| t.to_lowercase()), column: column.to_lowercase() }
     }
 
     #[allow(dead_code)]
     pub fn qualified(table: &str, column: &str) -> Self {
-        Self {
-            table: Some(table.to_lowercase()),
-            column: column.to_lowercase(),
-        }
+        Self { table: Some(table.to_lowercase()), column: column.to_lowercase() }
     }
 
     #[allow(dead_code)]
@@ -163,7 +156,10 @@ pub fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<Column
             let column = col_id.column_canonical();
             // Skip the special "*" wildcard (used in COUNT(*))
             if column != "*" {
-                columns.insert(ColumnRef::new(col_id.table_canonical().map(|t| t.to_string()), column.to_string()));
+                columns.insert(ColumnRef::new(
+                    col_id.table_canonical().map(|t| t.to_string()),
+                    column.to_string(),
+                ));
             }
         }
 
@@ -380,7 +376,9 @@ pub fn compute_projection_indices(
         match &col_ref.table {
             Some(table_name) => {
                 // Qualified reference: table.column
-                if let Some(idx) = schema.get_column_index(Some(table_name.as_str()), &col_ref.column) {
+                if let Some(idx) =
+                    schema.get_column_index(Some(table_name.as_str()), &col_ref.column)
+                {
                     indices.insert(idx);
                 } else {
                     // Column not found - keep all columns to be safe
@@ -392,7 +390,9 @@ pub fn compute_projection_indices(
                 let mut found = false;
                 for (tbl_id, (_start, tbl_schema)) in &schema.table_schemas {
                     if tbl_schema.columns.iter().any(|c| c.name.to_lowercase() == col_ref.column) {
-                        if let Some(idx) = schema.get_column_index(Some(tbl_id.canonical()), &col_ref.column) {
+                        if let Some(idx) =
+                            schema.get_column_index(Some(tbl_id.canonical()), &col_ref.column)
+                        {
                             indices.insert(idx);
                             found = true;
                             break;
@@ -458,8 +458,10 @@ pub fn remap_schema(
         .collect();
 
     // For each table in the original schema, build a new TableSchema with only the kept columns
-    let mut new_table_schemas: HashMap<vibesql_catalog::TableIdentifier, (usize, vibesql_catalog::TableSchema)> =
-        HashMap::new();
+    let mut new_table_schemas: HashMap<
+        vibesql_catalog::TableIdentifier,
+        (usize, vibesql_catalog::TableSchema),
+    > = HashMap::new();
 
     // Track new column offset for each table
     for (table_id, (original_start, original_table_schema)) in &original_schema.table_schemas {
@@ -489,10 +491,8 @@ pub fn remap_schema(
             kept_columns.into_iter().map(|(_, col)| col).collect();
 
         // Create new TableSchema with filtered columns
-        let new_table_schema = vibesql_catalog::TableSchema::new(
-            original_table_schema.name.clone(),
-            new_columns,
-        );
+        let new_table_schema =
+            vibesql_catalog::TableSchema::new(original_table_schema.name.clone(), new_columns);
 
         new_table_schemas.insert(table_id.clone(), (new_start, new_table_schema));
     }
@@ -517,7 +517,8 @@ mod tests {
 
     #[test]
     fn test_collect_simple_column_ref() {
-        let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t", false, "c", false));
+        let expr =
+            Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t", false, "c", false));
 
         let mut columns = HashSet::new();
         collect_columns_from_expr(&expr, &mut columns);
@@ -540,9 +541,13 @@ mod tests {
     #[test]
     fn test_collect_from_binary_op() {
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "a", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "t1", false, "a", false,
+            ))),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "b", false))),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "t2", false, "b", false,
+            ))),
         };
 
         let mut columns = HashSet::new();
@@ -558,9 +563,13 @@ mod tests {
         let expr = Expression::AggregateFunction {
             name: vibesql_ast::FunctionIdentifier::new("SUM"),
             args: vec![Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "price", false,
+                ))),
                 op: BinaryOperator::Multiply,
-                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("qty", false))),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "qty", false,
+                ))),
             }],
             distinct: false,
             order_by: None,
@@ -578,7 +587,12 @@ mod tests {
     fn test_collect_from_extract() {
         let expr = Expression::Extract {
             field: vibesql_ast::IntervalUnit::Year,
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("lineitem", false, "l_shipdate", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "lineitem",
+                false,
+                "l_shipdate",
+                false,
+            ))),
         };
 
         let mut columns = HashSet::new();

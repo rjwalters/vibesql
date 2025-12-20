@@ -130,9 +130,7 @@ fn try_detect_spatial_predicate(
 ) -> Result<Option<SpatialIndexUsage>, ExecutorError> {
     // First argument should be a column reference
     let column_name = match column_expr {
-        Expression::ColumnRef(col_id)
-            if col_id.schema_canonical().is_none() =>
-        {
+        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() => {
             col_id.column_canonical().to_string()
         }
         _ => return Ok(None), // Not a column reference

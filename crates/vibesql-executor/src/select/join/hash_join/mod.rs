@@ -73,9 +73,19 @@ pub(super) fn batch_combine_rows_with_table_names(
 
         // Use Row::combine_for_join to handle both values and ROWIDs
         let result_row = if left_is_build {
-            vibesql_storage::Row::combine_for_join(build_row, probe_row, left_table_names, right_table_names)
+            vibesql_storage::Row::combine_for_join(
+                build_row,
+                probe_row,
+                left_table_names,
+                right_table_names,
+            )
         } else {
-            vibesql_storage::Row::combine_for_join(probe_row, build_row, left_table_names, right_table_names)
+            vibesql_storage::Row::combine_for_join(
+                probe_row,
+                build_row,
+                left_table_names,
+                right_table_names,
+            )
         };
 
         result_rows.push(result_row);

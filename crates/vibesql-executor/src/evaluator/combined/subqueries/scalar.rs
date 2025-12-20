@@ -159,25 +159,24 @@ impl CombinedExpressionEvaluator<'_> {
                 None
             };
 
-            let select_executor =
-                if let (Some(ref schema), Some(ref outer_row)) = (&merged_schema, &merged_row) {
-                    // Execute with outer context for column resolution
-                    if let Some(cte_ctx) = self.cte_context {
-                        crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
-                            database, outer_row, schema, cte_ctx, self.depth,
-                        )
-                    } else {
-                        crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                            database, outer_row, schema, self.depth,
-                        )
-                    }
-                } else if let Some(cte_ctx) = self.cte_context {
-                    crate::select::SelectExecutor::new_with_cte_and_depth(
-                        database, cte_ctx, self.depth,
+            let select_executor = if let (Some(ref schema), Some(ref outer_row)) =
+                (&merged_schema, &merged_row)
+            {
+                // Execute with outer context for column resolution
+                if let Some(cte_ctx) = self.cte_context {
+                    crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
+                        database, outer_row, schema, cte_ctx, self.depth,
                     )
                 } else {
-                    crate::select::SelectExecutor::new(database)
-                };
+                    crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                        database, outer_row, schema, self.depth,
+                    )
+                }
+            } else if let Some(cte_ctx) = self.cte_context {
+                crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+            } else {
+                crate::select::SelectExecutor::new(database)
+            };
 
             let executed_rows = select_executor.execute(subquery)?;
 

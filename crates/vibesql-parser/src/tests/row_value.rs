@@ -72,15 +72,16 @@ fn test_row_value_less_than_or_equal() {
                         // First element should be column 'rowid'
                         match &values[0] {
                             vibesql_ast::Expression::ColumnRef(col_id) => {
-            let column = col_id.column_canonical();
+                                let column = col_id.column_canonical();
                                 assert_eq!(column, "rowid");
                             }
                             _ => panic!("Expected ColumnRef for first element"),
                         }
                         // Second element should be literal 1
                         match &values[1] {
-                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)) => {
-                            }
+                            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
+                                1,
+                            )) => {}
                             _ => panic!("Expected Integer(1) for second element"),
                         }
                     }
@@ -279,7 +280,7 @@ fn test_parenthesized_single_expression_unchanged() {
                 // Left should be a column ref, not a row value constructor
                 match *left {
                     vibesql_ast::Expression::ColumnRef(col_id) => {
-            let column = col_id.column_canonical();
+                        let column = col_id.column_canonical();
                         assert_eq!(column, "a");
                     }
                     vibesql_ast::Expression::RowValueConstructor(_) => {

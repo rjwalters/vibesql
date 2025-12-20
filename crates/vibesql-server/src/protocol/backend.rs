@@ -7,9 +7,7 @@ use std::collections::HashMap;
 use bytes::{BufMut, BytesMut};
 
 use super::helpers::{encode_notice_or_error, put_cstring};
-use super::types::{
-    FieldDescription, PartialRowUpdate, SubscriptionUpdateType, TransactionStatus,
-};
+use super::types::{FieldDescription, PartialRowUpdate, SubscriptionUpdateType, TransactionStatus};
 
 /// Backend message types (server -> client)
 #[derive(Debug, Clone, PartialEq)]

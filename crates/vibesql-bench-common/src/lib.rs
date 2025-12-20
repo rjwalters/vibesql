@@ -26,9 +26,9 @@
 //! ```
 
 pub mod harness;
+pub mod sysbench;
 pub mod tpcc;
 pub mod tpch;
-pub mod sysbench;
 
 // TPC-DS and TPC-E to be added in Phase 2
 // pub mod tpcds;

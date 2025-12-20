@@ -23,11 +23,12 @@ pub fn parse_alter_table(parser: &mut crate::Parser) -> Result<AlterTableStmt, P
                 }
                 // SQL:1999 allows adding constraints with or without CONSTRAINT keyword
                 Token::Keyword {
-                    keyword: Keyword::Constraint
-                    | Keyword::Check
-                    | Keyword::Unique
-                    | Keyword::Primary
-                    | Keyword::Foreign,
+                    keyword:
+                        Keyword::Constraint
+                        | Keyword::Check
+                        | Keyword::Unique
+                        | Keyword::Primary
+                        | Keyword::Foreign,
                     ..
                 } => parse_add_constraint(parser, table_name),
                 // SQL:1999 allows ADD COLUMN without the COLUMN keyword
@@ -109,13 +110,17 @@ fn parse_add_column(
             Token::Keyword { keyword: Keyword::Primary, .. } => {
                 parser.advance();
                 parser.expect_keyword(Keyword::Key)?;
-                constraints
-                    .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } });
+                constraints.push(ColumnConstraint {
+                    name: None,
+                    kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
+                });
             }
             Token::Keyword { keyword: Keyword::Unique, .. } => {
                 parser.advance();
-                constraints
-                    .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::Unique { on_conflict: None } });
+                constraints.push(ColumnConstraint {
+                    name: None,
+                    kind: ColumnConstraintKind::Unique { on_conflict: None },
+                });
             }
             Token::Keyword { keyword: Keyword::References, .. } => {
                 parser.advance();
@@ -297,13 +302,17 @@ fn parse_modify_column(
             Token::Keyword { keyword: Keyword::Primary, .. } => {
                 parser.advance();
                 parser.expect_keyword(Keyword::Key)?;
-                constraints
-                    .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } });
+                constraints.push(ColumnConstraint {
+                    name: None,
+                    kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
+                });
             }
             Token::Keyword { keyword: Keyword::Unique, .. } => {
                 parser.advance();
-                constraints
-                    .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::Unique { on_conflict: None } });
+                constraints.push(ColumnConstraint {
+                    name: None,
+                    kind: ColumnConstraintKind::Unique { on_conflict: None },
+                });
             }
             Token::Keyword { keyword: Keyword::References, .. } => {
                 parser.advance();
@@ -380,13 +389,17 @@ fn parse_change_column(
             Token::Keyword { keyword: Keyword::Primary, .. } => {
                 parser.advance();
                 parser.expect_keyword(Keyword::Key)?;
-                constraints
-                    .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } });
+                constraints.push(ColumnConstraint {
+                    name: None,
+                    kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
+                });
             }
             Token::Keyword { keyword: Keyword::Unique, .. } => {
                 parser.advance();
-                constraints
-                    .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::Unique { on_conflict: None } });
+                constraints.push(ColumnConstraint {
+                    name: None,
+                    kind: ColumnConstraintKind::Unique { on_conflict: None },
+                });
             }
             Token::Keyword { keyword: Keyword::References, .. } => {
                 parser.advance();

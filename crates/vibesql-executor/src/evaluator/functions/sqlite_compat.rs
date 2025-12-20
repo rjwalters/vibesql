@@ -1036,10 +1036,7 @@ mod tests {
         assert_eq!(hex(&[SqlValue::Null]).unwrap(), SqlValue::Null);
         // SQLite coerces integers to text first: hex(255) = hex("255") = "323535"
         // "255" = bytes [0x32, 0x35, 0x35]
-        assert_eq!(
-            hex(&[SqlValue::Integer(255)]).unwrap(),
-            SqlValue::Varchar("323535".into())
-        );
+        assert_eq!(hex(&[SqlValue::Integer(255)]).unwrap(), SqlValue::Varchar("323535".into()));
         // Uppercase hex string as stated in SQLite docs
         assert_eq!(
             hex(&[SqlValue::Varchar("ABC".into())]).unwrap(),

@@ -71,7 +71,9 @@ pub(super) fn build_exists_checks(eliminated: &[EliminatedTable]) -> Vec<Express
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
                     expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                    alias: None, source_text: None }],
+                    alias: None,
+                    source_text: None,
+                }],
                 into_table: None,
                 into_variables: None,
                 from: Some(FromClause::Table {

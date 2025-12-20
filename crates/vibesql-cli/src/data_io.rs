@@ -19,8 +19,7 @@ impl DataIO {
 
         // Write rows (NULL values become empty strings in CSV)
         for row in &result.rows {
-            let values: Vec<String> =
-                row.iter().map(|v| v.clone().unwrap_or_default()).collect();
+            let values: Vec<String> = row.iter().map(|v| v.clone().unwrap_or_default()).collect();
             write_csv_row(&mut file, &values)?;
         }
 

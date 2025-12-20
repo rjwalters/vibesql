@@ -42,36 +42,54 @@ pub mod transactions;
 
 // Re-export data generators from shared crate
 pub use vibesql_bench_common::tpcc::{
-    // Data generation
-    TPCCData, TPCCRng,
-    // Entity types
-    Customer, District, History, Item, NewOrder, Order, OrderLine, Stock, Warehouse,
-    // Transaction input types
-    DeliveryInput, NewOrderInput, NewOrderItemInput, OrderStatusInput, PaymentInput,
-    StockLevelInput, TransactionResult,
     // Input generators
-    generate_delivery_input, generate_new_order_input, generate_order_status_input,
-    generate_payment_input, generate_stock_level_input,
+    generate_delivery_input,
+    generate_new_order_input,
+    generate_order_status_input,
+    generate_payment_input,
+    generate_stock_level_input,
+    // Entity types
+    Customer,
+    // Transaction input types
+    DeliveryInput,
+    District,
+    History,
+    Item,
+    NewOrder,
+    NewOrderInput,
+    NewOrderItemInput,
+    Order,
+    OrderLine,
+    OrderStatusInput,
+    PaymentInput,
+    Stock,
+    StockLevelInput,
+    TPCCBenchmarkResults,
+    // Data generation
+    TPCCData,
+    TPCCRng,
     // Workload generator
-    TPCCWorkload, TPCCBenchmarkResults,
+    TPCCWorkload,
+    TransactionResult,
+    Warehouse,
 };
 
 // Re-export schema loaders
 #[cfg(feature = "duckdb")]
 pub use schema::load_duckdb;
-#[cfg(feature = "mysql")]
-pub use schema::{get_mysql_pool, load_mysql};
 #[cfg(feature = "sqlite")]
 pub use schema::load_sqlite;
 pub use schema::load_vibesql;
+#[cfg(feature = "mysql")]
+pub use schema::{get_mysql_pool, load_mysql};
 
 // Re-export transaction executors (engine-specific implementations)
-pub use transactions::{
-    print_profile_summary, reset_profile_counters, TPCCExecutor, VibesqlTransactionExecutor,
-};
 #[cfg(feature = "duckdb")]
 pub use transactions::DuckdbTransactionExecutor;
 #[cfg(feature = "mysql")]
 pub use transactions::MysqlTransactionExecutor;
 #[cfg(feature = "sqlite")]
 pub use transactions::SqliteTransactionExecutor;
+pub use transactions::{
+    print_profile_summary, reset_profile_counters, TPCCExecutor, VibesqlTransactionExecutor,
+};

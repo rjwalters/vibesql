@@ -256,21 +256,33 @@ pub(super) fn rewrite_expression_with_context(
             character_unit: character_unit.clone(),
         },
 
-        Expression::AggregateFunction { name, distinct, args, order_by } => Expression::AggregateFunction {
-            name: name.clone(),
-            distinct: *distinct,
-            args: args
-                .iter()
-                .map(|a| rewrite_expression_with_context(a, rewrite_subquery_fn, outer_tables))
-                .collect(),
-            order_by: order_by.as_ref().map(|items| {
-                items.iter().map(|item| vibesql_ast::OrderByItem {
-                    expr: rewrite_expression_with_context(&item.expr, rewrite_subquery_fn, outer_tables),
-                    direction: item.direction.clone(),
-                    nulls_order: item.nulls_order,
-                }).collect()
-            }),
-        },
+        Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
+            Expression::AggregateFunction {
+                name: name.clone(),
+                distinct: *distinct,
+                args: args
+                    .iter()
+                    .map(|a| rewrite_expression_with_context(a, rewrite_subquery_fn, outer_tables))
+                    .collect(),
+                order_by: order_by.as_ref().map(|items| {
+                    items
+                        .iter()
+                        .map(|item| vibesql_ast::OrderByItem {
+                            expr: rewrite_expression_with_context(
+                                &item.expr,
+                                rewrite_subquery_fn,
+                                outer_tables,
+                            ),
+                            direction: item.direction.clone(),
+                            nulls_order: item.nulls_order,
+                        })
+                        .collect()
+                }),
+                filter: filter.as_ref().map(|f| {
+                    Box::new(rewrite_expression_with_context(f, rewrite_subquery_fn, outer_tables))
+                }),
+            }
+        }
 
         Expression::Position { substring, string, character_unit } => Expression::Position {
             substring: Box::new(rewrite_expression_with_context(

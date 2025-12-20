@@ -82,7 +82,7 @@ impl<'arena> ArenaParser<'arena> {
         ArenaParser {
             tokens,
             spans: Vec::new(), // No spans available
-            input: "",        // No original input
+            input: "",         // No original input
             position: 0,
             placeholder_count: 0,
             arena,
@@ -163,7 +163,8 @@ impl<'arena> ArenaParser<'arena> {
 
         match self.peek() {
             // DML statements
-            Token::Keyword { keyword: Keyword::Select, .. } | Token::Keyword { keyword: Keyword::With, .. } => {
+            Token::Keyword { keyword: Keyword::Select, .. }
+            | Token::Keyword { keyword: Keyword::With, .. } => {
                 let stmt = self.parse_select_statement()?;
                 Ok(Statement::Select(stmt))
             }
@@ -205,7 +206,8 @@ impl<'arena> ArenaParser<'arena> {
             }
 
             // Transaction statements
-            Token::Keyword { keyword: Keyword::Begin, .. } | Token::Keyword { keyword: Keyword::Start, .. } => {
+            Token::Keyword { keyword: Keyword::Begin, .. }
+            | Token::Keyword { keyword: Keyword::Start, .. } => {
                 let stmt = self.parse_begin_statement()?;
                 Ok(Statement::BeginTransaction(stmt))
             }
@@ -259,7 +261,8 @@ impl<'arena> ArenaParser<'arena> {
         // Skip optional TEMP/TEMPORARY
         if matches!(
             self.peek_at_offset(offset),
-            Token::Keyword { keyword: Keyword::Temp, .. } | Token::Keyword { keyword: Keyword::Temporary, .. }
+            Token::Keyword { keyword: Keyword::Temp, .. }
+                | Token::Keyword { keyword: Keyword::Temporary, .. }
         ) {
             offset += 1;
         }
@@ -576,7 +579,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Ok(self.intern(&name))
             }
-            _ => Err(ParseError { message: self.peek().syntax_error() })
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 
@@ -653,7 +656,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Ok(self.intern(&alias))
             }
-            _ => Err(ParseError { message: self.peek().syntax_error() })
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 
@@ -976,10 +979,9 @@ mod tests {
         assert_eq!(order_by[0].nulls_order, None);
 
         // Test multiple columns
-        let stmt = parse_select_to_owned(
-            "SELECT x, y FROM t ORDER BY x NULLS FIRST, y DESC NULLS LAST",
-        )
-        .unwrap();
+        let stmt =
+            parse_select_to_owned("SELECT x, y FROM t ORDER BY x NULLS FIRST, y DESC NULLS LAST")
+                .unwrap();
         let order_by = stmt.order_by.unwrap();
         assert_eq!(order_by.len(), 2);
         assert_eq!(order_by[0].nulls_order, Some(NullsOrder::First));

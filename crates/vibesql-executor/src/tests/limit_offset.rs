@@ -9,10 +9,11 @@ fn make_pagination_stmt(limit: Option<usize>, offset: Option<usize>) -> vibesql_
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -21,8 +22,10 @@ fn make_pagination_stmt(limit: Option<usize>, offset: Option<usize>) -> vibesql_
         group_by: None,
         having: None,
         order_by: None,
-        limit: limit.map(|n| vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n as i64))),
-        offset: offset.map(|n| vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n as i64))),
+        limit: limit
+            .map(|n| vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n as i64))),
+        offset: offset
+            .map(|n| vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n as i64))),
     }
 }
 
@@ -217,25 +220,31 @@ fn test_limit_with_inner_join() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            left: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "orders".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false),
+                )),
             }),
             using_columns: None,
             natural: false,
@@ -324,25 +333,31 @@ fn test_offset_with_inner_join() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            left: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "orders".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false),
+                )),
             }),
             using_columns: None,
             natural: false,
@@ -431,25 +446,31 @@ fn test_limit_offset_with_inner_join() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            left: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "orders".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false),
+                )),
             }),
             using_columns: None,
             natural: false,

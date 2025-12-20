@@ -517,7 +517,9 @@ fn main() {
                                 vibesql::ast::SelectItem::Expression {
                                     alias: Some(alias), ..
                                 } => alias.clone(),
-                                vibesql::ast::SelectItem::Expression { alias: None, expr, .. } => {
+                                vibesql::ast::SelectItem::Expression {
+                                    alias: None, expr, ..
+                                } => {
                                     // Try to extract column name from expression
                                     match expr {
                                         vibesql::ast::Expression::ColumnRef(id) => {

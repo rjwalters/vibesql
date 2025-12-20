@@ -106,7 +106,8 @@ impl Parser {
     /// Parse a statement
     pub fn parse_statement(&mut self) -> Result<vibesql_ast::Statement, ParseError> {
         match self.peek() {
-            Token::Keyword { keyword: Keyword::Select, .. } | Token::Keyword { keyword: Keyword::With, .. } => {
+            Token::Keyword { keyword: Keyword::Select, .. }
+            | Token::Keyword { keyword: Keyword::With, .. } => {
                 let select_stmt = self.parse_select_statement()?;
                 Ok(vibesql_ast::Statement::Select(Box::new(select_stmt)))
             }
@@ -133,13 +134,22 @@ impl Parser {
             Token::Keyword { keyword: Keyword::Create, .. } => {
                 // Check for CREATE OR REPLACE VIEW and CREATE OR REPLACE TEMP/TEMPORARY VIEW
                 if self.peek_next_keyword(Keyword::Or)
-                    && matches!(self.peek_at_offset(2), Token::Keyword { keyword: Keyword::Replace, .. })
+                    && matches!(
+                        self.peek_at_offset(2),
+                        Token::Keyword { keyword: Keyword::Replace, .. }
+                    )
                 {
                     // Could be CREATE OR REPLACE VIEW or CREATE OR REPLACE TEMP/TEMPORARY VIEW
-                    if matches!(self.peek_at_offset(3), Token::Keyword { keyword: Keyword::View, .. })
-                        || matches!(self.peek_at_offset(3), Token::Keyword { keyword: Keyword::Temp, .. })
-                        || matches!(self.peek_at_offset(3), Token::Keyword { keyword: Keyword::Temporary, .. })
-                    {
+                    if matches!(
+                        self.peek_at_offset(3),
+                        Token::Keyword { keyword: Keyword::View, .. }
+                    ) || matches!(
+                        self.peek_at_offset(3),
+                        Token::Keyword { keyword: Keyword::Temp, .. }
+                    ) || matches!(
+                        self.peek_at_offset(3),
+                        Token::Keyword { keyword: Keyword::Temporary, .. }
+                    ) {
                         return Ok(vibesql_ast::Statement::CreateView(
                             self.parse_create_view_statement()?,
                         ));
@@ -178,8 +188,13 @@ impl Parser {
                 {
                     // CREATE TEMP TABLE or CREATE TEMP VIEW / CREATE TEMPORARY TABLE or VIEW
                     // Check offset 2 to determine if it's TABLE or VIEW
-                    if matches!(self.peek_at_offset(2), Token::Keyword { keyword: Keyword::Table, .. }) {
-                        Ok(vibesql_ast::Statement::CreateTable(self.parse_create_table_statement()?))
+                    if matches!(
+                        self.peek_at_offset(2),
+                        Token::Keyword { keyword: Keyword::Table, .. }
+                    ) {
+                        Ok(vibesql_ast::Statement::CreateTable(
+                            self.parse_create_table_statement()?,
+                        ))
                     } else {
                         Ok(vibesql_ast::Statement::CreateView(self.parse_create_view_statement()?))
                     }
@@ -294,7 +309,8 @@ impl Parser {
                 let explain_stmt = self.parse_explain_statement()?;
                 Ok(vibesql_ast::Statement::Explain(explain_stmt))
             }
-            Token::Keyword { keyword: Keyword::Begin, .. } | Token::Keyword { keyword: Keyword::Start, .. } => {
+            Token::Keyword { keyword: Keyword::Begin, .. }
+            | Token::Keyword { keyword: Keyword::Start, .. } => {
                 let begin_stmt = self.parse_begin_statement()?;
                 Ok(vibesql_ast::Statement::BeginTransaction(begin_stmt))
             }
@@ -402,7 +418,7 @@ impl Parser {
                 let pragma_stmt = self.parse_pragma_statement()?;
                 Ok(vibesql_ast::Statement::Pragma(pragma_stmt))
             }
-            _ => Err(ParseError { message: self.peek().syntax_error() })
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 

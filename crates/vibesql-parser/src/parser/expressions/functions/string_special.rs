@@ -26,12 +26,13 @@ impl Parser {
         let string = self.parse_primary_expression()?;
 
         // Parse optional USING clause
-        let character_unit = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Using, .. }) {
-            self.advance(); // consume USING
-            Some(self.parse_character_unit()?)
-        } else {
-            None
-        };
+        let character_unit =
+            if matches!(self.peek(), Token::Keyword { keyword: Keyword::Using, .. }) {
+                self.advance(); // consume USING
+                Some(self.parse_character_unit()?)
+            } else {
+                None
+            };
 
         // Expect closing parenthesis
         self.expect_token(Token::RParen)?;
@@ -176,12 +177,13 @@ impl Parser {
         };
 
         // Parse optional USING clause
-        let character_unit = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Using, .. }) {
-            self.advance(); // consume USING
-            Some(self.parse_character_unit()?)
-        } else {
-            None
-        };
+        let character_unit =
+            if matches!(self.peek(), Token::Keyword { keyword: Keyword::Using, .. }) {
+                self.advance(); // consume USING
+                Some(self.parse_character_unit()?)
+            } else {
+                None
+            };
 
         self.expect_token(Token::RParen)?;
 

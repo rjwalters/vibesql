@@ -1,6 +1,8 @@
 //! Test UPDATE performance with primary key index optimization
 
-use vibesql_ast::{Assignment, BinaryOperator, ColumnIdentifier, Expression, UpdateStmt, WhereClause};
+use vibesql_ast::{
+    Assignment, BinaryOperator, ColumnIdentifier, Expression, UpdateStmt, WhereClause,
+};
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::UpdateExecutor;
 use vibesql_storage::{Database, Row};

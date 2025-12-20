@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{errors::CatalogError, TableIdentifier, table::TableSchema};
+use crate::{errors::CatalogError, table::TableSchema, TableIdentifier};
 
 impl super::Catalog {
     /// Check for circular foreign key dependencies that would be created by adding this table.
@@ -137,10 +137,8 @@ impl super::Catalog {
         let (target_schema_name, table_identifier) = if identifier.is_qualified() {
             // Qualified identifier: use specified schema, extract table part
             let schema_name = identifier.schema_canonical().unwrap().to_string();
-            let table_id = TableIdentifier::new(
-                identifier.table_display(),
-                identifier.is_table_quoted(),
-            );
+            let table_id =
+                TableIdentifier::new(identifier.table_display(), identifier.is_table_quoted());
             (schema_name, table_id)
         } else {
             // Unqualified identifier: use current schema
@@ -201,14 +199,17 @@ impl super::Catalog {
             let schema_canonical = identifier.schema_canonical().unwrap_or(&self.current_schema);
             self.schemas.get(schema_canonical).and_then(|schema| {
                 // Create a simple identifier with just the table part for lookup
-                let table_id = TableIdentifier::new(identifier.table_canonical(), identifier.is_table_quoted());
+                let table_id = TableIdentifier::new(
+                    identifier.table_canonical(),
+                    identifier.is_table_quoted(),
+                );
                 schema.get_table_by_identifier(&table_id)
             })
         } else {
             // For unqualified identifiers, use current schema
-            self.schemas.get(&self.current_schema).and_then(|schema| {
-                schema.get_table_by_identifier(identifier)
-            })
+            self.schemas
+                .get(&self.current_schema)
+                .and_then(|schema| schema.get_table_by_identifier(identifier))
         }
     }
 

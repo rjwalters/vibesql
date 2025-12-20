@@ -45,7 +45,10 @@ impl SelectExecutor<'_> {
             // If table doesn't exist, fall through to normal path which will produce proper error
             if let Some(table) = self.database.get_table(&table_name) {
                 let count = table.row_count();
-                let result = vec![vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(count as i64)])];
+                let result =
+                    vec![vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(
+                        count as i64,
+                    )])];
                 // Apply LIMIT/OFFSET even in fast path
                 let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
                 let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
@@ -154,7 +157,11 @@ impl SelectExecutor<'_> {
             // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
             // NOTE: Table column names take precedence over aliases (SQLite behavior)
             let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
-                crate::select::order::resolve_where_aliases_with_schema(where_expr, &stmt.select_list, &original_schema)
+                crate::select::order::resolve_where_aliases_with_schema(
+                    where_expr,
+                    &stmt.select_list,
+                    &original_schema,
+                )
             });
 
             // Optimize WHERE clause with constant folding and dead code elimination
@@ -272,7 +279,9 @@ impl SelectExecutor<'_> {
         let schema_columns: HashSet<String> = schema
             .table_schemas
             .values()
-            .flat_map(|(_, table_schema)| table_schema.columns.iter().map(|c| c.name.to_lowercase()))
+            .flat_map(|(_, table_schema)| {
+                table_schema.columns.iter().map(|c| c.name.to_lowercase())
+            })
             .collect();
 
         // Process GROUP BY clause (handles ROLLUP, CUBE, GROUPING SETS)
@@ -477,8 +486,12 @@ impl SelectExecutor<'_> {
                     // Resolve SELECT list aliases in HAVING (e.g., HAVING y >= 4 where y is count(*))
                     // No GROUP BY, so no GROUP BY expressions to exclude from alias resolution
                     // Still pass schema_columns so table columns take precedence over aliases (#4531)
-                    let resolved_having =
-                        resolve_having_aliases_with_schema(having_expr, &expanded_select_list, &[], &schema_columns);
+                    let resolved_having = resolve_having_aliases_with_schema(
+                        having_expr,
+                        &expanded_select_list,
+                        &[],
+                        &schema_columns,
+                    );
                     let having_result = self.evaluate_with_aggregates_and_grouping(
                         &resolved_having,
                         &group_rows,
@@ -566,34 +579,34 @@ impl SelectExecutor<'_> {
         // filter out the single group, resulting in 0 rows.
         let result_rows =
             if result_rows.is_empty() && stmt.group_by.is_none() && stmt.having.is_none() {
-            // Recompute aggregates for empty input
-            // This should not happen if the logic above is correct, but acts as a failsafe
-            let grouping_context = GroupingContext::default();
-            let mut aggregate_results = Vec::new();
-            for item in &expanded_select_list {
-                match item {
-                    vibesql_ast::SelectItem::Expression { expr, .. } => {
-                        // For aggregates on empty input: COUNT returns 0, others return NULL
-                        let value = self.evaluate_with_aggregates_and_grouping(
-                            expr,
-                            &[], // Empty group_rows
-                            &[], // Empty group_key
-                            &evaluator,
-                            &grouping_context,
-                        )?;
-                        aggregate_results.push(value);
-                    }
-                    _ => {
-                        return Err(ExecutorError::UnsupportedFeature(
-                            "Wildcards not supported in aggregates".to_string(),
-                        ))
+                // Recompute aggregates for empty input
+                // This should not happen if the logic above is correct, but acts as a failsafe
+                let grouping_context = GroupingContext::default();
+                let mut aggregate_results = Vec::new();
+                for item in &expanded_select_list {
+                    match item {
+                        vibesql_ast::SelectItem::Expression { expr, .. } => {
+                            // For aggregates on empty input: COUNT returns 0, others return NULL
+                            let value = self.evaluate_with_aggregates_and_grouping(
+                                expr,
+                                &[], // Empty group_rows
+                                &[], // Empty group_key
+                                &evaluator,
+                                &grouping_context,
+                            )?;
+                            aggregate_results.push(value);
+                        }
+                        _ => {
+                            return Err(ExecutorError::UnsupportedFeature(
+                                "Wildcards not supported in aggregates".to_string(),
+                            ))
+                        }
                     }
                 }
-            }
-            vec![vibesql_storage::Row::new(aggregate_results)]
-        } else {
-            result_rows
-        };
+                vec![vibesql_storage::Row::new(aggregate_results)]
+            } else {
+                result_rows
+            };
 
         // Don't apply LIMIT/OFFSET if we have a set operation - it will be applied later
         let final_result = if stmt.set_operation.is_some() {
@@ -627,15 +640,26 @@ impl SelectExecutor<'_> {
                             // Create a column reference expression for each column
                             let column_expr = if schema.table_schemas.len() > 1 {
                                 // Multiple tables: qualify the column
-                                vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&table_name.to_string(), false, &column.name, false))
+                                vibesql_ast::Expression::ColumnRef(
+                                    vibesql_ast::ColumnIdentifier::qualified(
+                                        &table_name.to_string(),
+                                        false,
+                                        &column.name,
+                                        false,
+                                    ),
+                                )
                             } else {
                                 // Single table: no need to qualify
-                                vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&column.name, false))
+                                vibesql_ast::Expression::ColumnRef(
+                                    vibesql_ast::ColumnIdentifier::simple(&column.name, false),
+                                )
                             };
 
                             expanded.push(vibesql_ast::SelectItem::Expression {
                                 expr: column_expr,
-                                alias: None, source_text: None });
+                                alias: None,
+                                source_text: None,
+                            });
                         }
                     }
                 }
@@ -646,11 +670,20 @@ impl SelectExecutor<'_> {
 
                     if let Some((_start_idx, table_schema)) = table_result {
                         for column in &table_schema.columns {
-                            let column_expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(qualifier, false, &column.name, false));
+                            let column_expr = vibesql_ast::Expression::ColumnRef(
+                                vibesql_ast::ColumnIdentifier::qualified(
+                                    qualifier,
+                                    false,
+                                    &column.name,
+                                    false,
+                                ),
+                            );
 
                             expanded.push(vibesql_ast::SelectItem::Expression {
                                 expr: column_expr,
-                                alias: None, source_text: None });
+                                alias: None,
+                                source_text: None,
+                            });
                         }
                     } else {
                         return Err(ExecutorError::TableNotFound(format!(
@@ -699,10 +732,7 @@ pub(crate) fn build_early_schema(
             // Combine schemas
             let mut combined = left_schema;
             for (key, (_, schema)) in right_schema.table_schemas {
-                combined.table_schemas.insert(
-                    key,
-                    (combined.total_columns, schema.clone()),
-                );
+                combined.table_schemas.insert(key, (combined.total_columns, schema.clone()));
                 combined.total_columns += schema.columns.len();
             }
             Some(combined)

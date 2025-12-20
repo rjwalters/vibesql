@@ -27,14 +27,19 @@ mod value;
 
 // Re-export public API
 pub use aggregates::{
-    evaluate_avg_window, evaluate_count_window, evaluate_group_concat_window, evaluate_max_window, evaluate_min_window,
-    evaluate_sum_window,
+    evaluate_avg_window, evaluate_count_window, evaluate_group_concat_window, evaluate_max_window,
+    evaluate_min_window, evaluate_sum_window,
 };
 pub use frames::calculate_frame;
 pub use partitioning::{partition_rows, Partition};
-pub use ranking::{evaluate_cume_dist, evaluate_dense_rank, evaluate_ntile, evaluate_percent_rank, evaluate_rank, evaluate_row_number};
+pub use ranking::{
+    evaluate_cume_dist, evaluate_dense_rank, evaluate_ntile, evaluate_percent_rank, evaluate_rank,
+    evaluate_row_number,
+};
 pub use sorting::{compare_values, sort_partition};
-pub use value::{evaluate_first_value, evaluate_lag, evaluate_last_value, evaluate_lead, evaluate_nth_value};
+pub use value::{
+    evaluate_first_value, evaluate_lag, evaluate_last_value, evaluate_lead, evaluate_nth_value,
+};
 
 #[cfg(test)]
 mod tests;

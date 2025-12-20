@@ -33,11 +33,16 @@ fn create_simple_case_expression(
         operand: None,
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&col_name, false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    &col_name, false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(match_value)),
             }],
-            result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&result_col, false)),
+            result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                &result_col,
+                false,
+            )),
         }],
         else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
     }
@@ -80,7 +85,9 @@ fn test_compile_when_equals_then_literal() {
         operand: None,
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("day_name", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "day_name", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "Sunday",
@@ -161,7 +168,9 @@ fn test_evaluate_literal_result() {
         operand: None,
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("day_name", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "day_name", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "Sunday",
@@ -197,12 +206,17 @@ fn test_does_not_compile_simple_case_with_operand() {
 
     // Simple CASE day_name WHEN 'Sunday' THEN sales_price END (has operand)
     let expr = Expression::Case {
-        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("day_name", false)))),
+        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "day_name", false,
+        )))),
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                 "Sunday",
             )))],
-            result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("sales_price", false)),
+            result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "sales_price",
+                false,
+            )),
         }],
         else_result: None,
     };
@@ -221,7 +235,9 @@ fn test_does_not_compile_multiple_when_clauses() {
         when_clauses: vec![
             CaseWhen {
                 conditions: vec![Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("day_name", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "day_name", false,
+                    ))),
                     op: BinaryOperator::Equal,
                     right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                         "Sunday",
@@ -231,7 +247,9 @@ fn test_does_not_compile_multiple_when_clauses() {
             },
             CaseWhen {
                 conditions: vec![Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("day_name", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "day_name", false,
+                    ))),
                     op: BinaryOperator::Equal,
                     right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                         "Monday",
@@ -256,13 +274,18 @@ fn test_does_not_compile_non_null_else() {
         operand: None,
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("day_name", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "day_name", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "Sunday",
                 )))),
             }],
-            result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("sales_price", false)),
+            result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "sales_price",
+                false,
+            )),
         }],
         else_result: Some(Box::new(Expression::Literal(SqlValue::Integer(0)))),
     };
@@ -280,11 +303,16 @@ fn test_does_not_compile_non_equality_condition() {
         operand: None,
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "quantity", false,
+                ))),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(5))),
             }],
-            result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("sales_price", false)),
+            result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "sales_price",
+                false,
+            )),
         }],
         else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
     };
@@ -302,14 +330,19 @@ fn test_does_not_compile_complex_result() {
         operand: None,
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("day_name", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "day_name", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "Sunday",
                 )))),
             }],
             result: Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("sales_price", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "sales_price",
+                    false,
+                ))),
                 op: BinaryOperator::Multiply,
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             },
@@ -330,13 +363,18 @@ fn test_compiles_with_absent_else() {
         operand: None,
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("day_name", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "day_name", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "Sunday",
                 )))),
             }],
-            result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("sales_price", false)),
+            result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "sales_price",
+                false,
+            )),
         }],
         else_result: None,
     };
@@ -358,9 +396,14 @@ fn test_literal_on_left_side_of_equality() {
                     "Sunday",
                 )))),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("day_name", false))),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "day_name", false,
+                ))),
             }],
-            result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("sales_price", false)),
+            result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "sales_price",
+                false,
+            )),
         }],
         else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
     };
@@ -389,9 +432,14 @@ fn test_does_not_compile_column_to_column_comparison() {
         operand: None,
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("day_name", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "day_name", false,
+                ))),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("sales_price", false))),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "sales_price",
+                    false,
+                ))),
             }],
             result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false)),
         }],

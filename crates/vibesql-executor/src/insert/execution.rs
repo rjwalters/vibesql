@@ -140,7 +140,11 @@ fn execute_insert_internal(
     } else {
         target_column_info.len()
     };
-    super::validation::validate_row_column_counts(&rows_to_insert, expected_value_count, table_name)?;
+    super::validation::validate_row_column_counts(
+        &rows_to_insert,
+        expected_value_count,
+        table_name,
+    )?;
 
     // Estimate DML cost for query analysis and optimization decisions
     // This helps with profiling and can inform future batch size decisions
@@ -377,11 +381,9 @@ fn execute_insert_internal(
         && !has_insert_triggers;
 
     // Helper to create a Row with optional explicit rowid
-    let make_row = |(values, rowid): (Vec<vibesql_types::SqlValue>, Option<u64>)| {
-        match rowid {
-            Some(id) => vibesql_storage::Row::with_row_id(values, id),
-            None => vibesql_storage::Row::new(values),
-        }
+    let make_row = |(values, rowid): (Vec<vibesql_types::SqlValue>, Option<u64>)| match rowid {
+        Some(id) => vibesql_storage::Row::with_row_id(values, id),
+        None => vibesql_storage::Row::new(values),
     };
 
     if use_batch_insert && validated_rows.len() > 1 {
@@ -642,7 +644,8 @@ fn check_would_violate_constraints(
                 // Build key values for this index
                 let mut key_values = Vec::new();
                 for index_col in &index_metadata.columns {
-                    if let Some(col_idx) = schema.get_column_index(&index_col.expect_column_name()) {
+                    if let Some(col_idx) = schema.get_column_index(index_col.expect_column_name())
+                    {
                         key_values.push(row_values[col_idx].clone());
                     }
                 }
@@ -772,7 +775,11 @@ fn execute_insert_on_view(
                         column_name: col_name.clone(),
                         table_name: view_def.name.clone(),
                         searched_tables: vec![view_def.name.clone()],
-                        available_columns: view_schema.columns.iter().map(|c| c.name.clone()).collect(),
+                        available_columns: view_schema
+                            .columns
+                            .iter()
+                            .map(|c| c.name.clone())
+                            .collect(),
                     })
             })
             .collect::<Result<Vec<_>, _>>()?
@@ -836,17 +843,18 @@ fn build_view_schema(
     let result = select_executor.execute_with_columns(&view_def.query)?;
 
     // Use explicit column names if provided, otherwise derive from SELECT
-    let column_names: Vec<String> = if let Some(ref cols) = view_def.columns {
-        cols.clone()
-    } else {
-        result.columns.clone()
-    };
+    let column_names: Vec<String> =
+        if let Some(ref cols) = view_def.columns { cols.clone() } else { result.columns.clone() };
 
     // Build columns with a generic data type (we just need names for trigger binding)
     let columns: Vec<vibesql_catalog::ColumnSchema> = column_names
         .into_iter()
         .map(|name| {
-            vibesql_catalog::ColumnSchema::new(name, vibesql_types::DataType::Varchar { max_length: None }, true)
+            vibesql_catalog::ColumnSchema::new(
+                name,
+                vibesql_types::DataType::Varchar { max_length: None },
+                true,
+            )
         })
         .collect();
 

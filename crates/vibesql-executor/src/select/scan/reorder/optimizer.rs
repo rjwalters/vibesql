@@ -317,7 +317,8 @@ where
                     &column_to_table,
                 ) {
                     // Find the column index in the accumulated result
-                    if let Some(col_idx) = prev_result.schema.get_column_index(Some(&acc_table), &acc_col)
+                    if let Some(col_idx) =
+                        prev_result.schema.get_column_index(Some(&acc_table), &acc_col)
                     {
                         // Build Bloom filter from the accumulated result's join key column
                         if let Some(bloom) = bloom_context::build_bloom_filter_from_rows(
@@ -624,7 +625,8 @@ where
     }
 
     // Build a new combined schema with tables in original order
-    let mut new_schema = utils::build_reordered_schema(&result.schema, &table_names, &optimal_order);
+    let mut new_schema =
+        utils::build_reordered_schema(&result.schema, &table_names, &optimal_order);
 
     // Add duplicate table aliases to the schema (issue #4507)
     // This enables proper error reporting during column resolution
@@ -905,7 +907,9 @@ fn find_inner_table_in_condition(expr: &Expression, inner_tables: &[String]) -> 
             }
             find_inner_table_in_condition(right, inner_tables)
         }
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() =>
+        {
             let t = col_id.table_canonical().unwrap();
             let t_lower = t.to_lowercase();
             if inner_tables.contains(&t_lower) {
@@ -914,7 +918,9 @@ fn find_inner_table_in_condition(expr: &Expression, inner_tables: &[String]) -> 
             // Also try to infer from column naming convention (o_ → orders)
             infer_table_from_column(col_id.column_canonical(), inner_tables)
         }
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+        {
             // Try to infer from column naming convention
             infer_table_from_column(col_id.column_canonical(), inner_tables)
         }
@@ -1262,8 +1268,8 @@ fn find_connecting_join_condition(
     column_to_table: &HashMap<String, String>,
 ) -> Option<(String, String, String)> {
     let new_table_lower = new_table.to_lowercase();
-    let profile = std::env::var("JOIN_PROFILE").is_ok()
-        || std::env::var("BLOOM_PREFILTER_DEBUG").is_ok();
+    let profile =
+        std::env::var("JOIN_PROFILE").is_ok() || std::env::var("BLOOM_PREFILTER_DEBUG").is_ok();
 
     if profile {
         eprintln!(
@@ -1289,13 +1295,19 @@ fn find_connecting_join_condition(
             // Check if one side is the new table and the other is an accumulated table
             if left_table == new_table_lower && joined_tables.contains(&right_table) {
                 if profile {
-                    eprintln!("[BLOOM_PREFILTER]   -> MATCH: accumulated {}.{} for new {}.{}", right_table, right_col, new_table_lower, left_col);
+                    eprintln!(
+                        "[BLOOM_PREFILTER]   -> MATCH: accumulated {}.{} for new {}.{}",
+                        right_table, right_col, new_table_lower, left_col
+                    );
                 }
                 return Some((right_table, right_col, left_col));
             }
             if right_table == new_table_lower && joined_tables.contains(&left_table) {
                 if profile {
-                    eprintln!("[BLOOM_PREFILTER]   -> MATCH: accumulated {}.{} for new {}.{}", left_table, left_col, new_table_lower, right_col);
+                    eprintln!(
+                        "[BLOOM_PREFILTER]   -> MATCH: accumulated {}.{} for new {}.{}",
+                        left_table, left_col, new_table_lower, right_col
+                    );
                 }
                 return Some((left_table, left_col, right_col));
             }

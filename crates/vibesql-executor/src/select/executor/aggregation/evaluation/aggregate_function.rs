@@ -78,7 +78,10 @@ fn extract_collations(order_items: &[vibesql_ast::OrderByItem]) -> Vec<Option<St
 
 /// Validate aggregate function argument count
 /// Returns error with SQLite-compatible message if validation fails
-fn validate_aggregate_args(name: &str, args: &[vibesql_ast::Expression]) -> Result<(), ExecutorError> {
+fn validate_aggregate_args(
+    name: &str,
+    args: &[vibesql_ast::Expression],
+) -> Result<(), ExecutorError> {
     let name_upper = name.to_uppercase();
     let arg_count = args.len();
 
@@ -150,21 +153,37 @@ pub(super) fn evaluate(
     group_rows: &[vibesql_storage::Row],
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
-    // Extract name, distinct, args, and order_by from AggregateFunction
-    let (name, distinct, args, order_by) = match expr {
-        vibesql_ast::Expression::AggregateFunction { name, distinct, args, order_by } => {
-            (name, *distinct, args, order_by)
+    // Extract name, distinct, args, order_by, and filter from AggregateFunction
+    let (name, distinct, args, order_by, filter) = match expr {
+        vibesql_ast::Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
+            (name, *distinct, args, order_by, filter)
         }
         _ => unreachable!("evaluate called with non-aggregate expression"),
+    };
+
+    // Helper closure to check if a row passes the FILTER condition
+    // Returns true if there's no filter, or if the filter evaluates to true
+    let passes_filter = |row: &vibesql_storage::Row,
+                         evaluator: &CombinedExpressionEvaluator|
+     -> Result<bool, ExecutorError> {
+        if let Some(filter_expr) = filter {
+            let filter_result = evaluator.eval(filter_expr, row)?;
+            // Only rows where filter evaluates to TRUE are included
+            // NULL and FALSE are excluded (per SQL:2003 semantics)
+            Ok(matches!(filter_result, vibesql_types::SqlValue::Boolean(true)))
+        } else {
+            Ok(true)
+        }
     };
 
     // Validate argument count first
     validate_aggregate_args(name.canonical(), args)?;
 
     // Generate cache key for this aggregate expression
-    // Format: "{name}:{distinct}:{arg_debug}:{order_by_debug}"
-    // Include order_by to distinguish aggregates with different ORDER BY clauses
-    let cache_key = format!("{}:{}:{:?}:{:?}", name.to_uppercase(), distinct, args, order_by);
+    // Format: "{name}:{distinct}:{arg_debug}:{order_by_debug}:{filter_debug}"
+    // Include order_by and filter to distinguish aggregates with different clauses
+    let cache_key =
+        format!("{}:{}:{:?}:{:?}:{:?}", name.to_uppercase(), distinct, args, order_by, filter);
 
     // Check cache first (lazily initialized)
     if let Some(cached_result) = executor.get_aggregate_cache().borrow().get(&cache_key) {
@@ -188,9 +207,22 @@ pub(super) fn evaluate(
                     "COUNT(DISTINCT *) is not valid SQL".to_string(),
                 ));
             }
-            // Fast path: COUNT(*) without DISTINCT is just row count (O(1) vs O(n))
-            let result = vibesql_types::SqlValue::Integer(group_rows.len() as i64);
-            // Cache the result (lazily initialized)
+            // Fast path: COUNT(*) without DISTINCT and without FILTER is just row count (O(1) vs O(n))
+            if filter.is_none() {
+                let result = vibesql_types::SqlValue::Integer(group_rows.len() as i64);
+                // Cache the result (lazily initialized)
+                executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
+                return Ok(result);
+            }
+            // COUNT(*) with FILTER: need to count rows that pass the filter
+            let mut count = 0i64;
+            for row in group_rows {
+                evaluator.clear_cse_cache();
+                if passes_filter(row, evaluator)? {
+                    count += 1;
+                }
+            }
+            let result = vibesql_types::SqlValue::Integer(count);
             executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
             return Ok(result);
         }
@@ -201,14 +233,17 @@ pub(super) fn evaluate(
     if name.to_uppercase() == "COUNT" && args.len() > 1 {
         if !distinct {
             // SQLite-compatible error message
-            return Err(ExecutorError::WrongNumberOfArguments {
-                function_name: name.to_string(),
-            });
+            return Err(ExecutorError::WrongNumberOfArguments { function_name: name.to_string() });
         }
 
         // Evaluate all arguments for each row and accumulate as tuples
         for row in group_rows {
             evaluator.clear_cse_cache();
+
+            // Skip rows that don't pass the FILTER condition
+            if !passes_filter(row, evaluator)? {
+                continue;
+            }
 
             let mut tuple_values = Vec::with_capacity(args.len());
             for arg in args {
@@ -243,7 +278,7 @@ pub(super) fn evaluate(
                         s.to_string()
                     }
                     vibesql_types::SqlValue::Null => String::new(), // NULL separator = empty string (SQLite behavior)
-                    other => other.to_string(), // Convert other types to string
+                    other => other.to_string(),                     // Convert other types to string
                 }
             } else {
                 ",".to_string() // Empty group, use default
@@ -253,7 +288,8 @@ pub(super) fn evaluate(
         } else {
             return Err(ExecutorError::UnsupportedExpression(format!(
                 "{} expects 1 or 2 arguments, got {}",
-                name, args.len()
+                name,
+                args.len()
             )));
         };
 
@@ -268,6 +304,12 @@ pub(super) fn evaluate(
 
             for (row_idx, row) in group_rows.iter().enumerate() {
                 evaluator.clear_cse_cache();
+
+                // Skip rows that don't pass the FILTER condition
+                if !passes_filter(row, evaluator)? {
+                    continue;
+                }
+
                 let value = evaluator.eval(&args[0], row)?;
 
                 // Skip NULL values for GROUP_CONCAT
@@ -300,8 +342,9 @@ pub(super) fn evaluate(
                 evaluator.clear_cse_cache();
                 let sep_value = evaluator.eval(&args[1], last_row)?;
                 match sep_value {
-                    vibesql_types::SqlValue::Varchar(s)
-                    | vibesql_types::SqlValue::Character(s) => s.to_string(),
+                    vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                        s.to_string()
+                    }
                     vibesql_types::SqlValue::Null => String::new(),
                     other => other.to_string(),
                 }
@@ -320,18 +363,20 @@ pub(super) fn evaluate(
             }
 
             let result = acc.finalize();
-            executor
-                .get_aggregate_cache()
-                .borrow_mut()
-                .insert(cache_key, result.clone());
+            executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
             return Ok(result);
         }
 
         // No ORDER BY - use the original path
-        let mut acc = AggregateAccumulator::new_with_separator(name.canonical(), distinct, &separator)?;
+        let mut acc =
+            AggregateAccumulator::new_with_separator(name.canonical(), distinct, &separator)?;
 
         for row in group_rows {
             evaluator.clear_cse_cache();
+            // Skip rows that don't pass the FILTER condition
+            if !passes_filter(row, evaluator)? {
+                continue;
+            }
             let value = evaluator.eval(&args[0], row)?;
             acc.accumulate(&value);
         }
@@ -344,9 +389,7 @@ pub(super) fn evaluate(
     // Handle JSON_GROUP_ARRAY with optional ORDER BY
     if name_upper == "JSON_GROUP_ARRAY" {
         if args.len() != 1 {
-            return Err(ExecutorError::WrongNumberOfArguments {
-                function_name: name.to_string(),
-            });
+            return Err(ExecutorError::WrongNumberOfArguments { function_name: name.to_string() });
         }
 
         // Handle ORDER BY clause within the aggregate
@@ -359,6 +402,12 @@ pub(super) fn evaluate(
 
             for row in group_rows {
                 evaluator.clear_cse_cache();
+
+                // Skip rows that don't pass the FILTER condition
+                if !passes_filter(row, evaluator)? {
+                    continue;
+                }
+
                 let value = evaluator.eval(&args[0], row)?;
 
                 // JSON_GROUP_ARRAY includes NULL values (unlike GROUP_CONCAT)
@@ -388,10 +437,7 @@ pub(super) fn evaluate(
             }
 
             let result = acc.finalize();
-            executor
-                .get_aggregate_cache()
-                .borrow_mut()
-                .insert(cache_key, result.clone());
+            executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
             return Ok(result);
         }
 
@@ -400,15 +446,16 @@ pub(super) fn evaluate(
 
         for row in group_rows {
             evaluator.clear_cse_cache();
+            // Skip rows that don't pass the FILTER condition
+            if !passes_filter(row, evaluator)? {
+                continue;
+            }
             let value = evaluator.eval(&args[0], row)?;
             acc.accumulate(&value);
         }
 
         let result = acc.finalize();
-        executor
-            .get_aggregate_cache()
-            .borrow_mut()
-            .insert(cache_key, result.clone());
+        executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
         return Ok(result);
     }
 
@@ -455,9 +502,22 @@ pub(super) fn evaluate(
 
     if let Some(ref compiled) = compiled_case {
         // Fast path: use compiled CASE expression (no CSE cache, no expression traversal)
-        for row in group_rows {
-            let value = compiled.evaluate(row);
-            acc.accumulate(&value);
+        // Note: if there's a filter, we still need to evaluate it through the evaluator
+        if filter.is_some() {
+            for row in group_rows {
+                evaluator.clear_cse_cache();
+                // Skip rows that don't pass the FILTER condition
+                if !passes_filter(row, evaluator)? {
+                    continue;
+                }
+                let value = compiled.evaluate(row);
+                acc.accumulate(&value);
+            }
+        } else {
+            for row in group_rows {
+                let value = compiled.evaluate(row);
+                acc.accumulate(&value);
+            }
         }
     } else {
         // Slow path: full expression evaluation
@@ -465,6 +525,11 @@ pub(super) fn evaluate(
             // Clear CSE cache before evaluating each row to prevent column values
             // from being incorrectly cached across different rows
             evaluator.clear_cse_cache();
+
+            // Skip rows that don't pass the FILTER condition
+            if !passes_filter(row, evaluator)? {
+                continue;
+            }
 
             let value = evaluator.eval(&args[0], row)?;
             acc.accumulate(&value);

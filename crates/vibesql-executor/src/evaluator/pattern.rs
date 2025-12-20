@@ -75,7 +75,11 @@ fn glob_match_recursive(text: &[u8], pattern: &[u8], text_pos: usize, pattern_po
                 let ch = pattern[pos];
 
                 // Check for range (e.g., a-z)
-                if ch == b'-' && prev_char.is_some() && pos + 1 < pattern.len() && pattern[pos + 1] != b']' {
+                if ch == b'-'
+                    && prev_char.is_some()
+                    && pos + 1 < pattern.len()
+                    && pattern[pos + 1] != b']'
+                {
                     let range_end = pattern[pos + 1];
                     let range_start = prev_char.unwrap();
                     if text_char >= range_start && text_char <= range_end {

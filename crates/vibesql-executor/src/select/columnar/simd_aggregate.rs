@@ -297,7 +297,7 @@ pub fn simd_aggregate_f64(
 
     // Return aggregated result
     match op {
-        AggregateOp::Sum => Ok(SqlValue::Double(sum)),  // SUM of floats returns Double
+        AggregateOp::Sum => Ok(SqlValue::Double(sum)), // SUM of floats returns Double
         AggregateOp::Avg => Ok(SqlValue::Double(sum / count as f64)),
         AggregateOp::Min => Ok(SqlValue::Double(min)),
         AggregateOp::Max => Ok(SqlValue::Double(max)),

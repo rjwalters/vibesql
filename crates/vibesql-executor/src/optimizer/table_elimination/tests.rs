@@ -118,7 +118,9 @@ mod eliminate_unused_tables_tests {
 
     fn make_column_ref(table: Option<&str>, column: &str) -> Expression {
         match table {
-            Some(t) => Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(t, false, column, false)),
+            Some(t) => Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                t, false, column, false,
+            )),
             None => Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(column, false)),
         }
     }
@@ -128,7 +130,7 @@ mod eliminate_unused_tables_tests {
             name: name.to_string(),
             alias: alias.map(|a| a.to_string()),
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }
     }
 
@@ -151,7 +153,9 @@ mod eliminate_unused_tables_tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: make_column_ref(Some("t1"), "col1"),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: Some(make_table("table1", Some("t1"))),
@@ -178,10 +182,14 @@ mod eliminate_unused_tables_tests {
             select_list: vec![
                 SelectItem::Expression {
                     expr: make_column_ref(Some("t1"), "col1"),
-                    alias: None, source_text: None },
+                    alias: None,
+                    source_text: None,
+                },
                 SelectItem::Expression {
                     expr: make_column_ref(Some("t2"), "col2"),
-                    alias: None, source_text: None },
+                    alias: None,
+                    source_text: None,
+                },
             ],
             into_table: None,
             into_variables: None,
@@ -212,7 +220,9 @@ mod eliminate_unused_tables_tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: make_column_ref(Some("t1"), "col1"),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: Some(make_cross_join(
@@ -247,7 +257,9 @@ mod eliminate_unused_tables_tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: make_column_ref(Some("t1"), "col1"),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: Some(make_cross_join(
@@ -295,7 +307,9 @@ mod eliminate_unused_tables_tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::Literal(SqlValue::Integer(1)),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: Some(make_cross_join(
@@ -324,7 +338,9 @@ mod eliminate_unused_tables_tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::Literal(SqlValue::Integer(42)),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: None,
@@ -389,7 +405,9 @@ mod eliminate_unused_tables_tests {
                         expr: Box::new(make_column_ref(Some("cor0"), "col2")),
                     }),
                 },
-                alias: Some("col0".to_string()), source_text: None }],
+                alias: Some("col0".to_string()),
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             // Cross join - tab1 is NOT referenced but has no filter
@@ -430,7 +448,9 @@ mod eliminate_unused_tables_tests {
                     op: vibesql_ast::UnaryOperator::Minus,
                     expr: Box::new(Expression::Literal(SqlValue::Integer(0))),
                 },
-                alias: Some("col3".to_string()), source_text: None }],
+                alias: Some("col3".to_string()),
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             // Cross join of same table
@@ -519,10 +539,16 @@ mod helper_function_tests {
         let select_list = vec![
             SelectItem::Expression {
                 expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false)),
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
             SelectItem::Expression {
-                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "col2", false)),
-                alias: None, source_text: None },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                    "t1", false, "col2", false,
+                )),
+                alias: None,
+                source_text: None,
+            },
         ];
         let result = collect_unqualified_columns(&select_list);
         assert!(result.contains("col1"));
@@ -531,11 +557,13 @@ mod helper_function_tests {
 
     #[test]
     fn has_unqualified_column_ref_detects_unqualified() {
-        let qualified =
-            Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "col1", false));
+        let qualified = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+            "t1", false, "col1", false,
+        ));
         assert!(!has_unqualified_column_ref(&qualified));
 
-        let unqualified = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false));
+        let unqualified =
+            Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false));
         assert!(has_unqualified_column_ref(&unqualified));
     }
 }

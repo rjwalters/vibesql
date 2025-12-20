@@ -16,7 +16,8 @@ impl Parser {
 
         // Peek ahead to see if next is CONFLICT (vs ON DELETE/UPDATE for foreign keys)
         if self.position + 1 < self.tokens.len() {
-            if let Token::Keyword { keyword: Keyword::Conflict, .. } = &self.tokens[self.position + 1]
+            if let Token::Keyword { keyword: Keyword::Conflict, .. } =
+                &self.tokens[self.position + 1]
             {
                 self.advance(); // consume ON
                 self.advance(); // consume CONFLICT

@@ -333,8 +333,7 @@ fn test_parse_on_conflict_column_constraints() {
     }
 
     // Test PRIMARY KEY with ON CONFLICT ROLLBACK
-    let result =
-        Parser::parse_sql("CREATE TABLE t4(id INTEGER PRIMARY KEY ON CONFLICT ROLLBACK);");
+    let result = Parser::parse_sql("CREATE TABLE t4(id INTEGER PRIMARY KEY ON CONFLICT ROLLBACK);");
     assert!(result.is_ok(), "Should parse PRIMARY KEY with ON CONFLICT ROLLBACK");
     let stmt = result.unwrap();
     match stmt {

@@ -300,10 +300,7 @@ pub enum IndexColumn<'arena> {
         prefix_length: Option<u64>,
     },
     /// Expression index (functional index)
-    Expression {
-        expr: &'arena Expression<'arena>,
-        direction: super::expression::OrderDirection,
-    },
+    Expression { expr: &'arena Expression<'arena>, direction: super::expression::OrderDirection },
 }
 
 impl<'arena> IndexColumn<'arena> {

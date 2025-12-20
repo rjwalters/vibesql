@@ -90,7 +90,11 @@ impl SelectExecutor<'_> {
         // IMPORTANT: Use schema-aware resolution to avoid incorrectly substituting
         // table column names with aggregate aliases (SQLite behavior)
         let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
-            crate::select::order::resolve_where_aliases_with_schema(where_expr, &stmt.select_list, &schema)
+            crate::select::order::resolve_where_aliases_with_schema(
+                where_expr,
+                &stmt.select_list,
+                &schema,
+            )
         });
 
         // Validate WHERE clause subqueries upfront (before row iteration)
@@ -143,7 +147,11 @@ impl SelectExecutor<'_> {
 
         // Stage 3: OFFSET (skip rows lazily)
         let mut iterator: Box<dyn Iterator<Item = _>> = if let Some(ref offset_expr) = stmt.offset {
-            let offset_usize = crate::select::helpers::evaluate_limit_offset_expr(offset_expr, self.database, "OFFSET")?;
+            let offset_usize = crate::select::helpers::evaluate_limit_offset_expr(
+                offset_expr,
+                self.database,
+                "OFFSET",
+            )?;
             Box::new(iterator.skip(offset_usize))
         } else {
             iterator
@@ -151,7 +159,11 @@ impl SelectExecutor<'_> {
 
         // Stage 4: LIMIT (take only needed rows)
         if let Some(ref limit_expr) = stmt.limit {
-            let limit_usize = crate::select::helpers::evaluate_limit_offset_expr(limit_expr, self.database, "LIMIT")?;
+            let limit_usize = crate::select::helpers::evaluate_limit_offset_expr(
+                limit_expr,
+                self.database,
+                "LIMIT",
+            )?;
             iterator = Box::new(iterator.take(limit_usize));
         }
 

@@ -333,7 +333,9 @@ fn test_parse_natural_join() {
 
     match stmt {
         vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
-            vibesql_ast::FromClause::Join { join_type, natural, condition, using_columns, .. } => {
+            vibesql_ast::FromClause::Join {
+                join_type, natural, condition, using_columns, ..
+            } => {
                 assert_eq!(*join_type, vibesql_ast::JoinType::Inner);
                 assert!(*natural);
                 // NATURAL JOIN should have no ON or USING clause
@@ -374,7 +376,9 @@ fn test_parse_natural_cross_join() {
 
     match stmt {
         vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
-            vibesql_ast::FromClause::Join { join_type, natural, condition, using_columns, .. } => {
+            vibesql_ast::FromClause::Join {
+                join_type, natural, condition, using_columns, ..
+            } => {
                 assert_eq!(*join_type, vibesql_ast::JoinType::Cross);
                 // NATURAL flag should be preserved
                 assert!(*natural);
@@ -508,16 +512,18 @@ fn test_parse_legacy_comma_join_on_multiple_tables() {
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             match select.from.as_ref().unwrap() {
-                vibesql_ast::FromClause::Join {
-                    join_type, left, condition, ..
-                } => {
+                vibesql_ast::FromClause::Join { join_type, left, condition, .. } => {
                     // Outermost join (t1,t2) JOIN t3
                     assert_eq!(*join_type, vibesql_ast::JoinType::Inner);
                     assert!(condition.is_some());
 
                     // Inner join should also be Inner with condition
                     match left.as_ref() {
-                        vibesql_ast::FromClause::Join { join_type: inner_type, condition: inner_cond, .. } => {
+                        vibesql_ast::FromClause::Join {
+                            join_type: inner_type,
+                            condition: inner_cond,
+                            ..
+                        } => {
                             assert_eq!(*inner_type, vibesql_ast::JoinType::Inner);
                             assert!(inner_cond.is_some());
                         }

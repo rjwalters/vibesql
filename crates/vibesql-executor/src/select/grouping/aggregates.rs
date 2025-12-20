@@ -57,11 +57,7 @@ pub enum AggregateAccumulator {
         seen: Option<HashSet<String>>,
     },
     /// TOTAL - Like SUM but returns 0.0 for empty set instead of NULL (SQLite compatible)
-    Total {
-        sum: f64,
-        distinct: bool,
-        seen: Option<HashSet<vibesql_types::SqlValue>>,
-    },
+    Total { sum: f64, distinct: bool, seen: Option<HashSet<vibesql_types::SqlValue>> },
     /// JSON_GROUP_ARRAY - Collects values into a JSON array (SQLite compatible)
     JsonGroupArray {
         values: Vec<vibesql_types::SqlValue>,
@@ -111,11 +107,9 @@ impl AggregateAccumulator {
                 seen: if distinct { Some(HashSet::new()) } else { None },
             }),
             "TOTAL" => Ok(AggregateAccumulator::Total { sum: 0.0, distinct, seen }),
-            "JSON_GROUP_ARRAY" => Ok(AggregateAccumulator::JsonGroupArray {
-                values: Vec::new(),
-                distinct,
-                seen,
-            }),
+            "JSON_GROUP_ARRAY" => {
+                Ok(AggregateAccumulator::JsonGroupArray { values: Vec::new(), distinct, seen })
+            }
             _ => Err(crate::errors::ExecutorError::UnsupportedExpression(format!(
                 "Unknown aggregate function: {}",
                 function_name
@@ -315,7 +309,9 @@ impl AggregateAccumulator {
     /// SQLite semantics: If ANY value in the tuple is NULL, the entire tuple is skipped.
     pub fn accumulate_tuple(&mut self, values: Vec<vibesql_types::SqlValue>) {
         match self {
-            AggregateAccumulator::Count { ref mut count, distinct, ref mut seen_tuples, .. } => {
+            AggregateAccumulator::Count {
+                ref mut count, distinct, ref mut seen_tuples, ..
+            } => {
                 // Multi-arg COUNT(DISTINCT) requires DISTINCT flag
                 if !*distinct {
                     // For non-DISTINCT, just count non-NULL tuples
@@ -365,7 +361,9 @@ impl AggregateAccumulator {
                         vibesql_types::SqlValue::Integer(v) => {
                             vibesql_types::SqlValue::Double(*v as f64)
                         }
-                        vibesql_types::SqlValue::Bigint(v) => vibesql_types::SqlValue::Double(*v as f64),
+                        vibesql_types::SqlValue::Bigint(v) => {
+                            vibesql_types::SqlValue::Double(*v as f64)
+                        }
                         vibesql_types::SqlValue::Smallint(v) => {
                             vibesql_types::SqlValue::Double(*v as f64)
                         }
@@ -951,10 +949,18 @@ mod tests {
 
     #[test]
     fn test_combine_count() {
-        let mut acc1 =
-            AggregateAccumulator::Count { count: 5, distinct: false, seen: None, seen_tuples: None };
-        let acc2 =
-            AggregateAccumulator::Count { count: 3, distinct: false, seen: None, seen_tuples: None };
+        let mut acc1 = AggregateAccumulator::Count {
+            count: 5,
+            distinct: false,
+            seen: None,
+            seen_tuples: None,
+        };
+        let acc2 = AggregateAccumulator::Count {
+            count: 3,
+            distinct: false,
+            seen: None,
+            seen_tuples: None,
+        };
 
         acc1.combine(acc2).unwrap();
 
@@ -1137,8 +1143,12 @@ mod tests {
 
     #[test]
     fn test_combine_incompatible_types_fails() {
-        let mut acc1 =
-            AggregateAccumulator::Count { count: 5, distinct: false, seen: None, seen_tuples: None };
+        let mut acc1 = AggregateAccumulator::Count {
+            count: 5,
+            distinct: false,
+            seen: None,
+            seen_tuples: None,
+        };
         let acc2 = AggregateAccumulator::Sum {
             sum: SqlValue::Integer(10),
             count: 3,
@@ -1153,8 +1163,12 @@ mod tests {
 
     #[test]
     fn test_combine_different_distinct_flags_fails() {
-        let mut acc1 =
-            AggregateAccumulator::Count { count: 5, distinct: false, seen: None, seen_tuples: None };
+        let mut acc1 = AggregateAccumulator::Count {
+            count: 5,
+            distinct: false,
+            seen: None,
+            seen_tuples: None,
+        };
         let acc2 = AggregateAccumulator::Count {
             count: 3,
             distinct: true,
@@ -1260,7 +1274,8 @@ mod tests {
 
     #[test]
     fn test_group_concat_with_custom_separator() {
-        let mut acc = AggregateAccumulator::new_with_separator("GROUP_CONCAT", false, " - ").unwrap();
+        let mut acc =
+            AggregateAccumulator::new_with_separator("GROUP_CONCAT", false, " - ").unwrap();
 
         acc.accumulate(&SqlValue::Varchar("a".into()));
         acc.accumulate(&SqlValue::Varchar("b".into()));

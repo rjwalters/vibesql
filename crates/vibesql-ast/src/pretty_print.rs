@@ -342,7 +342,7 @@ impl ToSql for Expression {
                 result
             }
 
-            Expression::AggregateFunction { name, distinct, args, order_by } => {
+            Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
                 let args_sql: Vec<String> = args.iter().map(|a| a.to_sql()).collect();
                 let order_by_sql = order_by.as_ref().map(|items| {
                     let items_sql: Vec<String> = items
@@ -357,19 +357,25 @@ impl ToSql for Expression {
                         .collect();
                     format!(" ORDER BY {}", items_sql.join(", "))
                 });
+                let filter_sql = filter
+                    .as_ref()
+                    .map(|f| format!(" FILTER (WHERE {})", f.to_sql()))
+                    .unwrap_or_default();
                 if *distinct {
                     format!(
-                        "{}(DISTINCT {}{})",
+                        "{}(DISTINCT {}{}){}",
                         name.canonical().to_uppercase(),
                         args_sql.join(", "),
-                        order_by_sql.unwrap_or_default()
+                        order_by_sql.unwrap_or_default(),
+                        filter_sql
                     )
                 } else {
                     format!(
-                        "{}({}{})",
+                        "{}({}{}){}",
                         name.canonical().to_uppercase(),
                         args_sql.join(", "),
-                        order_by_sql.unwrap_or_default()
+                        order_by_sql.unwrap_or_default(),
+                        filter_sql
                     )
                 }
             }
@@ -702,9 +708,18 @@ impl ToSql for PseudoTable {
 impl ToSql for WindowFunctionSpec {
     fn to_sql(&self) -> String {
         match self {
-            WindowFunctionSpec::Aggregate { name, args } => {
+            WindowFunctionSpec::Aggregate { name, args, filter } => {
                 let args_sql: Vec<String> = args.iter().map(|a| a.to_sql()).collect();
-                format!("{}({})", name.canonical().to_uppercase(), args_sql.join(", "))
+                let filter_sql = filter
+                    .as_ref()
+                    .map(|f| format!(" FILTER (WHERE {})", f.to_sql()))
+                    .unwrap_or_default();
+                format!(
+                    "{}({}){}",
+                    name.canonical().to_uppercase(),
+                    args_sql.join(", "),
+                    filter_sql
+                )
             }
             WindowFunctionSpec::Ranking { name, args } => {
                 let args_sql: Vec<String> = args.iter().map(|a| a.to_sql()).collect();
@@ -1272,8 +1287,15 @@ mod tests {
             join_type: JoinType::Inner,
             condition: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(ColumnIdentifier::qualified("o", false, "customer_id", false))),
-                right: Box::new(Expression::ColumnRef(ColumnIdentifier::qualified("c", false, "id", false))),
+                left: Box::new(Expression::ColumnRef(ColumnIdentifier::qualified(
+                    "o",
+                    false,
+                    "customer_id",
+                    false,
+                ))),
+                right: Box::new(Expression::ColumnRef(ColumnIdentifier::qualified(
+                    "c", false, "id", false,
+                ))),
             }),
             using_columns: None,
             natural: false,
@@ -1289,6 +1311,7 @@ mod tests {
             distinct: true,
             args: vec![Expression::ColumnRef(ColumnIdentifier::simple("id", false))],
             order_by: None,
+            filter: None,
         };
         assert_eq!(expr.to_sql(), "COUNT(DISTINCT id)");
     }
@@ -1342,7 +1365,9 @@ mod tests {
     fn test_group_by_rollup() {
         let group_by = GroupByClause::Rollup(vec![
             GroupingElement::Single(Expression::ColumnRef(ColumnIdentifier::simple("year", false))),
-            GroupingElement::Single(Expression::ColumnRef(ColumnIdentifier::simple("month", false))),
+            GroupingElement::Single(Expression::ColumnRef(ColumnIdentifier::simple(
+                "month", false,
+            ))),
         ]);
         assert_eq!(group_by.to_sql(), "ROLLUP(year, month)");
     }

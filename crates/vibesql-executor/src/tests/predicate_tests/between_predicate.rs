@@ -30,16 +30,19 @@ fn test_between_with_null_expr() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("val", false),
+            )),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             negated: false,
@@ -84,16 +87,19 @@ fn test_not_between() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("val", false),
+            )),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: true,
@@ -137,16 +143,19 @@ fn test_between_boundary_values() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("val", false),
+            )),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: false,
@@ -193,16 +202,19 @@ fn test_not_between_with_null_bound() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("val", false),
+            )),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
             negated: true,
@@ -248,16 +260,19 @@ fn test_between_with_null_bound() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("val", false),
+            )),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: false,
@@ -306,16 +321,19 @@ fn test_not_between_with_null_lower_bound() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("val", false),
+            )),
             low: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
             high: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20))),
             negated: true,
@@ -366,10 +384,11 @@ fn test_not_negative_literal_between_null_bounds() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "tab0".to_string(),
             alias: None,
             column_aliases: None,

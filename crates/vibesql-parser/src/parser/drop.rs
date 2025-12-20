@@ -34,6 +34,10 @@ impl Parser {
             self.advance();
         }
 
-        Ok(vibesql_ast::DropTableStmt { table_name: table.full_name(), if_exists, quoted: table.is_any_quoted() })
+        Ok(vibesql_ast::DropTableStmt {
+            table_name: table.full_name(),
+            if_exists,
+            quoted: table.is_any_quoted(),
+        })
     }
 }

@@ -384,11 +384,7 @@ fn test_error_message_includes_suggestion() {
     // 2. The specific keyword (WHERE)
     // 3. Suggestion to use delimited identifiers
     assert!(error_msg.contains("reserved keyword"), "Missing 'reserved keyword' in: {}", error_msg);
-    assert!(
-        error_msg.to_lowercase().contains("where"),
-        "Missing keyword name in: {}",
-        error_msg
-    );
+    assert!(error_msg.to_lowercase().contains("where"), "Missing keyword name in: {}", error_msg);
     assert!(
         error_msg.contains("delimited identifiers") || error_msg.contains("\""),
         "Missing suggestion in: {}",
@@ -405,22 +401,14 @@ fn test_issue_4448_incomplete_alias_in_from() {
     // SQLite returns: near ";": syntax error
     // VibeSQL should also return syntax error
     let result = Parser::parse_sql("SELECT f1 FROM test1 as 'hi', test2 as");
-    assert!(
-        result.is_err(),
-        "Should fail with incomplete alias after AS, got: {:?}",
-        result
-    );
+    assert!(result.is_err(), "Should fail with incomplete alias after AS, got: {:?}", result);
 }
 
 #[test]
 fn test_issue_4448_incomplete_alias_with_semicolon() {
     // Same as above but with explicit semicolon
     let result = Parser::parse_sql("SELECT f1 FROM test1 as 'hi', test2 as;");
-    assert!(
-        result.is_err(),
-        "Should fail with incomplete alias after AS, got: {:?}",
-        result
-    );
+    assert!(result.is_err(), "Should fail with incomplete alias after AS, got: {:?}", result);
 }
 
 #[test]
@@ -429,22 +417,14 @@ fn test_issue_4448_order_by_after_limit_offset() {
     // SQLite: SELECT f1 FROM test1 LIMIT 5+3 OFFSET 1 ORDER BY f2
     // Returns: near "ORDER": syntax error
     let result = Parser::parse_sql("SELECT f1 FROM test1 LIMIT 8 OFFSET 1 ORDER BY f2");
-    assert!(
-        result.is_err(),
-        "Should fail with ORDER BY after LIMIT/OFFSET, got: {:?}",
-        result
-    );
+    assert!(result.is_err(), "Should fail with ORDER BY after LIMIT/OFFSET, got: {:?}", result);
 }
 
 #[test]
 fn test_issue_4448_order_by_after_limit_only() {
     // ORDER BY after just LIMIT (no OFFSET) should also be rejected
     let result = Parser::parse_sql("SELECT f1 FROM test1 LIMIT 5 ORDER BY f2");
-    assert!(
-        result.is_err(),
-        "Should fail with ORDER BY after LIMIT, got: {:?}",
-        result
-    );
+    assert!(result.is_err(), "Should fail with ORDER BY after LIMIT, got: {:?}", result);
 }
 
 #[test]

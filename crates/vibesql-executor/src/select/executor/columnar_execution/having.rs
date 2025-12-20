@@ -124,8 +124,8 @@ fn evaluate_expr_on_result_row(
             } else if args.len() == 1 {
                 match &args[0] {
                     Expression::ColumnRef(col_id) => {
-                        if let Some(idx) =
-                            schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())
+                        if let Some(idx) = schema
+                            .get_column_index(col_id.table_canonical(), col_id.column_canonical())
                         {
                             AggregateSource::Column(idx)
                         } else {
@@ -465,11 +465,11 @@ fn sources_match(spec_source: &AggregateSource, having_source: &AggregateSource)
 /// Check if two expressions are structurally equal
 fn expressions_equal(a: &Expression, b: &Expression) -> bool {
     match (a, b) {
-        (
-            Expression::ColumnRef(col_id1),
-            Expression::ColumnRef(col_id2),
-        ) if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() => {
-            col_id1.table_canonical() == col_id2.table_canonical() && col_id1.column_canonical() == col_id2.column_canonical()
+        (Expression::ColumnRef(col_id1), Expression::ColumnRef(col_id2))
+            if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() =>
+        {
+            col_id1.table_canonical() == col_id2.table_canonical()
+                && col_id1.column_canonical() == col_id2.column_canonical()
         }
         (
             Expression::BinaryOp { left: l1, op: o1, right: r1 },

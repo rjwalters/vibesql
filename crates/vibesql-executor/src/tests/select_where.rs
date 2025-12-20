@@ -54,16 +54,19 @@ fn test_select_with_where() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false))),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("age", false),
+            )),
             op: vibesql_ast::BinaryOperator::GreaterThanOrEqual,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(18))),
         }),
@@ -139,17 +142,20 @@ fn test_select_with_and_condition() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("price", false),
+                )),
                 op: vibesql_ast::BinaryOperator::GreaterThan,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(50),
@@ -157,7 +163,9 @@ fn test_select_with_and_condition() {
             }),
             op: vibesql_ast::BinaryOperator::And,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("stock", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("stock", false),
+                )),
                 op: vibesql_ast::BinaryOperator::GreaterThan,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(0),
@@ -228,17 +236,20 @@ fn test_select_with_or_condition() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "items".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("category", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("category", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("electronics")),
@@ -246,7 +257,9 @@ fn test_select_with_or_condition() {
             }),
             op: vibesql_ast::BinaryOperator::Or,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("category", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("category", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("books")),
@@ -315,16 +328,19 @@ fn test_select_with_null_in_where() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "data".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("value", false),
+            )),
             op: vibesql_ast::BinaryOperator::GreaterThan,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(50))),
         }),

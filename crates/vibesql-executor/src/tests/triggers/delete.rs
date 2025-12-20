@@ -15,7 +15,10 @@ fn test_after_delete_trigger_fires() {
     create_audit_table(&mut db);
 
     // Insert a user first
-    let insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "USERS".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -53,7 +56,7 @@ fn test_after_delete_trigger_fires() {
             vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Equal,
                 left: Box::new(vibesql_ast::Expression::ColumnRef(
-                    vibesql_ast::ColumnIdentifier::simple("id", false)
+                    vibesql_ast::ColumnIdentifier::simple("id", false),
                 )),
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(1),
@@ -74,7 +77,10 @@ fn test_before_delete_trigger_fires() {
     create_audit_table(&mut db);
 
     // Insert a user first
-    let insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "USERS".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -112,7 +118,7 @@ fn test_before_delete_trigger_fires() {
             vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Equal,
                 left: Box::new(vibesql_ast::Expression::ColumnRef(
-                    vibesql_ast::ColumnIdentifier::simple("id", false)
+                    vibesql_ast::ColumnIdentifier::simple("id", false),
                 )),
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(1),

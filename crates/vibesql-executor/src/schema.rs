@@ -180,10 +180,10 @@ impl CombinedSchema {
             .map(|(name, data_type)| vibesql_catalog::ColumnSchema {
                 name,
                 data_type,
-                nullable: true,      // Derived table columns are always nullable
-                default_value: None, // Derived table columns have no defaults
+                nullable: true,       // Derived table columns are always nullable
+                default_value: None,  // Derived table columns have no defaults
                 generated_expr: None, // Derived table columns are not generated
-                collation: None,     // Derived table columns don't inherit collation
+                collation: None,      // Derived table columns don't inherit collation
             })
             .collect();
 
@@ -395,7 +395,11 @@ impl CombinedSchema {
     /// -- This should fail validation:
     /// SELECT A.f1 FROM test1 A, test2 A;  -- "A" appears twice
     /// ```
-    pub fn validate_qualified_reference(&self, table: &str, column: &str) -> Result<(), crate::errors::ExecutorError> {
+    pub fn validate_qualified_reference(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Result<(), crate::errors::ExecutorError> {
         let table_id = TableIdentifier::unquoted(table);
         if self.duplicate_aliases.contains(&table_id) {
             return Err(crate::errors::ExecutorError::AmbiguousColumnName {
@@ -604,11 +608,7 @@ impl SchemaBuilder {
     ///
     /// This is an O(1) operation - columns are not copied, just indexed
     /// Note: Table names are automatically normalized via TableIdentifier for case-insensitive lookups
-    pub fn add_table(
-        &mut self,
-        name: String,
-        schema: vibesql_catalog::TableSchema,
-    ) -> &mut Self {
+    pub fn add_table(&mut self, name: String, schema: vibesql_catalog::TableSchema) -> &mut Self {
         let num_columns = schema.columns.len();
         let table_id = TableIdentifier::unquoted(&name);
 
@@ -1215,7 +1215,7 @@ mod tests {
             table_schema_with_columns(
                 "test2",
                 vec![
-                    ("id", DataType::Integer), // Same as test1
+                    ("id", DataType::Integer),    // Same as test1
                     ("value", DataType::Integer), // Different from test1
                 ],
             ),
@@ -1281,11 +1281,7 @@ mod tests {
             "t1".to_string(),
             table_schema_with_columns(
                 "t1",
-                vec![
-                    ("a", DataType::Integer),
-                    ("b", DataType::Integer),
-                    ("c", DataType::Integer),
-                ],
+                vec![("a", DataType::Integer), ("b", DataType::Integer), ("c", DataType::Integer)],
             ),
         );
         let mut schema = CombinedSchema::combine(
@@ -1293,17 +1289,19 @@ mod tests {
             "t2".to_string(),
             table_schema_with_columns(
                 "t2",
-                vec![
-                    ("b", DataType::Integer),
-                    ("c", DataType::Integer),
-                    ("d", DataType::Integer),
-                ],
+                vec![("b", DataType::Integer), ("c", DataType::Integer), ("d", DataType::Integer)],
             ),
         );
 
         // Before marking as joined, b and c should be ambiguous
-        assert!(schema.is_column_ambiguous("b"), "b should be ambiguous before NATURAL JOIN processing");
-        assert!(schema.is_column_ambiguous("c"), "c should be ambiguous before NATURAL JOIN processing");
+        assert!(
+            schema.is_column_ambiguous("b"),
+            "b should be ambiguous before NATURAL JOIN processing"
+        );
+        assert!(
+            schema.is_column_ambiguous("c"),
+            "c should be ambiguous before NATURAL JOIN processing"
+        );
 
         // Mark b and c as joined columns (as would happen in NATURAL JOIN processing)
         schema.add_joined_column("b");

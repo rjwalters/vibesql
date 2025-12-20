@@ -182,8 +182,8 @@ fn bench_thread_scaling(db: &VibeDB, harness: &Harness) {
     // Test queries - custom variants without ORDER BY to enable parallel GROUP BY
     // Note: Standard TPC-H Q1/Q6 have ORDER BY which forces sequential execution
     let queries = [
-        ("ParallelQ1", PARALLEL_Q1),  // GROUP BY on lineitem, no ORDER BY
-        ("ParallelQ5", PARALLEL_Q5),  // Multi-table join with GROUP BY
+        ("ParallelQ1", PARALLEL_Q1),     // GROUP BY on lineitem, no ORDER BY
+        ("ParallelQ5", PARALLEL_Q5),     // Multi-table join with GROUP BY
         ("ParallelScan", PARALLEL_SCAN), // Simple scan with COUNT(*)
     ];
 
@@ -256,28 +256,28 @@ fn create_skewed_database(row_count: usize, skew_ratio: f64) -> VibeDB {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "CATEGORY".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "PADDING".to_string(),
                 data_type: DataType::Varchar { max_length: Some(100) },
                 nullable: true,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
     );
@@ -370,8 +370,8 @@ fn bench_morsel_size(db: &VibeDB, harness: &Harness) {
     // ParallelQ5: Complex 6-way join, no ORDER BY
     // ParallelScan: Filter-heavy with COUNT(*)
     let queries = [
-        ("Q1_agg", PARALLEL_Q1),    // Aggregation-heavy (benefits from SIMD)
-        ("Q5_join", PARALLEL_Q5),   // Complex 6-way join (tests scheduling overhead)
+        ("Q1_agg", PARALLEL_Q1),        // Aggregation-heavy (benefits from SIMD)
+        ("Q5_join", PARALLEL_Q5),       // Complex 6-way join (tests scheduling overhead)
         ("Scan_filter", PARALLEL_SCAN), // Filter-heavy
     ];
 

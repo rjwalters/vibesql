@@ -92,7 +92,8 @@ impl ConstraintValidator {
                         constraint_counter += 1;
                         result.check_constraints.push((constraint_name, (**expr).clone()));
                     }
-                    ColumnConstraintKind::NotNull | ColumnConstraintKind::NotNullWithConflict { .. } => {
+                    ColumnConstraintKind::NotNull
+                    | ColumnConstraintKind::NotNullWithConflict { .. } => {
                         result.not_null_columns.push(col_def.name.clone());
                     }
                     ColumnConstraintKind::References { .. } => {
@@ -233,13 +234,16 @@ mod tests {
                 .collect(),
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }
     }
 
     #[test]
     fn test_column_level_primary_key() {
-        let columns = vec![make_column_def("id", vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }])];
+        let columns = vec![make_column_def(
+            "id",
+            vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
+        )];
         let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["id".to_string()]));
@@ -277,7 +281,10 @@ mod tests {
 
     #[test]
     fn test_multiple_primary_keys_fails() {
-        let columns = vec![make_column_def("id", vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }])];
+        let columns = vec![make_column_def(
+            "id",
+            vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
+        )];
         let constraints = vec![TableConstraint {
             name: None,
             kind: TableConstraintKind::PrimaryKey {
@@ -324,7 +331,9 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let check_expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "age", false,
+            ))),
             op: vibesql_ast::BinaryOperator::GreaterThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(0))),
         };

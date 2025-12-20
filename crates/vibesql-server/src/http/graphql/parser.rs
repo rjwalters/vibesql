@@ -5,7 +5,9 @@
 
 use serde_json::Value as JsonValue;
 
-use super::where_clause::{escape_identifier, parse_where_clause, where_clause_to_sql, WhereClause};
+use super::where_clause::{
+    escape_identifier, parse_where_clause, where_clause_to_sql, WhereClause,
+};
 use crate::http::types::json_to_sql_value;
 
 /// Parsed GraphQL query information

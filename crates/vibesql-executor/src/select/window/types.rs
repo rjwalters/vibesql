@@ -32,7 +32,7 @@ impl WindowFunctionKey {
 
         // Add function name and args
         match function {
-            WindowFunctionSpec::Aggregate { name, args } => {
+            WindowFunctionSpec::Aggregate { name, args, .. } => {
                 let args_str =
                     args.iter().map(|expr| format!("{:?}", expr)).collect::<Vec<_>>().join(",");
                 key_parts.push(format!("{}({})", name, args_str));

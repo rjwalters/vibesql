@@ -27,7 +27,6 @@ pub use domain::{DomainConstraintDef, DomainDefinition};
 pub use errors::CatalogError;
 pub use foreign_key::{ForeignKeyConstraint, ReferentialAction};
 // Re-export identifiers from vibesql-ast
-pub use vibesql_ast::{ColumnIdentifier, Identifier, TableIdentifier};
 pub use index::{IndexMetadata, IndexType, IndexedColumn, SortOrder, VectorDistanceMetric};
 pub use privilege::PrivilegeGrant;
 pub use schema::Schema;
@@ -35,6 +34,7 @@ pub use store::{Catalog, ViewDropBehavior};
 pub use table::{StorageFormat, TableSchema};
 pub use trigger::TriggerDefinition;
 pub use type_definition::{TypeAttribute, TypeDefinition, TypeDefinitionKind};
+pub use vibesql_ast::{ColumnIdentifier, Identifier, TableIdentifier};
 pub use view::ViewDefinition;
 
 #[cfg(test)]

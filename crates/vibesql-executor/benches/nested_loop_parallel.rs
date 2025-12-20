@@ -24,11 +24,7 @@
 
 mod harness;
 
-use std::{
-    env,
-    hint::black_box,
-    time::Instant,
-};
+use std::{env, hint::black_box, time::Instant};
 
 use harness::{print_group_header, BenchConfig, BenchResult, BenchStats, Harness};
 use vibesql_catalog::{ColumnSchema, TableSchema};
@@ -91,21 +87,21 @@ fn setup_range_join_tables(db: &mut Database, products: usize, promotions: usize
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "PRICE".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "CATEGORY".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
     );
@@ -120,28 +116,28 @@ fn setup_range_join_tables(db: &mut Database, products: usize, promotions: usize
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "MIN_PRICE".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "MAX_PRICE".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "DISCOUNT".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
     );
@@ -151,16 +147,16 @@ fn setup_range_join_tables(db: &mut Database, products: usize, promotions: usize
     for i in 0..products {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Integer((i % 1000) as i64),           // price 0-999
-            SqlValue::Integer((i % 10) as i64),              // category 0-9
+            SqlValue::Integer((i % 1000) as i64), // price 0-999
+            SqlValue::Integer((i % 10) as i64),   // category 0-9
         ]);
         db.insert_row("PRODUCTS", row).unwrap();
     }
 
     // Insert promotions with overlapping price ranges
     for i in 0..promotions {
-        let min_price = (i * 100 % 800) as i64;  // Range starts: 0, 100, 200, ...
-        let max_price = min_price + 200;          // 200-wide bands
+        let min_price = (i * 100 % 800) as i64; // Range starts: 0, 100, 200, ...
+        let max_price = min_price + 200; // 200-wide bands
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Integer(min_price),
@@ -182,14 +178,14 @@ fn setup_cross_join_tables(db: &mut Database, left_rows: usize, right_rows: usiz
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
     );
@@ -204,14 +200,14 @@ fn setup_cross_join_tables(db: &mut Database, left_rows: usize, right_rows: usiz
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "FACTOR".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
     );
@@ -219,18 +215,14 @@ fn setup_cross_join_tables(db: &mut Database, left_rows: usize, right_rows: usiz
 
     // Insert data
     for i in 0..left_rows {
-        let row = Row::new(vec![
-            SqlValue::Integer(i as i64),
-            SqlValue::Integer((i * 7 + 13) as i64),
-        ]);
+        let row =
+            Row::new(vec![SqlValue::Integer(i as i64), SqlValue::Integer((i * 7 + 13) as i64)]);
         db.insert_row("LEFT_TABLE", row).unwrap();
     }
 
     for i in 0..right_rows {
-        let row = Row::new(vec![
-            SqlValue::Integer(i as i64),
-            SqlValue::Integer((i * 3 + 5) as i64),
-        ]);
+        let row =
+            Row::new(vec![SqlValue::Integer(i as i64), SqlValue::Integer((i * 3 + 5) as i64)]);
         db.insert_row("RIGHT_TABLE", row).unwrap();
     }
 }
@@ -406,8 +398,10 @@ fn bench_cross_join(harness: &Harness) {
 fn main() {
     eprintln!("\n=== Nested Loop Join Parallel Benchmarks ===\n");
 
-    let warmup_iterations = env::var("WARMUP_ITERATIONS").ok().and_then(|s| s.parse().ok()).unwrap_or(3);
-    let benchmark_iterations = env::var("BENCHMARK_ITERATIONS").ok().and_then(|s| s.parse().ok()).unwrap_or(10);
+    let warmup_iterations =
+        env::var("WARMUP_ITERATIONS").ok().and_then(|s| s.parse().ok()).unwrap_or(3);
+    let benchmark_iterations =
+        env::var("BENCHMARK_ITERATIONS").ok().and_then(|s| s.parse().ok()).unwrap_or(10);
     let config = BenchConfig::new(warmup_iterations, benchmark_iterations, 60);
     let harness = Harness::with_config(config);
 

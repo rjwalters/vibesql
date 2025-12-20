@@ -1,6 +1,9 @@
 //! Common Table Expression (CTE) handling for SELECT queries
 
-use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use crate::errors::ExecutorError;
 
@@ -232,7 +235,7 @@ where
         order_by: cte.query.order_by.clone(),
         limit: cte.query.limit.clone(),
         offset: cte.query.offset.clone(),
-        set_operation: None,  // Remove UNION ALL for base term execution
+        set_operation: None, // Remove UNION ALL for base term execution
         values: cte.query.values.clone(),
     };
     let recursive_query = &set_op.right;
@@ -241,10 +244,9 @@ where
     // This provides better SQLite compatibility by catching errors at prepare time
     // rather than waiting until runtime
     // Note: For VALUES statements, column count comes from the VALUES rows, not select_list
-    if let (Some(base_count), Some(recursive_count)) = (
-        count_stmt_columns(&base_query),
-        count_stmt_columns(recursive_query),
-    ) {
+    if let (Some(base_count), Some(recursive_count)) =
+        (count_stmt_columns(&base_query), count_stmt_columns(recursive_query))
+    {
         if base_count != recursive_count {
             return Err(ExecutorError::UnsupportedFeature(
                 "SELECTs to the left and right of UNION ALL do not have the same number of result columns".to_string()
@@ -279,10 +281,8 @@ where
 
         // Make working table available as this CTE for recursive reference
         let mut recursive_cte_results = cte_results.clone();
-        recursive_cte_results.insert(
-            cte.name.clone(),
-            (schema.clone(), Arc::new(working_table.clone())),
-        );
+        recursive_cte_results
+            .insert(cte.name.clone(), (schema.clone(), Arc::new(working_table.clone())));
 
         // Execute recursive term with working table as CTE
         let new_rows = executor(recursive_query, &recursive_cte_results)?;

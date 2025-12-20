@@ -6,8 +6,7 @@ use vibesql_types::SqlValue;
 use super::*;
 
 fn simple_table_from(name: &str) -> FromClause {
-    FromClause::Table { name: name.to_string(), alias: None, column_aliases: None ,
-                quoted: false,}
+    FromClause::Table { name: name.to_string(), alias: None, column_aliases: None, quoted: false }
 }
 
 fn column_ref(column: &str) -> Expression {
@@ -18,7 +17,11 @@ fn simple_select(table: &str, column: &str) -> SelectStmt {
     SelectStmt {
         with_clause: None,
         distinct: false,
-        select_list: vec![SelectItem::Expression { expr: column_ref(column), alias: None , source_text: None }],
+        select_list: vec![SelectItem::Expression {
+            expr: column_ref(column),
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(simple_table_from(table)),
@@ -29,7 +32,7 @@ fn simple_select(table: &str, column: &str) -> SelectStmt {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     }
 }
 
@@ -283,8 +286,12 @@ fn test_nested_in_subquery_self_join_column_qualification() {
                         Expression::In { expr: inner_expr, .. } => {
                             // The outer expression of the nested IN should be qualified
                             match inner_expr.as_ref() {
-                                Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
-                                    col_id.table_canonical().unwrap().starts_with("__subquery_") && col_id.column_canonical().eq_ignore_ascii_case("col0")
+                                Expression::ColumnRef(col_id)
+                                    if col_id.schema_canonical().is_none()
+                                        && col_id.table_canonical().is_some() =>
+                                {
+                                    col_id.table_canonical().unwrap().starts_with("__subquery_")
+                                        && col_id.column_canonical().eq_ignore_ascii_case("col0")
                                 }
                                 _ => false,
                             }
@@ -313,7 +320,7 @@ fn table_from_with_alias(name: &str, alias: &str) -> FromClause {
         name: name.to_string(),
         alias: Some(alias.to_string()),
         column_aliases: None,
-    quoted: false,
+        quoted: false,
     }
 }
 
@@ -348,7 +355,7 @@ fn test_exists_self_join_column_qualification() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     // Create correlated EXISTS subquery:
@@ -380,7 +387,7 @@ fn test_exists_self_join_column_qualification() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     stmt.where_clause =
@@ -423,7 +430,12 @@ fn test_exists_self_join_column_qualification() {
             if let Some(cond) = condition {
                 fn contains_rewritten_alias(expr: &Expression) -> bool {
                     match expr {
-                        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => col_id.table_canonical().unwrap() == "__subquery_l2",
+                        Expression::ColumnRef(col_id)
+                            if col_id.schema_canonical().is_none()
+                                && col_id.table_canonical().is_some() =>
+                        {
+                            col_id.table_canonical().unwrap() == "__subquery_l2"
+                        }
                         Expression::BinaryOp { left, right, .. } => {
                             contains_rewritten_alias(left) || contains_rewritten_alias(right)
                         }
@@ -467,7 +479,7 @@ fn test_not_exists_self_join_column_qualification() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     // Create correlated NOT EXISTS subquery:
@@ -499,7 +511,7 @@ fn test_not_exists_self_join_column_qualification() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     stmt.where_clause = Some(Expression::Exists {
@@ -545,7 +557,12 @@ fn test_not_exists_self_join_column_qualification() {
             if let Some(cond) = condition {
                 fn contains_rewritten_l3_ref(expr: &Expression) -> bool {
                     match expr {
-                        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => col_id.table_canonical().unwrap() == "__subquery_l3",
+                        Expression::ColumnRef(col_id)
+                            if col_id.schema_canonical().is_none()
+                                && col_id.table_canonical().is_some() =>
+                        {
+                            col_id.table_canonical().unwrap() == "__subquery_l3"
+                        }
                         Expression::BinaryOp { left, right, .. } => {
                             contains_rewritten_l3_ref(left) || contains_rewritten_l3_ref(right)
                         }
@@ -589,7 +606,7 @@ fn test_conjunction_exists_to_semi_join() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     // Create correlated EXISTS subquery
@@ -598,7 +615,9 @@ fn test_conjunction_exists_to_semi_join() {
         distinct: false,
         select_list: vec![SelectItem::Expression {
             expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(simple_table_from("lineitem")),
@@ -613,7 +632,7 @@ fn test_conjunction_exists_to_semi_join() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     // Build Conjunction: [predicate1, predicate2, EXISTS(...)]
@@ -677,7 +696,7 @@ fn test_conjunction_not_exists_to_anti_join() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     // Create correlated NOT EXISTS subquery
@@ -686,7 +705,9 @@ fn test_conjunction_not_exists_to_anti_join() {
         distinct: false,
         select_list: vec![SelectItem::Expression {
             expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(simple_table_from("lineitem")),
@@ -701,7 +722,7 @@ fn test_conjunction_not_exists_to_anti_join() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     // Build Conjunction with NOT EXISTS

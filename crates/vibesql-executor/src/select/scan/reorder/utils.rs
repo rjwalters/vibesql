@@ -152,7 +152,14 @@ pub(super) fn build_reordered_schema(
     // For reordered schemas, hidden_columns would need to be remapped to new positions
     // However, reordering happens before NATURAL JOIN deduplication, so hidden_columns
     // should be empty at this point
-    CombinedSchema { table_schemas: new_table_schemas, total_columns: current_position, hidden_columns: std::collections::HashSet::new(), outer_schema: None, duplicate_aliases: std::collections::HashSet::new(), joined_columns: std::collections::HashSet::new() }
+    CombinedSchema {
+        table_schemas: new_table_schemas,
+        total_columns: current_position,
+        hidden_columns: std::collections::HashSet::new(),
+        outer_schema: None,
+        duplicate_aliases: std::collections::HashSet::new(),
+        joined_columns: std::collections::HashSet::new(),
+    }
 }
 
 /// Build a column permutation to restore original table ordering
@@ -377,11 +384,20 @@ fn qualify_columns(expr: &vibesql_ast::Expression, table_name: &str) -> vibesql_
     let table_name_lower = table_name.to_lowercase();
 
     match expr {
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+        {
             // Add table qualifier to unqualified column
-            Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&table_name_lower, false, col_id.column_canonical(), false))
+            Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                &table_name_lower,
+                false,
+                col_id.column_canonical(),
+                false,
+            ))
         }
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() =>
+        {
             // Already qualified, keep as is
             expr.clone()
         }

@@ -150,7 +150,9 @@ impl SelectExecutor<'_> {
                         .collect();
                     return Err(ExecutorError::ColumnNotFound {
                         column_name: column.to_string(),
-                        table_name: table.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string()),
+                        table_name: table
+                            .map(|t| t.to_string())
+                            .unwrap_or_else(|| "unknown".to_string()),
                         searched_tables: schema.table_names(),
                         available_columns,
                     });
@@ -197,7 +199,8 @@ impl SelectExecutor<'_> {
 
         // Pre-compute sort keys for ORDER BY columns
         // (sort_key, direction, nulls_first)
-        let mut sort_keys: Vec<(SortKey, OrderDirection, bool)> = Vec::with_capacity(order_by.len());
+        let mut sort_keys: Vec<(SortKey, OrderDirection, bool)> =
+            Vec::with_capacity(order_by.len());
 
         for item in order_by {
             let sort_key = match &item.expr {
@@ -263,9 +266,8 @@ impl SelectExecutor<'_> {
             // Determine NULL ordering:
             // - If explicitly specified via NULLS FIRST/LAST, use that
             // - Default: SQLite uses NULLS LAST for all directions
-            let nulls_first = item
-                .nulls_order
-                .is_some_and(|no| matches!(no, vibesql_ast::NullsOrder::First));
+            let nulls_first =
+                item.nulls_order.is_some_and(|no| matches!(no, vibesql_ast::NullsOrder::First));
             sort_keys.push((sort_key, item.direction.clone(), nulls_first));
         }
 
@@ -273,9 +275,7 @@ impl SelectExecutor<'_> {
         rows.sort_by(|a, b| {
             for (sort_key, dir, nulls_first) in &sort_keys {
                 let (val_a, val_b) = match sort_key {
-                    SortKey::Column(col_idx) => {
-                        (&a.values[*col_idx], &b.values[*col_idx])
-                    }
+                    SortKey::Column(col_idx) => (&a.values[*col_idx], &b.values[*col_idx]),
                     SortKey::Rowid(table_qualifier) => {
                         // Get rowid from row metadata
                         let rowid_a = a.get_row_id_for_table(table_qualifier.as_deref());
@@ -285,10 +285,18 @@ impl SelectExecutor<'_> {
                         let cmp = match (rowid_a, rowid_b) {
                             (None, None) => Ordering::Equal,
                             (None, Some(_)) => {
-                                if *nulls_first { Ordering::Less } else { Ordering::Greater }
+                                if *nulls_first {
+                                    Ordering::Less
+                                } else {
+                                    Ordering::Greater
+                                }
                             }
                             (Some(_), None) => {
-                                if *nulls_first { Ordering::Greater } else { Ordering::Less }
+                                if *nulls_first {
+                                    Ordering::Greater
+                                } else {
+                                    Ordering::Less
+                                }
                             }
                             (Some(id_a), Some(id_b)) => {
                                 let raw_cmp = id_a.cmp(&id_b);
@@ -551,9 +559,7 @@ impl SelectExecutor<'_> {
 
         for item in select_list {
             match item {
-                SelectItem::Expression {
-                    expr: Expression::ColumnRef(col_id), ..
-                } => {
+                SelectItem::Expression { expr: Expression::ColumnRef(col_id), .. } => {
                     // Find column index by name (case-insensitive)
                     let idx = table_schema
                         .columns
@@ -651,17 +657,11 @@ mod tests {
 
         // Integer literal should return Some
         let int_literal = Expression::Literal(SqlValue::Integer(42));
-        assert_eq!(
-            executor.literal_to_value(&int_literal),
-            Some(SqlValue::Integer(42))
-        );
+        assert_eq!(executor.literal_to_value(&int_literal), Some(SqlValue::Integer(42)));
 
         // String literal should return Some
         let str_literal = Expression::Literal(SqlValue::Varchar("test".into()));
-        assert_eq!(
-            executor.literal_to_value(&str_literal),
-            Some(SqlValue::Varchar("test".into()))
-        );
+        assert_eq!(executor.literal_to_value(&str_literal), Some(SqlValue::Varchar("test".into())));
 
         // Non-literal expression should return None
         let column_ref = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col", false));

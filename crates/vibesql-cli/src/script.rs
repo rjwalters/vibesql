@@ -317,10 +317,7 @@ fn parse_statements(script: &str) -> Vec<String> {
         if !in_string && ch.is_ascii_alphabetic() {
             current_statement.push(ch);
             // Peek ahead to check for BEGIN or END keyword
-            let rest: String = chars
-                .clone()
-                .take_while(|c| c.is_ascii_alphabetic())
-                .collect();
+            let rest: String = chars.clone().take_while(|c| c.is_ascii_alphabetic()).collect();
             let word = format!("{}{}", ch, rest).to_uppercase();
             if word == "BEGIN" {
                 // Consume the rest of the word
@@ -337,10 +334,8 @@ fn parse_statements(script: &str) -> Vec<String> {
                     peek_chars.next();
                 }
                 // Check what follows
-                let next_word: String = peek_chars
-                    .clone()
-                    .take_while(|c| c.is_ascii_alphabetic())
-                    .collect();
+                let next_word: String =
+                    peek_chars.clone().take_while(|c| c.is_ascii_alphabetic()).collect();
                 let is_transaction = peek_chars.clone().next() == Some(';')
                     || next_word.eq_ignore_ascii_case("TRANSACTION")
                     || next_word.eq_ignore_ascii_case("DEFERRED")
@@ -458,7 +453,10 @@ mod tests {
         let script = "INSERT INTO test VALUES (1, 'Error at position 10; expected value');";
         let stmts = parse_statements(script);
         assert_eq!(stmts.len(), 1);
-        assert_eq!(stmts[0], "INSERT INTO test VALUES (1, 'Error at position 10; expected value');");
+        assert_eq!(
+            stmts[0],
+            "INSERT INTO test VALUES (1, 'Error at position 10; expected value');"
+        );
     }
 
     #[test]

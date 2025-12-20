@@ -51,7 +51,10 @@ pub fn resolve_group_by_alias(
             let column = col_id.column_canonical();
             // Search for matching alias in SELECT list (case-insensitive)
             for item in select_list {
-                if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) , .. } = item {
+                if let vibesql_ast::SelectItem::Expression {
+                    expr, alias: Some(alias_name), ..
+                } = item
+                {
                     if alias_name.eq_ignore_ascii_case(column) {
                         // Found matching alias, use the SELECT list expression
                         return Ok(expr.clone());
@@ -80,10 +83,7 @@ pub fn resolve_grouping_set_aliases(
     for (i, expr) in set.group_by_exprs.iter().enumerate() {
         resolved_exprs.push(resolve_group_by_alias(expr, select_list, i)?);
     }
-    Ok(ResolvedGroupingSet {
-        group_by_exprs: resolved_exprs,
-        rolled_up: set.rolled_up.clone(),
-    })
+    Ok(ResolvedGroupingSet { group_by_exprs: resolved_exprs, rolled_up: set.rolled_up.clone() })
 }
 
 /// Resolve aliases in base expressions for GroupingContext
@@ -178,7 +178,9 @@ fn resolve_having_aliases_inner(
 ) -> Expression {
     match having_expr {
         // Check if this column reference matches a SELECT list alias
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+        {
             let column = col_id.column_canonical();
             // Skip alias resolution if this column is in GROUP BY
             // GROUP BY columns take precedence over SELECT aliases in HAVING
@@ -196,8 +198,9 @@ fn resolve_having_aliases_inner(
 
             // Search for matching alias in SELECT list (case-insensitive)
             for item in select_list {
-                if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name), .. } =
-                    item
+                if let vibesql_ast::SelectItem::Expression {
+                    expr, alias: Some(alias_name), ..
+                } = item
                 {
                     if alias_name.eq_ignore_ascii_case(column) {
                         // Found matching alias, use the SELECT list expression
@@ -211,15 +214,30 @@ fn resolve_having_aliases_inner(
 
         // Recursively resolve in binary operations
         Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
-            left: Box::new(resolve_having_aliases_inner(left, select_list, group_by_exprs, schema_columns)),
+            left: Box::new(resolve_having_aliases_inner(
+                left,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+            )),
             op: *op,
-            right: Box::new(resolve_having_aliases_inner(right, select_list, group_by_exprs, schema_columns)),
+            right: Box::new(resolve_having_aliases_inner(
+                right,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+            )),
         },
 
         // Recursively resolve in unary operations
         Expression::UnaryOp { op, expr } => Expression::UnaryOp {
             op: *op,
-            expr: Box::new(resolve_having_aliases_inner(expr, select_list, group_by_exprs, schema_columns)),
+            expr: Box::new(resolve_having_aliases_inner(
+                expr,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+            )),
         },
 
         // Recursively resolve in function arguments
@@ -227,43 +245,77 @@ fn resolve_having_aliases_inner(
             name: name.clone(),
             args: args
                 .iter()
-                .map(|a| resolve_having_aliases_inner(a, select_list, group_by_exprs, schema_columns))
+                .map(|a| {
+                    resolve_having_aliases_inner(a, select_list, group_by_exprs, schema_columns)
+                })
                 .collect(),
             character_unit: character_unit.clone(),
         },
 
         // Recursively resolve in aggregate function arguments
-        Expression::AggregateFunction { name, distinct, args, order_by } => {
+        Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
             Expression::AggregateFunction {
                 name: name.clone(),
                 distinct: *distinct,
                 args: args
                     .iter()
-                    .map(|a| resolve_having_aliases_inner(a, select_list, group_by_exprs, schema_columns))
+                    .map(|a| {
+                        resolve_having_aliases_inner(a, select_list, group_by_exprs, schema_columns)
+                    })
                     .collect(),
                 order_by: order_by.clone(),
+                filter: filter.as_ref().map(|f| {
+                    Box::new(resolve_having_aliases_inner(
+                        f,
+                        select_list,
+                        group_by_exprs,
+                        schema_columns,
+                    ))
+                }),
             }
         }
 
         // Recursively resolve in CASE expressions
         Expression::Case { operand, when_clauses, else_result } => {
-            let resolved_operand = operand
-                .as_ref()
-                .map(|o| Box::new(resolve_having_aliases_inner(o, select_list, group_by_exprs, schema_columns)));
+            let resolved_operand = operand.as_ref().map(|o| {
+                Box::new(resolve_having_aliases_inner(
+                    o,
+                    select_list,
+                    group_by_exprs,
+                    schema_columns,
+                ))
+            });
             let resolved_when_clauses = when_clauses
                 .iter()
                 .map(|wc| vibesql_ast::CaseWhen {
                     conditions: wc
                         .conditions
                         .iter()
-                        .map(|c| resolve_having_aliases_inner(c, select_list, group_by_exprs, schema_columns))
+                        .map(|c| {
+                            resolve_having_aliases_inner(
+                                c,
+                                select_list,
+                                group_by_exprs,
+                                schema_columns,
+                            )
+                        })
                         .collect(),
-                    result: resolve_having_aliases_inner(&wc.result, select_list, group_by_exprs, schema_columns),
+                    result: resolve_having_aliases_inner(
+                        &wc.result,
+                        select_list,
+                        group_by_exprs,
+                        schema_columns,
+                    ),
                 })
                 .collect();
-            let resolved_else = else_result
-                .as_ref()
-                .map(|e| Box::new(resolve_having_aliases_inner(e, select_list, group_by_exprs, schema_columns)));
+            let resolved_else = else_result.as_ref().map(|e| {
+                Box::new(resolve_having_aliases_inner(
+                    e,
+                    select_list,
+                    group_by_exprs,
+                    schema_columns,
+                ))
+            });
             Expression::Case {
                 operand: resolved_operand,
                 when_clauses: resolved_when_clauses,
@@ -275,27 +327,51 @@ fn resolve_having_aliases_inner(
         Expression::Conjunction(terms) => Expression::Conjunction(
             terms
                 .iter()
-                .map(|t| resolve_having_aliases_inner(t, select_list, group_by_exprs, schema_columns))
+                .map(|t| {
+                    resolve_having_aliases_inner(t, select_list, group_by_exprs, schema_columns)
+                })
                 .collect(),
         ),
         Expression::Disjunction(terms) => Expression::Disjunction(
             terms
                 .iter()
-                .map(|t| resolve_having_aliases_inner(t, select_list, group_by_exprs, schema_columns))
+                .map(|t| {
+                    resolve_having_aliases_inner(t, select_list, group_by_exprs, schema_columns)
+                })
                 .collect(),
         ),
 
         // Recursively resolve in comparison expressions
         Expression::Between { expr, low, high, negated, symmetric } => Expression::Between {
-            expr: Box::new(resolve_having_aliases_inner(expr, select_list, group_by_exprs, schema_columns)),
-            low: Box::new(resolve_having_aliases_inner(low, select_list, group_by_exprs, schema_columns)),
-            high: Box::new(resolve_having_aliases_inner(high, select_list, group_by_exprs, schema_columns)),
+            expr: Box::new(resolve_having_aliases_inner(
+                expr,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+            )),
+            low: Box::new(resolve_having_aliases_inner(
+                low,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+            )),
+            high: Box::new(resolve_having_aliases_inner(
+                high,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+            )),
             negated: *negated,
             symmetric: *symmetric,
         },
 
         Expression::IsNull { expr, negated } => Expression::IsNull {
-            expr: Box::new(resolve_having_aliases_inner(expr, select_list, group_by_exprs, schema_columns)),
+            expr: Box::new(resolve_having_aliases_inner(
+                expr,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+            )),
             negated: *negated,
         },
 
@@ -415,8 +491,9 @@ mod tests {
         let select_list = vec![select_item(col("n_name"), Some("nation"))];
 
         // GROUP BY t.nation should NOT resolve to n_name (it's table-qualified)
-        let group_expr =
-            Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t", false, "nation", false));
+        let group_expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+            "t", false, "nation", false,
+        ));
         let resolved = resolve_group_by_alias(&group_expr, &select_list, 0).unwrap();
 
         // Should remain unchanged

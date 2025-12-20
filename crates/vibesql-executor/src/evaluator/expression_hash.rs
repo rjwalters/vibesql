@@ -557,7 +557,9 @@ mod tests {
         // Column references are NOT deterministic because they depend on row data
         // Caching expressions with column references would cause incorrect results
         // when evaluating across multiple rows with different column values
-        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false));
+        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "col1", false,
+        ));
         assert!(!ExpressionHasher::is_deterministic(&expr));
     }
 

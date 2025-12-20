@@ -646,7 +646,8 @@ fn collect_predicates_with_in(
             if let Expression::ColumnRef(col_id) = left.as_ref() {
                 if let Expression::Literal(value) = right.as_ref() {
                     if !matches!(value, SqlValue::Null) {
-                        equality_predicates.insert(col_id.column_canonical().to_uppercase(), value.clone());
+                        equality_predicates
+                            .insert(col_id.column_canonical().to_uppercase(), value.clone());
                     }
                 }
             }
@@ -654,7 +655,8 @@ fn collect_predicates_with_in(
             if let Expression::ColumnRef(col_id) = right.as_ref() {
                 if let Expression::Literal(value) = left.as_ref() {
                     if !matches!(value, SqlValue::Null) {
-                        equality_predicates.insert(col_id.column_canonical().to_uppercase(), value.clone());
+                        equality_predicates
+                            .insert(col_id.column_canonical().to_uppercase(), value.clone());
                     }
                 }
             }

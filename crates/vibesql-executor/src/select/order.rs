@@ -8,7 +8,9 @@ use rayon::slice::ParallelSliceMut;
 use super::grouping::compare_sql_values;
 #[cfg(feature = "parallel")]
 use super::parallel::ParallelConfig;
-use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema};
+use crate::{
+    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema,
+};
 
 /// Result of extracting a column position from an ORDER BY expression
 #[derive(Debug, Clone, Copy)]
@@ -186,7 +188,12 @@ fn resolve_position_with_wildcards<'a>(
 }
 
 /// Sort key for ORDER BY: (value, direction, nulls_order, collation)
-type SortKey = (vibesql_types::SqlValue, vibesql_ast::OrderDirection, Option<vibesql_ast::NullsOrder>, Option<String>);
+type SortKey = (
+    vibesql_types::SqlValue,
+    vibesql_ast::OrderDirection,
+    Option<vibesql_ast::NullsOrder>,
+    Option<String>,
+);
 
 /// Row with optional sort keys for ORDER BY
 pub(super) type RowWithSortKeys = (vibesql_storage::Row, Option<Vec<SortKey>>);
@@ -288,7 +295,9 @@ pub(super) fn apply_order_by(
         let keys_a = keys_a.as_ref().unwrap();
         let keys_b = keys_b.as_ref().unwrap();
 
-        for ((val_a, dir, nulls_order, collation), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+        for ((val_a, dir, nulls_order, collation), (val_b, _, _, _)) in
+            keys_a.iter().zip(keys_b.iter())
+        {
             // Determine NULL ordering:
             // - If explicitly specified via NULLS FIRST/LAST, use that
             // - Default: SQLite treats NULL as smallest value, so:
@@ -324,19 +333,27 @@ pub(super) fn apply_order_by(
                             // For NOCASE collation, uppercase both string values
                             let a = match val_a {
                                 vibesql_types::SqlValue::Varchar(s) => {
-                                    Cow::Owned(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())))
+                                    Cow::Owned(vibesql_types::SqlValue::Varchar(
+                                        arcstr::ArcStr::from(s.to_uppercase()),
+                                    ))
                                 }
                                 vibesql_types::SqlValue::Character(s) => {
-                                    Cow::Owned(vibesql_types::SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())))
+                                    Cow::Owned(vibesql_types::SqlValue::Character(
+                                        arcstr::ArcStr::from(s.to_uppercase()),
+                                    ))
                                 }
                                 other => Cow::Borrowed(other),
                             };
                             let b = match val_b {
                                 vibesql_types::SqlValue::Varchar(s) => {
-                                    Cow::Owned(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())))
+                                    Cow::Owned(vibesql_types::SqlValue::Varchar(
+                                        arcstr::ArcStr::from(s.to_uppercase()),
+                                    ))
                                 }
                                 vibesql_types::SqlValue::Character(s) => {
-                                    Cow::Owned(vibesql_types::SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())))
+                                    Cow::Owned(vibesql_types::SqlValue::Character(
+                                        arcstr::ArcStr::from(s.to_uppercase()),
+                                    ))
                                 }
                                 other => Cow::Borrowed(other),
                             };
@@ -350,7 +367,9 @@ pub(super) fn apply_order_by(
 
                     // Compare non-NULL values, respecting direction
                     match dir {
-                        vibesql_ast::OrderDirection::Asc => compare_sql_values(&cmp_val_a, &cmp_val_b),
+                        vibesql_ast::OrderDirection::Asc => {
+                            compare_sql_values(&cmp_val_a, &cmp_val_b)
+                        }
                         vibesql_ast::OrderDirection::Desc => {
                             compare_sql_values(&cmp_val_a, &cmp_val_b).reverse()
                         }
@@ -426,7 +445,9 @@ pub(crate) fn resolve_order_by_for_aggregates(
         ColumnPositionResult::Position(pos) => {
             let idx = validate_column_position(pos, column_count, term_index)?;
             if let Some(col_name) = resolve_position_to_column_name(idx, select_list) {
-                return Ok(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&col_name, false)));
+                return Ok(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple(&col_name, false),
+                ));
             }
         }
         ColumnPositionResult::Negative(pos) => {
@@ -470,7 +491,9 @@ fn resolve_order_by_for_aggregates_inner(
                 } else {
                     format!("col{}", idx + 1)
                 };
-                return vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&col_name, false));
+                return vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    &col_name, false,
+                ));
             }
         }
         // If not a valid column position, just return the literal as-is
@@ -486,7 +509,9 @@ fn resolve_order_by_for_aggregates_inner(
                 if let vibesql_ast::SelectItem::Expression { alias: Some(alias_name), .. } = item {
                     if alias_name.eq_ignore_ascii_case(column) {
                         // ORDER BY uses alias name, return ColumnRef to that alias
-                        return vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(alias_name, false));
+                        return vibesql_ast::Expression::ColumnRef(
+                            vibesql_ast::ColumnIdentifier::simple(alias_name, false),
+                        );
                     }
                 }
             }
@@ -503,7 +528,9 @@ fn resolve_order_by_for_aggregates_inner(
                         let select_col = select_col_id.column_canonical();
                         if select_col.eq_ignore_ascii_case(column) {
                             // ORDER BY uses original column name, return ColumnRef to the alias
-                            return vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(alias_name, false));
+                            return vibesql_ast::Expression::ColumnRef(
+                                vibesql_ast::ColumnIdentifier::simple(alias_name, false),
+                            );
                         }
                     }
                 }
@@ -533,7 +560,9 @@ fn resolve_order_by_for_aggregates_inner(
     // This handles cases like GROUPING(a) + GROUPING(b) matching an alias like "lochierarchy"
     // before we try to recursively decompose the expression
     if let Some(alias) = find_matching_select_expression(order_expr, select_list) {
-        return vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&alias, false));
+        return vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            &alias, false,
+        ));
     }
 
     // Handle CASE expressions by recursively resolving sub-expressions
@@ -586,7 +615,9 @@ fn resolve_order_by_for_aggregates_inner(
         if name.eq_ignore_ascii_case("GROUPING") || name.eq_ignore_ascii_case("GROUPING_ID") {
             // Try to find a matching GROUPING expression in the SELECT list
             if let Some(alias) = find_matching_select_expression(order_expr, select_list) {
-                return vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&alias, false));
+                return vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    &alias, false,
+                ));
             }
         }
     }
@@ -698,7 +729,9 @@ pub(crate) fn resolve_order_by_alias<'a>(
                     return Ok(Cow::Borrowed(expr));
                 }
                 ResolvedPosition::ColumnName(col_name) => {
-                    return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&col_name, false))));
+                    return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple(&col_name, false),
+                    )));
                 }
                 ResolvedPosition::NotFound => {
                     // Fallback: shouldn't reach here if validation passed
@@ -724,7 +757,10 @@ pub(crate) fn resolve_order_by_alias<'a>(
             let column = col_id.column_canonical();
             // First, search for matching alias in SELECT list (ORDER BY using alias name)
             for item in select_list {
-                if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) , .. } = item {
+                if let vibesql_ast::SelectItem::Expression {
+                    expr, alias: Some(alias_name), ..
+                } = item
+                {
                     if alias_name.eq_ignore_ascii_case(column) {
                         // Found matching alias, use the SELECT list expression
                         return Ok(Cow::Borrowed(expr));
@@ -763,7 +799,9 @@ pub(crate) fn resolve_order_by_alias<'a>(
                             if select_col.eq_ignore_ascii_case(column) {
                                 // The ORDER BY column matches the original column, but it's aliased
                                 // Return a new ColumnRef using the alias name
-                                return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(alias_name, false))));
+                                return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef(
+                                    vibesql_ast::ColumnIdentifier::simple(alias_name, false),
+                                )));
                             }
                         }
                     }
@@ -800,10 +838,7 @@ fn resolve_aliases_in_expression(
         vibesql_ast::Expression::UnaryOp { op, expr: inner } => {
             // Try to resolve the inner expression
             resolve_alias_or_clone(inner, select_list).map(|resolved_inner| {
-                vibesql_ast::Expression::UnaryOp {
-                    op: *op,
-                    expr: Box::new(resolved_inner),
-                }
+                vibesql_ast::Expression::UnaryOp { op: *op, expr: Box::new(resolved_inner) }
             })
         }
 
@@ -879,16 +914,19 @@ fn resolve_aliases_in_expression(
                         })
                         .collect();
 
-                    let resolved_result =
-                        if let Some(resolved) = resolve_alias_or_clone(&clause.result, select_list)
-                        {
-                            any_resolved = true;
-                            resolved
-                        } else {
-                            clause.result.clone()
-                        };
+                    let resolved_result = if let Some(resolved) =
+                        resolve_alias_or_clone(&clause.result, select_list)
+                    {
+                        any_resolved = true;
+                        resolved
+                    } else {
+                        clause.result.clone()
+                    };
 
-                    vibesql_ast::CaseWhen { conditions: resolved_conditions, result: resolved_result }
+                    vibesql_ast::CaseWhen {
+                        conditions: resolved_conditions,
+                        result: resolved_result,
+                    }
                 })
                 .collect();
 
@@ -929,8 +967,11 @@ fn resolve_alias_or_clone(
             let column = col_id.column_canonical();
             // Search for matching alias in SELECT list
             for item in select_list {
-                if let vibesql_ast::SelectItem::Expression { expr: select_expr, alias: Some(alias_name), .. } =
-                    item
+                if let vibesql_ast::SelectItem::Expression {
+                    expr: select_expr,
+                    alias: Some(alias_name),
+                    ..
+                } = item
                 {
                     if alias_name.eq_ignore_ascii_case(column) {
                         // Found matching alias, return the SELECT list expression
@@ -1004,7 +1045,9 @@ fn resolve_where_expression_with_schema(
 
     match expr {
         // Column reference: check if it's an alias
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+        {
             let column = col_id.column_canonical();
             // SQLite behavior: table column names ALWAYS take precedence over aliases
             // If the column name exists in the table schema, it refers to the table column,
@@ -1027,7 +1070,9 @@ fn resolve_where_expression_with_schema(
                     ..
                 } = item
                 {
-                    if sel_col_id.schema_canonical().is_none() && sel_col_id.table_canonical().is_none() {
+                    if sel_col_id.schema_canonical().is_none()
+                        && sel_col_id.table_canonical().is_none()
+                    {
                         let col_name = sel_col_id.column_canonical();
                         if col_name.eq_ignore_ascii_case(column) {
                             // The name matches a column reference in SELECT - don't resolve to alias
@@ -1035,7 +1080,9 @@ fn resolve_where_expression_with_schema(
                         }
                     }
                     // Also check qualified column references
-                    if sel_col_id.schema_canonical().is_none() && sel_col_id.table_canonical().is_some() {
+                    if sel_col_id.schema_canonical().is_none()
+                        && sel_col_id.table_canonical().is_some()
+                    {
                         let col_name = sel_col_id.column_canonical();
                         if col_name.eq_ignore_ascii_case(column) {
                             // The name matches a column reference in SELECT - don't resolve to alias
@@ -1064,7 +1111,11 @@ fn resolve_where_expression_with_schema(
         }
 
         // Qualified column reference: not an alias, return as-is
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => expr.clone(),
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() =>
+        {
+            expr.clone()
+        }
 
         // Schema-qualified column reference: not an alias, return as-is
         Expression::ColumnRef(col_id) if col_id.schema_canonical().is_some() => expr.clone(),
@@ -1076,7 +1127,11 @@ fn resolve_where_expression_with_schema(
         Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
             left: Box::new(resolve_where_expression_with_schema(left, select_list, table_columns)),
             op: *op,
-            right: Box::new(resolve_where_expression_with_schema(right, select_list, table_columns)),
+            right: Box::new(resolve_where_expression_with_schema(
+                right,
+                select_list,
+                table_columns,
+            )),
         },
 
         // UnaryOp: resolve inner expression
@@ -1088,29 +1143,38 @@ fn resolve_where_expression_with_schema(
         // Function call: resolve all arguments
         Expression::Function { name, args, character_unit } => Expression::Function {
             name: name.clone(),
-            args: args.iter().map(|arg| resolve_where_expression_with_schema(arg, select_list, table_columns)).collect(),
+            args: args
+                .iter()
+                .map(|arg| resolve_where_expression_with_schema(arg, select_list, table_columns))
+                .collect(),
             character_unit: character_unit.clone(),
         },
 
         // CASE expression: resolve all parts
         Expression::Case { operand, when_clauses, else_result } => Expression::Case {
-            operand: operand
-                .as_ref()
-                .map(|op| Box::new(resolve_where_expression_with_schema(op, select_list, table_columns))),
+            operand: operand.as_ref().map(|op| {
+                Box::new(resolve_where_expression_with_schema(op, select_list, table_columns))
+            }),
             when_clauses: when_clauses
                 .iter()
                 .map(|clause| vibesql_ast::CaseWhen {
                     conditions: clause
                         .conditions
                         .iter()
-                        .map(|cond| resolve_where_expression_with_schema(cond, select_list, table_columns))
+                        .map(|cond| {
+                            resolve_where_expression_with_schema(cond, select_list, table_columns)
+                        })
                         .collect(),
-                    result: resolve_where_expression_with_schema(&clause.result, select_list, table_columns),
+                    result: resolve_where_expression_with_schema(
+                        &clause.result,
+                        select_list,
+                        table_columns,
+                    ),
                 })
                 .collect(),
-            else_result: else_result
-                .as_ref()
-                .map(|e| Box::new(resolve_where_expression_with_schema(e, select_list, table_columns))),
+            else_result: else_result.as_ref().map(|e| {
+                Box::new(resolve_where_expression_with_schema(e, select_list, table_columns))
+            }),
         },
 
         // IS NULL / IS NOT NULL
@@ -1122,21 +1186,34 @@ fn resolve_where_expression_with_schema(
         // IS DISTINCT FROM / IS NOT DISTINCT FROM
         Expression::IsDistinctFrom { left, right, negated } => Expression::IsDistinctFrom {
             left: Box::new(resolve_where_expression_with_schema(left, select_list, table_columns)),
-            right: Box::new(resolve_where_expression_with_schema(right, select_list, table_columns)),
+            right: Box::new(resolve_where_expression_with_schema(
+                right,
+                select_list,
+                table_columns,
+            )),
             negated: *negated,
         },
 
         // IS TRUE / IS FALSE / IS UNKNOWN
-        Expression::IsTruthValue { expr: inner, truth_value, negated } => Expression::IsTruthValue {
-            expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
-            truth_value: *truth_value,
-            negated: *negated,
-        },
+        Expression::IsTruthValue { expr: inner, truth_value, negated } => {
+            Expression::IsTruthValue {
+                expr: Box::new(resolve_where_expression_with_schema(
+                    inner,
+                    select_list,
+                    table_columns,
+                )),
+                truth_value: *truth_value,
+                negated: *negated,
+            }
+        }
 
         // IN list
         Expression::InList { expr: inner, values, negated } => Expression::InList {
             expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
-            values: values.iter().map(|v| resolve_where_expression_with_schema(v, select_list, table_columns)).collect(),
+            values: values
+                .iter()
+                .map(|v| resolve_where_expression_with_schema(v, select_list, table_columns))
+                .collect(),
             negated: *negated,
         },
 
@@ -1159,14 +1236,22 @@ fn resolve_where_expression_with_schema(
         // LIKE
         Expression::Like { expr: inner, pattern, negated } => Expression::Like {
             expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
-            pattern: Box::new(resolve_where_expression_with_schema(pattern, select_list, table_columns)),
+            pattern: Box::new(resolve_where_expression_with_schema(
+                pattern,
+                select_list,
+                table_columns,
+            )),
             negated: *negated,
         },
 
         // GLOB
         Expression::Glob { expr: inner, pattern, negated } => Expression::Glob {
             expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
-            pattern: Box::new(resolve_where_expression_with_schema(pattern, select_list, table_columns)),
+            pattern: Box::new(resolve_where_expression_with_schema(
+                pattern,
+                select_list,
+                table_columns,
+            )),
             negated: *negated,
         },
 
@@ -1178,29 +1263,55 @@ fn resolve_where_expression_with_schema(
 
         // Conjunction / Disjunction
         Expression::Conjunction(children) => Expression::Conjunction(
-            children.iter().map(|c| resolve_where_expression_with_schema(c, select_list, table_columns)).collect(),
+            children
+                .iter()
+                .map(|c| resolve_where_expression_with_schema(c, select_list, table_columns))
+                .collect(),
         ),
         Expression::Disjunction(children) => Expression::Disjunction(
-            children.iter().map(|c| resolve_where_expression_with_schema(c, select_list, table_columns)).collect(),
+            children
+                .iter()
+                .map(|c| resolve_where_expression_with_schema(c, select_list, table_columns))
+                .collect(),
         ),
 
         // Aggregate functions (resolve arguments)
-        Expression::AggregateFunction { name, args, distinct, order_by } => Expression::AggregateFunction {
-            name: name.clone(),
-            args: args.iter().map(|arg| resolve_where_expression_with_schema(arg, select_list, table_columns)).collect(),
-            distinct: *distinct,
-            order_by: order_by.as_ref().map(|items| {
-                items.iter().map(|item| vibesql_ast::OrderByItem {
-                    expr: resolve_where_expression_with_schema(&item.expr, select_list, table_columns),
-                    direction: item.direction.clone(),
-                    nulls_order: item.nulls_order,
-                }).collect()
-            }),
-        },
+        Expression::AggregateFunction { name, args, distinct, order_by, filter } => {
+            Expression::AggregateFunction {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| {
+                        resolve_where_expression_with_schema(arg, select_list, table_columns)
+                    })
+                    .collect(),
+                distinct: *distinct,
+                order_by: order_by.as_ref().map(|items| {
+                    items
+                        .iter()
+                        .map(|item| vibesql_ast::OrderByItem {
+                            expr: resolve_where_expression_with_schema(
+                                &item.expr,
+                                select_list,
+                                table_columns,
+                            ),
+                            direction: item.direction.clone(),
+                            nulls_order: item.nulls_order,
+                        })
+                        .collect()
+                }),
+                filter: filter.as_ref().map(|f| {
+                    Box::new(resolve_where_expression_with_schema(f, select_list, table_columns))
+                }),
+            }
+        }
 
         // RowValueConstructor
         Expression::RowValueConstructor(children) => Expression::RowValueConstructor(
-            children.iter().map(|c| resolve_where_expression_with_schema(c, select_list, table_columns)).collect(),
+            children
+                .iter()
+                .map(|c| resolve_where_expression_with_schema(c, select_list, table_columns))
+                .collect(),
         ),
 
         // Collate
@@ -1212,16 +1323,28 @@ fn resolve_where_expression_with_schema(
         // TRIM
         Expression::Trim { position, removal_char, string } => Expression::Trim {
             position: position.clone(),
-            removal_char: removal_char
-                .as_ref()
-                .map(|c| Box::new(resolve_where_expression_with_schema(c, select_list, table_columns))),
-            string: Box::new(resolve_where_expression_with_schema(string, select_list, table_columns)),
+            removal_char: removal_char.as_ref().map(|c| {
+                Box::new(resolve_where_expression_with_schema(c, select_list, table_columns))
+            }),
+            string: Box::new(resolve_where_expression_with_schema(
+                string,
+                select_list,
+                table_columns,
+            )),
         },
 
         // POSITION
         Expression::Position { substring, string, character_unit } => Expression::Position {
-            substring: Box::new(resolve_where_expression_with_schema(substring, select_list, table_columns)),
-            string: Box::new(resolve_where_expression_with_schema(string, select_list, table_columns)),
+            substring: Box::new(resolve_where_expression_with_schema(
+                substring,
+                select_list,
+                table_columns,
+            )),
+            string: Box::new(resolve_where_expression_with_schema(
+                string,
+                select_list,
+                table_columns,
+            )),
             character_unit: character_unit.clone(),
         },
 
@@ -1234,7 +1357,11 @@ fn resolve_where_expression_with_schema(
         // INTERVAL
         Expression::Interval { value, unit, leading_precision, fractional_precision } => {
             Expression::Interval {
-                value: Box::new(resolve_where_expression_with_schema(value, select_list, table_columns)),
+                value: Box::new(resolve_where_expression_with_schema(
+                    value,
+                    select_list,
+                    table_columns,
+                )),
                 unit: unit.clone(),
                 leading_precision: *leading_precision,
                 fractional_precision: *fractional_precision,
@@ -1244,7 +1371,11 @@ fn resolve_where_expression_with_schema(
         // Quantified comparison
         Expression::QuantifiedComparison { expr: inner, op, quantifier, subquery } => {
             Expression::QuantifiedComparison {
-                expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
+                expr: Box::new(resolve_where_expression_with_schema(
+                    inner,
+                    select_list,
+                    table_columns,
+                )),
                 op: *op,
                 quantifier: quantifier.clone(),
                 subquery: subquery.clone(),
@@ -1299,9 +1430,9 @@ fn collect_aggregates_from_expr(
     match expr {
         Expression::AggregateFunction { .. } => {
             // Check if this aggregate is already collected (avoid duplicates)
-            let already_exists = aggregates.iter().any(|existing| {
-                format!("{:?}", existing) == format!("{:?}", expr)
-            });
+            let already_exists = aggregates
+                .iter()
+                .any(|existing| format!("{:?}", existing) == format!("{:?}", expr));
             if !already_exists {
                 aggregates.push(expr.clone());
             }
@@ -1373,8 +1504,7 @@ fn collect_aggregates_from_expr(
         | Expression::WindowFunction { .. } => {}
 
         // Other expressions we might need to handle
-        Expression::Like { expr, pattern, .. }
-        | Expression::Glob { expr, pattern, .. } => {
+        Expression::Like { expr, pattern, .. } | Expression::Glob { expr, pattern, .. } => {
             collect_aggregates_from_expr(expr, aggregates);
             collect_aggregates_from_expr(pattern, aggregates);
         }
@@ -1455,7 +1585,8 @@ mod tests {
             let keys_a = keys_a.as_ref().unwrap();
             let keys_b = keys_b.as_ref().unwrap();
 
-            for ((val_a, dir, _nulls, _coll), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, _nulls, _coll), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter())
+            {
                 // SQLite treats NULL as smallest value:
                 // - ASC: NULL comes first (Less than non-NULL)
                 // - DESC: NULL comes last (Greater than non-NULL)
@@ -1526,7 +1657,8 @@ mod tests {
             let keys_a = keys_a.as_ref().unwrap();
             let keys_b = keys_b.as_ref().unwrap();
 
-            for ((val_a, dir, _nulls, _coll), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, _nulls, _coll), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter())
+            {
                 // SQLite treats NULL as smallest value:
                 // - ASC: NULL comes first (Less than non-NULL)
                 // - DESC: NULL comes last (Greater than non-NULL)
@@ -1606,7 +1738,8 @@ mod tests {
             let keys_a = keys_a.as_ref().unwrap();
             let keys_b = keys_b.as_ref().unwrap();
 
-            for ((val_a, dir, _nulls, _coll), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, _nulls, _coll), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter())
+            {
                 // SQLite treats NULL as smallest value:
                 // - ASC: NULL comes first (Less than non-NULL)
                 // - DESC: NULL comes last (Greater than non-NULL)
@@ -1685,7 +1818,8 @@ mod tests {
             let keys_a = keys_a.as_ref().unwrap();
             let keys_b = keys_b.as_ref().unwrap();
 
-            for ((val_a, dir, _nulls, _coll), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, _nulls, _coll), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter())
+            {
                 // SQLite treats NULL as smallest value:
                 // - ASC: NULL comes first (Less than non-NULL)
                 // - DESC: NULL comes last (Greater than non-NULL)

@@ -329,7 +329,9 @@ fn test_group_by_clause_len() {
     assert_eq!(simple.len(), 2);
 
     let rollup = GroupByClause::Rollup(vec![
-        GroupingElement::Single(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
+        GroupingElement::Single(vibesql_ast::Expression::ColumnRef(
+            vibesql_ast::ColumnIdentifier::simple("a", false),
+        )),
         GroupingElement::Composite(vec![
             vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false)),
             vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c", false)),

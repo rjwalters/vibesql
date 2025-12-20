@@ -30,11 +30,7 @@
 
 mod harness;
 
-use std::{
-    env,
-    hint::black_box,
-    time::Instant,
-};
+use std::{env, hint::black_box, time::Instant};
 
 use harness::{print_group_header, BenchConfig, BenchResult, Harness};
 use vibesql_catalog::{ColumnSchema, TableSchema};
@@ -89,21 +85,21 @@ fn create_aggregate_database(row_count: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
                 data_type: DataType::Bigint,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "AMOUNT".to_string(),
                 data_type: DataType::DoublePrecision,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
     );
@@ -182,7 +178,10 @@ fn bench_aggregate_operation(harness: &Harness) {
     let agg_types = [
         ("agg_count", "SELECT COUNT(*) FROM AGG_DATA"),
         ("agg_sum", "SELECT SUM(VALUE) FROM AGG_DATA"),
-        ("agg_multi", "SELECT COUNT(*), SUM(VALUE), AVG(VALUE), MIN(VALUE), MAX(VALUE) FROM AGG_DATA"),
+        (
+            "agg_multi",
+            "SELECT COUNT(*), SUM(VALUE), AVG(VALUE), MIN(VALUE), MAX(VALUE) FROM AGG_DATA",
+        ),
         ("agg_filtered", "SELECT SUM(VALUE) FROM AGG_DATA WHERE VALUE > 5000"),
     ];
 

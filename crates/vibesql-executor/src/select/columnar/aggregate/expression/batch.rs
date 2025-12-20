@@ -87,9 +87,10 @@ fn evaluate_batch_expression(
         Expression::ColumnRef(col_id) => {
             // Simple column reference - return the column directly
             let column = col_id.column_canonical();
-            let col_idx = schema.get_column_index(col_id.table_canonical(), column).ok_or_else(|| {
-                ExecutorError::UnsupportedExpression(format!("Column not found: {}", column))
-            })?;
+            let col_idx =
+                schema.get_column_index(col_id.table_canonical(), column).ok_or_else(|| {
+                    ExecutorError::UnsupportedExpression(format!("Column not found: {}", column))
+                })?;
 
             batch.column(col_idx).cloned().ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
                 column_index: col_idx,

@@ -79,12 +79,11 @@ impl IndexManager {
         // Get column indices in the table for all indexed columns
         let mut column_indices = Vec::new();
         for index_col in &columns {
-            let column_idx =
-                table_schema.get_column_index(&index_col.expect_column_name()).ok_or_else(|| {
-                    StorageError::ColumnNotFound {
-                        column_name: index_col.expect_column_name().to_string(),
-                        table_name: table_name.clone(),
-                    }
+            let column_idx = table_schema
+                .get_column_index(index_col.expect_column_name())
+                .ok_or_else(|| StorageError::ColumnNotFound {
+                    column_name: index_col.expect_column_name().to_string(),
+                    table_name: table_name.clone(),
                 })?;
             column_indices.push(column_idx);
         }
@@ -263,7 +262,7 @@ impl IndexManager {
                         .iter()
                         .map(|col| {
                             let col_idx = table_schema
-                                .get_column_index(&col.expect_column_name())
+                                .get_column_index(col.expect_column_name())
                                 .expect("Index column should exist");
                             let value = &row.values[col_idx];
                             let truncated = apply_prefix_truncation(value, col.prefix_length());
@@ -360,7 +359,7 @@ impl IndexManager {
                     .iter()
                     .map(|col| {
                         let col_idx = table_schema
-                            .get_column_index(&col.expect_column_name())
+                            .get_column_index(col.expect_column_name())
                             .expect("Index column should exist");
                         (col_idx, col.prefix_length())
                     })
@@ -454,7 +453,7 @@ impl IndexManager {
                 if let Some(changed) = changed_columns {
                     let index_affected = metadata.columns.iter().any(|col| {
                         table_schema
-                            .get_column_index(&col.expect_column_name())
+                            .get_column_index(col.expect_column_name())
                             .map(|idx| changed.contains(&idx))
                             .unwrap_or(false)
                     });
@@ -471,7 +470,7 @@ impl IndexManager {
                         .iter()
                         .map(|col| {
                             let col_idx = table_schema
-                                .get_column_index(&col.expect_column_name())
+                                .get_column_index(col.expect_column_name())
                                 .expect("Index column should exist");
                             let value = &old_row.values[col_idx];
                             let truncated = apply_prefix_truncation(value, col.prefix_length());
@@ -486,7 +485,7 @@ impl IndexManager {
                         .iter()
                         .map(|col| {
                             let col_idx = table_schema
-                                .get_column_index(&col.expect_column_name())
+                                .get_column_index(col.expect_column_name())
                                 .expect("Index column should exist");
                             let value = &new_row.values[col_idx];
                             let truncated = apply_prefix_truncation(value, col.prefix_length());
@@ -600,7 +599,7 @@ impl IndexManager {
                         .iter()
                         .map(|col| {
                             let col_idx = table_schema
-                                .get_column_index(&col.expect_column_name())
+                                .get_column_index(col.expect_column_name())
                                 .expect("Index column should exist");
                             let value = &values[col_idx];
                             let truncated = apply_prefix_truncation(value, col.prefix_length());
@@ -696,7 +695,7 @@ impl IndexManager {
                     .iter()
                     .map(|col| {
                         let col_idx = table_schema
-                            .get_column_index(&col.expect_column_name())
+                            .get_column_index(col.expect_column_name())
                             .expect("Index column should exist");
                         (col_idx, col.prefix_length())
                     })
@@ -799,7 +798,7 @@ impl IndexManager {
                                     .iter()
                                     .map(|col| {
                                         let col_idx = table_schema
-                                            .get_column_index(&col.expect_column_name())
+                                            .get_column_index(col.expect_column_name())
                                             .expect("Index column should exist");
                                         let value = &row.values[col_idx];
                                         let truncated = apply_prefix_truncation(value, col.prefix_length());
@@ -821,7 +820,7 @@ impl IndexManager {
                                     .iter()
                                     .map(|col| {
                                         let col_idx = table_schema
-                                            .get_column_index(&col.expect_column_name())
+                                            .get_column_index(col.expect_column_name())
                                             .expect("Index column should exist");
                                         let value = &row.values[col_idx];
                                         let truncated = apply_prefix_truncation(value, col.prefix_length());
@@ -841,7 +840,7 @@ impl IndexManager {
                                 .iter()
                                 .map(|col| {
                                     let col_idx = table_schema
-                                        .get_column_index(&col.expect_column_name())
+                                        .get_column_index(col.expect_column_name())
                                         .expect("Index column should exist");
                                     table_schema.columns[col_idx].data_type.clone()
                                 })

@@ -47,10 +47,11 @@ fn test_select_star() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -115,17 +116,26 @@ fn test_select_specific_columns() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
-                alias: None, source_text: None },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "name", false,
+                )),
+                alias: None,
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false)),
-                alias: None, source_text: None },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "age", false,
+                )),
+                alias: None,
+                source_text: None,
+            },
         ],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,

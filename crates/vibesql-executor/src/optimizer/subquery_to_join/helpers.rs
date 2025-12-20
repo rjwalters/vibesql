@@ -92,7 +92,12 @@ pub(super) fn rewrite_column_refs_with_alias(
             };
 
             if should_rewrite {
-                Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(new_alias, false, col_id.column_canonical(), false))
+                Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                    new_alias,
+                    false,
+                    col_id.column_canonical(),
+                    false,
+                ))
             } else {
                 expr.clone()
             }

@@ -9,7 +9,10 @@ fn test_insert_from_select_basic() {
     setup_test_table(&mut db);
 
     // First insert some data to select from
-    let insert_stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert_stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -52,7 +55,7 @@ fn test_insert_from_select_basic() {
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -61,10 +64,13 @@ fn test_insert_from_select_basic() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
-    let insert_select_stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert_select_stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "users_backup".to_string(),
         columns: vec![], // No explicit columns, use all
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
@@ -85,7 +91,10 @@ fn test_insert_from_select_with_where() {
     setup_test_table(&mut db);
 
     // Insert multiple users
-    let insert_stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert_stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![
@@ -136,10 +145,12 @@ fn test_insert_from_select_with_where() {
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("id", false),
+            )),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
         }),
@@ -149,10 +160,13 @@ fn test_insert_from_select_with_where() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
-    let insert_select_stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert_select_stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "active_users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
@@ -173,7 +187,10 @@ fn test_insert_from_select_column_mismatch() {
     setup_test_table(&mut db);
 
     // Insert some data
-    let insert_stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert_stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -221,7 +238,7 @@ fn test_insert_from_select_column_mismatch() {
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -230,10 +247,13 @@ fn test_insert_from_select_column_mismatch() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
-    let insert_select_stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert_select_stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "wrong_table".to_string(),
         columns: vec![], // Should match all columns
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
@@ -243,10 +263,7 @@ fn test_insert_from_select_column_mismatch() {
 
     let result = InsertExecutor::execute(&mut db, &insert_select_stmt);
     assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err(),
-        ExecutorError::InsertColumnCountMismatch { .. }
-    ));
+    assert!(matches!(result.unwrap_err(), ExecutorError::InsertColumnCountMismatch { .. }));
 }
 
 #[test]
@@ -272,7 +289,10 @@ fn test_insert_from_select_with_aggregates() {
     db.create_table(schema).unwrap();
 
     // Insert sales data
-    let insert_stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert_stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "sales".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![
@@ -316,17 +336,23 @@ fn test_insert_from_select_with_aggregates() {
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: vibesql_ast::FunctionIdentifier::new("SUM"),
-                    args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("amount", false),
+                    )],
                     character_unit: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     args: vec![vibesql_ast::Expression::Wildcard],
                     character_unit: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
         ],
         into_table: None,
         into_variables: None,
@@ -334,7 +360,7 @@ fn test_insert_from_select_with_aggregates() {
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -343,10 +369,13 @@ fn test_insert_from_select_with_aggregates() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
-    let insert_select_stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert_select_stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "summary".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),

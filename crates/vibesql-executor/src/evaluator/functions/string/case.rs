@@ -23,9 +23,7 @@ pub(in crate::evaluator::functions) fn upper(
 
     match coerce_to_string(&args[0]) {
         None => Ok(vibesql_types::SqlValue::Null),
-        Some(s) => Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-            s.to_uppercase(),
-        ))),
+        Some(s) => Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase()))),
     }
 }
 
@@ -47,8 +45,6 @@ pub(in crate::evaluator::functions) fn lower(
 
     match coerce_to_string(&args[0]) {
         None => Ok(vibesql_types::SqlValue::Null),
-        Some(s) => Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-            s.to_lowercase(),
-        ))),
+        Some(s) => Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.to_lowercase()))),
     }
 }

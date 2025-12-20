@@ -408,9 +408,8 @@ fn test_parse_unique_constraint_prefix_boundary_values() {
 #[test]
 fn test_parse_on_conflict_table_constraints() {
     // Test table-level PRIMARY KEY with ON CONFLICT IGNORE
-    let result = Parser::parse_sql(
-        "CREATE TABLE t1(a INT, b INT, PRIMARY KEY (a, b) ON CONFLICT IGNORE);",
-    );
+    let result =
+        Parser::parse_sql("CREATE TABLE t1(a INT, b INT, PRIMARY KEY (a, b) ON CONFLICT IGNORE);");
     assert!(result.is_ok(), "Should parse table-level PRIMARY KEY with ON CONFLICT");
     let stmt = result.unwrap();
     match stmt {
@@ -428,8 +427,9 @@ fn test_parse_on_conflict_table_constraints() {
     }
 
     // Test table-level UNIQUE with ON CONFLICT REPLACE
-    let result =
-        Parser::parse_sql("CREATE TABLE t2(email TEXT, code TEXT, UNIQUE (email) ON CONFLICT REPLACE);");
+    let result = Parser::parse_sql(
+        "CREATE TABLE t2(email TEXT, code TEXT, UNIQUE (email) ON CONFLICT REPLACE);",
+    );
     assert!(result.is_ok(), "Should parse table-level UNIQUE with ON CONFLICT");
     let stmt = result.unwrap();
     match stmt {
@@ -452,14 +452,12 @@ fn test_parse_on_conflict_table_constraints() {
     assert!(result.is_ok(), "Should parse table-level UNIQUE with ON CONFLICT ABORT");
     let stmt = result.unwrap();
     match stmt {
-        vibesql_ast::Statement::CreateTable(create) => {
-            match &create.table_constraints[0].kind {
-                vibesql_ast::TableConstraintKind::Unique { on_conflict, .. } => {
-                    assert_eq!(*on_conflict, Some(vibesql_ast::ConflictClause::Abort));
-                }
-                _ => panic!("Expected Unique constraint"),
+        vibesql_ast::Statement::CreateTable(create) => match &create.table_constraints[0].kind {
+            vibesql_ast::TableConstraintKind::Unique { on_conflict, .. } => {
+                assert_eq!(*on_conflict, Some(vibesql_ast::ConflictClause::Abort));
             }
-        }
+            _ => panic!("Expected Unique constraint"),
+        },
         _ => panic!("Expected CREATE TABLE statement"),
     }
 
@@ -468,14 +466,12 @@ fn test_parse_on_conflict_table_constraints() {
     assert!(result.is_ok(), "Should parse table-level PRIMARY KEY with ON CONFLICT FAIL");
     let stmt = result.unwrap();
     match stmt {
-        vibesql_ast::Statement::CreateTable(create) => {
-            match &create.table_constraints[0].kind {
-                vibesql_ast::TableConstraintKind::PrimaryKey { on_conflict, .. } => {
-                    assert_eq!(*on_conflict, Some(vibesql_ast::ConflictClause::Fail));
-                }
-                _ => panic!("Expected PrimaryKey constraint"),
+        vibesql_ast::Statement::CreateTable(create) => match &create.table_constraints[0].kind {
+            vibesql_ast::TableConstraintKind::PrimaryKey { on_conflict, .. } => {
+                assert_eq!(*on_conflict, Some(vibesql_ast::ConflictClause::Fail));
             }
-        }
+            _ => panic!("Expected PrimaryKey constraint"),
+        },
         _ => panic!("Expected CREATE TABLE statement"),
     }
 }

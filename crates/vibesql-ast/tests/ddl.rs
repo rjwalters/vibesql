@@ -50,7 +50,7 @@ fn test_column_def() {
         constraints: vec![],
         default_value: None,
         comment: None,
-    generated_expr: None,
+        generated_expr: None,
     };
     assert_eq!(col.name, "email");
     assert!(!col.nullable);
@@ -66,7 +66,9 @@ fn test_create_assertion_statement() {
         assertion_name: "valid_balance".to_string(),
         check_condition: Box::new(Expression::BinaryOp {
             op: BinaryOperator::GreaterThanOrEqual,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("balance", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "balance", false,
+            ))),
             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(0))),
         }),
     });

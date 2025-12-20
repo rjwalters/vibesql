@@ -101,8 +101,10 @@ impl SelectExecutor<'_> {
                         evaluator.eval(expr, outer_row)?
                     } else {
                         // No outer context - use simple evaluation
-                        let empty_schema = vibesql_catalog::TableSchema::new("".to_string(), vec![]);
-                        let evaluator = ExpressionEvaluator::with_database(&empty_schema, self.database);
+                        let empty_schema =
+                            vibesql_catalog::TableSchema::new("".to_string(), vec![]);
+                        let evaluator =
+                            ExpressionEvaluator::with_database(&empty_schema, self.database);
                         let empty_row = vibesql_storage::Row::new(vec![]);
                         evaluator.eval(expr, &empty_row)?
                     };

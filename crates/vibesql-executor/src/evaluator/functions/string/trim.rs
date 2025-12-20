@@ -22,9 +22,7 @@ pub(in crate::evaluator::functions) fn trim(
 
     match coerce_to_string(&args[0]) {
         None => Ok(vibesql_types::SqlValue::Null),
-        Some(s) => Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-            s.trim().to_string(),
-        ))),
+        Some(s) => Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.trim().to_string()))),
     }
 }
 

@@ -52,11 +52,7 @@
 
 mod harness;
 
-use std::{
-    env,
-    hint::black_box,
-    time::Instant,
-};
+use std::{env, hint::black_box, time::Instant};
 
 use harness::{print_group_header, BenchConfig, BenchResult, Harness};
 use vibesql_catalog::{ColumnSchema, TableSchema};
@@ -124,28 +120,28 @@ fn create_filter_database(row_count: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "CATEGORY".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
                 data_type: DataType::Bigint,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "FLAG".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
     );
@@ -154,9 +150,9 @@ fn create_filter_database(row_count: usize) -> Database {
     for i in 0..row_count {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Integer((i % 100) as i64),                  // 100 categories
+            SqlValue::Integer((i % 100) as i64), // 100 categories
             SqlValue::Bigint(((i * 17 + 42) % 1_000_000) as i64), // pseudo-random
-            SqlValue::Integer((i % 2) as i64),                    // 50% selectivity
+            SqlValue::Integer((i % 2) as i64),   // 50% selectivity
         ]);
         db.insert_row("FILTER_DATA", row).unwrap();
     }
@@ -226,10 +222,7 @@ fn bench_filter_operation(harness: &Harness) {
         ("filter_50pct", "SELECT COUNT(*) FROM FILTER_DATA WHERE FLAG = 1"), // 50%
         ("filter_10pct", "SELECT COUNT(*) FROM FILTER_DATA WHERE CATEGORY < 10"), // 10%
         ("filter_1pct", "SELECT COUNT(*) FROM FILTER_DATA WHERE CATEGORY = 0"), // 1%
-        (
-            "filter_compound",
-            "SELECT COUNT(*) FROM FILTER_DATA WHERE CATEGORY < 50 AND FLAG = 1",
-        ), // ~25%
+        ("filter_compound", "SELECT COUNT(*) FROM FILTER_DATA WHERE CATEGORY < 50 AND FLAG = 1"), // ~25%
     ];
 
     for &row_count in &row_counts {
@@ -287,27 +280,21 @@ fn bench_morsel_filter_direct(harness: &Harness) {
             .map(|i| {
                 Row::new(vec![
                     SqlValue::Integer(i as i64),
-                    SqlValue::Integer((i % 100) as i64),                  // category
+                    SqlValue::Integer((i % 100) as i64), // category
                     SqlValue::Bigint(((i * 17 + 42) % 1_000_000) as i64), // value
-                    SqlValue::Integer((i % 2) as i64),                    // flag
+                    SqlValue::Integer((i % 2) as i64),   // flag
                 ])
             })
             .collect();
 
         // Different predicates with varying selectivities
         let predicates: Vec<(&str, PredicateFn)> = vec![
-            (
-                "50pct_flag",
-                Box::new(|row: &Row| matches!(row.values[3], SqlValue::Integer(1))),
-            ),
+            ("50pct_flag", Box::new(|row: &Row| matches!(row.values[3], SqlValue::Integer(1)))),
             (
                 "10pct_category",
                 Box::new(|row: &Row| matches!(row.values[1], SqlValue::Integer(c) if c < 10)),
             ),
-            (
-                "1pct_category",
-                Box::new(|row: &Row| matches!(row.values[1], SqlValue::Integer(0))),
-            ),
+            ("1pct_category", Box::new(|row: &Row| matches!(row.values[1], SqlValue::Integer(0)))),
             (
                 "25pct_compound",
                 Box::new(|row: &Row| {
@@ -330,16 +317,14 @@ fn bench_morsel_filter_direct(harness: &Harness) {
                     .expect("Failed to create thread pool");
 
                 for &morsel_size in &morsel_sizes {
-                    let config = MorselConfig {
-                        morsel_size,
-                        ..MorselConfig::default()
-                    };
+                    let config = MorselConfig { morsel_size, ..MorselConfig::default() };
 
                     let stats = pool.install(|| {
                         let name = format!("morsel_{}_{}t_{}m", pred_name, threads, morsel_size);
                         harness.run(&name, || {
                             let start = Instant::now();
-                            let result = morsel_parallel_filter(&rows, &config, |row| predicate(row));
+                            let result =
+                                morsel_parallel_filter(&rows, &config, |row| predicate(row));
                             black_box(result);
                             BenchResult::Ok(start.elapsed())
                         })

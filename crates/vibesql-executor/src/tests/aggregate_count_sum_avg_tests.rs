@@ -54,7 +54,7 @@ fn test_count_star_no_group_by() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
@@ -65,7 +65,8 @@ fn test_count_star_no_group_by() {
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -133,18 +134,21 @@ fn test_sum_no_group_by() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: vibesql_ast::FunctionIdentifier::new("SUM"),
-                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                args: vec![vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("amount", false),
+                )],
                 character_unit: None,
             },
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
@@ -214,7 +218,7 @@ fn test_count_with_nulls() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
@@ -225,7 +229,8 @@ fn test_count_with_nulls() {
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "data".to_string(),
             alias: None,
             column_aliases: None,
@@ -293,18 +298,21 @@ fn test_sum_with_nulls() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: vibesql_ast::FunctionIdentifier::new("SUM"),
-                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))],
+                args: vec![vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("value", false),
+                )],
                 character_unit: None,
             },
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "amounts".to_string(),
             alias: None,
             column_aliases: None,
@@ -374,18 +382,21 @@ fn test_avg_function() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: vibesql_ast::FunctionIdentifier::new("AVG"),
-                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("score", false))],
+                args: vec![vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("score", false),
+                )],
                 character_unit: None,
             },
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "scores".to_string(),
             alias: None,
             column_aliases: None,
@@ -454,18 +465,21 @@ fn test_avg_with_nulls() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: vibesql_ast::FunctionIdentifier::new("AVG"),
-                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("rating", false))],
+                args: vec![vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("rating", false),
+                )],
                 character_unit: None,
             },
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "ratings".to_string(),
             alias: None,
             column_aliases: None,
@@ -537,18 +551,21 @@ fn test_count_column_all_nulls() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: vibesql_ast::FunctionIdentifier::new("COUNT"),
-                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))],
+                args: vec![vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("value", false),
+                )],
                 character_unit: None,
             },
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "null_data".to_string(),
             alias: None,
             column_aliases: None,
@@ -571,7 +588,7 @@ fn test_count_column_all_nulls() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
@@ -582,7 +599,8 @@ fn test_count_column_all_nulls() {
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "null_data".to_string(),
             alias: None,
             column_aliases: None,
@@ -630,7 +648,7 @@ fn test_count_star_in_simple_case_expression() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Case {
@@ -655,7 +673,8 @@ fn test_count_star_in_simple_case_expression() {
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "data".to_string(),
             alias: None,
             column_aliases: None,
@@ -702,7 +721,7 @@ fn test_count_star_in_searched_case_expression() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Case {
@@ -731,7 +750,8 @@ fn test_count_star_in_searched_case_expression() {
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "items".to_string(),
             alias: None,
             column_aliases: None,
@@ -779,7 +799,7 @@ fn test_count_star_in_arithmetic_expression() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
@@ -797,7 +817,8 @@ fn test_count_star_in_arithmetic_expression() {
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "records".to_string(),
             alias: None,
             column_aliases: None,
@@ -839,7 +860,7 @@ fn test_count_star_in_case_then_clause() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Case {
@@ -868,7 +889,8 @@ fn test_count_star_in_case_then_clause() {
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
@@ -910,7 +932,7 @@ fn test_count_star_in_nested_case_expression() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Case {
@@ -950,7 +972,8 @@ fn test_count_star_in_nested_case_expression() {
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "nested".to_string(),
             alias: None,
             column_aliases: None,

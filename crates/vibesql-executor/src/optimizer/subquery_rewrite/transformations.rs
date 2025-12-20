@@ -33,7 +33,9 @@ pub(super) fn rewrite_in_to_exists(
     // Change SELECT list to SELECT 1 (EXISTS doesn't care about actual values)
     exists_subquery.select_list = vec![SelectItem::Expression {
         expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-        alias: None, source_text: None }];
+        alias: None,
+        source_text: None,
+    }];
 
     // Add LIMIT 1 for early termination after first match
     // EXISTS only cares if ANY row matches, not all rows
@@ -113,8 +115,11 @@ pub(super) fn rewrite_exists_to_in(
     decorrelated.distinct = true;
 
     // SELECT the inner correlation column
-    decorrelated.select_list =
-        vec![SelectItem::Expression { expr: correlation.inner_expr.clone(), alias: None , source_text: None }];
+    decorrelated.select_list = vec![SelectItem::Expression {
+        expr: correlation.inner_expr.clone(),
+        alias: None,
+        source_text: None,
+    }];
 
     // Remove correlation predicate from WHERE, keep only remaining predicates
     decorrelated.where_clause = remaining_predicates;
@@ -220,13 +225,15 @@ fn is_from_outer_tables(expr: &Expression, outer_tables: &[String], inner_table:
                     // Handle unqualified columns that use table prefix convention (e.g., o_orderkey for orders)
                     let column = col_id.column_canonical();
                     // Don't match if column starts with inner table's prefix
-                    let inner_prefix = inner_table.chars().next().unwrap_or('_').to_ascii_lowercase();
+                    let inner_prefix =
+                        inner_table.chars().next().unwrap_or('_').to_ascii_lowercase();
                     let col_prefix = column.chars().next().unwrap_or('_').to_ascii_lowercase();
 
                     // If column prefix matches an outer table's prefix but not inner table's prefix
                     if col_prefix != inner_prefix {
                         for outer in outer_tables {
-                            let outer_prefix = outer.chars().next().unwrap_or('_').to_ascii_lowercase();
+                            let outer_prefix =
+                                outer.chars().next().unwrap_or('_').to_ascii_lowercase();
                             if col_prefix == outer_prefix {
                                 return true;
                             }

@@ -471,14 +471,11 @@ fn expression_has_rowid(expr: &vibesql_ast::Expression) -> bool {
             expression_has_rowid(left) || expression_has_rowid(right)
         }
         vibesql_ast::Expression::UnaryOp { expr, .. } => expression_has_rowid(expr),
-        vibesql_ast::Expression::Function { args, .. } => {
-            args.iter().any(expression_has_rowid)
-        }
+        vibesql_ast::Expression::Function { args, .. } => args.iter().any(expression_has_rowid),
         vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
             operand.as_ref().is_some_and(|e| expression_has_rowid(e))
                 || when_clauses.iter().any(|w| {
-                    w.conditions.iter().any(expression_has_rowid)
-                        || expression_has_rowid(&w.result)
+                    w.conditions.iter().any(expression_has_rowid) || expression_has_rowid(&w.result)
                 })
                 || else_result.as_ref().is_some_and(|e| expression_has_rowid(e))
         }
@@ -549,10 +546,7 @@ fn contains_unsupported_predicates(expr: &vibesql_ast::Expression) -> bool {
         // Binary operations need recursive checking
         vibesql_ast::Expression::BinaryOp { left, op, right } => {
             // For AND/OR, check both sides
-            if matches!(
-                op,
-                vibesql_ast::BinaryOperator::And | vibesql_ast::BinaryOperator::Or
-            ) {
+            if matches!(op, vibesql_ast::BinaryOperator::And | vibesql_ast::BinaryOperator::Or) {
                 return contains_unsupported_predicates(left)
                     || contains_unsupported_predicates(right);
             }
@@ -561,10 +555,7 @@ fn contains_unsupported_predicates(expr: &vibesql_ast::Expression) -> bool {
             // Skip join conditions (col1 = col2) as they're handled separately
             let is_join_condition = matches!(
                 (left.as_ref(), right.as_ref()),
-                (
-                    vibesql_ast::Expression::ColumnRef(_),
-                    vibesql_ast::Expression::ColumnRef(_)
-                )
+                (vibesql_ast::Expression::ColumnRef(_), vibesql_ast::Expression::ColumnRef(_))
             );
 
             if is_join_condition {

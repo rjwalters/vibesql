@@ -13,11 +13,7 @@ fn format_f64(n: f64) -> String {
         return "NaN".to_string();
     }
     if n.is_infinite() {
-        return if n > 0.0 {
-            "Infinity".to_string()
-        } else {
-            "-Infinity".to_string()
-        };
+        return if n > 0.0 { "Infinity".to_string() } else { "-Infinity".to_string() };
     }
 
     let abs_n = n.abs();
@@ -45,11 +41,7 @@ fn format_f32(n: f32) -> String {
         return "NaN".to_string();
     }
     if n.is_infinite() {
-        return if n > 0.0 {
-            "Infinity".to_string()
-        } else {
-            "-Infinity".to_string()
-        };
+        return if n > 0.0 { "Infinity".to_string() } else { "-Infinity".to_string() };
     }
 
     let abs_n = n.abs();

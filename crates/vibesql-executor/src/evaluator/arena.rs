@@ -497,9 +497,11 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             | ArenaExtendedExpr::DuplicateKeyValue { .. }
             | ArenaExtendedExpr::NextValue { .. }
             | ArenaExtendedExpr::MatchAgainst { .. }
-            | ArenaExtendedExpr::RowValueConstructor { .. } => Err(ExecutorError::UnsupportedExpression(
-                "Advanced expression types not supported in arena evaluator".to_string(),
-            )),
+            | ArenaExtendedExpr::RowValueConstructor { .. } => {
+                Err(ExecutorError::UnsupportedExpression(
+                    "Advanced expression types not supported in arena evaluator".to_string(),
+                ))
+            }
         }
     }
 
@@ -904,11 +906,25 @@ mod tests {
         let row =
             Row::new(vec![SqlValue::Integer(42), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
 
-        let expr = ArenaExpression::ColumnRef { schema: None, table: None, column: id_sym, schema_quoted: false, table_quoted: false, column_quoted: false };
+        let expr = ArenaExpression::ColumnRef {
+            schema: None,
+            table: None,
+            column: id_sym,
+            schema_quoted: false,
+            table_quoted: false,
+            column_quoted: false,
+        };
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Integer(42));
 
-        let expr = ArenaExpression::ColumnRef { schema: None, table: None, column: name_sym, schema_quoted: false, table_quoted: false, column_quoted: false };
+        let expr = ArenaExpression::ColumnRef {
+            schema: None,
+            table: None,
+            column: name_sym,
+            schema_quoted: false,
+            table_quoted: false,
+            column_quoted: false,
+        };
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
     }
@@ -928,14 +944,28 @@ mod tests {
         let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Null]);
 
         let expr = ArenaExpression::IsNull {
-            expr: arena.alloc(ArenaExpression::ColumnRef { schema: None, table: None, column: name_sym, schema_quoted: false, table_quoted: false, column_quoted: false }),
+            expr: arena.alloc(ArenaExpression::ColumnRef {
+                schema: None,
+                table: None,
+                column: name_sym,
+                schema_quoted: false,
+                table_quoted: false,
+                column_quoted: false,
+            }),
             negated: false,
         };
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Boolean(true));
 
         let expr = ArenaExpression::IsNull {
-            expr: arena.alloc(ArenaExpression::ColumnRef { schema: None, table: None, column: id_sym, schema_quoted: false, table_quoted: false, column_quoted: false }),
+            expr: arena.alloc(ArenaExpression::ColumnRef {
+                schema: None,
+                table: None,
+                column: id_sym,
+                schema_quoted: false,
+                table_quoted: false,
+                column_quoted: false,
+            }),
             negated: false,
         };
         let result = evaluator.eval(&expr, &row).unwrap();

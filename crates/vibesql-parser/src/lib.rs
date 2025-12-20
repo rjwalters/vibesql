@@ -76,12 +76,15 @@ use vibesql_ast::Statement;
 pub fn parse_with_arena_fallback(sql: &str) -> Result<Statement, ParseError> {
     // Tokenize to detect statement type
     let mut lexer = Lexer::new(sql);
-    let tokens =
-        lexer.tokenize().map_err(|e| ParseError { message: e.to_string() })?;
+    let tokens = lexer.tokenize().map_err(|e| ParseError { message: e.to_string() })?;
 
     // Check first token to determine statement type
     if let Some(first_token) = tokens.first() {
-        if matches!(first_token, Token::Keyword { keyword: Keyword::Select, .. } | Token::Keyword { keyword: Keyword::With, .. }) {
+        if matches!(
+            first_token,
+            Token::Keyword { keyword: Keyword::Select, .. }
+                | Token::Keyword { keyword: Keyword::With, .. }
+        ) {
             // Use arena parsing for SELECT statements (including WITH CTEs)
             match arena_parser::parse_select_to_owned(sql) {
                 Ok(select_stmt) => {
@@ -166,10 +169,7 @@ mod arena_fallback_tests {
                 vibesql_ast::SelectItem::QualifiedWildcard { qualifier, alias: _ } => {
                     assert_eq!(qualifier, "t1");
                 }
-                other => panic!(
-                    "Expected QualifiedWildcard, got {:?}",
-                    other
-                ),
+                other => panic!("Expected QualifiedWildcard, got {:?}", other),
             }
         } else {
             panic!("Expected SELECT statement");

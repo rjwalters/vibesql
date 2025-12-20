@@ -142,21 +142,21 @@ fn create_sbtest_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "k".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "c".to_string(),
                 data_type: DataType::Varchar { max_length: Some(120) },
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             // Note: renamed from "pad" to "padding" because PAD is a SQL keyword
             ColumnSchema {
@@ -164,7 +164,7 @@ fn create_sbtest_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         vec!["id".to_string()], // PRIMARY KEY on id column

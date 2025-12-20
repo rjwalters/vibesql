@@ -144,7 +144,12 @@ pub(super) fn apply_window_functions_to_aggregates(
             let arg_col_idx = win_func.select_index;
 
             // Create an expression that references this column
-            let arg_expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("result", false, &format!("col{}", arg_col_idx), false));
+            let arg_expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "result",
+                false,
+                &format!("col{}", arg_col_idx),
+                false,
+            ));
 
             // Evaluate the window function for each row in the partition
             for row_idx in 0..partition.len() {
@@ -157,11 +162,13 @@ pub(super) fn apply_window_functions_to_aggregates(
                 };
 
                 let value = match win_func.outer_func_name.to_uppercase().as_str() {
-                    "COUNT" => evaluate_count_window(partition, &frame, Some(&arg_expr), eval_fn),
-                    "SUM" => evaluate_sum_window(partition, &frame, &arg_expr, eval_fn),
-                    "AVG" => evaluate_avg_window(partition, &frame, &arg_expr, eval_fn),
-                    "MIN" => evaluate_min_window(partition, &frame, &arg_expr, eval_fn),
-                    "MAX" => evaluate_max_window(partition, &frame, &arg_expr, eval_fn),
+                    "COUNT" => {
+                        evaluate_count_window(partition, &frame, Some(&arg_expr), None, eval_fn)
+                    }
+                    "SUM" => evaluate_sum_window(partition, &frame, &arg_expr, None, eval_fn),
+                    "AVG" => evaluate_avg_window(partition, &frame, &arg_expr, None, eval_fn),
+                    "MIN" => evaluate_min_window(partition, &frame, &arg_expr, None, eval_fn),
+                    "MAX" => evaluate_max_window(partition, &frame, &arg_expr, None, eval_fn),
                     other => {
                         return Err(ExecutorError::UnsupportedExpression(format!(
                             "Unsupported aggregate window function: {}",
@@ -209,7 +216,14 @@ fn build_aggregate_result_schema(select_list: &[SelectItem]) -> CombinedSchema {
     let table_id = vibesql_catalog::TableIdentifier::unquoted("result");
     table_schemas.insert(table_id, (0, table_schema.clone()));
 
-    CombinedSchema { table_schemas, total_columns: table_schema.columns.len(), hidden_columns: std::collections::HashSet::new(), outer_schema: None, duplicate_aliases: std::collections::HashSet::new(), joined_columns: std::collections::HashSet::new() }
+    CombinedSchema {
+        table_schemas,
+        total_columns: table_schema.columns.len(),
+        hidden_columns: std::collections::HashSet::new(),
+        outer_schema: None,
+        duplicate_aliases: std::collections::HashSet::new(),
+        joined_columns: std::collections::HashSet::new(),
+    }
 }
 
 /// Map an expression to a column reference in the result schema
@@ -219,18 +233,24 @@ fn build_aggregate_result_schema(select_list: &[SelectItem]) -> CombinedSchema {
 fn map_expr_to_result_column(expr: &Expression, select_list: &[SelectItem]) -> Expression {
     // Try to find this expression in the SELECT list
     for (idx, item) in select_list.iter().enumerate() {
-        if let SelectItem::Expression { expr: select_expr, alias , .. } = item {
+        if let SelectItem::Expression { expr: select_expr, alias, .. } = item {
             // Check if expressions match
             if expressions_match(expr, select_expr) {
                 let col_name = alias.clone().unwrap_or_else(|| format!("col{}", idx));
-                return Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("result", false, &col_name, false));
+                return Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                    "result", false, &col_name, false,
+                ));
             }
 
             // Also check if expr matches an alias
             if let Some(alias) = alias {
                 if let Expression::ColumnRef(col_id) = expr {
-                    if col_id.table_canonical().is_none() && col_id.column_canonical().eq_ignore_ascii_case(alias) {
-                        return Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("result", false, alias, false));
+                    if col_id.table_canonical().is_none()
+                        && col_id.column_canonical().eq_ignore_ascii_case(alias)
+                    {
+                        return Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                            "result", false, alias, false,
+                        ));
                     }
                 }
             }

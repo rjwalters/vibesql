@@ -18,7 +18,7 @@ fn test_parse_select_with_backtick_column_names() {
                     assert!(alias.is_none());
                     match expr {
                         vibesql_ast::Expression::ColumnRef(col_id) => {
-            let column = col_id.column_canonical();
+                            let column = col_id.column_canonical();
                             // Backtick identifiers preserve case
                             assert_eq!(column, "user_id");
                         }
@@ -93,7 +93,7 @@ fn test_parse_select_with_backtick_reserved_words() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef(col_id) => {
-            let column = col_id.column_canonical();
+                        let column = col_id.column_canonical();
                         assert_eq!(column, "select");
                     }
                     _ => panic!("Expected ColumnRef"),
@@ -125,7 +125,7 @@ fn test_parse_select_mixed_backtick_and_regular() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef(col_id) => {
-            let column = col_id.column_canonical();
+                        let column = col_id.column_canonical();
                         assert_eq!(column, "id");
                     }
                     _ => panic!("Expected ColumnRef"),
@@ -136,7 +136,7 @@ fn test_parse_select_mixed_backtick_and_regular() {
             match &select.select_list[1] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef(col_id) => {
-            let column = col_id.column_canonical();
+                        let column = col_id.column_canonical();
                         assert_eq!(column, "userName");
                     }
                     _ => panic!("Expected ColumnRef"),

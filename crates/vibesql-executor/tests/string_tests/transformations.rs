@@ -302,10 +302,7 @@ fn test_replace_wrong_type() {
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     // "123" not found in "hello", so returns "hello" unchanged
-    assert_eq!(
-        result,
-        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))
-    );
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")));
 }
 
 #[test]
@@ -432,10 +429,7 @@ fn test_reverse_wrong_type() {
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     // REVERSE(123) = REVERSE("123") = "321"
-    assert_eq!(
-        result,
-        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("321"))
-    );
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("321")));
 }
 
 #[test]

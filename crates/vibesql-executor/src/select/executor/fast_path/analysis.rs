@@ -488,7 +488,9 @@ mod tests {
         // No sorted_by means we need to sort
         assert!(needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false)),
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "a", false
+                )),
                 direction: vibesql_ast::OrderDirection::Asc,
                 nulls_order: None,
             }],
@@ -498,7 +500,9 @@ mod tests {
         // Matching sorted_by means no sorting needed
         assert!(!needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false)),
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "a", false
+                )),
                 direction: vibesql_ast::OrderDirection::Asc,
                 nulls_order: None,
             }],
@@ -508,7 +512,9 @@ mod tests {
         // Different column means sorting needed
         assert!(needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false)),
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "b", false
+                )),
                 direction: vibesql_ast::OrderDirection::Asc,
                 nulls_order: None,
             }],
@@ -518,7 +524,9 @@ mod tests {
         // Different direction means sorting needed
         assert!(needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false)),
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "a", false
+                )),
                 direction: vibesql_ast::OrderDirection::Desc,
                 nulls_order: None,
             }],
@@ -528,7 +536,9 @@ mod tests {
         // ORDER BY prefix of sorted_by is OK
         assert!(!needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false)),
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "a", false
+                )),
                 direction: vibesql_ast::OrderDirection::Asc,
                 nulls_order: None,
             }],
@@ -542,12 +552,16 @@ mod tests {
         assert!(needs_sorting(
             &[
                 vibesql_ast::OrderByItem {
-                    expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false)),
+                    expr: vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("a", false)
+                    ),
                     direction: vibesql_ast::OrderDirection::Asc,
                     nulls_order: None,
                 },
                 vibesql_ast::OrderByItem {
-                    expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false)),
+                    expr: vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("b", false)
+                    ),
                     direction: vibesql_ast::OrderDirection::Asc,
                     nulls_order: None,
                 },

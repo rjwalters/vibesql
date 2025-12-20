@@ -5,6 +5,10 @@ use std::sync::{Arc, Mutex};
 use crossbeam_deque::{Injector, Steal, Worker};
 
 use super::{combine_rows, FromResult};
+#[cfg(feature = "parallel")]
+use crate::select::morsel::{Morsel, MorselConfig};
+#[cfg(feature = "parallel")]
+use crate::select::parallel::ParallelConfig;
 use crate::{
     errors::ExecutorError,
     evaluator::CombinedExpressionEvaluator,
@@ -12,10 +16,6 @@ use crate::{
     schema::CombinedSchema,
     timeout::{TimeoutContext, CHECK_INTERVAL},
 };
-#[cfg(feature = "parallel")]
-use crate::select::morsel::{Morsel, MorselConfig};
-#[cfg(feature = "parallel")]
-use crate::select::parallel::ParallelConfig;
 
 /// Maximum number of rows allowed in a join result to prevent memory exhaustion
 /// With average row size of ~100 bytes, this allows up to ~10GB
@@ -923,8 +923,11 @@ pub(super) fn nested_loop_cross_join(
     let right_table_display_name = right_table_name.display().to_string();
 
     // Combine schemas
-    let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_display_name.clone(), right_schema);
+    let combined_schema = CombinedSchema::combine(
+        left.schema.clone(),
+        right_table_display_name.clone(),
+        right_schema,
+    );
 
     // Get table names for ROWID tracking (issue #4370)
     let left_table_names = left.schema.table_names();
@@ -987,8 +990,11 @@ pub(super) fn nested_loop_semi_join(
     let right_table_display_name = right_table_name.display().to_string();
 
     // Create combined schema for condition evaluation
-    let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_display_name.clone(), right_schema_def);
+    let combined_schema = CombinedSchema::combine(
+        left.schema.clone(),
+        right_table_display_name.clone(),
+        right_schema_def,
+    );
 
     // Create evaluator for condition
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
@@ -1080,8 +1086,11 @@ pub(super) fn nested_loop_anti_join(
     let right_table_display_name = right_table_name.display().to_string();
 
     // Create combined schema for condition evaluation
-    let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_display_name.clone(), right_schema_def);
+    let combined_schema = CombinedSchema::combine(
+        left.schema.clone(),
+        right_table_display_name.clone(),
+        right_schema_def,
+    );
 
     // Create evaluator for condition
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
@@ -1186,7 +1195,10 @@ mod tests {
         let left_rows: Vec<Row> = vec![
             Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
             Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
-            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))]),
+            Row::new(vec![
+                SqlValue::Integer(3),
+                SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
+            ]),
         ];
 
         let right_rows: Vec<Row> = vec![
@@ -1207,9 +1219,13 @@ mod tests {
 
         // Condition: users.id = orders.user_id (column 0 = column 2 in combined row)
         let condition = vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false),
+            )),
             op: vibesql_ast::BinaryOperator::Equal,
-            right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
+            right: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false),
+            )),
         };
 
         let result = execute_nested_loop_classic(
@@ -1243,10 +1259,8 @@ mod tests {
     #[test]
     fn test_nested_loop_classic_no_condition() {
         // Test cross product (no condition)
-        let left_rows: Vec<Row> = vec![
-            Row::new(vec![SqlValue::Integer(1)]),
-            Row::new(vec![SqlValue::Integer(2)]),
-        ];
+        let left_rows: Vec<Row> =
+            vec![Row::new(vec![SqlValue::Integer(1)]), Row::new(vec![SqlValue::Integer(2)])];
 
         let right_rows: Vec<Row> = vec![
             Row::new(vec![SqlValue::Integer(10)]),
@@ -1339,7 +1353,10 @@ mod tests {
 
             let schema = create_combined_schema(
                 "users",
-                vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
+                vec![
+                    ("id", DataType::Integer),
+                    ("name", DataType::Varchar { max_length: Some(50) }),
+                ],
                 "orders",
                 vec![("user_id", DataType::Integer), ("amount", DataType::Integer)],
             );
@@ -1349,9 +1366,13 @@ mod tests {
 
             // Condition: users.id = orders.user_id
             let condition = vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false),
+                )),
             };
 
             let result = execute_nested_loop_parallel(
@@ -1454,9 +1475,13 @@ mod tests {
 
             // Condition: left.a = right.b (no matches since ranges don't overlap)
             let condition = vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("left", false, "a", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("left", false, "a", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("right", false, "b", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("right", false, "b", false),
+                )),
             };
 
             let result = execute_nested_loop_parallel(
@@ -1495,9 +1520,15 @@ mod tests {
 
             let schema = create_combined_schema(
                 "left",
-                vec![("id", DataType::Integer), ("data", DataType::Varchar { max_length: Some(50) })],
+                vec![
+                    ("id", DataType::Integer),
+                    ("data", DataType::Varchar { max_length: Some(50) }),
+                ],
                 "right",
-                vec![("id", DataType::Integer), ("info", DataType::Varchar { max_length: Some(50) })],
+                vec![
+                    ("id", DataType::Integer),
+                    ("info", DataType::Varchar { max_length: Some(50) }),
+                ],
             );
 
             let db = Database::default();
@@ -1505,9 +1536,13 @@ mod tests {
 
             // Condition: left.id = right.id
             let condition = vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("left", false, "id", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("left", false, "id", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("right", false, "id", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("right", false, "id", false),
+                )),
             };
 
             // Sequential result
@@ -1571,9 +1606,13 @@ mod tests {
 
             // Condition: left.key = right.key
             let condition = vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("left", false, "key", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("left", false, "key", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("right", false, "key", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("right", false, "key", false),
+                )),
             };
 
             let result = execute_nested_loop_parallel(

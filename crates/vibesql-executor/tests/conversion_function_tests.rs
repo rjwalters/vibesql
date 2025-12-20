@@ -16,7 +16,11 @@ use common::create_test_evaluator;
 
 /// Helper to create a function expression
 fn create_function_expr(name: &str, args: Vec<vibesql_ast::Expression>) -> vibesql_ast::Expression {
-    vibesql_ast::Expression::Function { name: vibesql_ast::FunctionIdentifier::new(name), args, character_unit: None }
+    vibesql_ast::Expression::Function {
+        name: vibesql_ast::FunctionIdentifier::new(name),
+        args,
+        character_unit: None,
+    }
 }
 
 /// Helper to evaluate a function and return the result

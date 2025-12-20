@@ -249,10 +249,7 @@ pub enum IndexColumn {
     },
     /// Expression index (functional index)
     /// Example: CREATE INDEX idx ON t(lower(name)) or CREATE INDEX idx ON t(a + b)
-    Expression {
-        expr: Box<Expression>,
-        direction: crate::select::OrderDirection,
-    },
+    Expression { expr: Box<Expression>, direction: crate::select::OrderDirection },
 }
 
 impl IndexColumn {

@@ -134,33 +134,46 @@ fn test_having_clause() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept", false)),
-                alias: None, source_text: None },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "dept", false,
+                )),
+                alias: None,
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: vibesql_ast::FunctionIdentifier::new("SUM"),
-                    args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("amount", false),
+                    )],
                     character_unit: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
         ],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
-            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept", false)),
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "dept", false,
+            )),
         ])),
         having: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::Function {
                 name: vibesql_ast::FunctionIdentifier::new("SUM"),
-                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                args: vec![vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("amount", false),
+                )],
                 character_unit: None,
             }),
             op: vibesql_ast::BinaryOperator::GreaterThan,

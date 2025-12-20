@@ -10,8 +10,8 @@
 
 use std::fmt::Write;
 
-use vibesql_ast::{ExplainFormat, ExplainStmt, SelectStmt, Statement};
 use vibesql_ast::pretty_print::ToSql;
+use vibesql_ast::{ExplainFormat, ExplainStmt, SelectStmt, Statement};
 use vibesql_storage::Database;
 
 use crate::{

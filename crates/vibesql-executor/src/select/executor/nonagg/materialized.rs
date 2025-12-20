@@ -188,7 +188,11 @@ impl SelectExecutor<'_> {
         // IMPORTANT: Use schema-aware resolution to avoid incorrectly substituting
         // table column names with aggregate aliases (SQLite behavior)
         let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
-            crate::select::order::resolve_where_aliases_with_schema(where_expr, &stmt.select_list, schema)
+            crate::select::order::resolve_where_aliases_with_schema(
+                where_expr,
+                &stmt.select_list,
+                schema,
+            )
         });
 
         // Try spatial index optimization if feature is enabled

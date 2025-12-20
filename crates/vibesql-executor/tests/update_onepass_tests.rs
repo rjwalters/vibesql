@@ -118,7 +118,9 @@ fn test_onepass_multiple_literal_assignments() {
             },
         ],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "id", false,
+            ))),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
@@ -155,7 +157,9 @@ fn test_onepass_single_literal_assignment() {
             value: Expression::Literal(SqlValue::Integer(777)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "id", false,
+            ))),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         })),
@@ -184,7 +188,9 @@ fn test_onepass_pk_not_found_returns_zero() {
             value: Expression::Literal(SqlValue::Integer(999)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "id", false,
+            ))),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(999))),
         })),
@@ -222,7 +228,9 @@ fn test_onepass_not_null_constraint_enforced() {
             value: Expression::Literal(SqlValue::Null),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "id", false,
+            ))),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
@@ -253,13 +261,17 @@ fn test_composite_pk_update_both_columns_specified() {
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("order_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "order_id", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("item_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "item_id", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
@@ -297,13 +309,17 @@ fn test_composite_pk_update_reversed_order() {
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("item_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "item_id", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("order_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "order_id", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
@@ -335,7 +351,9 @@ fn test_composite_pk_partial_match_uses_scan() {
             value: Expression::Literal(SqlValue::Integer(1)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("order_id", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "order_id", false,
+            ))),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
@@ -368,13 +386,17 @@ fn test_composite_pk_not_found_returns_zero() {
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("order_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "order_id", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(99))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("item_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "item_id", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(99))),
             }),
@@ -407,13 +429,17 @@ fn test_composite_pk_multiple_columns_updated() {
         ],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("order_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "order_id", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("item_id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "item_id", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),

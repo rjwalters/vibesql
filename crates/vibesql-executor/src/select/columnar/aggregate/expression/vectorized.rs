@@ -62,18 +62,19 @@ fn try_vectorized_binary_aggregate(
 
         // Both operands must be simple column references
         let (left_col, right_col) = match (left.as_ref(), right.as_ref()) {
-            (
-                Expression::ColumnRef(col_id1),
-                Expression::ColumnRef(col_id2),
-            ) if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() => {
+            (Expression::ColumnRef(col_id1), Expression::ColumnRef(col_id2))
+                if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() =>
+            {
                 let c1 = col_id1.column_canonical();
                 let c2 = col_id2.column_canonical();
-                let idx1 = schema.get_column_index(col_id1.table_canonical(), c1).ok_or_else(|| {
-                    ExecutorError::UnsupportedExpression(format!("Column not found: {}", c1))
-                })?;
-                let idx2 = schema.get_column_index(col_id2.table_canonical(), c2).ok_or_else(|| {
-                    ExecutorError::UnsupportedExpression(format!("Column not found: {}", c2))
-                })?;
+                let idx1 =
+                    schema.get_column_index(col_id1.table_canonical(), c1).ok_or_else(|| {
+                        ExecutorError::UnsupportedExpression(format!("Column not found: {}", c1))
+                    })?;
+                let idx2 =
+                    schema.get_column_index(col_id2.table_canonical(), c2).ok_or_else(|| {
+                        ExecutorError::UnsupportedExpression(format!("Column not found: {}", c2))
+                    })?;
                 (idx1, idx2)
             }
             _ => return Ok(None), // Not simple col * col pattern

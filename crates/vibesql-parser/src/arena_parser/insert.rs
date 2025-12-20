@@ -31,9 +31,7 @@ impl<'arena> ArenaParser<'arena> {
                 (self.intern(&name), true)
             }
             _ => {
-                return Err(ParseError {
-                    message: "Expected table name".to_string(),
-                });
+                return Err(ParseError { message: "Expected table name".to_string() });
             }
         };
 

@@ -122,7 +122,7 @@ mod tests {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             }],
             table_constraints: vec![],
             table_options: vec![],
@@ -133,7 +133,8 @@ mod tests {
         assert!(db.catalog.table_exists("users"));
 
         // Now drop it
-        let drop_stmt = DropTableStmt { table_name: "users".to_string(), if_exists: false, quoted: false };
+        let drop_stmt =
+            DropTableStmt { table_name: "users".to_string(), if_exists: false, quoted: false };
 
         let result = DropTableExecutor::execute(&drop_stmt, &mut db);
         assert!(result.is_ok());
@@ -148,7 +149,11 @@ mod tests {
     fn test_drop_nonexistent_table_without_if_exists() {
         let mut db = Database::new();
 
-        let drop_stmt = DropTableStmt { table_name: "nonexistent".to_string(), if_exists: false, quoted: false };
+        let drop_stmt = DropTableStmt {
+            table_name: "nonexistent".to_string(),
+            if_exists: false,
+            quoted: false,
+        };
 
         let result = DropTableExecutor::execute(&drop_stmt, &mut db);
         assert!(result.is_err());
@@ -159,7 +164,8 @@ mod tests {
     fn test_drop_nonexistent_table_with_if_exists() {
         let mut db = Database::new();
 
-        let drop_stmt = DropTableStmt { table_name: "nonexistent".to_string(), if_exists: true, quoted: false };
+        let drop_stmt =
+            DropTableStmt { table_name: "nonexistent".to_string(), if_exists: true, quoted: false };
 
         let result = DropTableExecutor::execute(&drop_stmt, &mut db);
         assert!(result.is_ok());
@@ -181,7 +187,7 @@ mod tests {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             }],
             table_constraints: vec![],
             table_options: vec![],
@@ -191,7 +197,8 @@ mod tests {
         CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
         // Drop it with IF EXISTS
-        let drop_stmt = DropTableStmt { table_name: "products".to_string(), if_exists: true, quoted: false };
+        let drop_stmt =
+            DropTableStmt { table_name: "products".to_string(), if_exists: true, quoted: false };
 
         let result = DropTableExecutor::execute(&drop_stmt, &mut db);
         assert!(result.is_ok());
@@ -217,7 +224,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                generated_expr: None,
+                    generated_expr: None,
                 },
                 ColumnDef {
                     name: "name".to_string(),
@@ -226,7 +233,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                generated_expr: None,
+                    generated_expr: None,
                 },
             ],
             table_constraints: vec![],
@@ -247,7 +254,8 @@ mod tests {
         assert_eq!(db.get_table("customers").unwrap().row_count(), 1);
 
         // Drop the table
-        let drop_stmt = DropTableStmt { table_name: "customers".to_string(), if_exists: false, quoted: false };
+        let drop_stmt =
+            DropTableStmt { table_name: "customers".to_string(), if_exists: false, quoted: false };
 
         let result = DropTableExecutor::execute(&drop_stmt, &mut db);
         assert!(result.is_ok());
@@ -272,7 +280,7 @@ mod tests {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             }],
             table_constraints: vec![],
             table_options: vec![],
@@ -282,7 +290,8 @@ mod tests {
         CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
         // Drop it
-        let drop_stmt = DropTableStmt { table_name: "temp".to_string(), if_exists: false, quoted: false };
+        let drop_stmt =
+            DropTableStmt { table_name: "temp".to_string(), if_exists: false, quoted: false };
         DropTableExecutor::execute(&drop_stmt, &mut db).unwrap();
 
         // Recreate it
@@ -307,12 +316,12 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                generated_expr: None,
+                    generated_expr: None,
                 }],
                 table_constraints: vec![],
                 table_options: vec![],
-            quoted: false,
-            as_query: None,
+                quoted: false,
+                as_query: None,
             };
             CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
         }
@@ -321,7 +330,8 @@ mod tests {
 
         // Drop them one by one
         for name in &["table1", "table2", "table3"] {
-            let drop_stmt = DropTableStmt { table_name: name.to_string(), if_exists: false, quoted: false };
+            let drop_stmt =
+                DropTableStmt { table_name: name.to_string(), if_exists: false, quoted: false };
             let result = DropTableExecutor::execute(&drop_stmt, &mut db);
             assert!(result.is_ok());
         }
@@ -344,7 +354,7 @@ mod tests {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             }],
             table_constraints: vec![],
             table_options: vec![],
@@ -354,7 +364,8 @@ mod tests {
         CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
         // Try to drop with exact case - should succeed
-        let drop_stmt = DropTableStmt { table_name: "MyTable".to_string(), if_exists: false, quoted: false };
+        let drop_stmt =
+            DropTableStmt { table_name: "MyTable".to_string(), if_exists: false, quoted: false };
         let result = DropTableExecutor::execute(&drop_stmt, &mut db);
         assert!(result.is_ok());
     }
@@ -379,7 +390,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                generated_expr: None,
+                    generated_expr: None,
                 },
                 ColumnDef {
                     name: "email".to_string(),
@@ -388,7 +399,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                generated_expr: None,
+                    generated_expr: None,
                 },
             ],
             table_constraints: vec![],
@@ -430,7 +441,8 @@ mod tests {
         assert!(db.index_exists("idx_users_id"));
 
         // Drop the table
-        let drop_stmt = DropTableStmt { table_name: "users".to_string(), if_exists: false, quoted: false };
+        let drop_stmt =
+            DropTableStmt { table_name: "users".to_string(), if_exists: false, quoted: false };
         let result = DropTableExecutor::execute(&drop_stmt, &mut db);
         assert!(result.is_ok());
 
@@ -462,7 +474,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                generated_expr: None,
+                    generated_expr: None,
                 },
                 ColumnDef {
                     name: "name".to_string(),
@@ -471,7 +483,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                generated_expr: None,
+                    generated_expr: None,
                 },
             ],
             table_constraints: vec![],
@@ -499,7 +511,8 @@ mod tests {
         assert!(db.index_exists("idx_products_name"));
 
         // Drop the table (should cascade to drop index)
-        let drop_stmt = DropTableStmt { table_name: "products".to_string(), if_exists: false, quoted: false };
+        let drop_stmt =
+            DropTableStmt { table_name: "products".to_string(), if_exists: false, quoted: false };
         DropTableExecutor::execute(&drop_stmt, &mut db).unwrap();
 
         // Verify both table and index are dropped
@@ -530,7 +543,7 @@ mod tests {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             }],
             table_constraints: vec![],
             table_options: vec![],
@@ -540,7 +553,11 @@ mod tests {
         CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
         // Drop table without indexes - should still work
-        let drop_stmt = DropTableStmt { table_name: "simple_table".to_string(), if_exists: false, quoted: false };
+        let drop_stmt = DropTableStmt {
+            table_name: "simple_table".to_string(),
+            if_exists: false,
+            quoted: false,
+        };
         let result = DropTableExecutor::execute(&drop_stmt, &mut db);
         assert!(result.is_ok(), "Dropping table without indexes should still work");
         assert!(!db.catalog.table_exists("simple_table"));

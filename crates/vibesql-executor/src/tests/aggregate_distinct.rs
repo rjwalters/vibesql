@@ -90,19 +90,22 @@ fn test_count_distinct_basic() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 distinct: true,
-                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                args: vec![vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("amount", false),
+                )],
                 order_by: None,
             },
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
@@ -132,27 +135,36 @@ fn test_count_distinct_vs_count_all() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     distinct: false,
-                    args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("amount", false),
+                    )],
                     order_by: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     distinct: true,
-                    args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("amount", false),
+                    )],
                     order_by: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
         ],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
@@ -184,19 +196,22 @@ fn test_sum_distinct() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("SUM"),
                 distinct: true,
-                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                args: vec![vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("amount", false),
+                )],
                 order_by: None,
             },
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
@@ -227,27 +242,36 @@ fn test_sum_distinct_vs_sum_all() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: vibesql_ast::FunctionIdentifier::new("SUM"),
                     distinct: false,
-                    args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("amount", false),
+                    )],
                     order_by: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: vibesql_ast::FunctionIdentifier::new("SUM"),
                     distinct: true,
-                    args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("amount", false),
+                    )],
                     order_by: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
         ],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
@@ -281,19 +305,22 @@ fn test_avg_distinct() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("AVG"),
                 distinct: true,
-                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                args: vec![vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("amount", false),
+                )],
                 order_by: None,
             },
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
@@ -323,19 +350,22 @@ fn test_min_distinct() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("MIN"),
                 distinct: true,
-                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                args: vec![vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("amount", false),
+                )],
                 order_by: None,
             },
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
@@ -365,19 +395,22 @@ fn test_max_distinct() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("MAX"),
                 distinct: true,
-                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
+                args: vec![vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("amount", false),
+                )],
                 order_by: None,
             },
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
@@ -427,19 +460,22 @@ fn test_count_distinct_with_nulls() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 distinct: true,
-                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))],
+                args: vec![vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("val", false),
+                )],
                 order_by: None,
             },
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
@@ -487,27 +523,36 @@ fn test_distinct_all_same_value() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     distinct: true,
-                    args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))],
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("val", false),
+                    )],
                     order_by: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: vibesql_ast::FunctionIdentifier::new("SUM"),
                     distinct: true,
-                    args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))],
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("val", false),
+                    )],
                     order_by: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
         ],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
@@ -550,27 +595,36 @@ fn test_distinct_empty_table() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     distinct: true,
-                    args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))],
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("val", false),
+                    )],
                     order_by: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: vibesql_ast::FunctionIdentifier::new("SUM"),
                     distinct: true,
-                    args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))],
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("val", false),
+                    )],
                     order_by: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
         ],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "empty_test".to_string(),
             alias: None,
             column_aliases: None,

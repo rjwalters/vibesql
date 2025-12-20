@@ -9,9 +9,7 @@
 //! SELECT name FROM sqlite_master WHERE type = 'table';
 //! ```
 
-use vibesql_executor::{
-    CreateIndexExecutor, CreateTableExecutor, SelectExecutor, ViewExecutor,
-};
+use vibesql_executor::{CreateIndexExecutor, CreateTableExecutor, SelectExecutor, ViewExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 
@@ -134,7 +132,8 @@ fn test_sqlite_schema_case_insensitive() {
     ];
 
     for sql in cases {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| execute_select(&db, sql)));
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| execute_select(&db, sql)));
         assert!(result.is_ok(), "Query '{}' should succeed", sql);
     }
 }

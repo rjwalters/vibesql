@@ -135,7 +135,9 @@ fn collect_qualified_columns_from_expr(
     table_columns: &mut HashMap<String, Vec<String>>,
 ) {
     match expr {
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() =>
+        {
             let t = col_id.table_canonical().unwrap();
             let column = col_id.column_canonical();
             table_columns.entry(t.to_lowercase()).or_default().push(column.to_lowercase());

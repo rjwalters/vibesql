@@ -17,7 +17,7 @@ fn test_cast_integer_to_varchar() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -26,7 +26,9 @@ fn test_cast_integer_to_varchar() {
                 ))),
                 data_type: vibesql_types::DataType::Varchar { max_length: Some(10) },
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -52,7 +54,7 @@ fn test_cast_varchar_to_integer() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -61,7 +63,9 @@ fn test_cast_varchar_to_integer() {
                 ))),
                 data_type: vibesql_types::DataType::Integer,
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -87,14 +91,16 @@ fn test_cast_null() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
                 expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
                 data_type: vibesql_types::DataType::Integer,
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -120,7 +126,7 @@ fn test_cast_integer_to_unsigned() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -129,7 +135,9 @@ fn test_cast_integer_to_unsigned() {
                 ))),
                 data_type: vibesql_types::DataType::Unsigned,
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -155,7 +163,7 @@ fn test_cast_negative_integer_to_unsigned() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -164,7 +172,9 @@ fn test_cast_negative_integer_to_unsigned() {
                 ))),
                 data_type: vibesql_types::DataType::Unsigned,
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -191,7 +201,7 @@ fn test_cast_varchar_to_unsigned() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -200,7 +210,9 @@ fn test_cast_varchar_to_unsigned() {
                 ))),
                 data_type: vibesql_types::DataType::Unsigned,
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -230,7 +242,7 @@ fn test_cast_float_to_unsigned() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -239,7 +251,9 @@ fn test_cast_float_to_unsigned() {
                 ))),
                 data_type: vibesql_types::DataType::Unsigned,
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -266,7 +280,7 @@ fn test_cast_as_signed_positive() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -275,7 +289,9 @@ fn test_cast_as_signed_positive() {
                 ))),
                 data_type: vibesql_types::DataType::Bigint,
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -304,7 +320,7 @@ fn test_cast_as_signed_negative() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -313,7 +329,9 @@ fn test_cast_as_signed_negative() {
                 ))),
                 data_type: vibesql_types::DataType::Bigint,
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -346,7 +364,7 @@ fn test_cast_as_signed_from_float() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -355,7 +373,9 @@ fn test_cast_as_signed_from_float() {
                 ))),
                 data_type: vibesql_types::DataType::Bigint,
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -390,7 +410,7 @@ fn test_cast_negative_float_to_signed_rounds() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -399,7 +419,9 @@ fn test_cast_negative_float_to_signed_rounds() {
                 ))),
                 data_type: vibesql_types::DataType::Bigint,
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -440,7 +462,9 @@ fn test_cast_rounding_edge_cases() {
                     )),
                     data_type: vibesql_types::DataType::Bigint,
                 },
-                alias: Some("result".to_string()), source_text: None }],
+                alias: Some("result".to_string()),
+                source_text: None,
+            }],
             from: None,
             where_clause: None,
             group_by: None,

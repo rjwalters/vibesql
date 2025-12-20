@@ -124,11 +124,8 @@ fn test_insert_cost_with_btree_indexes() {
     let cost = estimator.estimate_insert(100, &table_stats, &index_info);
 
     // B-tree indexes add significant overhead
-    let cost_no_btree = estimator.estimate_insert(
-        100,
-        &table_stats,
-        &TableIndexInfo::new(1, 0, false, 0.0, 64),
-    );
+    let cost_no_btree =
+        estimator.estimate_insert(100, &table_stats, &TableIndexInfo::new(1, 0, false, 0.0, 64));
     assert!(cost > cost_no_btree, "B-tree indexes should increase cost");
 }
 
@@ -1092,8 +1089,7 @@ fn test_combined_prefix_cardinality_estimation() {
         histogram: None,
     };
 
-    let cardinality_1 =
-        estimator.estimate_combined_prefix_cardinality(&[&col1_stats], total_rows);
+    let cardinality_1 = estimator.estimate_combined_prefix_cardinality(&[&col1_stats], total_rows);
     assert!(
         (cardinality_1 - 10.0).abs() < 0.01,
         "Single column cardinality should match n_distinct: {}",

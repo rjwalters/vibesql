@@ -152,12 +152,16 @@ fn extract_column_table_and_name(
     use vibesql_ast::Expression;
 
     match expr {
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() =>
+        {
             let t = col_id.table_canonical().unwrap();
             let column = col_id.column_canonical();
             Some((t.to_lowercase(), column.to_lowercase()))
         }
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+        {
             // Try to resolve unqualified column using schema-based mapping
             let col_lower = col_id.column_canonical().to_lowercase();
             column_to_table.get(&col_lower).map(|t| (t.to_lowercase(), col_lower))

@@ -240,7 +240,7 @@ fn test_aggregate_as_window_function() {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                 vibesql_ast::Expression::WindowFunction { function, .. } => match function {
-                    vibesql_ast::WindowFunctionSpec::Aggregate { name, args } => {
+                    vibesql_ast::WindowFunctionSpec::Aggregate { name, args, .. } => {
                         assert_eq!(name, "SUM");
                         assert_eq!(args.len(), 1);
                     }
