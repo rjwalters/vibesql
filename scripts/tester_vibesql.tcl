@@ -377,54 +377,121 @@ proc translate_error_to_sqlite {vibesql_error} {
 # Core SQL execution
 #-----------------------------------------------------------------------------
 
-# Stack-walking TCL variable substitution
+# SQL-aware TCL variable substitution
 # This emulates SQLite's parameter binding where $var in SQL refers to TCL variables.
-# Unlike simple `uplevel 1 subst`, this walks the call stack to find variables
-# defined in outer scopes (e.g., for loops, foreach, parent procs).
+# Unlike simple `uplevel 1 subst`, this:
+# 1. Walks the call stack from OUTERMOST level inward to find user-defined variables
+# 2. Properly quotes string values for SQL (adds single quotes, escapes internal quotes)
+# 3. Handles both $var and ${var} syntax
 #
-# The algorithm:
-# 1. Try progressively higher stack levels (1, 2, 3, ...)
-# 2. At each level, attempt variable substitution
-# 3. Check if all $var patterns have been resolved
-# 4. Return the first fully-substituted result, or best effort if none fully succeed
+# This is critical for braced SQL strings like {INSERT INTO t VALUES($x, $msg)}
+# where TCL doesn't perform substitution and we must do it manually with proper SQL quoting.
+#
+# IMPORTANT: We search from outermost (global) level inward because user variables
+# are typically defined at the test file level, not in intermediate procedures.
+# Searching inner-to-outer would incorrectly pick up local variables with the same name.
 proc substitute_tcl_vars {sql} {
     # Quick check: if no $ variables, return immediately
-    if {![regexp {\$[a-zA-Z_]} $sql]} {
+    # Match both $var and ${var} patterns
+    if {![regexp {\$[a-zA-Z_\{]} $sql]} {
         return $sql
     }
 
     # Get the maximum stack depth to search
     set max_level [info level]
 
-    # Track the best result we've found (fewest remaining $vars)
-    set best_result $sql
-    set best_unresolved_count [regexp -all {\$[a-zA-Z_]\w*} $sql]
+    # Find all variable references: $var and ${var} patterns
+    # We'll process each one individually for proper SQL quoting
+    set result $sql
 
-    # Try progressively higher stack levels
-    for {set level 1} {$level <= $max_level} {incr level} {
-        # Try substitution at this level
-        if {[catch {set result [uplevel $level [list subst -nocommands -nobackslashes $sql]]} err]} {
-            # Substitution failed at this level (variable not found) - continue to next level
-            continue
+    # Pattern to match TCL variable references in SQL
+    # Matches: $varname or ${varname}
+    # Note: We need to be careful not to match things like $1 (positional params)
+    set var_pattern {\$(\{[a-zA-Z_][a-zA-Z0-9_]*\}|[a-zA-Z_][a-zA-Z0-9_]*)}
+
+    # Keep substituting until no more matches or no progress
+    set prev_result ""
+    while {$result ne $prev_result} {
+        set prev_result $result
+
+        # Find the first variable reference
+        if {![regexp $var_pattern $result match varname]} {
+            break
         }
 
-        # Count remaining unresolved $variables
-        set unresolved [regexp -all {\$[a-zA-Z_]\w*} $result]
-
-        # If all variables resolved, return immediately
-        if {$unresolved == 0} {
-            return $result
+        # Strip braces if present: ${foo} -> foo
+        if {[string index $varname 0] eq "\{"} {
+            set varname [string range $varname 1 end-1]
         }
 
-        # Track if this is better than our current best
-        if {$unresolved < $best_unresolved_count} {
-            set best_result $result
-            set best_unresolved_count $unresolved
+        # Try to get the variable value - search from OUTERMOST level inward
+        # This is critical: user variables are defined at the test file level (outer),
+        # while intermediate levels may have local variables with conflicting names
+        # (e.g., 'name' parameter in do_test procedure)
+        set found 0
+        set value ""
+
+        # First try global scope (level #0)
+        if {[catch {set value [uplevel #0 [list set $varname]]}] == 0} {
+            set found 1
         }
+
+        # If not global, search from outermost to innermost stack level
+        if {!$found} {
+            for {set level $max_level} {$level >= 1} {incr level -1} {
+                if {[catch {set value [uplevel $level [list set $varname]]}] == 0} {
+                    set found 1
+                    break
+                }
+            }
+        }
+
+        if {!$found} {
+            # Variable not found - leave it as-is (will cause SQL error, but that's expected)
+            # Just skip this match to avoid infinite loop
+            break
+        }
+
+        # Format the value as a SQL literal
+        set sql_value [format_sql_value $value]
+
+        # Replace the first occurrence of this variable reference
+        # Use string map with the exact match to be safe
+        set result [string replace $result \
+            [string first $match $result] \
+            [expr {[string first $match $result] + [string length $match] - 1}] \
+            $sql_value]
     }
 
-    # Return the best result we found
-    return $best_result
+    return $result
+}
+
+# Format a TCL value as a SQL literal
+# - Numbers are passed through as-is
+# - Strings are quoted with single quotes, internal quotes are escaped
+# - NULL/empty handled appropriately
+proc format_sql_value {value} {
+    # Handle empty string as empty SQL string
+    if {$value eq ""} {
+        return "''"
+    }
+
+    # Check if value is numeric (integer or floating point)
+    # TCL's string is double/integer checks handle this
+    if {[string is integer -strict $value] || [string is double -strict $value]} {
+        return $value
+    }
+
+    # Check for special SQL keywords that shouldn't be quoted
+    set upper [string toupper $value]
+    if {$upper eq "NULL"} {
+        return "NULL"
+    }
+
+    # It's a string - escape single quotes and wrap in quotes
+    # SQL escapes single quotes by doubling them: ' -> ''
+    set escaped [string map {' ''} $value]
+    return "'$escaped'"
 }
 
 # Build PRAGMA prefix to prepend to SQL for consistent session state
