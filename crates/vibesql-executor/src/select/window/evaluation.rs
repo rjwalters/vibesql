@@ -15,7 +15,7 @@ use crate::{
     errors::ExecutorError,
     evaluator::{
         window::{
-            calculate_frame, evaluate_avg_window, evaluate_count_window,
+            calculate_frame_with_exclusion, evaluate_avg_window, evaluate_count_window,
             evaluate_group_concat_window, evaluate_max_window, evaluate_min_window,
             evaluate_sum_window, partition_rows, sort_partition, Partition,
         },
@@ -429,8 +429,12 @@ fn evaluate_window_function_for_partition(
 
             // Evaluate function for each row in the partition
             for row_idx in 0..partition.len() {
-                // Calculate frame for this row
-                let frame = calculate_frame(partition, row_idx, order_by, frame_spec);
+                // Calculate frame for this row with exclusion support
+                let frame_result =
+                    calculate_frame_with_exclusion(partition, row_idx, order_by, frame_spec);
+
+                // Get the iterator of included indices (applies EXCLUDE filtering)
+                let frame_indices = frame_result.included_indices(partition, order_by);
 
                 // Create closure that evaluates expressions using the evaluator
                 let eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
@@ -453,7 +457,7 @@ fn evaluate_window_function_for_partition(
                         } else {
                             Some(&args[0])
                         };
-                        evaluate_count_window(partition, &frame, arg_expr, filter, eval_fn)
+                        evaluate_count_window(partition, frame_indices, arg_expr, filter, eval_fn)
                     }
                     "SUM" => {
                         if args.is_empty() {
@@ -461,7 +465,7 @@ fn evaluate_window_function_for_partition(
                                 "SUM requires an argument".to_string(),
                             ));
                         }
-                        evaluate_sum_window(partition, &frame, &args[0], filter, eval_fn)
+                        evaluate_sum_window(partition, frame_indices, &args[0], filter, eval_fn)
                     }
                     "AVG" => {
                         if args.is_empty() {
@@ -469,7 +473,7 @@ fn evaluate_window_function_for_partition(
                                 "AVG requires an argument".to_string(),
                             ));
                         }
-                        evaluate_avg_window(partition, &frame, &args[0], filter, eval_fn)
+                        evaluate_avg_window(partition, frame_indices, &args[0], filter, eval_fn)
                     }
                     "MIN" => {
                         if args.is_empty() {
@@ -477,7 +481,7 @@ fn evaluate_window_function_for_partition(
                                 "MIN requires an argument".to_string(),
                             ));
                         }
-                        evaluate_min_window(partition, &frame, &args[0], filter, eval_fn)
+                        evaluate_min_window(partition, frame_indices, &args[0], filter, eval_fn)
                     }
                     "MAX" => {
                         if args.is_empty() {
@@ -485,7 +489,7 @@ fn evaluate_window_function_for_partition(
                                 "MAX requires an argument".to_string(),
                             ));
                         }
-                        evaluate_max_window(partition, &frame, &args[0], filter, eval_fn)
+                        evaluate_max_window(partition, frame_indices, &args[0], filter, eval_fn)
                     }
                     "GROUP_CONCAT" | "STRING_AGG" => {
                         if args.is_empty() {
@@ -508,7 +512,12 @@ fn evaluate_window_function_for_partition(
                             ",".to_string()
                         };
                         evaluate_group_concat_window(
-                            partition, &frame, &args[0], &separator, filter, eval_fn,
+                            partition,
+                            frame_indices,
+                            &args[0],
+                            &separator,
+                            filter,
+                            eval_fn,
                         )
                     }
                     _ => {

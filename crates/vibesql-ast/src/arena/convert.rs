@@ -382,6 +382,12 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             unit: f.unit.into(),
             start: self.convert_frame_bound(&f.start),
             end: f.end.as_ref().map(|b| self.convert_frame_bound(b)),
+            exclude: f.exclude.map(|e| match e {
+                arena_expr::FrameExclude::NoOthers => crate::FrameExclude::NoOthers,
+                arena_expr::FrameExclude::CurrentRow => crate::FrameExclude::CurrentRow,
+                arena_expr::FrameExclude::Group => crate::FrameExclude::Group,
+                arena_expr::FrameExclude::Ties => crate::FrameExclude::Ties,
+            }),
         }
     }
 

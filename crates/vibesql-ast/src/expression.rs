@@ -472,6 +472,9 @@ pub struct WindowFrame {
 
     /// Frame end boundary (defaults to CURRENT ROW if None)
     pub end: Option<FrameBound>,
+
+    /// Frame exclusion mode (defaults to NO OTHERS if None)
+    pub exclude: Option<FrameExclude>,
 }
 
 /// Frame unit type
@@ -500,6 +503,23 @@ pub enum FrameBound {
 
     /// UNBOUNDED FOLLOWING - end of partition
     UnboundedFollowing,
+}
+
+/// Frame exclusion specification (SQL:2011)
+/// Determines which rows to exclude from the frame
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FrameExclude {
+    /// EXCLUDE NO OTHERS - include all rows in frame (default)
+    NoOthers,
+
+    /// EXCLUDE CURRENT ROW - exclude the current row from frame
+    CurrentRow,
+
+    /// EXCLUDE GROUP - exclude current row and its peers (rows with same ORDER BY values)
+    Group,
+
+    /// EXCLUDE TIES - exclude peers of current row, but not current row itself
+    Ties,
 }
 
 /// TRIM position specification

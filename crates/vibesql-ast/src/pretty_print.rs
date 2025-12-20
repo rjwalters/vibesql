@@ -22,8 +22,9 @@ use vibesql_types::{DataType, SqlValue};
 
 use crate::{
     expression::{
-        CaseWhen, CharacterUnit, Expression, FrameBound, FrameUnit, FulltextMode, IntervalUnit,
-        PseudoTable, Quantifier, TrimPosition, WindowFrame, WindowFunctionSpec, WindowSpec,
+        CaseWhen, CharacterUnit, Expression, FrameBound, FrameExclude, FrameUnit, FulltextMode,
+        IntervalUnit, PseudoTable, Quantifier, TrimPosition, WindowFrame, WindowFunctionSpec,
+        WindowSpec,
     },
     operators::{BinaryOperator, UnaryOperator},
     select::{
@@ -766,11 +767,30 @@ impl ToSql for WindowFrame {
             FrameUnit::Range => "RANGE",
         };
 
-        match &self.end {
+        let frame_bounds = match &self.end {
             Some(end) => {
                 format!("{} BETWEEN {} AND {}", unit, self.start.to_sql(), end.to_sql())
             }
             None => format!("{} {}", unit, self.start.to_sql()),
+        };
+
+        // Append EXCLUDE clause if present and not the default NO OTHERS
+        match &self.exclude {
+            Some(exclude) if *exclude != FrameExclude::NoOthers => {
+                format!("{} {}", frame_bounds, exclude.to_sql())
+            }
+            _ => frame_bounds,
+        }
+    }
+}
+
+impl ToSql for FrameExclude {
+    fn to_sql(&self) -> String {
+        match self {
+            FrameExclude::NoOthers => "EXCLUDE NO OTHERS".to_string(),
+            FrameExclude::CurrentRow => "EXCLUDE CURRENT ROW".to_string(),
+            FrameExclude::Group => "EXCLUDE GROUP".to_string(),
+            FrameExclude::Ties => "EXCLUDE TIES".to_string(),
         }
     }
 }

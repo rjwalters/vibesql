@@ -90,6 +90,9 @@ pub enum Keyword {
     Unbounded,
     Current,
     Filter,
+    Exclude,
+    Others,
+    Ties,
     // Note: Window function names (ROW_NUMBER, RANK, etc.) are identifiers, not keywords
     // Constraint keywords
     Primary,
@@ -459,6 +462,9 @@ impl fmt::Display for Keyword {
             Keyword::Unbounded => "UNBOUNDED",
             Keyword::Current => "CURRENT",
             Keyword::Filter => "FILTER",
+            Keyword::Exclude => "EXCLUDE",
+            Keyword::Others => "OTHERS",
+            Keyword::Ties => "TIES",
             Keyword::Primary => "PRIMARY",
             Keyword::Foreign => "FOREIGN",
             Keyword::Key => "KEY",

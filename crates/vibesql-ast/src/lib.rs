@@ -184,8 +184,9 @@ pub use dml::{
     Assignment, ConflictClause, DeleteStmt, InsertSource, InsertStmt, UpdateStmt, WhereClause,
 };
 pub use expression::{
-    CaseWhen, CharacterUnit, Expression, FrameBound, FrameUnit, FulltextMode, IntervalUnit,
-    PseudoTable, Quantifier, TrimPosition, TruthValue, WindowFrame, WindowFunctionSpec, WindowSpec,
+    CaseWhen, CharacterUnit, Expression, FrameBound, FrameExclude, FrameUnit, FulltextMode,
+    IntervalUnit, PseudoTable, Quantifier, TrimPosition, TruthValue, WindowFrame,
+    WindowFunctionSpec, WindowSpec,
 };
 pub use grant::{GrantStmt, ObjectType, PrivilegeType};
 pub use introspection::{

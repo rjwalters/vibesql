@@ -2,8 +2,9 @@
 //!
 //! Implements COUNT, SUM, AVG, MIN, MAX with frame support.
 //! SQL:2003 FILTER clause support for conditional aggregation in window functions.
+//! SQL:2011 EXCLUDE clause support for frame exclusion.
 
-use std::{cmp::Ordering, ops::Range};
+use std::cmp::Ordering;
 
 use vibesql_ast::Expression;
 use vibesql_storage::Row;
@@ -36,23 +37,25 @@ where
 /// - COUNT(expr): counts rows where expr is not NULL
 ///
 /// Supports FILTER clause for conditional aggregation.
+/// Supports EXCLUDE clause via frame_indices iterator.
 ///
 /// Example: COUNT(*) FILTER (WHERE x > 0) OVER (ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)
-pub fn evaluate_count_window<F>(
+pub fn evaluate_count_window<F, I>(
     partition: &Partition,
-    frame: &Range<usize>,
+    frame_indices: I,
     arg_expr: Option<&Expression>,
     filter: Option<&Expression>,
     eval_fn: F,
 ) -> SqlValue
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+    I: IntoIterator<Item = usize>,
 {
     let mut count = 0i64;
 
-    for idx in frame.clone() {
+    for idx in frame_indices {
         if idx >= partition.len() {
-            break;
+            continue;
         }
 
         let row = &partition.rows[idx];
@@ -86,24 +89,26 @@ where
 /// Sums numeric values in the frame, ignoring NULLs.
 /// Returns NULL if all values are NULL or frame is empty.
 /// Supports FILTER clause for conditional aggregation.
+/// Supports EXCLUDE clause via frame_indices iterator.
 ///
 /// Example: SUM(amount) FILTER (WHERE status = 'paid') OVER (ORDER BY date) for filtered running totals
-pub fn evaluate_sum_window<F>(
+pub fn evaluate_sum_window<F, I>(
     partition: &Partition,
-    frame: &Range<usize>,
+    frame_indices: I,
     arg_expr: &Expression,
     filter: Option<&Expression>,
     eval_fn: F,
 ) -> SqlValue
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+    I: IntoIterator<Item = usize>,
 {
     let mut sum = 0.0f64;
     let mut has_value = false;
 
-    for idx in frame.clone() {
+    for idx in frame_indices {
         if idx >= partition.len() {
-            break;
+            continue;
         }
 
         let row = &partition.rows[idx];
@@ -166,25 +171,27 @@ where
 /// Computes average of numeric values in the frame, ignoring NULLs.
 /// Returns NULL if all values are NULL or frame is empty.
 /// Supports FILTER clause for conditional aggregation.
+/// Supports EXCLUDE clause via frame_indices iterator.
 ///
 /// Example: AVG(temperature) FILTER (WHERE valid = 1) OVER (ORDER BY date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)
 /// for 7-day moving average of valid readings
-pub fn evaluate_avg_window<F>(
+pub fn evaluate_avg_window<F, I>(
     partition: &Partition,
-    frame: &Range<usize>,
+    frame_indices: I,
     arg_expr: &Expression,
     filter: Option<&Expression>,
     eval_fn: F,
 ) -> SqlValue
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+    I: IntoIterator<Item = usize>,
 {
     let mut sum = 0.0f64;
     let mut count = 0i64;
 
-    for idx in frame.clone() {
+    for idx in frame_indices {
         if idx >= partition.len() {
-            break;
+            continue;
         }
 
         let row = &partition.rows[idx];
@@ -242,23 +249,25 @@ where
 /// Finds minimum value in the frame, ignoring NULLs.
 /// Returns NULL if all values are NULL or frame is empty.
 /// Supports FILTER clause for conditional aggregation.
+/// Supports EXCLUDE clause via frame_indices iterator.
 ///
 /// Example: MIN(salary) FILTER (WHERE active = 1) OVER (PARTITION BY department)
-pub fn evaluate_min_window<F>(
+pub fn evaluate_min_window<F, I>(
     partition: &Partition,
-    frame: &Range<usize>,
+    frame_indices: I,
     arg_expr: &Expression,
     filter: Option<&Expression>,
     eval_fn: F,
 ) -> SqlValue
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+    I: IntoIterator<Item = usize>,
 {
     let mut min_val: Option<SqlValue> = None;
 
-    for idx in frame.clone() {
+    for idx in frame_indices {
         if idx >= partition.len() {
-            break;
+            continue;
         }
 
         let row = &partition.rows[idx];
@@ -291,23 +300,25 @@ where
 /// Finds maximum value in the frame, ignoring NULLs.
 /// Returns NULL if all values are NULL or frame is empty.
 /// Supports FILTER clause for conditional aggregation.
+/// Supports EXCLUDE clause via frame_indices iterator.
 ///
 /// Example: MAX(salary) FILTER (WHERE active = 1) OVER (PARTITION BY department)
-pub fn evaluate_max_window<F>(
+pub fn evaluate_max_window<F, I>(
     partition: &Partition,
-    frame: &Range<usize>,
+    frame_indices: I,
     arg_expr: &Expression,
     filter: Option<&Expression>,
     eval_fn: F,
 ) -> SqlValue
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+    I: IntoIterator<Item = usize>,
 {
     let mut max_val: Option<SqlValue> = None;
 
-    for idx in frame.clone() {
+    for idx in frame_indices {
         if idx >= partition.len() {
-            break;
+            continue;
         }
 
         let row = &partition.rows[idx];
@@ -340,11 +351,12 @@ where
 /// Concatenates string values in the frame using the specified separator.
 /// Returns NULL if all values are NULL or frame is empty.
 /// Supports FILTER clause for conditional aggregation.
+/// Supports EXCLUDE clause via frame_indices iterator.
 ///
 /// Example: GROUP_CONCAT(name, ',') FILTER (WHERE active = 1) OVER (ORDER BY date)
-pub fn evaluate_group_concat_window<F>(
+pub fn evaluate_group_concat_window<F, I>(
     partition: &Partition,
-    frame: &Range<usize>,
+    frame_indices: I,
     arg_expr: &Expression,
     separator: &str,
     filter: Option<&Expression>,
@@ -352,12 +364,13 @@ pub fn evaluate_group_concat_window<F>(
 ) -> SqlValue
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+    I: IntoIterator<Item = usize>,
 {
     let mut values: Vec<String> = Vec::new();
 
-    for idx in frame.clone() {
+    for idx in frame_indices {
         if idx >= partition.len() {
-            break;
+            continue;
         }
 
         let row = &partition.rows[idx];
