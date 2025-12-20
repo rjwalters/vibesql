@@ -535,3 +535,155 @@ fn test_mixed_explicit_and_auto_rowid() {
     assert_eq!(result[2].values[0], vibesql_types::SqlValue::Bigint(20));
     assert_eq!(result[2].values[1], vibesql_types::SqlValue::Integer(300));
 }
+
+/// Test ORDER BY rowid (issue #4573)
+#[test]
+fn test_order_by_rowid() {
+    let mut db = vibesql_storage::Database::new();
+    let schema = vibesql_catalog::TableSchema::new(
+        "t1".to_string(),
+        vec![vibesql_catalog::ColumnSchema::new(
+            "x".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
+    );
+    db.create_table(schema).unwrap();
+
+    // Insert rows with explicit rowids in non-sequential order
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::with_row_id(vec![vibesql_types::SqlValue::Integer(30)], 3),
+    )
+    .unwrap();
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::with_row_id(vec![vibesql_types::SqlValue::Integer(10)], 1),
+    )
+    .unwrap();
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::with_row_id(vec![vibesql_types::SqlValue::Integer(20)], 2),
+    )
+    .unwrap();
+
+    let executor = SelectExecutor::new(&db);
+
+    // SELECT x FROM t1 ORDER BY rowid ASC
+    let stmt = vibesql_ast::SelectStmt {
+        into_table: None,
+        into_variables: None,
+        with_clause: None,
+        set_operation: None,
+        values: None,
+        distinct: false,
+        select_list: vec![vibesql_ast::SelectItem::Expression {
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "x", false,
+            )),
+            alias: None,
+            source_text: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
+            name: "t1".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
+        where_clause: None,
+        group_by: None,
+        having: None,
+        order_by: Some(vec![vibesql_ast::OrderByItem {
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "rowid", false,
+            )),
+            direction: vibesql_ast::OrderDirection::Asc,
+            nulls_order: None,
+        }]),
+        limit: None,
+        offset: None,
+    };
+
+    let result = executor.execute(&stmt).unwrap();
+    assert_eq!(result.len(), 3);
+    // Should be sorted by rowid: 1, 2, 3 -> x values: 10, 20, 30
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(10));
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(20));
+    assert_eq!(result[2].values[0], vibesql_types::SqlValue::Integer(30));
+}
+
+/// Test ORDER BY rowid DESC (issue #4573)
+#[test]
+fn test_order_by_rowid_desc() {
+    let mut db = vibesql_storage::Database::new();
+    let schema = vibesql_catalog::TableSchema::new(
+        "t1".to_string(),
+        vec![vibesql_catalog::ColumnSchema::new(
+            "x".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
+    );
+    db.create_table(schema).unwrap();
+
+    // Insert rows
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(10)]),
+    )
+    .unwrap();
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(20)]),
+    )
+    .unwrap();
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(30)]),
+    )
+    .unwrap();
+
+    let executor = SelectExecutor::new(&db);
+
+    // SELECT x FROM t1 ORDER BY _rowid_ DESC
+    let stmt = vibesql_ast::SelectStmt {
+        into_table: None,
+        into_variables: None,
+        with_clause: None,
+        set_operation: None,
+        values: None,
+        distinct: false,
+        select_list: vec![vibesql_ast::SelectItem::Expression {
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "x", false,
+            )),
+            alias: None,
+            source_text: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
+            name: "t1".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
+        where_clause: None,
+        group_by: None,
+        having: None,
+        order_by: Some(vec![vibesql_ast::OrderByItem {
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "_rowid_", false,
+            )),
+            direction: vibesql_ast::OrderDirection::Desc,
+            nulls_order: None,
+        }]),
+        limit: None,
+        offset: None,
+    };
+
+    let result = executor.execute(&stmt).unwrap();
+    assert_eq!(result.len(), 3);
+    // Should be sorted by rowid DESC: 3, 2, 1 -> x values: 30, 20, 10
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(30));
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(20));
+    assert_eq!(result[2].values[0], vibesql_types::SqlValue::Integer(10));
+}

@@ -187,23 +187,72 @@ impl SelectExecutor<'_> {
 
         use crate::select::grouping::compare_sql_values;
 
-        // Pre-compute column indices for ORDER BY columns
-        // (col_idx, direction, nulls_first)
-        let mut sort_indices: Vec<(usize, OrderDirection, bool)> = Vec::with_capacity(order_by.len());
+        // Sort key can be either a column index or rowid pseudo-column
+        // None = sort by rowid, Some(idx) = sort by column at index
+        #[derive(Clone)]
+        enum SortKey {
+            Column(usize),
+            Rowid(Option<String>), // table qualifier for JOINs
+        }
+
+        // Pre-compute sort keys for ORDER BY columns
+        // (sort_key, direction, nulls_first)
+        let mut sort_keys: Vec<(SortKey, OrderDirection, bool)> = Vec::with_capacity(order_by.len());
 
         for item in order_by {
-            let col_idx = match &item.expr {
+            let sort_key = match &item.expr {
                 Expression::ColumnRef(col_id) => {
                     let table = col_id.table_canonical();
                     let column = col_id.column_canonical();
-                    schema
-                        .get_column_index(table, column)
-                        .ok_or_else(|| ExecutorError::ColumnNotFound {
-                            column_name: column.to_string(),
-                            table_name: table.map(|t| t.to_string()).unwrap_or_default(),
-                            searched_tables: schema.table_names(),
-                            available_columns: vec![],
-                        })?
+
+                    // First try to get column index from schema
+                    if let Some(col_idx) = schema.get_column_index(table, column) {
+                        SortKey::Column(col_idx)
+                    } else {
+                        // Check if this is a rowid pseudo-column
+                        let column_lower = column.to_lowercase();
+                        let is_rowid = column_lower == "rowid"
+                            || column_lower == "_rowid_"
+                            || column_lower == "oid";
+
+                        if is_rowid {
+                            // Verify table qualifier if present
+                            if let Some(qualifier) = table {
+                                let qualifier_lower = qualifier.to_lowercase();
+                                let table_exists = schema
+                                    .table_schemas
+                                    .keys()
+                                    .any(|k| k.canonical() == qualifier_lower);
+                                if !table_exists {
+                                    return Err(ExecutorError::ColumnNotFound {
+                                        column_name: column.to_string(),
+                                        table_name: qualifier.to_string(),
+                                        searched_tables: schema.table_names(),
+                                        available_columns: vec![],
+                                    });
+                                }
+                                SortKey::Rowid(Some(qualifier.to_string()))
+                            } else {
+                                // Unqualified rowid - valid if there's at least one table
+                                if schema.table_schemas.is_empty() {
+                                    return Err(ExecutorError::ColumnNotFound {
+                                        column_name: column.to_string(),
+                                        table_name: String::new(),
+                                        searched_tables: schema.table_names(),
+                                        available_columns: vec![],
+                                    });
+                                }
+                                SortKey::Rowid(None)
+                            }
+                        } else {
+                            return Err(ExecutorError::ColumnNotFound {
+                                column_name: column.to_string(),
+                                table_name: table.map(|t| t.to_string()).unwrap_or_default(),
+                                searched_tables: schema.table_names(),
+                                available_columns: vec![],
+                            });
+                        }
+                    }
                 }
                 _ => {
                     return Err(ExecutorError::Other(
@@ -217,14 +266,44 @@ impl SelectExecutor<'_> {
             let nulls_first = item
                 .nulls_order
                 .is_some_and(|no| matches!(no, vibesql_ast::NullsOrder::First));
-            sort_indices.push((col_idx, item.direction.clone(), nulls_first));
+            sort_keys.push((sort_key, item.direction.clone(), nulls_first));
         }
 
-        // Sort rows by the specified columns
+        // Sort rows by the specified columns/rowid
         rows.sort_by(|a, b| {
-            for (col_idx, dir, nulls_first) in &sort_indices {
-                let val_a = &a.values[*col_idx];
-                let val_b = &b.values[*col_idx];
+            for (sort_key, dir, nulls_first) in &sort_keys {
+                let (val_a, val_b) = match sort_key {
+                    SortKey::Column(col_idx) => {
+                        (&a.values[*col_idx], &b.values[*col_idx])
+                    }
+                    SortKey::Rowid(table_qualifier) => {
+                        // Get rowid from row metadata
+                        let rowid_a = a.get_row_id_for_table(table_qualifier.as_deref());
+                        let rowid_b = b.get_row_id_for_table(table_qualifier.as_deref());
+
+                        // Compare rowid values with proper NULL handling
+                        let cmp = match (rowid_a, rowid_b) {
+                            (None, None) => Ordering::Equal,
+                            (None, Some(_)) => {
+                                if *nulls_first { Ordering::Less } else { Ordering::Greater }
+                            }
+                            (Some(_), None) => {
+                                if *nulls_first { Ordering::Greater } else { Ordering::Less }
+                            }
+                            (Some(id_a), Some(id_b)) => {
+                                let raw_cmp = id_a.cmp(&id_b);
+                                match dir {
+                                    OrderDirection::Asc => raw_cmp,
+                                    OrderDirection::Desc => raw_cmp.reverse(),
+                                }
+                            }
+                        };
+                        if cmp != Ordering::Equal {
+                            return cmp;
+                        }
+                        continue; // Move to next sort key
+                    }
+                };
 
                 // Handle NULLs according to nulls_first setting
                 let cmp = match (val_a.is_null(), val_b.is_null()) {
