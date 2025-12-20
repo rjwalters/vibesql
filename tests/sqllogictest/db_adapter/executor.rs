@@ -490,9 +490,14 @@ pub fn execute_sql(
                 .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
 
             // Format the explain output as rows
-            let plan_text = match result.format {
-                vibesql_ast::ExplainFormat::Text => result.to_text(),
-                vibesql_ast::ExplainFormat::Json => result.to_json(),
+            // Use SQLite-compatible format for EXPLAIN QUERY PLAN
+            let plan_text = if explain_stmt.query_plan {
+                result.to_sqlite_eqp()
+            } else {
+                match result.format {
+                    vibesql_ast::ExplainFormat::Text => result.to_text(),
+                    vibesql_ast::ExplainFormat::Json => result.to_json(),
+                }
             };
 
             // Return as single-column text output
