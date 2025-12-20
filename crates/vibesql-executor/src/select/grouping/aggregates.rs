@@ -62,6 +62,12 @@ pub enum AggregateAccumulator {
         distinct: bool,
         seen: Option<HashSet<vibesql_types::SqlValue>>,
     },
+    /// JSON_GROUP_ARRAY - Collects values into a JSON array (SQLite compatible)
+    JsonGroupArray {
+        values: Vec<vibesql_types::SqlValue>,
+        distinct: bool,
+        seen: Option<HashSet<vibesql_types::SqlValue>>,
+    },
 }
 
 impl AggregateAccumulator {
@@ -105,6 +111,11 @@ impl AggregateAccumulator {
                 seen: if distinct { Some(HashSet::new()) } else { None },
             }),
             "TOTAL" => Ok(AggregateAccumulator::Total { sum: 0.0, distinct, seen }),
+            "JSON_GROUP_ARRAY" => Ok(AggregateAccumulator::JsonGroupArray {
+                values: Vec::new(),
+                distinct,
+                seen,
+            }),
             _ => Err(crate::errors::ExecutorError::UnsupportedExpression(format!(
                 "Unknown aggregate function: {}",
                 function_name
@@ -282,6 +293,20 @@ impl AggregateAccumulator {
                     *sum += f;
                 }
             }
+
+            // JSON_GROUP_ARRAY - collects values into a JSON array
+            AggregateAccumulator::JsonGroupArray { ref mut values, distinct, seen } => {
+                // Unlike GROUP_CONCAT, JSON_GROUP_ARRAY includes NULL values
+                if *distinct {
+                    let seen_set = seen.as_mut().unwrap();
+                    if !seen_set.contains(value) {
+                        seen_set.insert(value.clone());
+                        values.push(value.clone());
+                    }
+                } else {
+                    values.push(value.clone());
+                }
+            }
         }
     }
 
@@ -374,6 +399,11 @@ impl AggregateAccumulator {
             AggregateAccumulator::Total { sum, .. } => {
                 // TOTAL always returns a real number, even for empty set (returns 0.0)
                 vibesql_types::SqlValue::Numeric(*sum)
+            }
+            AggregateAccumulator::JsonGroupArray { values, .. } => {
+                // Convert values to JSON array string
+                let json_array = sql_values_to_json_array(values);
+                vibesql_types::SqlValue::Varchar(json_array.into())
             }
         }
     }
@@ -735,6 +765,58 @@ fn sql_value_to_string(value: &vibesql_types::SqlValue) -> String {
         }
         _ => value.to_string(),
     }
+}
+
+/// Escape a string for JSON output, handling all required escape sequences.
+fn escape_json_string(s: &str) -> String {
+    let mut escaped = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\u{0008}' => escaped.push_str("\\b"), // backspace
+            '\u{000C}' => escaped.push_str("\\f"), // form feed
+            // Other control characters U+0000 through U+001F
+            c if c.is_control() && (c as u32) < 0x20 => {
+                escaped.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => escaped.push(c),
+        }
+    }
+    escaped
+}
+
+/// Convert a single SqlValue to a JSON value representation
+fn sql_value_to_json(value: &vibesql_types::SqlValue) -> String {
+    use vibesql_types::SqlValue;
+    match value {
+        SqlValue::Null => "null".to_string(),
+        SqlValue::Boolean(b) => if *b { "true" } else { "false" }.to_string(),
+        SqlValue::Integer(i) => i.to_string(),
+        SqlValue::Bigint(i) => i.to_string(),
+        SqlValue::Smallint(i) => i.to_string(),
+        SqlValue::Unsigned(u) => u.to_string(),
+        SqlValue::Numeric(n) => n.to_string(),
+        SqlValue::Real(r) => r.to_string(),
+        SqlValue::Double(d) => d.to_string(),
+        SqlValue::Float(f) => f.to_string(),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            format!("\"{}\"", escape_json_string(s))
+        }
+        _ => {
+            // For other types, convert to string and quote
+            format!("\"{}\"", escape_json_string(&value.to_string()))
+        }
+    }
+}
+
+/// Convert a vector of SqlValues to a JSON array string
+fn sql_values_to_json_array(values: &[vibesql_types::SqlValue]) -> String {
+    let elements: Vec<String> = values.iter().map(sql_value_to_json).collect();
+    format!("[{}]", elements.join(","))
 }
 
 /// Divide a SqlValue by an integer count, handling all numeric types
