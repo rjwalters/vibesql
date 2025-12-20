@@ -43,6 +43,10 @@ pub fn sqlvalue_to_py(py: Python, value: &vibesql_types::SqlValue) -> PyResult<P
             // Convert vector to Python list of floats
             pyo3::types::PyList::new(py, v.iter().map(|f| *f as f64))?.into_any().unbind()
         }
+        vibesql_types::SqlValue::Blob(b) => {
+            // Convert blob to Python bytes
+            pyo3::types::PyBytes::new(py, b).into_any().unbind()
+        }
         vibesql_types::SqlValue::Null => py.None(),
     })
 }
@@ -173,6 +177,11 @@ pub fn substitute_placeholders(sql: &str, sql_values: &[vibesql_types::SqlValue]
                     vibesql_types::SqlValue::Vector(v) => {
                         let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
                         format!("[{}]", formatted.join(", "))
+                    }
+                    vibesql_types::SqlValue::Blob(b) => {
+                        // SQLite hex literal notation: X'...'
+                        let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+                        format!("X'{}'", hex)
                     }
                     vibesql_types::SqlValue::Null => "NULL".to_string(),
                 };

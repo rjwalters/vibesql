@@ -54,7 +54,7 @@ pub use search::JoinOrderSearch;
 /// - `SELECT * FROM t LIMIT 10` only clones 10 rows, not all of `t`
 /// - Memory usage is O(LIMIT) instead of O(table_size)
 #[allow(dead_code)]
-pub(super) enum FromDataIterator {
+pub(crate) enum FromDataIterator {
     /// Iterator over a materialized Vec<Row>
     Vec(std::vec::IntoIter<vibesql_storage::Row>),
     /// Lazy iterator from FromIterator (table scan)
@@ -86,7 +86,7 @@ impl Iterator for FromDataIterator {
 /// This enum allows FROM results to be either materialized (Vec<Row>) or lazy (iterator).
 /// Materialized results are used for JOINs, CTEs, and operations that need multiple passes.
 /// Lazy results are used for simple table scans to enable streaming execution.
-pub(super) enum FromData {
+pub(crate) enum FromData {
     /// Materialized rows (for JOINs, CTEs, operations needing multiple passes)
     Materialized(Vec<vibesql_storage::Row>),
 
@@ -197,16 +197,16 @@ impl FromData {
 /// Result of executing a FROM clause
 ///
 /// Contains the combined schema and data (either materialized or lazy).
-pub(super) struct FromResult {
-    pub(super) schema: CombinedSchema,
-    pub(super) data: FromData,
+pub(crate) struct FromResult {
+    pub(crate) schema: CombinedSchema,
+    pub(crate) data: FromData,
     /// If present, indicates that results are already sorted by the specified columns
     /// in the given order (ASC/DESC). This allows skipping ORDER BY sorting.
-    pub(super) sorted_by: Option<Vec<(String, vibesql_ast::OrderDirection)>>,
+    pub(crate) sorted_by: Option<Vec<(String, vibesql_ast::OrderDirection)>>,
     /// If true, indicates that WHERE clause filtering has already been fully applied
     /// during the scan (e.g., by index scan with predicate pushdown). This allows
     /// skipping redundant WHERE clause evaluation in the executor.
-    pub(super) where_filtered: bool,
+    pub(crate) where_filtered: bool,
 }
 
 impl FromResult {
