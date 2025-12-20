@@ -1398,6 +1398,7 @@ mod tests {
             distinct: false,
             args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("*", false))],
             order_by: None,
+            filter: None,
         };
         let result = check_aggregate_arg_count(&expr);
         assert!(result.is_some(), "MIN(*) should be invalid");
@@ -1412,6 +1413,7 @@ mod tests {
             distinct: false,
             args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("*", false))],
             order_by: None,
+            filter: None,
         };
         let result = check_aggregate_arg_count(&expr);
         assert!(result.is_some(), "MAX(*) should be invalid");
@@ -1426,6 +1428,7 @@ mod tests {
             distinct: false,
             args: vec![],
             order_by: None,
+            filter: None,
         };
         let result = check_aggregate_arg_count(&expr);
         assert!(result.is_some(), "MIN() should be invalid");
@@ -1443,6 +1446,7 @@ mod tests {
                     "*", false,
                 ))],
                 order_by: None,
+                filter: None,
             },
             alias: None,
             source_text: None,
@@ -1490,6 +1494,7 @@ mod tests {
                     "f1", false,
                 ))],
                 order_by: None,
+                filter: None,
             },
             alias: Some("m".to_string()),
             source_text: None,
@@ -1509,6 +1514,7 @@ mod tests {
                     right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(5))),
                 }],
                 order_by: None,
+                filter: None,
             }),
             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(10))),
         };
@@ -1540,6 +1546,7 @@ mod tests {
                     "f1", false,
                 ))],
                 order_by: None,
+                filter: None,
             },
             alias: Some("m".to_string()),
             source_text: None,
@@ -1571,6 +1578,7 @@ mod tests {
                 distinct: false,
                 args: vec![Expression::Wildcard],
                 order_by: None,
+                filter: None,
             },
             alias: None, // No alias
             source_text: None,
@@ -1605,6 +1613,7 @@ mod tests {
                     distinct: false,
                     args: vec![Expression::Wildcard],
                     order_by: None,
+                    filter: None,
                 },
                 alias: None,
                 source_text: None,
@@ -1621,6 +1630,7 @@ mod tests {
                     "x", false,
                 ))],
                 order_by: None,
+                filter: None,
             }),
             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(10))),
         };
@@ -1657,6 +1667,7 @@ mod tests {
                             )),
                         }],
                         order_by: None,
+                        filter: None,
                     }),
                 }),
             },
@@ -1673,6 +1684,7 @@ mod tests {
                     "col0", false,
                 ))],
                 order_by: None,
+                filter: None,
             }),
             negated: false,
         };
@@ -1724,6 +1736,7 @@ mod tests {
                         "f1", false,
                     ))],
                     order_by: None,
+                    filter: None,
                 },
                 alias: Some("m".to_string()),
                 source_text: None,
@@ -1747,6 +1760,7 @@ mod tests {
                                     vibesql_ast::ColumnIdentifier::simple("f1", false),
                                 )],
                                 order_by: None,
+                                filter: None,
                             }),
                             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(
                                 5,

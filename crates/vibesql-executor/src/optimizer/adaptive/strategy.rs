@@ -373,6 +373,7 @@ mod tests {
                         )),
                     }],
                     order_by: None,
+                    filter: None,
                 },
                 alias: None,
                 source_text: None,

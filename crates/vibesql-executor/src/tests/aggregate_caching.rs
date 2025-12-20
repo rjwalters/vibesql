@@ -37,6 +37,7 @@ fn test_repeated_count_star_cached() {
         distinct: false,
         args: vec![vibesql_ast::Expression::Wildcard],
         order_by: None,
+        filter: None,
     };
 
     // COUNT(*) * 37
@@ -147,6 +148,7 @@ fn test_repeated_sum_cached() {
             "amount", false,
         ))],
         order_by: None,
+        filter: None,
     };
 
     // SUM(amount) * 2
@@ -270,6 +272,7 @@ fn test_cache_cleared_between_groups() {
         distinct: false,
         args: vec![vibesql_ast::Expression::Wildcard],
         order_by: None,
+        filter: None,
     };
 
     // COUNT(*) + COUNT(*)
@@ -372,6 +375,7 @@ fn test_distinct_aggregates_not_confused() {
             "val", false,
         ))],
         order_by: None,
+        filter: None,
     };
 
     let count_distinct_val = vibesql_ast::Expression::AggregateFunction {
@@ -381,6 +385,7 @@ fn test_distinct_aggregates_not_confused() {
             "val", false,
         ))],
         order_by: None,
+        filter: None,
     };
 
     let stmt = vibesql_ast::SelectStmt {

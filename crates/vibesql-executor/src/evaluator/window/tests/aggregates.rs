@@ -16,7 +16,7 @@ fn test_count_star_window() {
     let partition = Partition::new(make_test_rows(vec![10, 20, 30, 40, 50]));
     let frame = 0..5; // All rows
 
-    let result = evaluate_count_window(&partition, &frame, None, None, evaluate_expression);
+    let result = evaluate_count_window(&partition, frame, None, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Integer(5));
 }
@@ -28,7 +28,7 @@ fn test_count_window_with_frame() {
 
     // Frame: rows 1, 2, 3 (3 rows)
     let frame = 1..4;
-    let result = evaluate_count_window(&partition, &frame, None, None, evaluate_expression);
+    let result = evaluate_count_window(&partition, frame, None, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Integer(3));
 }
@@ -41,7 +41,7 @@ fn test_count_expr_window() {
 
     let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("0", false));
 
-    let result = evaluate_count_window(&partition, &frame, Some(&expr), None, evaluate_expression);
+    let result = evaluate_count_window(&partition, frame, Some(&expr), None, evaluate_expression);
 
     // All 3 values are non-NULL
     assert_eq!(result, SqlValue::Integer(3));
@@ -58,7 +58,7 @@ fn test_sum_window_running_total() {
 
     // Running total at position 2: sum of rows 0, 1, 2
     let frame = 0..3; // 10 + 20 + 30 = 60
-    let result = evaluate_sum_window(&partition, &frame, &expr, evaluate_expression);
+    let result = evaluate_sum_window(&partition, frame, &expr, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Integer(60));
 }
@@ -72,7 +72,7 @@ fn test_sum_window_moving() {
 
     // Frame: rows 2, 3, 4 (values 15, 20, 25)
     let frame = 2..5;
-    let result = evaluate_sum_window(&partition, &frame, &expr, evaluate_expression);
+    let result = evaluate_sum_window(&partition, frame, &expr, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Integer(60)); // 15 + 20 + 25
 }
@@ -85,7 +85,7 @@ fn test_sum_window_empty_frame() {
 
     // Empty frame
     let frame = 0..0;
-    let result = evaluate_sum_window(&partition, &frame, &expr, evaluate_expression);
+    let result = evaluate_sum_window(&partition, frame, &expr, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Null);
 }
@@ -100,7 +100,7 @@ fn test_avg_window_simple() {
     let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("0", false));
 
     let frame = 0..5;
-    let result = evaluate_avg_window(&partition, &frame, &expr, evaluate_expression);
+    let result = evaluate_avg_window(&partition, frame, &expr, None, evaluate_expression);
 
     // Average: (10 + 20 + 30 + 40 + 50) / 5 = 30
     assert_eq!(result, SqlValue::Numeric(30.0));
@@ -115,7 +115,7 @@ fn test_avg_window_moving() {
 
     // Frame: rows 1, 2, 3 (values 20, 30, 40)
     let frame = 1..4;
-    let result = evaluate_avg_window(&partition, &frame, &expr, evaluate_expression);
+    let result = evaluate_avg_window(&partition, frame, &expr, None, evaluate_expression);
 
     // Average: (20 + 30 + 40) / 3 = 30
     assert_eq!(result, SqlValue::Numeric(30.0));
@@ -129,7 +129,7 @@ fn test_avg_window_empty_frame() {
 
     // Empty frame
     let frame = 0..0;
-    let result = evaluate_avg_window(&partition, &frame, &expr, evaluate_expression);
+    let result = evaluate_avg_window(&partition, frame, &expr, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Null);
 }
@@ -144,7 +144,7 @@ fn test_min_window_partition() {
     let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("0", false));
 
     let frame = 0..5;
-    let result = evaluate_min_window(&partition, &frame, &expr, evaluate_expression);
+    let result = evaluate_min_window(&partition, frame, &expr, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Integer(10));
 }
@@ -158,7 +158,7 @@ fn test_min_window_moving() {
 
     // Frame: rows 1, 2, 3 (values 20, 80, 10)
     let frame = 1..4;
-    let result = evaluate_min_window(&partition, &frame, &expr, evaluate_expression);
+    let result = evaluate_min_window(&partition, frame, &expr, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Integer(10));
 }
@@ -171,7 +171,7 @@ fn test_min_window_empty_frame() {
 
     // Empty frame
     let frame = 0..0;
-    let result = evaluate_min_window(&partition, &frame, &expr, evaluate_expression);
+    let result = evaluate_min_window(&partition, frame, &expr, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Null);
 }
@@ -186,7 +186,7 @@ fn test_max_window_partition() {
     let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("0", false));
 
     let frame = 0..5;
-    let result = evaluate_max_window(&partition, &frame, &expr, evaluate_expression);
+    let result = evaluate_max_window(&partition, frame, &expr, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Integer(80));
 }
@@ -200,7 +200,7 @@ fn test_max_window_moving() {
 
     // Frame: rows 2, 3, 4 (values 80, 10, 40)
     let frame = 2..5;
-    let result = evaluate_max_window(&partition, &frame, &expr, evaluate_expression);
+    let result = evaluate_max_window(&partition, frame, &expr, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Integer(80));
 }
@@ -213,7 +213,7 @@ fn test_max_window_empty_frame() {
 
     // Empty frame
     let frame = 0..0;
-    let result = evaluate_max_window(&partition, &frame, &expr, evaluate_expression);
+    let result = evaluate_max_window(&partition, frame, &expr, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Null);
 }
@@ -229,7 +229,7 @@ fn test_frame_at_partition_boundaries() {
 
     // Frame extends beyond partition end
     let frame = 3..10; // Should clamp to 3..5
-    let result = evaluate_sum_window(&partition, &frame, &expr, evaluate_expression);
+    let result = evaluate_sum_window(&partition, frame, &expr, None, evaluate_expression);
 
     // Should only sum rows 3, 4 (values 40, 50)
     assert_eq!(result, SqlValue::Integer(90));

@@ -91,6 +91,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
                     vibesql_ast::ColumnIdentifier::qualified("J", false, "I_CURRENT_PRICE", false),
                 )],
                 order_by: None,
+                filter: None,
             },
             alias: None,
             source_text: None,

@@ -792,6 +792,7 @@ mod tests {
                 "price", false,
             ))],
             order_by: None,
+            filter: None,
         }];
 
         let result = execute_columnar(&rows, None, &aggregates, &schema);
@@ -833,6 +834,7 @@ mod tests {
                 "price", false,
             ))],
             order_by: None,
+            filter: None,
         }];
 
         let result = execute_columnar(&rows, Some(&filter), &aggregates, &schema);
@@ -867,12 +869,14 @@ mod tests {
                     "price", false,
                 ))],
                 order_by: None,
+                filter: None,
             },
             Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 distinct: false,
                 args: vec![Expression::Wildcard],
                 order_by: None,
+                filter: None,
             },
             Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("AVG"),
@@ -881,6 +885,7 @@ mod tests {
                     "quantity", false,
                 ))],
                 order_by: None,
+                filter: None,
             },
         ];
 
@@ -925,6 +930,7 @@ mod tests {
                 "price", false,
             ))],
             order_by: None,
+            filter: None,
         }];
 
         let result = execute_columnar(&rows, None, &aggregates, &schema);
@@ -961,6 +967,7 @@ mod tests {
                 "price", false,
             ))],
             order_by: None,
+            filter: None,
         }];
 
         let result = execute_columnar(&rows, Some(&filter), &aggregates, &schema);

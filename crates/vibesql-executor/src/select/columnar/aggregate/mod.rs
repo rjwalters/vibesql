@@ -303,6 +303,7 @@ mod tests {
             distinct: false,
             args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))],
             order_by: None,
+            filter: None,
         }];
 
         let result = extract_aggregates(&exprs, &combined_schema);
@@ -318,6 +319,7 @@ mod tests {
             distinct: false,
             args: vec![Expression::Wildcard],
             order_by: None,
+            filter: None,
         }];
 
         let result = extract_aggregates(&exprs, &combined_schema);
@@ -336,6 +338,7 @@ mod tests {
                     "col1", false,
                 ))],
                 order_by: None,
+                filter: None,
             },
             Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("AVG"),
@@ -344,6 +347,7 @@ mod tests {
                     "col2", false,
                 ))],
                 order_by: None,
+                filter: None,
             },
         ];
 
@@ -377,6 +381,7 @@ mod tests {
             distinct: true,
             args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))],
             order_by: None,
+            filter: None,
         }];
 
         let result = extract_aggregates(&exprs, &combined_schema);
@@ -410,6 +415,7 @@ mod tests {
                 values: None,
             }))],
             order_by: None,
+            filter: None,
         }];
 
         let result = extract_aggregates(&exprs, &combined_schema);
@@ -448,6 +454,7 @@ mod tests {
                 ))),
             }],
             order_by: None,
+            filter: None,
         }];
 
         let result = extract_aggregates(&exprs, &combined_schema);

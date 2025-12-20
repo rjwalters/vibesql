@@ -325,6 +325,7 @@ mod tests {
             distinct,
             args,
             order_by: None,
+            filter: None,
         }
     }
 

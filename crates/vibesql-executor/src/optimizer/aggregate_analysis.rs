@@ -502,6 +502,7 @@ mod tests {
             distinct: false,
             args: vec![arg],
             order_by: None,
+            filter: None,
         }
     }
 

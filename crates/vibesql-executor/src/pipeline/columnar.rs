@@ -533,6 +533,7 @@ mod tests {
             args: vec![Expression::Wildcard],
             distinct: false,
             order_by: None,
+            filter: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&count_expr, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Integer(0));
@@ -543,6 +544,7 @@ mod tests {
             args: vec![Expression::Wildcard],
             distinct: false,
             order_by: None,
+            filter: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&count_lower, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Integer(0));
@@ -559,6 +561,7 @@ mod tests {
             args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))],
             distinct: false,
             order_by: None,
+            filter: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&sum_expr, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Null);
@@ -578,6 +581,7 @@ mod tests {
                 ))],
                 distinct: false,
                 order_by: None,
+                filter: None,
             };
             let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
             assert_eq!(result, SqlValue::Null, "{} should return NULL for empty set", agg_name);
@@ -608,6 +612,7 @@ mod tests {
                 args: vec![Expression::Wildcard],
                 distinct: false,
                 order_by: None,
+                filter: None,
             }),
             op: vibesql_ast::BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
@@ -630,6 +635,7 @@ mod tests {
                 args: vec![Expression::Wildcard],
                 distinct: false,
                 order_by: None,
+                filter: None,
             }),
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
@@ -649,6 +655,7 @@ mod tests {
                 args: vec![Expression::Wildcard],
                 distinct: false,
                 order_by: None,
+                filter: None,
             }),
             data_type: vibesql_types::DataType::Varchar { max_length: None },
         };
@@ -702,6 +709,7 @@ mod tests {
                 args: vec![Expression::Wildcard],
                 distinct: false,
                 order_by: None,
+                filter: None,
             }),
         };
         let select_items =
@@ -736,6 +744,7 @@ mod tests {
                 args: vec![Expression::Wildcard],
                 distinct: false,
                 order_by: None,
+                filter: None,
             }),
         };
         let select_items =

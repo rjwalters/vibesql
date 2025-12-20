@@ -657,6 +657,7 @@ fn test_count_star_in_simple_case_expression() {
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
+                    filter: None,
                 })),
                 when_clauses: vec![vibesql_ast::CaseWhen {
                     conditions: vec![vibesql_ast::Expression::Literal(
@@ -733,6 +734,7 @@ fn test_count_star_in_searched_case_expression() {
                             distinct: false,
                             args: vec![vibesql_ast::Expression::Wildcard],
                             order_by: None,
+                            filter: None,
                         }),
                         op: vibesql_ast::BinaryOperator::GreaterThan,
                         right: Box::new(vibesql_ast::Expression::Literal(
@@ -808,6 +810,7 @@ fn test_count_star_in_arithmetic_expression() {
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
+                    filter: None,
                 }),
                 op: vibesql_ast::BinaryOperator::Multiply,
                 right: Box::new(vibesql_ast::Expression::Literal(
@@ -880,6 +883,7 @@ fn test_count_star_in_case_then_clause() {
                         distinct: false,
                         args: vec![vibesql_ast::Expression::Wildcard],
                         order_by: None,
+                        filter: None,
                     },
                 }],
                 else_result: Some(Box::new(vibesql_ast::Expression::Literal(
@@ -941,6 +945,7 @@ fn test_count_star_in_nested_case_expression() {
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
+                    filter: None,
                 })),
                 when_clauses: vec![vibesql_ast::CaseWhen {
                     conditions: vec![vibesql_ast::Expression::Literal(

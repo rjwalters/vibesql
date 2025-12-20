@@ -573,6 +573,7 @@ mod tests {
             }],
             distinct: false,
             order_by: None,
+            filter: None,
         };
 
         let mut columns = HashSet::new();

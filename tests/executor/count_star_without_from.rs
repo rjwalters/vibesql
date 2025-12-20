@@ -24,6 +24,7 @@ fn test_count_star_without_from() {
                 distinct: false,
                 args: vec![vibesql_ast::Expression::Wildcard],
                 order_by: None,
+                filter: None,
             },
             alias: None,
             source_text: None,
@@ -77,6 +78,7 @@ fn test_count_star_in_expression_without_from() {
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
+                    filter: None,
                 }),
             },
             alias: None,
@@ -118,6 +120,7 @@ fn test_complex_expression_without_from() {
         distinct: false,
         args: vec![vibesql_ast::Expression::Wildcard],
         order_by: None,
+        filter: None,
     };
 
     // - COUNT(*)

@@ -44,6 +44,7 @@ fn test_count_star_in_multiplication() {
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
+                    filter: None,
                 }),
             },
             alias: Some("col1".to_string()),
@@ -104,6 +105,7 @@ fn test_count_star_in_addition() {
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
+                    filter: None,
                 }),
                 op: vibesql_ast::BinaryOperator::Plus,
                 right: Box::new(vibesql_ast::Expression::AggregateFunction {
@@ -111,6 +113,7 @@ fn test_count_star_in_addition() {
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
+                    filter: None,
                 }),
             },
             alias: None,
@@ -165,6 +168,7 @@ fn test_count_star_complex_expression() {
             distinct: false,
             args: vec![vibesql_ast::Expression::Wildcard],
             order_by: None,
+            filter: None,
         }),
         op: vibesql_ast::BinaryOperator::Multiply,
         right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2))),
@@ -248,6 +252,7 @@ fn test_count_star_with_unary_operators() {
             distinct: false,
             args: vec![vibesql_ast::Expression::Wildcard],
             order_by: None,
+            filter: None,
         }),
     };
 
@@ -335,6 +340,7 @@ fn test_count_star_with_negative_unary() {
             distinct: false,
             args: vec![vibesql_ast::Expression::Wildcard],
             order_by: None,
+            filter: None,
         }),
     };
 

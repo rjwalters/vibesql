@@ -405,6 +405,7 @@ mod tests {
                     distinct: false,
                     args: vec![Expression::Wildcard],
                     order_by: None,
+                    filter: None,
                 },
                 None,
             ),
