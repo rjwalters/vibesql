@@ -329,7 +329,27 @@ fn parse_statements(script: &str) -> Vec<String> {
                         current_statement.push(c);
                     }
                 }
-                begin_depth += 1;
+                // Check if this is a transaction BEGIN (followed by ; or TRANSACTION)
+                // or a trigger body BEGIN (followed by SQL statements)
+                let mut peek_chars = chars.clone();
+                // Skip whitespace
+                while peek_chars.clone().next().is_some_and(|c| c.is_whitespace()) {
+                    peek_chars.next();
+                }
+                // Check what follows
+                let next_word: String = peek_chars
+                    .clone()
+                    .take_while(|c| c.is_ascii_alphabetic())
+                    .collect();
+                let is_transaction = peek_chars.clone().next() == Some(';')
+                    || next_word.eq_ignore_ascii_case("TRANSACTION")
+                    || next_word.eq_ignore_ascii_case("DEFERRED")
+                    || next_word.eq_ignore_ascii_case("IMMEDIATE")
+                    || next_word.eq_ignore_ascii_case("EXCLUSIVE");
+                if !is_transaction {
+                    // Only increment depth for trigger body BEGIN, not transaction BEGIN
+                    begin_depth += 1;
+                }
                 continue;
             } else if word == "END" && begin_depth > 0 {
                 // Consume the rest of the word
