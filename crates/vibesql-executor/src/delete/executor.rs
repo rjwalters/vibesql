@@ -121,6 +121,11 @@ impl DeleteExecutor {
         // Check DELETE privilege on the table
         PrivilegeChecker::check_delete(database, &stmt.table_name)?;
 
+        // Check if target is a VIEW with INSTEAD OF triggers
+        if let Some(view_def) = database.catalog.get_view(&stmt.table_name).cloned() {
+            return execute_delete_on_view(database, stmt, &view_def, procedural_context, trigger_context);
+        }
+
         // Use TableIdentifier for SQL:1999 case-sensitive lookups when quoted
         let table_id = TableIdentifier::new(&stmt.table_name, stmt.quoted);
 
@@ -608,4 +613,116 @@ pub fn execute_delete_with_trigger_context(
     trigger_context: &crate::trigger_execution::TriggerContext,
 ) -> Result<usize, ExecutorError> {
     DeleteExecutor::execute_with_trigger_context(stmt, database, trigger_context)
+}
+
+/// Execute DELETE on a VIEW using INSTEAD OF triggers
+///
+/// When deleting from a view, we need to fire INSTEAD OF DELETE triggers
+/// instead of actually deleting data. The triggers typically delete from
+/// the underlying tables.
+fn execute_delete_on_view(
+    database: &mut Database,
+    stmt: &DeleteStmt,
+    view_def: &vibesql_catalog::ViewDefinition,
+    procedural_context: Option<&crate::procedural::ExecutionContext>,
+    trigger_context: Option<&crate::trigger_execution::TriggerContext>,
+) -> Result<usize, ExecutorError> {
+    use vibesql_ast::TriggerTiming;
+
+    // Find INSTEAD OF DELETE triggers for this view
+    let triggers = crate::TriggerFirer::find_triggers(
+        database,
+        &view_def.name,
+        TriggerTiming::InsteadOf,
+        vibesql_ast::TriggerEvent::Delete,
+    );
+
+    if triggers.is_empty() {
+        return Err(ExecutorError::UnsupportedExpression(format!(
+            "Cannot DELETE from view '{}' without INSTEAD OF trigger",
+            view_def.name
+        )));
+    }
+
+    // Build a pseudo-schema for the view
+    let view_schema = build_view_schema(database, view_def)?;
+
+    // Execute the view query to get the rows to potentially delete
+    let select_executor = crate::SelectExecutor::new(database);
+    let all_rows = select_executor.execute_with_columns(&view_def.query)?;
+
+    // Collect rows to delete first, before firing triggers
+    // This avoids borrow conflicts with the evaluator
+    let rows_to_delete: Vec<vibesql_storage::Row> = {
+        // Create evaluator for WHERE clause (if any)
+        let evaluator = if let Some(ctx) = trigger_context {
+            ExpressionEvaluator::with_trigger_context(&view_schema, database, ctx)
+        } else if let Some(ctx) = procedural_context {
+            ExpressionEvaluator::with_procedural_context(&view_schema, database, ctx)
+        } else {
+            ExpressionEvaluator::with_database(&view_schema, database)
+        };
+
+        // Select rows matching WHERE clause
+        let mut collected_rows = Vec::new();
+        for row in &all_rows.rows {
+            let matches = match &stmt.where_clause {
+                Some(vibesql_ast::WhereClause::Condition(expr)) => {
+                    match evaluator.eval(expr, row)? {
+                        vibesql_types::SqlValue::Boolean(b) => b,
+                        vibesql_types::SqlValue::Null => false,
+                        _ => false,
+                    }
+                }
+                None => true, // No WHERE clause - delete all rows
+                Some(vibesql_ast::WhereClause::CurrentOf(_)) => {
+                    return Err(ExecutorError::UnsupportedExpression(
+                        "CURRENT OF not supported for view deletes".to_string(),
+                    ));
+                }
+            };
+
+            if matches {
+                collected_rows.push(row.clone());
+            }
+        }
+        collected_rows
+    }; // evaluator dropped here
+
+    // Now fire triggers (database can be mutably borrowed)
+    let rows_processed = rows_to_delete.len();
+    for old_row in rows_to_delete {
+        for trigger in &triggers {
+            crate::TriggerFirer::execute_trigger(database, trigger, Some(&old_row), None)?;
+        }
+    }
+
+    Ok(rows_processed)
+}
+
+/// Build a pseudo TableSchema from a view definition
+fn build_view_schema(
+    database: &Database,
+    view_def: &vibesql_catalog::ViewDefinition,
+) -> Result<vibesql_catalog::TableSchema, ExecutorError> {
+    // Execute the view's SELECT query to get column names
+    let select_executor = crate::SelectExecutor::new(database);
+    let result = select_executor.execute_with_columns(&view_def.query)?;
+
+    // Use explicit column names if provided, otherwise derive from SELECT
+    let column_names: Vec<String> = if let Some(ref cols) = view_def.columns {
+        cols.clone()
+    } else {
+        result.columns.clone()
+    };
+
+    // Build columns with a generic data type (we just need names for trigger binding)
+    let columns: Vec<vibesql_catalog::ColumnSchema> = column_names
+        .into_iter()
+        .map(|name| {
+            vibesql_catalog::ColumnSchema::new(name, vibesql_types::DataType::Varchar { max_length: None }, true)
+        })
+        .collect();
+
+    Ok(vibesql_catalog::TableSchema::new(view_def.name.clone(), columns))
 }

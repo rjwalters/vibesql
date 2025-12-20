@@ -269,6 +269,7 @@ fn parse_statements(script: &str) -> Vec<String> {
     let mut current_statement = String::new();
     let mut in_string = false;
     let mut in_multiline_comment = false;
+    let mut begin_depth = 0; // Track BEGIN...END nesting for trigger bodies
     let mut chars = script.chars().peekable();
 
     while let Some(ch) = chars.next() {
@@ -312,18 +313,51 @@ fn parse_statements(script: &str) -> Vec<String> {
             continue;
         }
 
+        // Track BEGIN/END keywords for trigger body nesting (case-insensitive)
+        if !in_string && ch.is_ascii_alphabetic() {
+            current_statement.push(ch);
+            // Peek ahead to check for BEGIN or END keyword
+            let rest: String = chars
+                .clone()
+                .take_while(|c| c.is_ascii_alphabetic())
+                .collect();
+            let word = format!("{}{}", ch, rest).to_uppercase();
+            if word == "BEGIN" {
+                // Consume the rest of the word
+                for _ in 0..(rest.len()) {
+                    if let Some(c) = chars.next() {
+                        current_statement.push(c);
+                    }
+                }
+                begin_depth += 1;
+                continue;
+            } else if word == "END" && begin_depth > 0 {
+                // Consume the rest of the word
+                for _ in 0..(rest.len()) {
+                    if let Some(c) = chars.next() {
+                        current_statement.push(c);
+                    }
+                }
+                begin_depth -= 1;
+                continue;
+            }
+            // Not BEGIN/END, let normal processing continue
+            continue;
+        }
+
         // Handle statement delimiter (semicolon)
         // Include the semicolon in the statement so the parser can see it.
-        // This allows the parser to distinguish between:
-        // - "SELECT f1 FROM test1 ORDER BY"   → incomplete input (no semicolon)
-        // - "SELECT f1 FROM test1 ORDER BY;"  → syntax error (has semicolon, but invalid)
+        // But don't split if we're inside a BEGIN...END block (trigger body)
         if !in_string && ch == ';' {
             current_statement.push(ch); // Include the semicolon
-            let trimmed = current_statement.trim();
-            if !trimmed.is_empty() {
-                statements.push(trimmed.to_string());
+            if begin_depth == 0 {
+                // Only split if we're not inside a BEGIN...END block
+                let trimmed = current_statement.trim();
+                if !trimmed.is_empty() {
+                    statements.push(trimmed.to_string());
+                }
+                current_statement.clear();
             }
-            current_statement.clear();
             continue;
         }
 

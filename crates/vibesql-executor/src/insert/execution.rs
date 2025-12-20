@@ -49,6 +49,11 @@ fn execute_insert_internal(
     // Check INSERT privilege on the table
     PrivilegeChecker::check_insert(db, &full_table_name)?;
 
+    // Check if target is a VIEW with INSTEAD OF triggers
+    if let Some(view_def) = db.catalog.get_view(&stmt.table_name).cloned() {
+        return execute_insert_on_view(db, stmt, &view_def, procedural_context, trigger_context);
+    }
+
     // Get table schema from catalog (clone to avoid borrow issues)
     // Use TableIdentifier for SQL:1999 case-sensitive lookups when quoted
     // For schema-qualified names, use TableIdentifier::qualified to preserve
@@ -700,4 +705,150 @@ fn check_would_violate_constraints(
     }
 
     false
+}
+
+/// Execute INSERT on a VIEW using INSTEAD OF triggers
+///
+/// When inserting into a view, we need to fire INSTEAD OF INSERT triggers
+/// instead of actually inserting data. The triggers typically insert into
+/// the underlying tables.
+fn execute_insert_on_view(
+    db: &mut vibesql_storage::Database,
+    stmt: &vibesql_ast::InsertStmt,
+    view_def: &vibesql_catalog::ViewDefinition,
+    procedural_context: Option<&crate::procedural::ExecutionContext>,
+    trigger_context: Option<&crate::trigger_execution::TriggerContext>,
+) -> Result<usize, ExecutorError> {
+    use vibesql_ast::TriggerTiming;
+
+    // Find INSTEAD OF INSERT triggers for this view
+    let triggers = crate::TriggerFirer::find_triggers(
+        db,
+        &view_def.name,
+        TriggerTiming::InsteadOf,
+        vibesql_ast::TriggerEvent::Insert,
+    );
+
+    if triggers.is_empty() {
+        return Err(ExecutorError::UnsupportedExpression(format!(
+            "Cannot INSERT into view '{}' without INSTEAD OF trigger",
+            view_def.name
+        )));
+    }
+
+    // Build a pseudo-schema for the view to evaluate values and resolve column names
+    // We derive column info from the view's SELECT query
+    let view_schema = build_view_schema(db, view_def)?;
+
+    // Get the rows to insert based on the source
+    let rows_to_insert = match &stmt.source {
+        vibesql_ast::InsertSource::Values(values) => values.clone(),
+        vibesql_ast::InsertSource::Select(select_stmt) => {
+            // Execute SELECT and convert to expressions
+            let select_executor = crate::SelectExecutor::new(db);
+            let select_result = select_executor.execute_with_columns(select_stmt)?;
+            select_result
+                .rows
+                .into_iter()
+                .map(|row| row.values.into_iter().map(vibesql_ast::Expression::Literal).collect())
+                .collect()
+        }
+    };
+
+    // Determine target column indices from the statement's column list
+    // If no columns specified, use all view columns in order
+    let target_columns: Vec<(usize, &vibesql_catalog::ColumnSchema)> = if stmt.columns.is_empty() {
+        view_schema.columns.iter().enumerate().collect()
+    } else {
+        stmt.columns
+            .iter()
+            .map(|col_name| {
+                view_schema
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .find(|(_, c)| c.name.to_uppercase() == col_name.to_uppercase())
+                    .ok_or_else(|| ExecutorError::ColumnNotFound {
+                        column_name: col_name.clone(),
+                        table_name: view_def.name.clone(),
+                        searched_tables: vec![view_def.name.clone()],
+                        available_columns: view_schema.columns.iter().map(|c| c.name.clone()).collect(),
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
+
+    // Collect all new rows first, before firing triggers
+    // This avoids borrow conflicts with the evaluator
+    let new_rows: Vec<vibesql_storage::Row> = {
+        let dummy_row = vibesql_storage::Row::new(vec![]);
+        let evaluator = if let Some(ctx) = trigger_context {
+            crate::evaluator::ExpressionEvaluator::with_trigger_context(&view_schema, db, ctx)
+        } else if let Some(ctx) = procedural_context {
+            crate::evaluator::ExpressionEvaluator::with_procedural_context(&view_schema, db, ctx)
+        } else {
+            crate::evaluator::ExpressionEvaluator::with_database(&view_schema, db)
+        };
+
+        let mut collected_rows = Vec::new();
+        for value_exprs in &rows_to_insert {
+            // Validate column count
+            if value_exprs.len() != target_columns.len() {
+                return Err(ExecutorError::InsertColumnCountMismatch {
+                    table_name: view_def.name.clone(),
+                    expected: target_columns.len(),
+                    provided: value_exprs.len(),
+                });
+            }
+
+            // Build a row with values for all view columns
+            let mut row_values = vec![vibesql_types::SqlValue::Null; view_schema.columns.len()];
+
+            for (expr, (col_idx, _col)) in value_exprs.iter().zip(target_columns.iter()) {
+                // Evaluate expression - for INSERT, these are typically literals
+                let value = evaluator.eval(expr, &dummy_row)?;
+                row_values[*col_idx] = value;
+            }
+
+            collected_rows.push(vibesql_storage::Row::new(row_values));
+        }
+        collected_rows
+    }; // evaluator dropped here
+
+    // Now fire triggers (database can be mutably borrowed)
+    let rows_processed = new_rows.len();
+    for row in new_rows {
+        for trigger in &triggers {
+            crate::TriggerFirer::execute_trigger(db, trigger, None, Some(&row))?;
+        }
+    }
+
+    Ok(rows_processed)
+}
+
+/// Build a pseudo TableSchema from a view definition
+fn build_view_schema(
+    db: &vibesql_storage::Database,
+    view_def: &vibesql_catalog::ViewDefinition,
+) -> Result<vibesql_catalog::TableSchema, ExecutorError> {
+    // Execute the view's SELECT query to get column names
+    let select_executor = crate::SelectExecutor::new(db);
+    let result = select_executor.execute_with_columns(&view_def.query)?;
+
+    // Use explicit column names if provided, otherwise derive from SELECT
+    let column_names: Vec<String> = if let Some(ref cols) = view_def.columns {
+        cols.clone()
+    } else {
+        result.columns.clone()
+    };
+
+    // Build columns with a generic data type (we just need names for trigger binding)
+    let columns: Vec<vibesql_catalog::ColumnSchema> = column_names
+        .into_iter()
+        .map(|name| {
+            vibesql_catalog::ColumnSchema::new(name, vibesql_types::DataType::Varchar { max_length: None }, true)
+        })
+        .collect();
+
+    Ok(vibesql_catalog::TableSchema::new(view_def.name.clone(), columns))
 }
