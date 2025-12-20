@@ -421,9 +421,14 @@ impl Parser {
 
     /// Parse JOIN type (INNER JOIN, LEFT JOIN, NATURAL JOIN, etc.)
     /// Returns (JoinType, is_natural)
+    ///
+    /// SQLite supports NATURAL in various positions:
+    /// - NATURAL JOIN, NATURAL LEFT JOIN, NATURAL LEFT OUTER JOIN
+    /// - LEFT NATURAL JOIN, LEFT OUTER NATURAL JOIN
+    /// - OUTER LEFT NATURAL JOIN
     pub(crate) fn parse_join_type(&mut self) -> Result<(vibesql_ast::JoinType, bool), ParseError> {
         // Check for optional NATURAL keyword first
-        let is_natural = if self.peek_keyword(Keyword::Natural) {
+        let mut is_natural = if self.peek_keyword(Keyword::Natural) {
             self.consume_keyword(Keyword::Natural)?;
             true
         } else {
@@ -437,6 +442,11 @@ impl Parser {
             }
             Token::Keyword { keyword: Keyword::Inner, .. } => {
                 self.advance();
+                // Check for NATURAL after INNER (INNER NATURAL JOIN)
+                if self.peek_keyword(Keyword::Natural) {
+                    self.consume_keyword(Keyword::Natural)?;
+                    is_natural = true;
+                }
                 self.expect_keyword(Keyword::Join)?;
                 vibesql_ast::JoinType::Inner
             }
@@ -445,6 +455,11 @@ impl Parser {
                 // Optional OUTER keyword
                 if self.peek_keyword(Keyword::Outer) {
                     self.consume_keyword(Keyword::Outer)?;
+                }
+                // Check for NATURAL after LEFT [OUTER] (LEFT NATURAL JOIN, LEFT OUTER NATURAL JOIN)
+                if self.peek_keyword(Keyword::Natural) {
+                    self.consume_keyword(Keyword::Natural)?;
+                    is_natural = true;
                 }
                 self.expect_keyword(Keyword::Join)?;
                 vibesql_ast::JoinType::LeftOuter
@@ -455,11 +470,21 @@ impl Parser {
                 if self.peek_keyword(Keyword::Outer) {
                     self.consume_keyword(Keyword::Outer)?;
                 }
+                // Check for NATURAL after RIGHT [OUTER]
+                if self.peek_keyword(Keyword::Natural) {
+                    self.consume_keyword(Keyword::Natural)?;
+                    is_natural = true;
+                }
                 self.expect_keyword(Keyword::Join)?;
                 vibesql_ast::JoinType::RightOuter
             }
             Token::Keyword { keyword: Keyword::Cross, .. } => {
                 self.advance();
+                // Check for NATURAL after CROSS
+                if self.peek_keyword(Keyword::Natural) {
+                    self.consume_keyword(Keyword::Natural)?;
+                    is_natural = true;
+                }
                 self.expect_keyword(Keyword::Join)?;
                 vibesql_ast::JoinType::Cross
             }
@@ -468,6 +493,11 @@ impl Parser {
                 // Optional OUTER keyword
                 if self.peek_keyword(Keyword::Outer) {
                     self.consume_keyword(Keyword::Outer)?;
+                }
+                // Check for NATURAL after FULL [OUTER]
+                if self.peek_keyword(Keyword::Natural) {
+                    self.consume_keyword(Keyword::Natural)?;
+                    is_natural = true;
                 }
                 self.expect_keyword(Keyword::Join)?;
                 vibesql_ast::JoinType::FullOuter
@@ -478,16 +508,31 @@ impl Parser {
                 match self.peek() {
                     Token::Keyword { keyword: Keyword::Left, .. } => {
                         self.advance();
+                        // Check for NATURAL after OUTER LEFT
+                        if self.peek_keyword(Keyword::Natural) {
+                            self.consume_keyword(Keyword::Natural)?;
+                            is_natural = true;
+                        }
                         self.expect_keyword(Keyword::Join)?;
                         vibesql_ast::JoinType::LeftOuter
                     }
                     Token::Keyword { keyword: Keyword::Right, .. } => {
                         self.advance();
+                        // Check for NATURAL after OUTER RIGHT
+                        if self.peek_keyword(Keyword::Natural) {
+                            self.consume_keyword(Keyword::Natural)?;
+                            is_natural = true;
+                        }
                         self.expect_keyword(Keyword::Join)?;
                         vibesql_ast::JoinType::RightOuter
                     }
                     Token::Keyword { keyword: Keyword::Full, .. } => {
                         self.advance();
+                        // Check for NATURAL after OUTER FULL
+                        if self.peek_keyword(Keyword::Natural) {
+                            self.consume_keyword(Keyword::Natural)?;
+                            is_natural = true;
+                        }
                         self.expect_keyword(Keyword::Join)?;
                         vibesql_ast::JoinType::FullOuter
                     }
