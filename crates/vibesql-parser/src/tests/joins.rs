@@ -397,6 +397,82 @@ fn test_parse_natural_cross_join_complex() {
     assert!(result.is_ok(), "Parse failed: {:?}", result.err());
 }
 
+#[test]
+fn test_parse_outer_left_natural_join() {
+    // SQLite allows OUTER before LEFT in "OUTER LEFT NATURAL JOIN" (#4574)
+    let result = Parser::parse_sql("SELECT * FROM t1 OUTER LEFT NATURAL JOIN t2;");
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join { join_type, natural, .. } => {
+                assert_eq!(*join_type, vibesql_ast::JoinType::LeftOuter);
+                assert!(*natural);
+            }
+            _ => panic!("Expected JOIN"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_left_natural_join() {
+    // NATURAL can appear after LEFT: "LEFT NATURAL JOIN" (#4574)
+    let result = Parser::parse_sql("SELECT * FROM t1 LEFT NATURAL JOIN t2;");
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join { join_type, natural, .. } => {
+                assert_eq!(*join_type, vibesql_ast::JoinType::LeftOuter);
+                assert!(*natural);
+            }
+            _ => panic!("Expected JOIN"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_left_outer_natural_join() {
+    // NATURAL can appear after LEFT OUTER: "LEFT OUTER NATURAL JOIN" (#4574)
+    let result = Parser::parse_sql("SELECT * FROM t1 LEFT OUTER NATURAL JOIN t2;");
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join { join_type, natural, .. } => {
+                assert_eq!(*join_type, vibesql_ast::JoinType::LeftOuter);
+                assert!(*natural);
+            }
+            _ => panic!("Expected JOIN"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_natural_left_outer_join() {
+    // Standard form: "NATURAL LEFT OUTER JOIN"
+    let result = Parser::parse_sql("SELECT * FROM t1 NATURAL LEFT OUTER JOIN t2;");
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join { join_type, natural, .. } => {
+                assert_eq!(*join_type, vibesql_ast::JoinType::LeftOuter);
+                assert!(*natural);
+            }
+            _ => panic!("Expected JOIN"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}
+
 // ========================================================================
 // Legacy Comma-Join ON Syntax Tests (#4369)
 // ========================================================================
