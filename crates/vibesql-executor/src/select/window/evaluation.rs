@@ -15,7 +15,7 @@ use crate::{
     errors::ExecutorError,
     evaluator::{
         window::{
-            calculate_frame, evaluate_avg_window, evaluate_count_window, evaluate_max_window,
+            calculate_frame, evaluate_avg_window, evaluate_count_window, evaluate_group_concat_window, evaluate_max_window,
             evaluate_min_window, evaluate_sum_window, partition_rows, sort_partition, Partition,
         },
         CombinedExpressionEvaluator,
@@ -192,6 +192,8 @@ fn evaluate_window_function_for_partition(
         "ROW_NUMBER" => crate::evaluator::window::evaluate_row_number(partition),
         "RANK" => crate::evaluator::window::evaluate_rank(partition, order_by),
         "DENSE_RANK" => crate::evaluator::window::evaluate_dense_rank(partition, order_by),
+        "PERCENT_RANK" => crate::evaluator::window::evaluate_percent_rank(partition, order_by),
+        "CUME_DIST" => crate::evaluator::window::evaluate_cume_dist(partition, order_by),
         "NTILE" => {
             if args.is_empty() {
                 return Err(ExecutorError::UnsupportedExpression(
@@ -357,6 +359,41 @@ fn evaluate_window_function_for_partition(
             // Return the same value for all rows
             vec![value; partition.len()]
         }
+        "NTH_VALUE" => {
+            // NTH_VALUE(expr, n)
+            if args.len() < 2 {
+                return Err(ExecutorError::UnsupportedExpression(
+                    "NTH_VALUE requires two arguments (expression and n)".to_string(),
+                ));
+            }
+
+            let value_expr = &args[0];
+
+            // Evaluate n argument (should be constant integer)
+            let n_value = evaluator.eval(&args[1], &partition.rows[0])?;
+            let n = match n_value {
+                SqlValue::Integer(n) => n,
+                _ => {
+                    return Err(ExecutorError::UnsupportedExpression(
+                        "NTH_VALUE second argument must be an integer".to_string(),
+                    ))
+                }
+            };
+
+            // Create closure that evaluates expressions using the evaluator
+            let eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
+                evaluator.clear_cse_cache();
+                evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
+            };
+
+            // NTH_VALUE returns the value from the Nth row for all rows in the partition
+            let value =
+                crate::evaluator::window::evaluate_nth_value(partition, n, value_expr, eval_fn)
+                    .map_err(ExecutorError::UnsupportedExpression)?;
+
+            // Return the same value for all rows
+            vec![value; partition.len()]
+        }
         _ => {
             // Handle aggregate functions that use frames
             let mut results: Vec<SqlValue> = Vec::with_capacity(partition.len());
@@ -378,8 +415,9 @@ fn evaluate_window_function_for_partition(
                 let value = match func_name.to_uppercase().as_str() {
                     "COUNT" => {
                         // COUNT(*) or COUNT(expr)
-                        // Check if arg is the special "*" column reference
+                        // Check if arg is the special "*" (Wildcard) or empty args
                         let arg_expr = if args.is_empty()
+                            || matches!(&args[0], Expression::Wildcard)
                             || matches!(&args[0], Expression::ColumnRef(col_id) if col_id.column_canonical() == "*")
                         {
                             None // COUNT(*) should count all rows
@@ -419,6 +457,28 @@ fn evaluate_window_function_for_partition(
                             ));
                         }
                         evaluate_max_window(partition, &frame, &args[0], eval_fn)
+                    }
+                    "GROUP_CONCAT" | "STRING_AGG" => {
+                        if args.is_empty() {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                "GROUP_CONCAT/STRING_AGG requires an argument".to_string(),
+                            ));
+                        }
+                        // Get separator (default is comma for group_concat, required for string_agg)
+                        let separator = if args.len() > 1 {
+                            // Evaluate separator expression
+                            if let Ok(sep_val) = evaluator.eval(&args[1], &partition.rows[0]) {
+                                match sep_val {
+                                    SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+                                    _ => ",".to_string(),
+                                }
+                            } else {
+                                ",".to_string()
+                            }
+                        } else {
+                            ",".to_string()
+                        };
+                        evaluate_group_concat_window(partition, &frame, &args[0], &separator, eval_fn)
                     }
                     _ => {
                         return Err(ExecutorError::UnsupportedExpression(format!(

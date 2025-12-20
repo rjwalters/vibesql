@@ -18,7 +18,7 @@ fn test_count_star_window() {
 
     let result = evaluate_count_window(&partition, &frame, None, evaluate_expression);
 
-    assert_eq!(result, SqlValue::Numeric(5.0));
+    assert_eq!(result, SqlValue::Integer(5));
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn test_count_window_with_frame() {
     let frame = 1..4;
     let result = evaluate_count_window(&partition, &frame, None, evaluate_expression);
 
-    assert_eq!(result, SqlValue::Numeric(3.0));
+    assert_eq!(result, SqlValue::Integer(3));
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn test_count_expr_window() {
     let result = evaluate_count_window(&partition, &frame, Some(&expr), evaluate_expression);
 
     // All 3 values are non-NULL
-    assert_eq!(result, SqlValue::Numeric(3.0));
+    assert_eq!(result, SqlValue::Integer(3));
 }
 
 // ===== SUM Tests =====
@@ -60,7 +60,7 @@ fn test_sum_window_running_total() {
     let frame = 0..3; // 10 + 20 + 30 = 60
     let result = evaluate_sum_window(&partition, &frame, &expr, evaluate_expression);
 
-    assert_eq!(result, SqlValue::Numeric(60.0));
+    assert_eq!(result, SqlValue::Integer(60));
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn test_sum_window_moving() {
     let frame = 2..5;
     let result = evaluate_sum_window(&partition, &frame, &expr, evaluate_expression);
 
-    assert_eq!(result, SqlValue::Numeric(60.0)); // 15 + 20 + 25
+    assert_eq!(result, SqlValue::Integer(60)); // 15 + 20 + 25
 }
 
 #[test]
@@ -232,5 +232,5 @@ fn test_frame_at_partition_boundaries() {
     let result = evaluate_sum_window(&partition, &frame, &expr, evaluate_expression);
 
     // Should only sum rows 3, 4 (values 40, 50)
-    assert_eq!(result, SqlValue::Numeric(90.0));
+    assert_eq!(result, SqlValue::Integer(90));
 }
