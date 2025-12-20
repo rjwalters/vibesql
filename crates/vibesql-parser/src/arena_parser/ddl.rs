@@ -178,6 +178,15 @@ impl<'arena> ArenaParser<'arena> {
 
         self.consume_keyword(Keyword::View)?;
 
+        // Check for IF NOT EXISTS
+        let if_not_exists = if self.try_consume_keyword(Keyword::If) {
+            self.expect_keyword(Keyword::Not)?;
+            self.expect_keyword(Keyword::Exists)?;
+            true
+        } else {
+            false
+        };
+
         let view_name = self.parse_arena_identifier()?;
 
         // Parse optional column list
@@ -202,7 +211,7 @@ impl<'arena> ArenaParser<'arena> {
             false
         };
 
-        Ok(CreateViewStmt { view_name, columns, query, with_check_option, or_replace, temporary })
+        Ok(CreateViewStmt { view_name, columns, query, with_check_option, or_replace, if_not_exists, temporary })
     }
 
     // ========================================================================

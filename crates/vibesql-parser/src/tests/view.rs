@@ -246,6 +246,39 @@ fn test_create_or_replace_temp_view() {
         assert_eq!(stmt.view_name, "my_view");
         assert!(stmt.temporary);
         assert!(stmt.or_replace);
+        assert!(!stmt.if_not_exists);
+    } else {
+        panic!("Expected CreateView statement");
+    }
+}
+
+#[test]
+fn test_create_view_if_not_exists() {
+    let sql = "CREATE VIEW IF NOT EXISTS v1 AS SELECT a,b FROM t1";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
+        assert_eq!(stmt.view_name, "v1");
+        assert!(stmt.if_not_exists);
+        assert!(!stmt.or_replace);
+        assert!(!stmt.temporary);
+    } else {
+        panic!("Expected CreateView statement");
+    }
+}
+
+#[test]
+fn test_create_temp_view_if_not_exists() {
+    let sql = "CREATE TEMP VIEW IF NOT EXISTS my_view AS SELECT * FROM users";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
+        assert_eq!(stmt.view_name, "my_view");
+        assert!(stmt.temporary);
+        assert!(stmt.if_not_exists);
+        assert!(!stmt.or_replace);
     } else {
         panic!("Expected CreateView statement");
     }

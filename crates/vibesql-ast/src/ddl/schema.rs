@@ -101,6 +101,8 @@ pub struct CreateViewStmt {
     pub query: Box<crate::SelectStmt>,
     pub with_check_option: bool,
     pub or_replace: bool,
+    /// Whether to skip creation if view already exists (CREATE VIEW IF NOT EXISTS)
+    pub if_not_exists: bool,
     /// Whether this is a temporary view (CREATE TEMP VIEW or CREATE TEMPORARY VIEW)
     pub temporary: bool,
     /// Original SQL definition for sqlite_master compatibility
