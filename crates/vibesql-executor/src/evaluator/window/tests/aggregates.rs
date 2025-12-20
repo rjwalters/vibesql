@@ -16,7 +16,7 @@ fn test_count_star_window() {
     let partition = Partition::new(make_test_rows(vec![10, 20, 30, 40, 50]));
     let frame = 0..5; // All rows
 
-    let result = evaluate_count_window(&partition, &frame, None, evaluate_expression);
+    let result = evaluate_count_window(&partition, &frame, None, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Integer(5));
 }
@@ -28,7 +28,7 @@ fn test_count_window_with_frame() {
 
     // Frame: rows 1, 2, 3 (3 rows)
     let frame = 1..4;
-    let result = evaluate_count_window(&partition, &frame, None, evaluate_expression);
+    let result = evaluate_count_window(&partition, &frame, None, None, evaluate_expression);
 
     assert_eq!(result, SqlValue::Integer(3));
 }
@@ -41,7 +41,7 @@ fn test_count_expr_window() {
 
     let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("0", false));
 
-    let result = evaluate_count_window(&partition, &frame, Some(&expr), evaluate_expression);
+    let result = evaluate_count_window(&partition, &frame, Some(&expr), None, evaluate_expression);
 
     // All 3 values are non-NULL
     assert_eq!(result, SqlValue::Integer(3));

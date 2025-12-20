@@ -339,6 +339,7 @@ mod tests {
                 else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
             }],
             order_by: None,
+            filter: None,
         }
     }
 
@@ -434,6 +435,7 @@ mod tests {
                 else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
             }],
             order_by: None,
+            filter: None,
         };
 
         let select_list = vec![
