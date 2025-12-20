@@ -748,8 +748,12 @@ pub(super) fn nested_loop_right_outer_join(
     // RIGHT OUTER JOIN = LEFT OUTER JOIN with sides swapped
     // Then we need to reorder columns to put left first, right second
 
+    // Save original schemas before swapping - we need these to build the correct output schema
+    let left_schema = left.schema.clone();
+    let right_schema = right.schema.clone();
+
     // Get the right column count (handles nested joins with multiple tables)
-    let right_col_count = right.schema.total_columns;
+    let right_col_count = right_schema.total_columns;
 
     // Do LEFT OUTER JOIN with swapped sides
     let swapped_result =
@@ -774,7 +778,11 @@ pub(super) fn nested_loop_right_outer_join(
         })
         .collect();
 
-    Ok(FromResult::from_rows(swapped_result.schema, reordered_rows))
+    // Build the correct schema: left columns first, then right columns
+    // The swapped_result.schema has [right, left] order, so we need to merge correctly
+    let correct_schema = CombinedSchema::merge(left_schema, right_schema);
+
+    Ok(FromResult::from_rows(correct_schema, reordered_rows))
 }
 
 /// Nested loop FULL OUTER JOIN implementation
