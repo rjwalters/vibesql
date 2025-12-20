@@ -1078,9 +1078,9 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses sqlite_sort_count (sort operation counter)"]
     }
 
-    # Note: "count" helper proc is handled differently - we redefine it
-    # in the shim to NOT append sqlite_search_count, so SQL correctness
-    # is still tested. See proc count below.
+    # Note: Tests using the "count" helper append sqlite_search_count to results.
+    # We handle this via is_search_count_mismatch in do_test, which passes tests
+    # where only the trailing search count differs (SQL correctness verified).
 
     # db status command - returns internal execution statistics
     if {[regexp {db\s+status\s+\w+} $script]} {
@@ -1168,7 +1168,9 @@ proc do_test {name script expected} {
         # Expected: "3 121 10 3" (SQL result + search count)
         # Actual:   "3 121 10 0" (SQL result + stubbed 0)
         # If only the trailing search count differs, SQL is correct - pass the test.
-        if {[is_search_count_mismatch $result_norm $expected_norm]} {
+        # Only apply this check when test uses the "count" helper to avoid false positives.
+        set uses_count_helper [regexp {\[count\s+} $script]
+        if {$uses_count_helper && [is_search_count_mismatch $result_norm $expected_norm]} {
             incr ::nPass
             if {$::verbose} {
                 puts "ok (search count ignored)"
@@ -1779,7 +1781,6 @@ proc run_test_file {filename} {
         array set sqlite_options [array get ::sqlite_options]
     }
     regsub {source \$testdir/tester\.tcl} $content $tester_vars content
-
 
     # Execute the modified content
     if {[catch {eval $content} err]} {
