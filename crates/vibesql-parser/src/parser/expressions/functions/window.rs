@@ -114,7 +114,7 @@ impl Parser {
         Ok(vibesql_ast::WindowSpec { partition_by, order_by, frame })
     }
 
-    /// Parse frame clause (ROWS/RANGE BETWEEN ... AND ...)
+    /// Parse frame clause (ROWS/RANGE BETWEEN ... AND ... [EXCLUDE ...])
     pub(super) fn parse_frame_clause(&mut self) -> Result<vibesql_ast::WindowFrame, ParseError> {
         // Parse frame unit (ROWS or RANGE)
         let unit = match self.peek() {
@@ -137,7 +137,8 @@ impl Parser {
         };
 
         // Parse BETWEEN ... AND ... or single bound
-        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Between, .. }) {
+        let (start, end) = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Between, .. })
+        {
             self.advance(); // consume BETWEEN
 
             let start = self.parse_frame_bound()?;
@@ -146,12 +147,76 @@ impl Parser {
 
             let end = self.parse_frame_bound()?;
 
-            Ok(vibesql_ast::WindowFrame { unit, start, end: Some(end) })
+            (start, Some(end))
         } else {
             // Single bound (defaults to CURRENT ROW as end)
             let start = self.parse_frame_bound()?;
 
-            Ok(vibesql_ast::WindowFrame { unit, start, end: None })
+            (start, None)
+        };
+
+        // Parse optional EXCLUDE clause
+        let exclude = self.parse_frame_exclude()?;
+
+        Ok(vibesql_ast::WindowFrame { unit, start, end, exclude })
+    }
+
+    /// Parse optional EXCLUDE clause for window frames
+    fn parse_frame_exclude(&mut self) -> Result<Option<vibesql_ast::FrameExclude>, ParseError> {
+        if !matches!(self.peek(), Token::Keyword { keyword: Keyword::Exclude, .. }) {
+            return Ok(None);
+        }
+
+        self.advance(); // consume EXCLUDE
+
+        match self.peek() {
+            // EXCLUDE NO OTHERS
+            Token::Keyword { keyword: Keyword::No, .. } => {
+                self.advance(); // consume NO
+                self.expect_keyword(Keyword::Others)?;
+                Ok(Some(vibesql_ast::FrameExclude::NoOthers))
+            }
+
+            // EXCLUDE CURRENT ROW
+            Token::Keyword { keyword: Keyword::Current, .. } => {
+                self.advance(); // consume CURRENT
+                // Accept ROW as either keyword or identifier for compatibility
+                match self.peek() {
+                    Token::Keyword { keyword: Keyword::Row, .. } => {
+                        self.advance();
+                        Ok(Some(vibesql_ast::FrameExclude::CurrentRow))
+                    }
+                    Token::Identifier(ref id) if id.to_uppercase() == "ROW" => {
+                        self.advance();
+                        Ok(Some(vibesql_ast::FrameExclude::CurrentRow))
+                    }
+                    _ => Err(ParseError {
+                        message: format!(
+                            "Expected ROW after EXCLUDE CURRENT, found {:?}",
+                            self.peek()
+                        ),
+                    }),
+                }
+            }
+
+            // EXCLUDE GROUP
+            Token::Keyword { keyword: Keyword::Group, .. } => {
+                self.advance();
+                Ok(Some(vibesql_ast::FrameExclude::Group))
+            }
+
+            // EXCLUDE TIES
+            Token::Keyword { keyword: Keyword::Ties, .. } => {
+                self.advance();
+                Ok(Some(vibesql_ast::FrameExclude::Ties))
+            }
+
+            _ => Err(ParseError {
+                message: format!(
+                    "Expected NO OTHERS, CURRENT ROW, GROUP, or TIES after EXCLUDE, found {:?}",
+                    self.peek()
+                ),
+            }),
         }
     }
 

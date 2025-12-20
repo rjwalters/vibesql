@@ -799,6 +799,7 @@ fn transform_window_spec<V: ExpressionMutVisitor>(visitor: &mut V, spec: WindowS
             unit: f.unit,
             start: transform_frame_bound(visitor, f.start),
             end: f.end.map(|e| transform_frame_bound(visitor, e)),
+            exclude: f.exclude,
         }),
     }
 }

@@ -304,6 +304,20 @@ pub struct WindowFrame<'arena> {
     pub unit: FrameUnit,
     pub start: FrameBound<'arena>,
     pub end: Option<FrameBound<'arena>>,
+    pub exclude: Option<FrameExclude>,
+}
+
+/// Frame exclusion specification (SQL:2011)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FrameExclude {
+    /// EXCLUDE NO OTHERS - include all rows in frame
+    NoOthers,
+    /// EXCLUDE CURRENT ROW - exclude the current row from frame
+    CurrentRow,
+    /// EXCLUDE GROUP - exclude current row and its peers
+    Group,
+    /// EXCLUDE TIES - exclude peers of current row, but not current row itself
+    Ties,
 }
 
 /// Frame unit type

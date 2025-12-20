@@ -26,6 +26,7 @@ fn test_calculate_frame_unbounded_preceding() {
         unit: FrameUnit::Rows,
         start: FrameBound::UnboundedPreceding,
         end: Some(FrameBound::CurrentRow),
+        exclude: None,
     };
 
     let frame = calculate_frame(&partition, 2, &None, &Some(frame_spec));
@@ -41,6 +42,7 @@ fn test_calculate_frame_preceding() {
         unit: FrameUnit::Rows,
         start: FrameBound::Preceding(Box::new(Expression::Literal(SqlValue::Integer(2)))),
         end: Some(FrameBound::CurrentRow),
+        exclude: None,
     };
 
     let frame = calculate_frame(&partition, 3, &None, &Some(frame_spec));
@@ -57,6 +59,7 @@ fn test_calculate_frame_following() {
         unit: FrameUnit::Rows,
         start: FrameBound::CurrentRow,
         end: Some(FrameBound::Following(Box::new(Expression::Literal(SqlValue::Integer(2))))),
+        exclude: None,
     };
 
     let frame = calculate_frame(&partition, 1, &None, &Some(frame_spec));
@@ -73,6 +76,7 @@ fn test_calculate_frame_unbounded_following() {
         unit: FrameUnit::Rows,
         start: FrameBound::CurrentRow,
         end: Some(FrameBound::UnboundedFollowing),
+        exclude: None,
     };
 
     let frame = calculate_frame(&partition, 2, &None, &Some(frame_spec));

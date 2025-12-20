@@ -6,7 +6,9 @@
 
 use std::io::{Read, Write};
 
-use vibesql_ast::{FrameBound, FrameUnit, WindowFrame, WindowFunctionSpec, WindowSpec};
+use vibesql_ast::{
+    FrameBound, FrameExclude, FrameUnit, WindowFrame, WindowFunctionSpec, WindowSpec,
+};
 
 use super::super::io::*;
 use crate::StorageError;
@@ -183,6 +185,20 @@ fn write_window_frame<W: Write>(writer: &mut W, frame: &WindowFrame) -> Result<(
         write_frame_bound(writer, end)?;
     }
 
+    // Write exclude clause
+    write_bool(writer, frame.exclude.is_some())?;
+    if let Some(exclude) = &frame.exclude {
+        let exclude_tag = match exclude {
+            FrameExclude::NoOthers => 0u8,
+            FrameExclude::CurrentRow => 1,
+            FrameExclude::Group => 2,
+            FrameExclude::Ties => 3,
+        };
+        writer
+            .write_all(&[exclude_tag])
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+    }
+
     Ok(())
 }
 
@@ -207,7 +223,28 @@ fn read_window_frame<R: Read>(reader: &mut R) -> Result<WindowFrame, StorageErro
     let has_end = read_bool(reader)?;
     let end = if has_end { Some(read_frame_bound(reader)?) } else { None };
 
-    Ok(WindowFrame { unit, start, end })
+    // Read exclude clause
+    let has_exclude = read_bool(reader)?;
+    let exclude = if has_exclude {
+        let exclude_tag = read_u8(reader)?;
+        let exclude_mode = match exclude_tag {
+            0 => FrameExclude::NoOthers,
+            1 => FrameExclude::CurrentRow,
+            2 => FrameExclude::Group,
+            3 => FrameExclude::Ties,
+            _ => {
+                return Err(StorageError::NotImplemented(format!(
+                    "Unknown frame exclude tag: {}",
+                    exclude_tag
+                )))
+            }
+        };
+        Some(exclude_mode)
+    } else {
+        None
+    };
+
+    Ok(WindowFrame { unit, start, end, exclude })
 }
 
 fn write_frame_bound<W: Write>(writer: &mut W, bound: &FrameBound) -> Result<(), StorageError> {

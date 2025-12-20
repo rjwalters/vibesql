@@ -13,8 +13,9 @@ use crate::{
     errors::ExecutorError,
     evaluator::{
         window::{
-            calculate_frame, evaluate_avg_window, evaluate_count_window, evaluate_max_window,
-            evaluate_min_window, evaluate_sum_window, partition_rows, sort_partition,
+            calculate_frame_with_exclusion, evaluate_avg_window, evaluate_count_window,
+            evaluate_max_window, evaluate_min_window, evaluate_sum_window, partition_rows,
+            sort_partition,
         },
         CombinedExpressionEvaluator,
     },
@@ -153,8 +154,13 @@ pub(super) fn apply_window_functions_to_aggregates(
 
             // Evaluate the window function for each row in the partition
             for row_idx in 0..partition.len() {
-                let frame =
-                    calculate_frame(partition, row_idx, &order_by_ref, &win_func.window_spec.frame);
+                let frame_result = calculate_frame_with_exclusion(
+                    partition,
+                    row_idx,
+                    &order_by_ref,
+                    &win_func.window_spec.frame,
+                );
+                let frame_indices = frame_result.included_indices(partition, &order_by_ref);
 
                 let eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
                     evaluator.clear_cse_cache();
@@ -163,12 +169,12 @@ pub(super) fn apply_window_functions_to_aggregates(
 
                 let value = match win_func.outer_func_name.to_uppercase().as_str() {
                     "COUNT" => {
-                        evaluate_count_window(partition, &frame, Some(&arg_expr), None, eval_fn)
+                        evaluate_count_window(partition, frame_indices, Some(&arg_expr), None, eval_fn)
                     }
-                    "SUM" => evaluate_sum_window(partition, &frame, &arg_expr, None, eval_fn),
-                    "AVG" => evaluate_avg_window(partition, &frame, &arg_expr, None, eval_fn),
-                    "MIN" => evaluate_min_window(partition, &frame, &arg_expr, None, eval_fn),
-                    "MAX" => evaluate_max_window(partition, &frame, &arg_expr, None, eval_fn),
+                    "SUM" => evaluate_sum_window(partition, frame_indices, &arg_expr, None, eval_fn),
+                    "AVG" => evaluate_avg_window(partition, frame_indices, &arg_expr, None, eval_fn),
+                    "MIN" => evaluate_min_window(partition, frame_indices, &arg_expr, None, eval_fn),
+                    "MAX" => evaluate_max_window(partition, frame_indices, &arg_expr, None, eval_fn),
                     other => {
                         return Err(ExecutorError::UnsupportedExpression(format!(
                             "Unsupported aggregate window function: {}",
