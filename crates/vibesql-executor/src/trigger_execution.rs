@@ -296,11 +296,15 @@ impl TriggerFirer {
         let statements = Self::parse_trigger_sql(&sql)?;
 
         // Get table schema for trigger context (clone to avoid borrow checker issues)
-        let schema = db
-            .catalog
-            .get_table(&trigger.table_name)
-            .ok_or_else(|| ExecutorError::TableNotFound(trigger.table_name.clone()))?
-            .clone();
+        // For INSTEAD OF triggers on views, build schema from the view definition
+        let schema = if let Some(table_schema) = db.catalog.get_table(&trigger.table_name) {
+            table_schema.clone()
+        } else if let Some(view_def) = db.catalog.get_view(&trigger.table_name) {
+            // Build a pseudo-schema from the view for OLD/NEW column resolution
+            Self::build_view_schema(db, view_def)?
+        } else {
+            return Err(ExecutorError::TableNotFound(trigger.table_name.clone()));
+        };
 
         // Create trigger context for OLD/NEW pseudo-variable resolution
         let trigger_context = TriggerContext { old_row, new_row, table_schema: &schema };
@@ -311,6 +315,37 @@ impl TriggerFirer {
         }
 
         Ok(())
+    }
+
+    /// Build a pseudo TableSchema from a view definition for trigger OLD/NEW column resolution
+    fn build_view_schema(
+        db: &Database,
+        view_def: &vibesql_catalog::ViewDefinition,
+    ) -> Result<TableSchema, ExecutorError> {
+        // Execute the view's SELECT query to get column names
+        let select_executor = crate::SelectExecutor::new(db);
+        let result = select_executor.execute_with_columns(&view_def.query)?;
+
+        // Use explicit column names if provided, otherwise derive from SELECT
+        let column_names: Vec<String> = if let Some(ref cols) = view_def.columns {
+            cols.clone()
+        } else {
+            result.columns.clone()
+        };
+
+        // Build columns with a generic data type
+        let columns: Vec<vibesql_catalog::ColumnSchema> = column_names
+            .into_iter()
+            .map(|name| {
+                vibesql_catalog::ColumnSchema::new(
+                    name,
+                    vibesql_types::DataType::Varchar { max_length: None },
+                    true,
+                )
+            })
+            .collect();
+
+        Ok(TableSchema::new(view_def.name.clone(), columns))
     }
 
     /// Parse trigger SQL into statements
