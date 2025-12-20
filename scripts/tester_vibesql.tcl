@@ -727,9 +727,10 @@ proc execsql {sql {db ""}} {
     # Handle EXPLAIN for uses_op_count test helper
     # SQLite's uses_op_count runs EXPLAIN and looks for "Count" opcode
     # We intercept EXPLAIN queries and synthesize output with "Count" when appropriate
+    # NOTE: Do NOT intercept EXPLAIN QUERY PLAN - let those execute normally for EQP tests
     set sql_trim [string trim $sql]
-    if {[regexp -nocase {^EXPLAIN\s+(.+)$} $sql_trim -> inner_sql]} {
-        # Extract the inner SQL
+    if {[regexp -nocase {^EXPLAIN\s+(?!QUERY\s+PLAN)(.+)$} $sql_trim -> inner_sql]} {
+        # Extract the inner SQL (this only matches EXPLAIN, not EXPLAIN QUERY PLAN)
         set inner_upper [string toupper $inner_sql]
         # Check if this is a simple count(*) or count() that would use OP_Count
         set has_count_star [regexp -nocase {SELECT\s+COUNT\s*\(\s*\*?\s*\)\s+FROM\s+\w+\s*$} $inner_upper]
@@ -1308,8 +1309,62 @@ proc do_catchsql_test {name sql expected} {
 }
 
 proc do_eqp_test {name sql expected} {
-    # EXPLAIN QUERY PLAN test - skip since we don't support EQP
-    omit_test $name "EXPLAIN QUERY PLAN not supported"
+    # EXPLAIN QUERY PLAN test
+    # Runs the query with EXPLAIN QUERY PLAN and matches against expected pattern
+    # Expected patterns use glob matching (e.g., *SEARCH t1 USING INDEX idx1*)
+
+    global test_results
+
+    # Increment test count
+    incr test_results(total)
+
+    # Substitute TCL variables in SQL
+    set sql [substitute_tcl_vars $sql]
+
+    # Run EXPLAIN QUERY PLAN
+    set eqp_sql "EXPLAIN QUERY PLAN $sql"
+
+    if {[catch {
+        # Use execsql directly since db is our proc alias
+        set rows [execsql $eqp_sql]
+        set result [join $rows " "]
+        set result [string trim $result]
+    } err]} {
+        # Query execution error
+        incr test_results(failed)
+        lappend test_results(failures) [list $name "EQP execution error: $err"]
+        puts "! $name FAILED (EQP execution error)"
+        return
+    }
+
+    # Match against expected pattern using glob matching
+    # Clean up expected pattern (remove surrounding braces if present)
+    set expected_clean [string trim $expected]
+    if {[string index $expected_clean 0] eq "\{" && [string index $expected_clean end] eq "\}"} {
+        set expected_clean [string range $expected_clean 1 end-1]
+    }
+
+    # Perform glob matching on the full result
+    if {[string match $expected_clean $result]} {
+        incr test_results(passed)
+        return
+    }
+
+    # Try matching against each line of the result
+    foreach line [split $result "\n"] {
+        set line [string trim $line]
+        if {[string match $expected_clean $line]} {
+            incr test_results(passed)
+            return
+        }
+    }
+
+    # Failed to match
+    incr test_results(failed)
+    lappend test_results(failures) [list $name "EQP mismatch. Expected: '$expected_clean', Got: '$result'"]
+    puts "! $name FAILED (EQP pattern mismatch)"
+    puts "  EQP Expected: '$expected_clean'"
+    puts "  EQP Got:      '$result'"
 }
 
 proc do_realnum_test {name script expected} {

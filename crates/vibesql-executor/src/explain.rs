@@ -7,17 +7,43 @@
 //! - Join types and order
 //! - Filter pushdown information
 //! - Estimated row counts (when statistics are available)
+//!
+//! Supports two output formats:
+//! - PostgreSQL-style text output (default for EXPLAIN)
+//! - SQLite-style EXPLAIN QUERY PLAN output (for TCL test compatibility)
 
 use std::fmt::Write;
 
 use vibesql_ast::pretty_print::ToSql;
-use vibesql_ast::{ExplainFormat, ExplainStmt, SelectStmt, Statement};
+use vibesql_ast::{ExplainFormat, ExplainStmt, Expression, SelectStmt, Statement};
 use vibesql_storage::Database;
 
 use crate::{
     errors::ExecutorError, optimizer::index_planner::IndexPlanner,
     select::scan::index_scan::cost_based_index_selection,
 };
+
+/// SQLite-style scan type for EQP output
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScanType {
+    /// Sequential scan (SCAN table)
+    Scan,
+    /// Index search (SEARCH table USING INDEX ...)
+    Search,
+    /// Covering index scan (SEARCH table USING COVERING INDEX ...)
+    CoveringIndex,
+    /// Integer primary key lookup (SEARCH table USING INTEGER PRIMARY KEY ...)
+    IntegerPrimaryKey,
+}
+
+/// Represents index predicate information for SQLite EQP output
+#[derive(Debug, Clone)]
+pub struct IndexPredicate {
+    /// Column name
+    pub column: String,
+    /// Predicate type: "=", ">", "<", ">=", "<=", etc.
+    pub predicate_type: String,
+}
 
 /// Represents a single node in the query execution plan
 #[derive(Debug, Clone)]
@@ -32,6 +58,12 @@ pub struct PlanNode {
     pub estimated_rows: Option<f64>,
     /// Child nodes in the plan tree
     pub children: Vec<PlanNode>,
+    /// SQLite-style scan type (for EQP output)
+    pub scan_type: Option<ScanType>,
+    /// Index name used (for SEARCH operations)
+    pub index_name: Option<String>,
+    /// Index predicates for SQLite EQP format (e.g., "w=?", "x>? AND x<?")
+    pub index_predicates: Vec<IndexPredicate>,
 }
 
 impl PlanNode {
@@ -42,6 +74,9 @@ impl PlanNode {
             details: Vec::new(),
             estimated_rows: None,
             children: Vec::new(),
+            scan_type: None,
+            index_name: None,
+            index_predicates: Vec::new(),
         }
     }
 
@@ -60,6 +95,24 @@ impl PlanNode {
         self
     }
 
+    fn with_scan_type(mut self, scan_type: ScanType) -> Self {
+        self.scan_type = Some(scan_type);
+        self
+    }
+
+    fn with_index_name(mut self, index_name: &str) -> Self {
+        self.index_name = Some(index_name.to_string());
+        self
+    }
+
+    fn with_index_predicate(mut self, column: &str, predicate_type: &str) -> Self {
+        self.index_predicates.push(IndexPredicate {
+            column: column.to_string(),
+            predicate_type: predicate_type.to_string(),
+        });
+        self
+    }
+
     fn add_child(&mut self, child: PlanNode) {
         self.children.push(child);
     }
@@ -75,7 +128,7 @@ pub struct ExplainResult {
 }
 
 impl ExplainResult {
-    /// Format the plan as text output
+    /// Format the plan as text output (PostgreSQL-style)
     pub fn to_text(&self) -> String {
         let mut output = String::new();
         format_node_text(&self.plan, 0, &mut output);
@@ -85,6 +138,105 @@ impl ExplainResult {
     /// Format the plan as JSON output
     pub fn to_json(&self) -> String {
         format_node_json(&self.plan)
+    }
+
+    /// Format the plan as SQLite-compatible EXPLAIN QUERY PLAN output
+    ///
+    /// Produces output like:
+    /// ```text
+    /// |--SEARCH t1 USING INDEX idx1 (w=?)
+    /// `--SCAN t2
+    /// ```
+    ///
+    /// Note: The "QUERY PLAN" column header is added by the CLI/display layer,
+    /// not included here to avoid duplication.
+    pub fn to_sqlite_eqp(&self) -> String {
+        let mut output = String::new();
+
+        // Collect all leaf scan nodes for SQLite-style flat output
+        let scan_nodes = collect_scan_nodes(&self.plan);
+
+        for (i, node) in scan_nodes.iter().enumerate() {
+            let is_last = i == scan_nodes.len() - 1;
+            let prefix = if is_last { "`--" } else { "|--" };
+            let line = format_sqlite_eqp_node(node);
+            writeln!(output, "{}{}", prefix, line).unwrap();
+        }
+
+        output
+    }
+}
+
+/// Collect all scan/search nodes from the plan tree for SQLite EQP output
+fn collect_scan_nodes(node: &PlanNode) -> Vec<&PlanNode> {
+    let mut nodes = Vec::new();
+
+    // Check if this is a scan/search node (has scan_type set)
+    if node.scan_type.is_some() {
+        nodes.push(node);
+    }
+
+    // Recursively collect from children
+    for child in &node.children {
+        nodes.extend(collect_scan_nodes(child));
+    }
+
+    nodes
+}
+
+/// Format a single node in SQLite EQP style
+fn format_sqlite_eqp_node(node: &PlanNode) -> String {
+    let table_name = node.object.as_deref().unwrap_or("?");
+
+    match node.scan_type.as_ref() {
+        Some(ScanType::Scan) => {
+            format!("SCAN {}", table_name)
+        }
+        Some(ScanType::Search) | Some(ScanType::CoveringIndex) => {
+            let index_name = node.index_name.as_deref().unwrap_or("?");
+            let covering = if matches!(node.scan_type, Some(ScanType::CoveringIndex)) {
+                "COVERING "
+            } else {
+                ""
+            };
+
+            if node.index_predicates.is_empty() {
+                format!("SEARCH {} USING {}INDEX {}", table_name, covering, index_name)
+            } else {
+                let predicates: Vec<String> = node
+                    .index_predicates
+                    .iter()
+                    .map(|p| format!("{}{}?", p.column, p.predicate_type))
+                    .collect();
+                format!(
+                    "SEARCH {} USING {}INDEX {} ({})",
+                    table_name,
+                    covering,
+                    index_name,
+                    predicates.join(" AND ")
+                )
+            }
+        }
+        Some(ScanType::IntegerPrimaryKey) => {
+            if node.index_predicates.is_empty() {
+                format!("SEARCH {} USING INTEGER PRIMARY KEY (rowid=?)", table_name)
+            } else {
+                let predicates: Vec<String> = node
+                    .index_predicates
+                    .iter()
+                    .map(|p| format!("rowid{}?", p.predicate_type))
+                    .collect();
+                format!(
+                    "SEARCH {} USING INTEGER PRIMARY KEY ({})",
+                    table_name,
+                    predicates.join(" AND ")
+                )
+            }
+        }
+        None => {
+            // Fallback for nodes without scan_type (e.g., joins)
+            node.operation.clone()
+        }
     }
 }
 
@@ -311,11 +463,17 @@ impl ExplainExecutor {
             None
         };
 
+        // Check if we're using a primary key lookup
+        let is_pk_lookup = Self::is_primary_key_lookup(table_name, where_clause, database);
+
         let mut node = if let Some(skip_plan) = skip_scan_plan {
             // Skip-scan detected - display skip-scan specific information
             let skip_info = skip_plan.skip_scan_info.as_ref().unwrap();
 
-            let mut skip_node = PlanNode::new("Skip Scan").with_object(table_name);
+            let mut skip_node = PlanNode::new("Skip Scan")
+                .with_object(table_name)
+                .with_scan_type(ScanType::Search)
+                .with_index_name(&skip_plan.index_name);
             skip_node.details.push(format!("USING INDEX {} ", skip_plan.index_name));
             skip_node.details.push(format!(
                 "Skip columns: {} (cardinality: {})",
@@ -325,10 +483,28 @@ impl ExplainExecutor {
             skip_node.details.push(format!("Filter column: {}", skip_info.filter_column));
             skip_node.details.push(format!("Estimated cost: {:.2}", skip_info.estimated_cost));
 
+            // Add filter column predicate for SQLite EQP
+            skip_node = skip_node.with_index_predicate(&skip_info.filter_column, "=");
+
             skip_node
         } else if let Some((index_name, sorted_cols)) = index_info {
-            let mut idx_node = PlanNode::new("Index Scan").with_object(table_name);
+            // Determine if this is a primary key lookup
+            let scan_type =
+                if is_pk_lookup { ScanType::IntegerPrimaryKey } else { ScanType::Search };
+
+            let mut idx_node = PlanNode::new("Index Scan")
+                .with_object(table_name)
+                .with_scan_type(scan_type.clone())
+                .with_index_name(&index_name);
             idx_node.details.push(format!("USING INDEX {} ", index_name));
+
+            // Extract predicates from WHERE clause for SQLite EQP format
+            if let Some(where_expr) = where_clause {
+                let predicates = extract_index_predicates(where_expr, &index_name, database);
+                for (col, op) in predicates {
+                    idx_node = idx_node.with_index_predicate(&col, &op);
+                }
+            }
 
             if let Some(cols) = sorted_cols {
                 let col_strs: Vec<String> = cols
@@ -349,7 +525,7 @@ impl ExplainExecutor {
 
             idx_node
         } else {
-            PlanNode::new("Seq Scan").with_object(table_name)
+            PlanNode::new("Seq Scan").with_object(table_name).with_scan_type(ScanType::Scan)
         };
 
         // Add alias if present
@@ -364,5 +540,165 @@ impl ExplainExecutor {
         }
 
         Ok(node)
+    }
+
+    /// Check if this is a primary key lookup (INTEGER PRIMARY KEY in SQLite)
+    fn is_primary_key_lookup(
+        table_name: &str,
+        where_clause: &Option<Expression>,
+        database: &Database,
+    ) -> bool {
+        let Some(table) = database.get_table(table_name) else {
+            return false;
+        };
+
+        let Some(pk_columns) = table.schema.primary_key.as_ref() else {
+            return false;
+        };
+
+        // Only consider single-column integer primary keys
+        if pk_columns.len() != 1 {
+            return false;
+        }
+
+        let pk_col = &pk_columns[0];
+        let pk_col_lower = pk_col.to_lowercase();
+
+        // Check if WHERE clause references the primary key column
+        if let Some(where_expr) = where_clause {
+            return expression_references_column(where_expr, &pk_col_lower);
+        }
+
+        false
+    }
+}
+
+/// Check if an expression references a specific column (case-insensitive)
+fn expression_references_column(expr: &Expression, column: &str) -> bool {
+    match expr {
+        Expression::ColumnRef(col_id) => col_id.column_canonical().to_lowercase() == column,
+        Expression::BinaryOp { left, right, .. } => {
+            expression_references_column(left, column)
+                || expression_references_column(right, column)
+        }
+        Expression::Conjunction(exprs) | Expression::Disjunction(exprs) => {
+            exprs.iter().any(|e| expression_references_column(e, column))
+        }
+        Expression::UnaryOp { expr: inner, .. } => expression_references_column(inner, column),
+        Expression::IsNull { expr: inner, .. } => expression_references_column(inner, column),
+        Expression::Between { expr, low, high, .. } => {
+            expression_references_column(expr, column)
+                || expression_references_column(low, column)
+                || expression_references_column(high, column)
+        }
+        Expression::InList { expr, values, .. } => {
+            expression_references_column(expr, column)
+                || values.iter().any(|e| expression_references_column(e, column))
+        }
+        _ => false,
+    }
+}
+
+/// Extract index predicates from a WHERE clause for SQLite EQP format
+///
+/// Returns a list of (column_name, operator) tuples for predicates that can
+/// use the index. The operator is one of "=", ">", "<", ">=", "<=".
+fn extract_index_predicates(
+    expr: &Expression,
+    index_name: &str,
+    database: &Database,
+) -> Vec<(String, String)> {
+    let mut predicates = Vec::new();
+
+    // Get the index columns
+    let index_columns: Vec<String> = database
+        .get_index(index_name)
+        .map(|idx| idx.columns.iter().map(|c| c.expect_column_name().to_lowercase()).collect())
+        .unwrap_or_default();
+
+    extract_predicates_recursive(expr, &index_columns, &mut predicates);
+    predicates
+}
+
+fn extract_predicates_recursive(
+    expr: &Expression,
+    index_columns: &[String],
+    predicates: &mut Vec<(String, String)>,
+) {
+    use vibesql_ast::BinaryOperator;
+
+    match expr {
+        Expression::BinaryOp { op, left, right } => {
+            // Check if this is a comparison operator
+            let op_str = match op {
+                BinaryOperator::Equal => Some("="),
+                BinaryOperator::NotEqual => None, // Don't use for index
+                BinaryOperator::LessThan => Some("<"),
+                BinaryOperator::LessThanOrEqual => Some("<="),
+                BinaryOperator::GreaterThan => Some(">"),
+                BinaryOperator::GreaterThanOrEqual => Some(">="),
+                BinaryOperator::And => {
+                    // Recurse for AND (but we typically have Conjunction)
+                    extract_predicates_recursive(left, index_columns, predicates);
+                    extract_predicates_recursive(right, index_columns, predicates);
+                    return;
+                }
+                _ => None,
+            };
+
+            if let Some(op_str) = op_str {
+                // Check if left side is a column reference that matches index columns
+                if let Expression::ColumnRef(col_id) = left.as_ref() {
+                    let col_name = col_id.column_canonical().to_lowercase();
+                    if index_columns.iter().any(|c| c == &col_name) {
+                        predicates
+                            .push((col_id.column_canonical().to_string(), op_str.to_string()));
+                    }
+                }
+                // Check if right side is a column reference (for reversed comparisons)
+                else if let Expression::ColumnRef(col_id) = right.as_ref() {
+                    let col_name = col_id.column_canonical().to_lowercase();
+                    if index_columns.iter().any(|c| c == &col_name) {
+                        // Reverse the operator for column on right side
+                        let reversed_op = match op {
+                            BinaryOperator::Equal => "=",
+                            BinaryOperator::LessThan => ">",
+                            BinaryOperator::LessThanOrEqual => ">=",
+                            BinaryOperator::GreaterThan => "<",
+                            BinaryOperator::GreaterThanOrEqual => "<=",
+                            _ => return,
+                        };
+                        predicates
+                            .push((col_id.column_canonical().to_string(), reversed_op.to_string()));
+                    }
+                }
+            }
+        }
+        Expression::Conjunction(exprs) => {
+            for e in exprs {
+                extract_predicates_recursive(e, index_columns, predicates);
+            }
+        }
+        Expression::Between { expr, negated: false, .. } => {
+            // BETWEEN is equivalent to >= AND <=
+            if let Expression::ColumnRef(col_id) = expr.as_ref() {
+                let col_name = col_id.column_canonical().to_lowercase();
+                if index_columns.iter().any(|c| c == &col_name) {
+                    let col = col_id.column_canonical().to_string();
+                    predicates.push((col.clone(), ">=".to_string()));
+                    predicates.push((col, "<=".to_string()));
+                }
+            }
+        }
+        Expression::InList { expr, negated: false, .. } => {
+            // IN list treated as equality
+            if let Expression::ColumnRef(col_id) = expr.as_ref() {
+                let col_name = col_id.column_canonical().to_lowercase();
+                if index_columns.iter().any(|c| c == &col_name) {
+                    predicates.push((col_id.column_canonical().to_string(), "=".to_string()));
+                }
+            }
+        }
+        _ => {}
     }
 }
