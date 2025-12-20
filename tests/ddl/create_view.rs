@@ -90,6 +90,7 @@ fn test_drop_view_simple() {
             nullable: false,
             default_value: None,
             generated_expr: None,
+            collation: None,
         }],
     );
     db.create_table(users_schema).expect("Failed to create table");
@@ -135,6 +136,7 @@ fn test_create_view_duplicate_error() {
             nullable: false,
             default_value: None,
             generated_expr: None,
+            collation: None,
         }],
     );
     db.create_table(users_schema).expect("Failed to create users table");
@@ -147,6 +149,7 @@ fn test_create_view_duplicate_error() {
             nullable: false,
             default_value: None,
             generated_expr: None,
+            collation: None,
         }],
     );
     db.create_table(employees_schema).expect("Failed to create employees table");
@@ -229,6 +232,7 @@ fn test_view_preserves_column_names_with_select_star() {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "col0".to_string(),
@@ -236,6 +240,7 @@ fn test_view_preserves_column_names_with_select_star() {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "col1".to_string(),
@@ -243,6 +248,7 @@ fn test_view_preserves_column_names_with_select_star() {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     );

@@ -407,7 +407,8 @@ impl VibeSqlDB {
                 | SqlValue::Time(_)
                 | SqlValue::Timestamp(_)
                 | SqlValue::Interval(_)
-                | SqlValue::Vector(_) => DefaultColumnType::Text,
+                | SqlValue::Vector(_)
+                | SqlValue::Blob(_) => DefaultColumnType::Text,
                 SqlValue::Boolean(_) => DefaultColumnType::Integer,
                 SqlValue::Null => DefaultColumnType::Any,
             })
@@ -467,6 +468,11 @@ impl VibeSqlDB {
             SqlValue::Vector(v) => {
                 let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
                 format!("[{}]", formatted.join(", "))
+            }
+            SqlValue::Blob(b) => {
+                // Format as hex string with X prefix for SQLite compatibility
+                let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+                format!("X'{}'", hex)
             }
         }
     }

@@ -97,6 +97,7 @@ pub fn execute_sql(
                             nullable: val.is_null(),
                             default_value: None,
                             generated_expr: None,
+                            collation: None,
                         })
                         .collect();
                     let table_schema = TableSchema::new("result".to_string(), columns);
@@ -673,7 +674,7 @@ fn format_query_result(
             | SqlValue::Timestamp(_)
             | SqlValue::Interval(_) => DefaultColumnType::Text,
             SqlValue::Boolean(_) => DefaultColumnType::Integer,
-            SqlValue::Vector(_) => DefaultColumnType::Text,
+            SqlValue::Vector(_) | SqlValue::Blob(_) => DefaultColumnType::Text,
             SqlValue::Null => DefaultColumnType::Any,
         })
         .collect();

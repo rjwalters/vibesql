@@ -393,6 +393,10 @@ fn format_value(value: &vibesql_types::SqlValue) -> String {
         SqlValue::Timestamp(ts) => format!("{}", ts),
         SqlValue::Interval(i) => format!("{}", i),
         SqlValue::Vector(v) => format!("{:?}", v),
+        SqlValue::Blob(b) => {
+            let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+            format!("X'{}'", hex)
+        }
     }
 }
 

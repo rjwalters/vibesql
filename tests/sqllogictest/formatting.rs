@@ -71,6 +71,10 @@ pub fn format_sql_value(value: &SqlValue, expected_type: Option<&DefaultColumnTy
             let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
             format!("[{}]", formatted.join(", "))
         }
+        SqlValue::Blob(b) => {
+            let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+            format!("X'{}'", hex)
+        }
     }
 }
 
@@ -139,6 +143,10 @@ pub fn format_sql_value_canonical(
         SqlValue::Vector(v) => {
             let formatted: Vec<String> = v.iter().map(|f| f.to_string()).collect();
             format!("[{}]", formatted.join(", "))
+        }
+        SqlValue::Blob(b) => {
+            let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+            format!("X'{}'", hex)
         }
     }
 }
