@@ -27,14 +27,16 @@ fn test_phase_2_table_local_pushdown() {
                 data_type: vibesql_types::DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
+                collation: None,
             },
             vibesql_catalog::ColumnSchema {
                 name: "b".to_string(),
                 data_type: vibesql_types::DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
+                collation: None,
             },
         ],
     );
@@ -82,7 +84,8 @@ fn test_phase_3_equijoin_hash_join() {
                 data_type: vibesql_types::DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
+                collation: None,
             }],
         );
         db.create_table(schema).unwrap();
@@ -127,14 +130,16 @@ fn test_phases_2_and_3_combined() {
                     data_type: vibesql_types::DataType::Integer,
                     nullable: false,
                     default_value: None,
-                generated_expr: None,
+                    generated_expr: None,
+                    collation: None,
                 },
                 vibesql_catalog::ColumnSchema {
                     name: "b".to_string(),
                     data_type: vibesql_types::DataType::Integer,
                     nullable: false,
                     default_value: None,
-                generated_expr: None,
+                    generated_expr: None,
+                    collation: None,
                 },
             ],
         );

@@ -308,21 +308,24 @@ mod tests {
                 data_type: DataType::Decimal { precision: 15, scale: 2 },
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "quantity".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "shipdate".to_string(),
                 data_type: DataType::Date,
                 nullable: false,
                 default_value: None,
-            generated_expr: None,
+                generated_expr: None,
+                collation: None,
             },
         ];
 

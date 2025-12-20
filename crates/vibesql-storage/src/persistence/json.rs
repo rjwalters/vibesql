@@ -99,6 +99,9 @@ pub struct JsonColumn {
     pub precision: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scale: Option<u8>,
+    /// Column-level collation (e.g., "nocase", "binary", "rtrim")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collation: Option<String>,
 }
 
 /// Row data (key-value pairs for readability)
@@ -434,6 +437,7 @@ fn column_to_json(col: &ColumnSchema) -> JsonColumn {
         max_length,
         precision,
         scale,
+        collation: col.collation.clone(),
     }
 }
 
@@ -563,6 +567,7 @@ fn json_column_to_schema(col: &JsonColumn) -> Result<ColumnSchema, StorageError>
         nullable: col.nullable,
         default_value: None,
         generated_expr: None,
+        collation: col.collation.clone(),
     })
 }
 

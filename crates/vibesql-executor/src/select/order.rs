@@ -185,8 +185,8 @@ fn resolve_position_with_wildcards<'a>(
     ResolvedPosition::NotFound
 }
 
-/// Sort key for ORDER BY: (value, direction, nulls_order)
-type SortKey = (vibesql_types::SqlValue, vibesql_ast::OrderDirection, Option<vibesql_ast::NullsOrder>);
+/// Sort key for ORDER BY: (value, direction, nulls_order, collation)
+type SortKey = (vibesql_types::SqlValue, vibesql_ast::OrderDirection, Option<vibesql_ast::NullsOrder>, Option<String>);
 
 /// Row with optional sort keys for ORDER BY
 pub(super) type RowWithSortKeys = (vibesql_storage::Row, Option<Vec<SortKey>>);
@@ -275,7 +275,9 @@ pub(super) fn apply_order_by(
             let expr_to_eval =
                 resolve_order_by_alias(&order_item.expr, select_list, term_index, Some(schema))?;
             let key_value = evaluator.eval(expr_to_eval.as_ref(), row)?;
-            keys.push((key_value, order_item.direction.clone(), order_item.nulls_order));
+            // Get collation for this ORDER BY expression (explicit or inherited from column)
+            let collation = evaluator.get_expression_collation(expr_to_eval.as_ref());
+            keys.push((key_value, order_item.direction.clone(), order_item.nulls_order, collation));
         }
         *sort_keys = Some(keys);
     }
@@ -286,7 +288,7 @@ pub(super) fn apply_order_by(
         let keys_a = keys_a.as_ref().unwrap();
         let keys_b = keys_b.as_ref().unwrap();
 
-        for ((val_a, dir, nulls_order), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+        for ((val_a, dir, nulls_order, collation), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter()) {
             // Determine NULL ordering:
             // - If explicitly specified via NULLS FIRST/LAST, use that
             // - Default: SQLite treats NULL as smallest value, so:
@@ -316,11 +318,41 @@ pub(super) fn apply_order_by(
                     }
                 }
                 (false, false) => {
+                    // Apply collation transformation if needed
+                    let (cmp_val_a, cmp_val_b) = if let Some(ref coll) = collation {
+                        if coll.eq_ignore_ascii_case("nocase") {
+                            // For NOCASE collation, uppercase both string values
+                            let a = match val_a {
+                                vibesql_types::SqlValue::Varchar(s) => {
+                                    Cow::Owned(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())))
+                                }
+                                vibesql_types::SqlValue::Character(s) => {
+                                    Cow::Owned(vibesql_types::SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())))
+                                }
+                                other => Cow::Borrowed(other),
+                            };
+                            let b = match val_b {
+                                vibesql_types::SqlValue::Varchar(s) => {
+                                    Cow::Owned(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())))
+                                }
+                                vibesql_types::SqlValue::Character(s) => {
+                                    Cow::Owned(vibesql_types::SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())))
+                                }
+                                other => Cow::Borrowed(other),
+                            };
+                            (a, b)
+                        } else {
+                            (Cow::Borrowed(val_a), Cow::Borrowed(val_b))
+                        }
+                    } else {
+                        (Cow::Borrowed(val_a), Cow::Borrowed(val_b))
+                    };
+
                     // Compare non-NULL values, respecting direction
                     match dir {
-                        vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
+                        vibesql_ast::OrderDirection::Asc => compare_sql_values(&cmp_val_a, &cmp_val_b),
                         vibesql_ast::OrderDirection::Desc => {
-                            compare_sql_values(val_a, val_b).reverse()
+                            compare_sql_values(&cmp_val_a, &cmp_val_b).reverse()
                         }
                     }
                 }
@@ -1406,15 +1438,15 @@ mod tests {
         let mut rows: Vec<RowWithSortKeys> = vec![
             (
                 Row::from_vec(vec![SqlValue::Integer(3)]),
-                Some(vec![(SqlValue::Integer(3), vibesql_ast::OrderDirection::Asc, None)]),
+                Some(vec![(SqlValue::Integer(3), vibesql_ast::OrderDirection::Asc, None, None)]),
             ),
             (
                 Row::from_vec(vec![SqlValue::Integer(1)]),
-                Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Asc, None)]),
+                Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Asc, None, None)]),
             ),
             (
                 Row::from_vec(vec![SqlValue::Integer(2)]),
-                Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Asc, None)]),
+                Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Asc, None, None)]),
             ),
         ];
 
@@ -1423,7 +1455,7 @@ mod tests {
             let keys_a = keys_a.as_ref().unwrap();
             let keys_b = keys_b.as_ref().unwrap();
 
-            for ((val_a, dir, _nulls), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, _nulls, _coll), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter()) {
                 // SQLite treats NULL as smallest value:
                 // - ASC: NULL comes first (Less than non-NULL)
                 // - DESC: NULL comes last (Greater than non-NULL)
@@ -1486,7 +1518,7 @@ mod tests {
         for i in (0..15000).rev() {
             rows.push((
                 Row::from_vec(vec![SqlValue::Integer(i)]),
-                Some(vec![(SqlValue::Integer(i), vibesql_ast::OrderDirection::Asc, None)]),
+                Some(vec![(SqlValue::Integer(i), vibesql_ast::OrderDirection::Asc, None, None)]),
             ));
         }
 
@@ -1494,7 +1526,7 @@ mod tests {
             let keys_a = keys_a.as_ref().unwrap();
             let keys_b = keys_b.as_ref().unwrap();
 
-            for ((val_a, dir, _nulls), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, _nulls, _coll), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter()) {
                 // SQLite treats NULL as smallest value:
                 // - ASC: NULL comes first (Less than non-NULL)
                 // - DESC: NULL comes last (Greater than non-NULL)
@@ -1558,15 +1590,15 @@ mod tests {
         let mut rows: Vec<RowWithSortKeys> = vec![
             (
                 Row::from_vec(vec![SqlValue::Integer(1)]),
-                Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Desc, None)]),
+                Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Desc, None, None)]),
             ),
             (
                 Row::from_vec(vec![SqlValue::Integer(3)]),
-                Some(vec![(SqlValue::Integer(3), vibesql_ast::OrderDirection::Desc, None)]),
+                Some(vec![(SqlValue::Integer(3), vibesql_ast::OrderDirection::Desc, None, None)]),
             ),
             (
                 Row::from_vec(vec![SqlValue::Integer(2)]),
-                Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Desc, None)]),
+                Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Desc, None, None)]),
             ),
         ];
 
@@ -1574,7 +1606,7 @@ mod tests {
             let keys_a = keys_a.as_ref().unwrap();
             let keys_b = keys_b.as_ref().unwrap();
 
-            for ((val_a, dir, _nulls), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, _nulls, _coll), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter()) {
                 // SQLite treats NULL as smallest value:
                 // - ASC: NULL comes first (Less than non-NULL)
                 // - DESC: NULL comes last (Greater than non-NULL)
@@ -1637,15 +1669,15 @@ mod tests {
         let mut rows_asc: Vec<RowWithSortKeys> = vec![
             (
                 Row::from_vec(vec![SqlValue::Integer(2)]),
-                Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Asc, None)]),
+                Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Asc, None, None)]),
             ),
             (
                 Row::from_vec(vec![SqlValue::Null]),
-                Some(vec![(SqlValue::Null, vibesql_ast::OrderDirection::Asc, None)]),
+                Some(vec![(SqlValue::Null, vibesql_ast::OrderDirection::Asc, None, None)]),
             ),
             (
                 Row::from_vec(vec![SqlValue::Integer(1)]),
-                Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Asc, None)]),
+                Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Asc, None, None)]),
             ),
         ];
 
@@ -1653,7 +1685,7 @@ mod tests {
             let keys_a = keys_a.as_ref().unwrap();
             let keys_b = keys_b.as_ref().unwrap();
 
-            for ((val_a, dir, _nulls), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, _nulls, _coll), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter()) {
                 // SQLite treats NULL as smallest value:
                 // - ASC: NULL comes first (Less than non-NULL)
                 // - DESC: NULL comes last (Greater than non-NULL)

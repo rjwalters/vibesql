@@ -7,11 +7,21 @@ pub struct ColumnSchema {
     pub default_value: Option<vibesql_ast::Expression>,
     /// Generated/computed column expression (AS(expression) syntax)
     pub generated_expr: Option<vibesql_ast::Expression>,
+    /// Column-level collation (e.g., "nocase", "binary", "rtrim")
+    /// When set, comparisons and ORDER BY involving this column use this collation
+    pub collation: Option<String>,
 }
 
 impl ColumnSchema {
     pub fn new(name: String, data_type: vibesql_types::DataType, nullable: bool) -> Self {
-        ColumnSchema { name, data_type, nullable, default_value: None, generated_expr: None }
+        ColumnSchema {
+            name,
+            data_type,
+            nullable,
+            default_value: None,
+            generated_expr: None,
+            collation: None,
+        }
     }
 
     /// Set the nullable property

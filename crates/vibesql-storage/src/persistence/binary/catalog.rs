@@ -74,6 +74,11 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                 if let Some(default_expr) = &col.default_value {
                     super::expression::write_expression(writer, default_expr)?;
                 }
+                // Write collation (v5+)
+                write_bool(writer, col.collation.is_some())?;
+                if let Some(coll) = &col.collation {
+                    write_string(writer, coll)?;
+                }
             }
 
             // Write primary key columns (v3+)
@@ -293,12 +298,25 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
                 None
             };
 
+            // Read collation (v5+)
+            let collation = if version >= 5 {
+                let has_collation = read_bool(reader)?;
+                if has_collation {
+                    Some(read_string(reader)?)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             columns.push(vibesql_catalog::ColumnSchema {
                 name: col_name,
                 data_type,
                 nullable,
                 default_value,
                 generated_expr: None,
+                collation,
             });
         }
 
