@@ -64,9 +64,17 @@ pub(super) fn apply_set_operation(
         let left_cols = left[0].values.len();
         let right_cols = right[0].values.len();
         if left_cols != right_cols {
-            return Err(ExecutorError::SubqueryColumnCountMismatch {
-                expected: left_cols,
-                actual: right_cols,
+            // Determine the operator string for the error message
+            let operator = match (&set_op.op, set_op.all) {
+                (vibesql_ast::SetOperator::Union, true) => "UNION ALL",
+                (vibesql_ast::SetOperator::Union, false) => "UNION",
+                (vibesql_ast::SetOperator::Intersect, true) => "INTERSECT ALL",
+                (vibesql_ast::SetOperator::Intersect, false) => "INTERSECT",
+                (vibesql_ast::SetOperator::Except, true) => "EXCEPT ALL",
+                (vibesql_ast::SetOperator::Except, false) => "EXCEPT",
+            };
+            return Err(ExecutorError::SetOperationColumnMismatch {
+                operator: operator.to_string(),
             });
         }
     }

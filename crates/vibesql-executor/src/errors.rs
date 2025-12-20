@@ -78,6 +78,12 @@ pub enum ExecutorError {
         expected: usize,
         actual: usize,
     },
+    /// Set operation (UNION, INTERSECT, EXCEPT) column count mismatch (SQLite-compatible)
+    /// Format: "SELECTs to the left and right of {op} do not have the same number of result columns"
+    SetOperationColumnMismatch {
+        /// The set operator name: "UNION", "UNION ALL", "INTERSECT", "INTERSECT ALL", "EXCEPT", "EXCEPT ALL"
+        operator: String,
+    },
     ColumnCountMismatch {
         expected: usize,
         provided: usize,
@@ -572,6 +578,13 @@ impl std::fmt::Display for ExecutorError {
                         expected = *expected as i64,
                         actual = *actual as i64
                     )
+                )
+            }
+            ExecutorError::SetOperationColumnMismatch { operator } => {
+                write!(
+                    f,
+                    "SELECTs to the left and right of {} do not have the same number of result columns",
+                    operator
                 )
             }
             ExecutorError::ColumnCountMismatch { expected, provided } => {
