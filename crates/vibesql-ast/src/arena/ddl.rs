@@ -348,6 +348,7 @@ pub struct CreateViewStmt<'arena> {
     pub query: &'arena SelectStmt<'arena>,
     pub with_check_option: bool,
     pub or_replace: bool,
+    pub if_not_exists: bool,
     pub temporary: bool,
 }
 

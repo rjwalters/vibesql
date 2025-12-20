@@ -10,20 +10,24 @@ use crate::errors::ExecutorError;
 pub struct ViewExecutor;
 
 impl ViewExecutor {
-    /// Execute CREATE VIEW or CREATE OR REPLACE VIEW
+    /// Execute CREATE VIEW, CREATE OR REPLACE VIEW, or CREATE VIEW IF NOT EXISTS
     pub fn execute_create_view(
         stmt: &CreateViewStmt,
         database: &mut Database,
     ) -> Result<String, ExecutorError> {
+        let view_exists = database.catalog.get_view(&stmt.view_name).is_some();
+
+        // If IF NOT EXISTS and view already exists, just return success
+        if stmt.if_not_exists && view_exists {
+            return Ok(format!("View '{}' already exists (skipped)", stmt.view_name));
+        }
+
         // If OR REPLACE, drop the view first if it exists
-        if stmt.or_replace {
-            let view_exists = database.catalog.get_view(&stmt.view_name).is_some();
-            if view_exists {
-                // Drop the existing view (no cascade needed for OR REPLACE)
-                database.catalog.drop_view(&stmt.view_name, false).map_err(|e| {
-                    ExecutorError::StorageError(format!("Failed to drop existing view: {:?}", e))
-                })?;
-            }
+        if stmt.or_replace && view_exists {
+            // Drop the existing view (no cascade needed for OR REPLACE)
+            database.catalog.drop_view(&stmt.view_name, false).map_err(|e| {
+                ExecutorError::StorageError(format!("Failed to drop existing view: {:?}", e))
+            })?;
         }
 
         // Create the view definition

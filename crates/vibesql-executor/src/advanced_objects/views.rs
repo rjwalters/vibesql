@@ -10,6 +10,14 @@ use crate::errors::ExecutorError;
 pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(), ExecutorError> {
     use vibesql_catalog::ViewDefinition;
 
+    // Check if view already exists
+    let view_exists = db.catalog.get_view(&stmt.view_name).is_some();
+
+    // If IF NOT EXISTS and view already exists, just return success
+    if stmt.if_not_exists && view_exists {
+        return Ok(());
+    }
+
     // If no explicit column list is provided, derive column names from the query
     // This ensures views with SELECT * preserve original column names
     // Use simple column names (without table prefix) for view schema compatibility
@@ -40,9 +48,11 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
         )
     };
 
-    if stmt.or_replace {
-        // DROP the view if it exists, then CREATE
-        let _ = db.catalog.drop_view(&stmt.view_name, false);
+    if stmt.or_replace || (stmt.if_not_exists && !view_exists) {
+        // For OR REPLACE, drop the view if it exists, then CREATE
+        if view_exists && stmt.or_replace {
+            let _ = db.catalog.drop_view(&stmt.view_name, false);
+        }
         db.catalog.create_view(view)?;
     } else {
         // Regular CREATE VIEW (will fail if view already exists)

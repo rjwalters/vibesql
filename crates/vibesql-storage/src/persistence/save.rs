@@ -181,6 +181,29 @@ impl Database {
         writeln!(writer)
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
+        // Export views
+        writeln!(writer, "-- Views")
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        for view_name in self.catalog.list_views() {
+            if let Some(view_def) = self.catalog.get_view(&view_name) {
+                // Use stored SQL definition if available, otherwise create a minimal definition
+                let sql = view_def.sql_definition.as_ref().map_or_else(
+                    || {
+                        // Fallback: create a representation from the stored query
+                        // This is a minimal representation and may not be fully accurate
+                        format!("CREATE VIEW {} AS {:?}", view_def.name, view_def.query)
+                    },
+                    |s| s.clone(),
+                );
+                // Strip trailing semicolons before adding one
+                let sql = sql.trim_end_matches(';').trim();
+                writeln!(writer, "{};", sql)
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+        }
+        writeln!(writer)
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
         writeln!(writer, "-- End of dump")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 

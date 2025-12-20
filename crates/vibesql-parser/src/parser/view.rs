@@ -7,9 +7,8 @@ impl Parser {
     /// Parse CREATE VIEW statement
     ///
     /// Syntax:
-    ///   CREATE [OR REPLACE] [TEMP | TEMPORARY] VIEW view_name [(column_list)] AS select_statement
-    /// [WITH CHECK OPTION]   CREATE [TEMP | TEMPORARY] VIEW view_name [(column_list)] AS
-    /// select_statement [WITH CHECK OPTION]
+    ///   CREATE [OR REPLACE] [TEMP | TEMPORARY] VIEW [IF NOT EXISTS] view_name [(column_list)]
+    ///     AS select_statement [WITH CHECK OPTION]
     pub(super) fn parse_create_view_statement(
         &mut self,
     ) -> Result<vibesql_ast::CreateViewStmt, ParseError> {
@@ -38,6 +37,16 @@ impl Parser {
 
         // Expect VIEW keyword
         self.expect_keyword(Keyword::View)?;
+
+        // Check for optional IF NOT EXISTS
+        let if_not_exists = if self.peek_keyword(Keyword::If) {
+            self.consume_keyword(Keyword::If)?;
+            self.expect_keyword(Keyword::Not)?;
+            self.expect_keyword(Keyword::Exists)?;
+            true
+        } else {
+            false
+        };
 
         // Parse view name (supports schema.view)
         let view_name = self.parse_qualified_identifier()?;
@@ -101,6 +110,7 @@ impl Parser {
             query,
             with_check_option,
             or_replace,
+            if_not_exists,
             temporary,
             sql_definition: None, // Will be populated by the statement executor if needed
         })
