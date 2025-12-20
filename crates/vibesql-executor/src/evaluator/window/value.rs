@@ -168,3 +168,48 @@ where
         Ok(SqlValue::Null)
     }
 }
+
+/// Evaluate NTH_VALUE() value window function
+///
+/// Returns the value of the expression from the Nth row in the window frame.
+/// N is 1-based (NTH_VALUE(expr, 1) returns the first row's value).
+///
+/// Signature: NTH_VALUE(expr, n)
+/// - expr: Expression to evaluate on the Nth row
+/// - n: 1-based row position (must be positive integer)
+///
+/// Example: NTH_VALUE(price, 2) OVER (ORDER BY date) -- returns 2nd row's price
+/// Example: NTH_VALUE(name, 1) OVER (PARTITION BY dept ORDER BY salary DESC)
+///
+/// Returns NULL if N is out of bounds or if the partition has fewer than N rows.
+pub fn evaluate_nth_value<F>(
+    partition: &Partition,
+    n: i64,
+    value_expr: &Expression,
+    eval_fn: F,
+) -> Result<SqlValue, String>
+where
+    F: Fn(&Expression, &vibesql_storage::Row) -> Result<SqlValue, String>,
+{
+    // N must be positive (1-based indexing)
+    if n < 1 {
+        return Err(format!("NTH_VALUE n must be a positive integer, got {}", n));
+    }
+
+    // Convert to 0-based index
+    let idx = (n - 1) as usize;
+
+    // Check if index is within partition bounds
+    if idx >= partition.len() {
+        // Out of bounds - return NULL
+        return Ok(SqlValue::Null);
+    }
+
+    // Get value from the Nth row
+    if let Some(row) = partition.rows.get(idx) {
+        eval_fn(value_expr, row)
+    } else {
+        // Should not happen if bounds check is correct
+        Ok(SqlValue::Null)
+    }
+}

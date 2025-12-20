@@ -58,9 +58,9 @@ fn test_count_star_window_function() {
         assert_eq!(result[0].values.len(), 2);
 
         // All rows should have count = 3 (total rows)
-        assert_eq!(result[0].values[1], SqlValue::Numeric(3.0));
-        assert_eq!(result[1].values[1], SqlValue::Numeric(3.0));
-        assert_eq!(result[2].values[1], SqlValue::Numeric(3.0));
+        assert_eq!(result[0].values[1], SqlValue::Integer(3));
+        assert_eq!(result[1].values[1], SqlValue::Integer(3));
+        assert_eq!(result[2].values[1], SqlValue::Integer(3));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -85,9 +85,9 @@ fn test_sum_window_running_total() {
         assert_eq!(result[0].values.len(), 2);
 
         // Verify running totals: 100, 300, 600
-        assert_eq!(result[0].values[1], SqlValue::Numeric(100.0));
-        assert_eq!(result[1].values[1], SqlValue::Numeric(300.0));
-        assert_eq!(result[2].values[1], SqlValue::Numeric(600.0));
+        assert_eq!(result[0].values[1], SqlValue::Integer(100));
+        assert_eq!(result[1].values[1], SqlValue::Integer(300));
+        assert_eq!(result[2].values[1], SqlValue::Integer(600));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -212,8 +212,8 @@ fn test_multiple_window_functions_same_query() {
 
         // All rows should have cnt=3 and total=600
         for row in &result {
-            assert_eq!(row.values[1], SqlValue::Numeric(3.0));
-            assert_eq!(row.values[2], SqlValue::Numeric(600.0));
+            assert_eq!(row.values[1], SqlValue::Integer(3));
+            assert_eq!(row.values[2], SqlValue::Integer(600));
         }
     } else {
         panic!("Expected SELECT statement");

@@ -51,7 +51,7 @@ where
         }
     }
 
-    SqlValue::Numeric(count as f64)
+    SqlValue::Integer(count)
 }
 
 /// Evaluate SUM aggregate window function over a frame
@@ -116,7 +116,12 @@ where
     }
 
     if has_value {
-        SqlValue::Numeric(sum)
+        // Return Integer if sum is a whole number, otherwise Numeric
+        if sum.fract() == 0.0 && sum >= i64::MIN as f64 && sum <= i64::MAX as f64 {
+            SqlValue::Integer(sum as i64)
+        } else {
+            SqlValue::Numeric(sum)
+        }
     } else {
         SqlValue::Null
     }
@@ -273,4 +278,88 @@ where
     }
 
     max_val.unwrap_or(SqlValue::Null)
+}
+
+/// Evaluate GROUP_CONCAT aggregate window function over a frame
+///
+/// Concatenates string values in the frame using the specified separator.
+/// Returns NULL if all values are NULL or frame is empty.
+///
+/// Example: GROUP_CONCAT(name, ',') OVER (ORDER BY date)
+pub fn evaluate_group_concat_window<F>(
+    partition: &Partition,
+    frame: &Range<usize>,
+    arg_expr: &Expression,
+    separator: &str,
+    eval_fn: F,
+) -> SqlValue
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
+    let mut values: Vec<String> = Vec::new();
+
+    for idx in frame.clone() {
+        if idx >= partition.len() {
+            break;
+        }
+
+        let row = &partition.rows[idx];
+
+        if let Ok(val) = eval_fn(arg_expr, row) {
+            match val {
+                SqlValue::Null => {} // Ignore NULL
+                SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                    values.push(s.to_string());
+                }
+                SqlValue::Integer(n) => {
+                    values.push(n.to_string());
+                }
+                SqlValue::Bigint(n) => {
+                    values.push(n.to_string());
+                }
+                SqlValue::Smallint(n) => {
+                    values.push(n.to_string());
+                }
+                SqlValue::Numeric(n) => {
+                    // Format as integer if whole number
+                    if n.fract() == 0.0 {
+                        values.push((n as i64).to_string());
+                    } else {
+                        values.push(n.to_string());
+                    }
+                }
+                SqlValue::Float(n) => {
+                    if n.fract() == 0.0 {
+                        values.push((n as i64).to_string());
+                    } else {
+                        values.push(n.to_string());
+                    }
+                }
+                SqlValue::Real(n) => {
+                    if n.fract() == 0.0 {
+                        values.push((n as i64).to_string());
+                    } else {
+                        values.push(n.to_string());
+                    }
+                }
+                SqlValue::Double(n) => {
+                    if n.fract() == 0.0 {
+                        values.push((n as i64).to_string());
+                    } else {
+                        values.push(n.to_string());
+                    }
+                }
+                other => {
+                    // Convert other types to string
+                    values.push(format!("{}", other));
+                }
+            }
+        }
+    }
+
+    if values.is_empty() {
+        SqlValue::Null
+    } else {
+        SqlValue::Varchar(values.join(separator).into())
+    }
 }
