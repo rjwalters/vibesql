@@ -11,7 +11,12 @@
 
 use std::collections::HashMap;
 
-use crate::{errors::ExecutorError, schema::CombinedSchema, select::cte::CteResult};
+use crate::{
+    errors::ExecutorError,
+    schema::CombinedSchema,
+    select::cte::CteResult,
+    sqlite_schema::{get_sqlite_schema_table_schema, is_sqlite_schema_table},
+};
 
 /// Validate IN subqueries in WHERE clause before row iteration
 /// This ensures schema validation happens even when there are no rows to process
@@ -127,6 +132,11 @@ fn compute_select_list_column_count(
                         continue;
                     }
                 }
+                // Issue #4577: Check for sqlite_schema/sqlite_master virtual tables
+                if is_sqlite_schema_table(qualifier) {
+                    count += get_sqlite_schema_table_schema().columns.len();
+                    continue;
+                }
                 let tbl = database
                     .get_table(qualifier)
                     .ok_or_else(|| ExecutorError::TableNotFound(qualifier.clone()))?;
@@ -159,6 +169,10 @@ fn count_columns_in_from_clause(
                 }) {
                     return Ok(schema.columns.len());
                 }
+            }
+            // Issue #4577: Check for sqlite_schema/sqlite_master virtual tables
+            if is_sqlite_schema_table(name) {
+                return Ok(get_sqlite_schema_table_schema().columns.len());
             }
             let table = database
                 .get_table(name)
