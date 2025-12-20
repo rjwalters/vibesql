@@ -351,7 +351,7 @@ impl QuerySignature {
                 }
             }
 
-            Expression::AggregateFunction { name, distinct, args, order_by } => {
+            Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
                 "AGGREGATE".hash(hasher);
                 name.canonical().hash(hasher);
                 distinct.hash(hasher);
@@ -365,6 +365,11 @@ impl QuerySignature {
                         Self::hash_expression(&item.expr, hasher);
                         std::mem::discriminant(&item.direction).hash(hasher);
                     }
+                }
+                // Hash filter clause if present
+                if let Some(f) = filter {
+                    "FILTER".hash(hasher);
+                    Self::hash_expression(f, hasher);
                 }
             }
 
@@ -528,11 +533,15 @@ impl QuerySignature {
                 "WINDOW_FUNCTION".hash(hasher);
                 // Hash function type and arguments
                 match function {
-                    vibesql_ast::WindowFunctionSpec::Aggregate { name, args } => {
+                    vibesql_ast::WindowFunctionSpec::Aggregate { name, args, filter } => {
                         "AGGREGATE".hash(hasher);
                         name.canonical().hash(hasher);
                         for arg in args {
                             Self::hash_expression(arg, hasher);
+                        }
+                        if let Some(f) = filter {
+                            "FILTER".hash(hasher);
+                            Self::hash_expression(f, hasher);
                         }
                     }
                     vibesql_ast::WindowFunctionSpec::Ranking { name, args } => {
@@ -1128,18 +1137,22 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false)),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
                 name: "tab".to_string(),
                 alias: None,
                 column_aliases: None,
-            quoted: false,
+                quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "col1", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(5))),
             }),
             group_by: None,
@@ -1157,18 +1170,22 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false)),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
                 name: "tab".to_string(),
                 alias: None,
                 column_aliases: None,
-            quoted: false,
+                quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "col1", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
             group_by: None,
@@ -1200,18 +1217,22 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false)),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
                 name: "tab".to_string(),
                 alias: None,
                 column_aliases: None,
-            quoted: false,
+                quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "col1", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(5))),
             }),
             group_by: None,
@@ -1229,18 +1250,22 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false)),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
                 name: "tab".to_string(),
                 alias: None,
                 column_aliases: None,
-            quoted: false,
+                quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::LessThan, // Different operator!
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "col1", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(5))),
             }),
             group_by: None,

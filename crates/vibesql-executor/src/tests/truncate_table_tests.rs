@@ -22,7 +22,7 @@ fn test_truncate_single_table() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "NAME".to_string(),
@@ -31,13 +31,13 @@ fn test_truncate_single_table() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -87,12 +87,12 @@ fn test_truncate_multiple_tables() {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt1, &mut db).unwrap();
 
@@ -107,12 +107,12 @@ fn test_truncate_multiple_tables() {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt2, &mut db).unwrap();
 
@@ -127,12 +127,12 @@ fn test_truncate_multiple_tables() {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt3, &mut db).unwrap();
 
@@ -213,12 +213,12 @@ fn test_truncate_multiple_tables_if_exists_mixed() {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -257,12 +257,12 @@ fn test_truncate_multiple_tables_all_or_nothing_validation() {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -299,12 +299,12 @@ fn test_truncate_empty_table() {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -345,11 +345,14 @@ fn test_truncate_resets_auto_increment() {
                 nullable: false,
                 constraints: vec![
                     ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
-                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } },
+                    ColumnConstraint {
+                        name: None,
+                        kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
+                    },
                 ],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "data".to_string(),
@@ -358,19 +361,22 @@ fn test_truncate_resets_auto_increment() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&stmt, &mut db).unwrap();
 
     // Insert 3 rows (ids should be 1, 2, 3)
     for val in ["a", "b", "c"] {
-        let insert = InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+        let insert = InsertStmt {
+            schema_name: None,
+            schema_quoted: false,
+            table_quoted: false,
             table_name: "auto_inc_test".to_string(),
             columns: vec!["data".to_string()],
             source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Varchar(
@@ -398,7 +404,10 @@ fn test_truncate_resets_auto_increment() {
     TruncateTableExecutor::execute(&truncate, &mut db).unwrap();
 
     // Insert new row - should get id = 1, not 4
-    let insert = InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert = InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "auto_inc_test".to_string(),
         columns: vec!["data".to_string()],
         source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Varchar(
@@ -440,11 +449,14 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
                 nullable: false,
                 constraints: vec![
                     ColumnConstraint { name: None, kind: ColumnConstraintKind::AutoIncrement },
-                    ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey { on_conflict: None } },
+                    ColumnConstraint {
+                        name: None,
+                        kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
+                    },
                 ],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "value".to_string(),
@@ -453,19 +465,22 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&stmt, &mut db).unwrap();
 
     // Insert 10 rows to get counter up to 10
     for i in 1..=10 {
-        let insert = InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+        let insert = InsertStmt {
+            schema_name: None,
+            schema_quoted: false,
+            table_quoted: false,
             table_name: "multi_test".to_string(),
             columns: vec!["value".to_string()],
             source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Integer(
@@ -491,7 +506,10 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
     TruncateTableExecutor::execute(&truncate, &mut db).unwrap();
 
     // Insert new row - should get id = 1, not 11
-    let insert = InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert = InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "multi_test".to_string(),
         columns: vec!["value".to_string()],
         source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Integer(9999))]]),
@@ -526,7 +544,7 @@ fn test_truncate_without_auto_increment() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "data".to_string(),
@@ -535,13 +553,13 @@ fn test_truncate_without_auto_increment() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 

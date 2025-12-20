@@ -21,7 +21,7 @@ fn test_create_spatial_index_basic() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "location".to_string(),
@@ -30,13 +30,13 @@ fn test_create_spatial_index_basic() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
@@ -75,7 +75,7 @@ fn test_spatial_index_multiple_columns_error() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "location1".to_string(),
@@ -84,7 +84,7 @@ fn test_spatial_index_multiple_columns_error() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "location2".to_string(),
@@ -93,13 +93,13 @@ fn test_spatial_index_multiple_columns_error() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
@@ -144,7 +144,7 @@ fn test_drop_spatial_index() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "location".to_string(),
@@ -153,13 +153,13 @@ fn test_drop_spatial_index() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
@@ -205,7 +205,7 @@ fn test_spatial_index_if_not_exists() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "location".to_string(),
@@ -214,13 +214,13 @@ fn test_spatial_index_if_not_exists() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();

@@ -45,7 +45,9 @@ fn test_null_parameter_in_procedure() {
             },
             ProceduralStatement::Set {
                 name: "result".to_string(),
-                value: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))),
+                value: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "x", false,
+                ))),
             },
         ],
     );
@@ -270,7 +272,9 @@ fn test_large_number_arithmetic() {
             ProceduralStatement::Set {
                 name: "result".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("large", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "large", false,
+                    ))),
                     op: BinaryOperator::Multiply,
                     right: Box::new(Expression::Literal(SqlValue::Integer(2))),
                 }),
@@ -314,9 +318,13 @@ fn test_multiple_variable_operations() {
             ProceduralStatement::Set {
                 name: "a".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "b", false,
+                    ))),
                     op: BinaryOperator::Plus,
-                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c", false))),
+                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "c", false,
+                    ))),
                 }),
             },
         ],
@@ -365,20 +373,28 @@ fn test_procedural_select_into_single_column() {
                 with_clause: None,
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
-                    expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
-                    alias: None, source_text: None }],
+                    expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "name", false,
+                    )),
+                    alias: None,
+                    source_text: None,
+                }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
                 from: Some(FromClause::Table {
                     name: "users".to_string(),
                     alias: None,
                     column_aliases: None,
-                quoted: false,
+                    quoted: false,
                 }),
                 where_clause: Some(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "id", false,
+                    ))),
                     op: BinaryOperator::Equal,
-                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("user_id", false))),
+                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "user_id", false,
+                    ))),
                 }),
                 group_by: None,
                 having: None,
@@ -386,7 +402,7 @@ fn test_procedural_select_into_single_column() {
                 limit: None,
                 offset: None,
                 set_operation: None,
-            values: None,
+                values: None,
             })))),
         ],
     );
@@ -440,11 +456,19 @@ fn test_procedural_select_into_multiple_columns() {
                 distinct: false,
                 select_list: vec![
                     SelectItem::Expression {
-                        expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
-                        alias: None, source_text: None },
+                        expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                            "id", false,
+                        )),
+                        alias: None,
+                        source_text: None,
+                    },
                     SelectItem::Expression {
-                        expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
-                        alias: None, source_text: None },
+                        expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                            "name", false,
+                        )),
+                        alias: None,
+                        source_text: None,
+                    },
                 ],
                 into_table: None,
                 into_variables: Some(vec!["user_id_out".to_string(), "user_name".to_string()]),
@@ -452,12 +476,16 @@ fn test_procedural_select_into_multiple_columns() {
                     name: "users".to_string(),
                     alias: None,
                     column_aliases: None,
-                quoted: false,
+                    quoted: false,
                 }),
                 where_clause: Some(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "id", false,
+                    ))),
                     op: BinaryOperator::Equal,
-                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("user_id", false))),
+                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "user_id", false,
+                    ))),
                 }),
                 group_by: None,
                 having: None,
@@ -465,7 +493,7 @@ fn test_procedural_select_into_multiple_columns() {
                 limit: None,
                 offset: None,
                 set_operation: None,
-            values: None,
+                values: None,
             })))),
         ],
     );
@@ -510,20 +538,28 @@ fn test_procedural_select_into_error_no_rows() {
                 with_clause: None,
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
-                    expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
-                    alias: None, source_text: None }],
+                    expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "name", false,
+                    )),
+                    alias: None,
+                    source_text: None,
+                }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
                 from: Some(FromClause::Table {
                     name: "users".to_string(),
                     alias: None,
                     column_aliases: None,
-                quoted: false,
+                    quoted: false,
                 }),
                 where_clause: Some(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "id", false,
+                    ))),
                     op: BinaryOperator::Equal,
-                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("user_id", false))),
+                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "user_id", false,
+                    ))),
                 }),
                 group_by: None,
                 having: None,
@@ -531,7 +567,7 @@ fn test_procedural_select_into_error_no_rows() {
                 limit: None,
                 offset: None,
                 set_operation: None,
-            values: None,
+                values: None,
             })))),
         ]),
         sql_security: None,
@@ -589,15 +625,19 @@ fn test_procedural_select_into_error_multiple_rows() {
                 with_clause: None,
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
-                    expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
-                    alias: None, source_text: None }],
+                    expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "name", false,
+                    )),
+                    alias: None,
+                    source_text: None,
+                }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
                 from: Some(FromClause::Table {
                     name: "users".to_string(),
                     alias: None,
                     column_aliases: None,
-                quoted: false,
+                    quoted: false,
                 }),
                 where_clause: None,
                 group_by: None,
@@ -606,7 +646,7 @@ fn test_procedural_select_into_error_multiple_rows() {
                 limit: None,
                 offset: None,
                 set_operation: None,
-            values: None,
+                values: None,
             })))),
         ],
     );
@@ -654,11 +694,19 @@ fn test_procedural_select_into_error_column_count_mismatch() {
                 distinct: false,
                 select_list: vec![
                     SelectItem::Expression {
-                        expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
-                        alias: None, source_text: None },
+                        expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                            "id", false,
+                        )),
+                        alias: None,
+                        source_text: None,
+                    },
                     SelectItem::Expression {
-                        expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
-                        alias: None, source_text: None },
+                        expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                            "name", false,
+                        )),
+                        alias: None,
+                        source_text: None,
+                    },
                 ],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
@@ -666,10 +714,12 @@ fn test_procedural_select_into_error_column_count_mismatch() {
                     name: "users".to_string(),
                     alias: None,
                     column_aliases: None,
-                quoted: false,
+                    quoted: false,
                 }),
                 where_clause: Some(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "id", false,
+                    ))),
                     op: BinaryOperator::Equal,
                     right: Box::new(Expression::Literal(SqlValue::Integer(1))),
                 }),
@@ -679,7 +729,7 @@ fn test_procedural_select_into_error_column_count_mismatch() {
                 limit: None,
                 offset: None,
                 set_operation: None,
-            values: None,
+                values: None,
             })))),
         ],
     );

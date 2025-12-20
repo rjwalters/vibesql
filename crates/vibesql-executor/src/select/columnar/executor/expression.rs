@@ -27,10 +27,8 @@ pub fn compute_expression_aggregate_batch(
         // For now, only support multiplication (most common in TPC-H)
         if *bin_op == BinaryOperator::Multiply {
             // Get column indices from left and right operands
-            if let (
-                Expression::ColumnRef(col_id1),
-                Expression::ColumnRef(col_id2),
-            ) = (left.as_ref(), right.as_ref())
+            if let (Expression::ColumnRef(col_id1), Expression::ColumnRef(col_id2)) =
+                (left.as_ref(), right.as_ref())
             {
                 if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() {
                     // Find column indices by name

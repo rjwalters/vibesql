@@ -96,10 +96,8 @@ fn test_correlated_subquery_no_from_in_derived_table() {
     table.insert(Row::new(vec![SqlValue::Integer(4), SqlValue::Integer(4)])).unwrap();
 
     // Test from select6-9.10: nested in a derived table with LIMIT/OFFSET
-    let rows = select_rows(
-        &db,
-        "SELECT x, y FROM (SELECT x, (SELECT 10+x) y FROM t1 LIMIT -1 OFFSET 1)",
-    );
+    let rows =
+        select_rows(&db, "SELECT x, y FROM (SELECT x, (SELECT 10+x) y FROM t1 LIMIT -1 OFFSET 1)");
     assert_eq!(rows.len(), 3);
 
     // Results should skip first row and correlate x properly

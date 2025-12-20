@@ -18,7 +18,8 @@ pub(super) fn execute_add_constraint(
     match &stmt.constraint.kind {
         TableConstraintKind::PrimaryKey { columns, .. } => {
             // Extract column names from IndexColumn structs
-            let column_names: Vec<String> = columns.iter().map(|c| c.expect_column_name().to_string()).collect();
+            let column_names: Vec<String> =
+                columns.iter().map(|c| c.expect_column_name().to_string()).collect();
 
             // Verify all columns exist
             for col_name in &column_names {
@@ -59,7 +60,8 @@ pub(super) fn execute_add_constraint(
         }
         TableConstraintKind::Unique { columns, .. } => {
             // Extract column names from IndexColumn structs
-            let column_names: Vec<String> = columns.iter().map(|c| c.expect_column_name().to_string()).collect();
+            let column_names: Vec<String> =
+                columns.iter().map(|c| c.expect_column_name().to_string()).collect();
             table.schema_mut().add_unique_constraint(column_names)?;
 
             // Rebuild table indexes to create the unique constraint index

@@ -25,7 +25,11 @@ fn eval_expr(expr: Expression) -> Result<SqlValue, String> {
 
 /// Helper to create a function call expression
 fn function_call(name: &str, args: Vec<Expression>) -> Expression {
-    Expression::Function { name: vibesql_ast::FunctionIdentifier::new(name), args, character_unit: None }
+    Expression::Function {
+        name: vibesql_ast::FunctionIdentifier::new(name),
+        args,
+        character_unit: None,
+    }
 }
 
 /// Helper to create a literal expression

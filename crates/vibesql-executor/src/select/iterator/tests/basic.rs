@@ -145,7 +145,9 @@ fn test_evaluator_direct() {
     let evaluator = CombinedExpressionEvaluator::with_database(&schema, &database);
 
     let predicate = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false))),
+        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "age", false,
+        ))),
         op: vibesql_ast::BinaryOperator::GreaterThan,
         right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Integer(18))),
     };
@@ -204,9 +206,9 @@ fn test_filter_with_column_ref() {
 
     // Predicate: age > 18 (using unqualified column reference)
     let predicate = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef(
-            vibesql_ast::ColumnIdentifier::simple("age", false)
-        )),
+        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "age", false,
+        ))),
         op: vibesql_ast::BinaryOperator::GreaterThan,
         right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Integer(18))),
     };

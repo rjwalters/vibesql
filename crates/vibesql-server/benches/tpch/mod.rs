@@ -27,13 +27,21 @@ pub use vibesql_bench_common::tpch::queries;
 
 // Re-export data generators and queries from shared crate
 pub use vibesql_bench_common::tpch::{
+    // Helper function
+    generate_part_type,
     // Data generation
     TPCHData,
     // Reference data constants
-    COLORS, CONTAINERS, NATIONS, PRIORITIES, REGIONS, SEGMENTS, SHIP_MODES,
-    TYPE_SYLLABLE1, TYPE_SYLLABLE2, TYPE_SYLLABLE3,
-    // Helper function
-    generate_part_type,
+    COLORS,
+    CONTAINERS,
+    NATIONS,
+    PRIORITIES,
+    REGIONS,
+    SEGMENTS,
+    SHIP_MODES,
+    TYPE_SYLLABLE1,
+    TYPE_SYLLABLE2,
+    TYPE_SYLLABLE3,
 };
 
 // Re-export schema loaders

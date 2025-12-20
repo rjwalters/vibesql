@@ -24,9 +24,13 @@ fn test_cse_repeated_arithmetic() -> Result<(), ExecutorError> {
 
     // Build expression: (a + b)
     let a_plus_b = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
+        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "a", false,
+        ))),
         op: vibesql_ast::BinaryOperator::Plus,
-        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
+        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "b", false,
+        ))),
     };
 
     // Evaluate (a + b) multiple times
@@ -60,9 +64,13 @@ fn test_cse_nested_expressions() -> Result<(), ExecutorError> {
 
     // Build expression: (x * y)
     let x_times_y = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))),
+        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "x", false,
+        ))),
         op: vibesql_ast::BinaryOperator::Multiply,
-        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("y", false))),
+        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "y", false,
+        ))),
     };
 
     // Evaluate multiple times
@@ -94,9 +102,13 @@ fn test_cse_case_expression() -> Result<(), ExecutorError> {
 
     // Build expression: (x * y)
     let x_times_y = || vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))),
+        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "x", false,
+        ))),
         op: vibesql_ast::BinaryOperator::Multiply,
-        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("y", false))),
+        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "y", false,
+        ))),
     };
 
     // Build CASE expression
@@ -140,7 +152,8 @@ fn test_cse_disabled_via_env() -> Result<(), ExecutorError> {
 
     let evaluator = ExpressionEvaluator::new(&schema);
 
-    let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false));
+    let expr =
+        vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false));
 
     let result = evaluator.eval(&expr, &row)?;
     assert_eq!(result, SqlValue::Integer(42));
@@ -199,16 +212,22 @@ fn test_cse_complex_expression() -> Result<(), ExecutorError> {
     // Build: ((a + b) * c) + ((a + b) * 2)
     // The sub-expression (a + b) should be cached
     let a_plus_b = || vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
+        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "a", false,
+        ))),
         op: vibesql_ast::BinaryOperator::Plus,
-        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
+        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "b", false,
+        ))),
     };
 
     let complex_expr = vibesql_ast::Expression::BinaryOp {
         left: Box::new(vibesql_ast::Expression::BinaryOp {
             left: Box::new(a_plus_b()),
             op: vibesql_ast::BinaryOperator::Multiply,
-            right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c", false))),
+            right: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("c", false),
+            )),
         }),
         op: vibesql_ast::BinaryOperator::Plus,
         right: Box::new(vibesql_ast::Expression::BinaryOp {
@@ -243,9 +262,13 @@ fn test_cse_with_nulls() -> Result<(), ExecutorError> {
 
     // Build expression: (a + b)
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
+        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "a", false,
+        ))),
         op: vibesql_ast::BinaryOperator::Plus,
-        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
+        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "b", false,
+        ))),
     };
 
     // Evaluate multiple times - should return NULL each time
@@ -288,14 +311,19 @@ fn test_cse_string_expressions() -> Result<(), ExecutorError> {
     // Build expression: first_name || ' ' || last_name
     let full_name = || vibesql_ast::Expression::BinaryOp {
         left: Box::new(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("first_name", false))),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("first_name", false),
+            )),
             op: vibesql_ast::BinaryOperator::Concat,
             right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(
                 arcstr::ArcStr::from(" "),
             ))),
         }),
         op: vibesql_ast::BinaryOperator::Concat,
-        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("last_name", false))),
+        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "last_name",
+            false,
+        ))),
     };
 
     // Evaluate multiple times

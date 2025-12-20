@@ -84,10 +84,7 @@ fn test_column_names_star_expansion() {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
         // SQLite quirk: SELECT * always uses short column names, even with full_column_names=ON
         // This matches SQLite behavior where wildcards ignore the PRAGMA setting
-        assert_eq!(
-            result.columns,
-            vec!["id", "name", "department", "salary"]
-        );
+        assert_eq!(result.columns, vec!["id", "name", "department", "salary"]);
         assert_eq!(result.rows.len(), 3);
     } else {
         panic!("Expected SELECT statement");
@@ -202,10 +199,9 @@ fn create_test_database_default_settings() -> vibesql_storage::Database {
     }
 
     // Insert some test data
-    let insert_stmt = vibesql_parser::Parser::parse_sql(
-        "INSERT INTO employees (id, name) VALUES (1, 'John')",
-    )
-    .unwrap();
+    let insert_stmt =
+        vibesql_parser::Parser::parse_sql("INSERT INTO employees (id, name) VALUES (1, 'John')")
+            .unwrap();
 
     if let vibesql_ast::Statement::Insert(insert) = insert_stmt {
         vibesql_executor::InsertExecutor::execute(&mut db, &insert).unwrap();

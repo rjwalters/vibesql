@@ -25,7 +25,10 @@
 //!
 //! This is particularly beneficial for OLTP workloads with high query rates.
 
-use std::{cmp::Ordering, collections::{HashMap, HashSet}};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+};
 
 use vibesql_ast::arena::{
     ArenaInterner, Expression as ArenaExpression, ExtendedExpr as ArenaExtendedExpr,
@@ -119,7 +122,14 @@ impl SelectExecutor<'_> {
         interner: &'arena ArenaInterner<'arena>,
     ) -> Result<Vec<Row>, ExecutorError> {
         // Create an empty schema and row for expression evaluation
-        let schema = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0, hidden_columns: HashSet::new(), outer_schema: None, duplicate_aliases: HashSet::new(), joined_columns: HashSet::new() };
+        let schema = CombinedSchema {
+            table_schemas: HashMap::new(),
+            total_columns: 0,
+            hidden_columns: HashSet::new(),
+            outer_schema: None,
+            duplicate_aliases: HashSet::new(),
+            joined_columns: HashSet::new(),
+        };
         let empty_row = Row::new(vec![]);
         let evaluator = ArenaExpressionEvaluator::new(&schema, params, interner);
 
@@ -303,9 +313,9 @@ impl SelectExecutor<'_> {
                 // Determine NULL ordering:
                 // - If explicitly specified via NULLS FIRST/LAST, use that
                 // - Default: SQLite uses NULLS LAST for all directions
-                let nulls_first = order_item.and_then(|o| o.nulls_order).is_some_and(
-                    |no| matches!(no, vibesql_ast::arena::NullsOrder::First),
-                );
+                let nulls_first = order_item
+                    .and_then(|o| o.nulls_order)
+                    .is_some_and(|no| matches!(no, vibesql_ast::arena::NullsOrder::First));
 
                 // Handle NULLs according to nulls_first setting
                 let cmp = match (key_a.is_null(), key_b.is_null()) {
@@ -327,7 +337,11 @@ impl SelectExecutor<'_> {
                     (false, false) => {
                         // Compare non-NULL values, respecting direction
                         let cmp = compare_values(key_a, key_b);
-                        if asc { cmp } else { cmp.reverse() }
+                        if asc {
+                            cmp
+                        } else {
+                            cmp.reverse()
+                        }
                     }
                 };
 

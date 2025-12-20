@@ -974,11 +974,7 @@ pub(crate) fn execute_table_scan_with_bloom(
     // Find the Bloom filter column index if we have a Bloom context
     let bloom_col_index = bloom_context.and_then(|ctx| {
         // Look up the column in the table schema
-        table
-            .schema
-            .columns
-            .iter()
-            .position(|col| col.name.to_lowercase() == ctx.column_name)
+        table.schema.columns.iter().position(|col| col.name.to_lowercase() == ctx.column_name)
     });
 
     // Build predicate plan for WHERE clause
@@ -1006,8 +1002,8 @@ pub(crate) fn execute_table_scan_with_bloom(
     // If we have a Bloom filter, apply it during scan
     // This is the key optimization: filter rows BEFORE they enter memory
     if let (Some(ctx), Some(col_idx)) = (bloom_context, bloom_col_index) {
-        let profile = std::env::var("JOIN_PROFILE").is_ok()
-            || std::env::var("BLOOM_PREFILTER_DEBUG").is_ok();
+        let profile =
+            std::env::var("JOIN_PROFILE").is_ok() || std::env::var("BLOOM_PREFILTER_DEBUG").is_ok();
 
         let original_count = all_rows.len();
 
@@ -1015,11 +1011,8 @@ pub(crate) fn execute_table_scan_with_bloom(
         let filtered_rows: Vec<vibesql_storage::Row> = if has_where_predicates {
             // Apply both Bloom filter and WHERE predicates
             let predicate_plan = predicate_plan.as_ref().unwrap();
-            let evaluator = CombinedExpressionEvaluator::with_database_and_cte(
-                &schema,
-                database,
-                cte_results,
-            );
+            let evaluator =
+                CombinedExpressionEvaluator::with_database_and_cte(&schema, database, cte_results);
 
             // Get predicates and combine them
             let ordered_preds = predicate_plan.get_table_filters_ordered(&effective_name, None);
@@ -1099,11 +1092,8 @@ pub(crate) fn execute_table_scan_with_bloom(
     // No Bloom filter - fall back to standard scan with WHERE predicates
     if has_where_predicates {
         let predicate_plan = predicate_plan.as_ref().unwrap();
-        let evaluator = CombinedExpressionEvaluator::with_database_and_cte(
-            &schema,
-            database,
-            cte_results,
-        );
+        let evaluator =
+            CombinedExpressionEvaluator::with_database_and_cte(&schema, database, cte_results);
 
         // Get predicates and combine them
         let ordered_preds = predicate_plan.get_table_filters_ordered(&effective_name, None);

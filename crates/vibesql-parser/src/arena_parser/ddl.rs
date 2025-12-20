@@ -211,7 +211,15 @@ impl<'arena> ArenaParser<'arena> {
             false
         };
 
-        Ok(CreateViewStmt { view_name, columns, query, with_check_option, or_replace, if_not_exists, temporary })
+        Ok(CreateViewStmt {
+            view_name,
+            columns,
+            query,
+            with_check_option,
+            or_replace,
+            if_not_exists,
+            temporary,
+        })
     }
 
     // ========================================================================
@@ -336,11 +344,12 @@ impl<'arena> ArenaParser<'arena> {
                     }
                     // SQL:1999 allows adding constraints with or without CONSTRAINT keyword
                     Token::Keyword {
-                        keyword: Keyword::Constraint
-                        | Keyword::Check
-                        | Keyword::Unique
-                        | Keyword::Primary
-                        | Keyword::Foreign,
+                        keyword:
+                            Keyword::Constraint
+                            | Keyword::Check
+                            | Keyword::Unique
+                            | Keyword::Primary
+                            | Keyword::Foreign,
                         ..
                     } => self.parse_add_constraint(table_name)?,
                     // SQL:1999 allows ADD COLUMN without the COLUMN keyword
@@ -409,7 +418,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Ok(self.intern(&name))
             }
-            _ => Err(ParseError { message: self.peek().syntax_error() })
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 
@@ -421,7 +430,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Ok(self.intern(&name))
             }
-            _ => Err(ParseError { message: self.peek().syntax_error() })
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 
@@ -500,7 +509,7 @@ impl<'arena> ArenaParser<'arena> {
             constraints,
             default_value,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         };
 
         Ok(AlterTableStmt::AddColumn(AddColumnStmt { table_name, column_def }))
@@ -640,7 +649,7 @@ impl<'arena> ArenaParser<'arena> {
             constraints,
             default_value,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         };
 
         Ok(AlterTableStmt::ModifyColumn(ModifyColumnStmt {
@@ -684,7 +693,7 @@ impl<'arena> ArenaParser<'arena> {
             constraints,
             default_value,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         };
 
         Ok(AlterTableStmt::ChangeColumn(ChangeColumnStmt {
@@ -804,14 +813,16 @@ impl<'arena> ArenaParser<'arena> {
                 self.expect_token(Token::RParen)?;
                 TableConstraintKind::Check { expr: self.arena.alloc(expr) }
             }
-            _ => return Err(ParseError { message: self.peek().syntax_error() })
+            _ => return Err(ParseError { message: self.peek().syntax_error() }),
         };
 
         Ok(TableConstraint { name, kind })
     }
 
     /// Parse index column list for constraints.
-    fn parse_index_column_list(&mut self) -> Result<BumpVec<'arena, IndexColumn<'arena>>, ParseError> {
+    fn parse_index_column_list(
+        &mut self,
+    ) -> Result<BumpVec<'arena, IndexColumn<'arena>>, ParseError> {
         let mut columns = BumpVec::new_in(self.arena);
 
         loop {
@@ -1074,7 +1085,7 @@ impl<'arena> ArenaParser<'arena> {
                     }),
                 }
             }
-            _ => Err(ParseError { message: self.peek().syntax_error() })
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 }

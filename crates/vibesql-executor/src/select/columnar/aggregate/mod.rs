@@ -332,13 +332,17 @@ mod tests {
             Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("SUM"),
                 distinct: false,
-                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "col1", false,
+                ))],
                 order_by: None,
             },
             Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("AVG"),
                 distinct: false,
-                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col2", false))],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "col2", false,
+                ))],
                 order_by: None,
             },
         ];
@@ -379,7 +383,8 @@ mod tests {
         assert!(result.is_none());
 
         // Test non-aggregate expression (should return None)
-        let exprs = vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))];
+        let exprs =
+            vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))];
 
         let result = extract_aggregates(&exprs, &combined_schema);
         assert!(result.is_none());
@@ -402,7 +407,7 @@ mod tests {
                 limit: None,
                 offset: None,
                 set_operation: None,
-            values: None,
+                values: None,
             }))],
             order_by: None,
         }];
@@ -434,9 +439,13 @@ mod tests {
             name: vibesql_ast::FunctionIdentifier::new("SUM"),
             distinct: false,
             args: vec![Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "price", false,
+                ))),
                 op: vibesql_ast::BinaryOperator::Multiply,
-                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("discount", false))),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "discount", false,
+                ))),
             }],
             order_by: None,
         }];

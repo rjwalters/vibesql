@@ -325,10 +325,7 @@ mod tests {
             SqlValue::Boolean(true)
         );
         // 0 OR NULL = NULL (0 is false, false OR null = null)
-        assert_eq!(
-            LogicalOps::or(&SqlValue::Integer(0), &SqlValue::Null).unwrap(),
-            SqlValue::Null
-        );
+        assert_eq!(LogicalOps::or(&SqlValue::Integer(0), &SqlValue::Null).unwrap(), SqlValue::Null);
     }
 
     #[test]

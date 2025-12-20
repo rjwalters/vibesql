@@ -145,7 +145,8 @@ impl PredicatePattern {
 
             // Pattern: column op date_literal
             if let Expression::ColumnRef(col_id) = left.as_ref() {
-                let col_idx = schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
+                let col_idx =
+                    schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
                 if let Expression::Literal(SqlValue::Date(date)) = right.as_ref() {
                     return Some((col_idx, comp_op, *date));
                 }
@@ -154,7 +155,8 @@ impl PredicatePattern {
             // Pattern: date_literal op column (need to reverse operator)
             if let Expression::Literal(SqlValue::Date(date)) = left.as_ref() {
                 if let Expression::ColumnRef(col_id) = right.as_ref() {
-                    let col_idx = schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
+                    let col_idx = schema
+                        .get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
                     let reversed_op = match comp_op {
                         ComparisonOp::Lt => ComparisonOp::Gt,
                         ComparisonOp::Le => ComparisonOp::Ge,
@@ -180,7 +182,8 @@ impl PredicatePattern {
     ) -> Option<PredicatePattern> {
         // Extract column reference
         if let Expression::ColumnRef(col_id) = expr {
-            let col_idx = schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
+            let col_idx =
+                schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
 
             // Extract numeric bounds
             let min_val = Self::extract_f64_literal(low)?;
@@ -201,7 +204,8 @@ impl PredicatePattern {
     ) -> Option<PredicatePattern> {
         // Extract column index
         if let Expression::ColumnRef(col_id) = left {
-            let col_idx = schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
+            let col_idx =
+                schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
 
             // Try to extract integer constant FIRST (before f64)
             // This ensures Integer literals are detected as IntegerComparison
@@ -227,7 +231,8 @@ impl PredicatePattern {
     ) -> Option<PredicatePattern> {
         // Extract column index from right side
         if let Expression::ColumnRef(col_id) = right {
-            let col_idx = schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
+            let col_idx =
+                schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
 
             // Reverse the operator since constant is on left
             let reversed_op = match op {
@@ -340,7 +345,9 @@ mod tests {
 
         // Test: price < 100.0
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("lineitem", false, "price", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "lineitem", false, "price", false,
+            ))),
             op: BinaryOperator::LessThan,
             right: Box::new(Expression::Literal(SqlValue::Double(100.0))),
         };
@@ -363,7 +370,9 @@ mod tests {
 
         // Test: quantity > 10
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("lineitem", false, "quantity", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "lineitem", false, "quantity", false,
+            ))),
             op: BinaryOperator::GreaterThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         };
@@ -389,13 +398,17 @@ mod tests {
         let max_date: vibesql_types::Date = "1995-01-01".parse().unwrap();
 
         let left_comparison = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("lineitem", false, "shipdate", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "lineitem", false, "shipdate", false,
+            ))),
             op: BinaryOperator::GreaterThanOrEqual,
             right: Box::new(Expression::Literal(SqlValue::Date(min_date))),
         };
 
         let right_comparison = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("lineitem", false, "shipdate", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "lineitem", false, "shipdate", false,
+            ))),
             op: BinaryOperator::LessThan,
             right: Box::new(Expression::Literal(SqlValue::Date(max_date))),
         };

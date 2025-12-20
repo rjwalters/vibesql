@@ -423,10 +423,8 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
 
             // Try: column op column (column-to-column comparison)
             // This handles predicates like `l_commitdate < l_receiptdate` in TPC-H Q4
-            if let (
-                Expression::ColumnRef(col_id1),
-                Expression::ColumnRef(col_id2),
-            ) = (left.as_ref(), right.as_ref())
+            if let (Expression::ColumnRef(col_id1), Expression::ColumnRef(col_id2)) =
+                (left.as_ref(), right.as_ref())
             {
                 if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() {
                     let t1 = col_id1.table_canonical();
@@ -435,15 +433,15 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
                     let c2 = col_id2.column_canonical();
                     let left_idx = schema.get_column_index(t1, c1)?;
                     let right_idx = schema.get_column_index(t2, c2)?;
-                let compare_op = match op {
-                    BinaryOperator::LessThan => CompareOp::LessThan,
-                    BinaryOperator::GreaterThan => CompareOp::GreaterThan,
-                    BinaryOperator::LessThanOrEqual => CompareOp::LessThanOrEqual,
-                    BinaryOperator::GreaterThanOrEqual => CompareOp::GreaterThanOrEqual,
-                    BinaryOperator::Equal => CompareOp::Equal,
-                    BinaryOperator::NotEqual => CompareOp::NotEqual,
-                    _ => return None,
-                };
+                    let compare_op = match op {
+                        BinaryOperator::LessThan => CompareOp::LessThan,
+                        BinaryOperator::GreaterThan => CompareOp::GreaterThan,
+                        BinaryOperator::LessThanOrEqual => CompareOp::LessThanOrEqual,
+                        BinaryOperator::GreaterThanOrEqual => CompareOp::GreaterThanOrEqual,
+                        BinaryOperator::Equal => CompareOp::Equal,
+                        BinaryOperator::NotEqual => CompareOp::NotEqual,
+                        _ => return None,
+                    };
                     return Some(PredicateTree::Leaf(ColumnPredicate::ColumnCompare {
                         left_column_idx: left_idx,
                         op: compare_op,
@@ -621,10 +619,8 @@ fn extract_predicates_recursive(
 
             // Try: column op column (column-to-column comparison within same table)
             // This handles predicates like `l_commitdate < l_receiptdate` in TPC-H Q4
-            if let (
-                Expression::ColumnRef(col_id1),
-                Expression::ColumnRef(col_id2),
-            ) = (left.as_ref(), right.as_ref())
+            if let (Expression::ColumnRef(col_id1), Expression::ColumnRef(col_id2)) =
+                (left.as_ref(), right.as_ref())
             {
                 if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() {
                     let t1 = col_id1.table_canonical();
@@ -632,19 +628,18 @@ fn extract_predicates_recursive(
                     let t2 = col_id2.table_canonical();
                     let c2 = col_id2.column_canonical();
                     // Only add if BOTH columns are in schema (same-table comparison)
-                    if let (Some(left_idx), Some(right_idx)) = (
-                        schema.get_column_index(t1, c1),
-                        schema.get_column_index(t2, c2),
-                    ) {
-                    let compare_op = match op {
-                        BinaryOperator::LessThan => CompareOp::LessThan,
-                        BinaryOperator::GreaterThan => CompareOp::GreaterThan,
-                        BinaryOperator::LessThanOrEqual => CompareOp::LessThanOrEqual,
-                        BinaryOperator::GreaterThanOrEqual => CompareOp::GreaterThanOrEqual,
-                        BinaryOperator::Equal => CompareOp::Equal,
-                        BinaryOperator::NotEqual => CompareOp::NotEqual,
-                        _ => return Some(()), // Skip unsupported operator
-                    };
+                    if let (Some(left_idx), Some(right_idx)) =
+                        (schema.get_column_index(t1, c1), schema.get_column_index(t2, c2))
+                    {
+                        let compare_op = match op {
+                            BinaryOperator::LessThan => CompareOp::LessThan,
+                            BinaryOperator::GreaterThan => CompareOp::GreaterThan,
+                            BinaryOperator::LessThanOrEqual => CompareOp::LessThanOrEqual,
+                            BinaryOperator::GreaterThanOrEqual => CompareOp::GreaterThanOrEqual,
+                            BinaryOperator::Equal => CompareOp::Equal,
+                            BinaryOperator::NotEqual => CompareOp::NotEqual,
+                            _ => return Some(()), // Skip unsupported operator
+                        };
                         predicates.push(ColumnPredicate::ColumnCompare {
                             left_column_idx: left_idx,
                             op: compare_op,
@@ -821,7 +816,9 @@ mod tests {
 
         // col0 BETWEEN 1 AND 1+2
         let expr = Expression::Between {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
             low: Box::new(Expression::Literal(SqlValue::Integer(1))),
             high: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::Literal(SqlValue::Integer(1))),
@@ -851,7 +848,9 @@ mod tests {
 
         // col0 < 10 - 3
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
             op: BinaryOperator::LessThan,
             right: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::Literal(SqlValue::Integer(10))),
@@ -884,7 +883,9 @@ mod tests {
                 right: Box::new(Expression::Literal(SqlValue::Integer(5))),
             }),
             op: BinaryOperator::GreaterThan,
-            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
         };
 
         let tree = extract_predicate_tree(&expr, &schema);
@@ -905,7 +906,9 @@ mod tests {
 
         // col0 IN (1, 1+1, 2+1)
         let expr = Expression::InList {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
             values: vec![
                 Expression::Literal(SqlValue::Integer(1)),
                 Expression::BinaryOp {
@@ -944,9 +947,13 @@ mod tests {
 
         // col0 BETWEEN 1 AND col1 (col1 cannot be folded)
         let expr = Expression::Between {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
             low: Box::new(Expression::Literal(SqlValue::Integer(1))),
-            high: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
+            high: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col1", false,
+            ))),
             negated: false,
             symmetric: false,
         };
@@ -961,9 +968,13 @@ mod tests {
 
         // col0 < col1 (column-to-column comparison)
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
             op: BinaryOperator::LessThan,
-            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col1", false,
+            ))),
         };
 
         let tree = extract_predicate_tree(&expr, &schema);
@@ -998,9 +1009,13 @@ mod tests {
 
         for (binary_op, expected_compare_op) in operators {
             let expr = Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "col0", false,
+                ))),
                 op: binary_op,
-                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "col1", false,
+                ))),
             };
 
             let tree = extract_predicate_tree(&expr, &schema);
@@ -1022,13 +1037,19 @@ mod tests {
         // col0 < col1 AND col0 > 5 (mix of column-to-column and column-to-value)
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "col0", false,
+                ))),
                 op: BinaryOperator::LessThan,
-                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "col1", false,
+                ))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "col0", false,
+                ))),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(5))),
             }),

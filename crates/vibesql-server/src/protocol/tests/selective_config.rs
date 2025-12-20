@@ -71,9 +71,7 @@ fn test_subscribe_with_partial_selective_config_enabled_only() {
     let result = FrontendMessage::decode(&mut buf);
     assert!(result.is_ok());
 
-    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
-        result.unwrap()
-    {
+    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
         assert!(selective_updates_config.is_some());
         let config = selective_updates_config.unwrap();
         assert_eq!(config.enabled, Some(true));
@@ -104,9 +102,7 @@ fn test_subscribe_with_partial_selective_config_min_columns_only() {
     let result = FrontendMessage::decode(&mut buf);
     assert!(result.is_ok());
 
-    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
-        result.unwrap()
-    {
+    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
         assert!(selective_updates_config.is_some());
         let config = selective_updates_config.unwrap();
         assert_eq!(config.enabled, None);
@@ -137,9 +133,7 @@ fn test_subscribe_with_partial_selective_config_max_ratio_only() {
     let result = FrontendMessage::decode(&mut buf);
     assert!(result.is_ok());
 
-    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
-        result.unwrap()
-    {
+    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
         assert!(selective_updates_config.is_some());
         let config = selective_updates_config.unwrap();
         assert_eq!(config.enabled, None);
@@ -168,9 +162,7 @@ fn test_subscribe_with_selective_config_zero_flags() {
     let result = FrontendMessage::decode(&mut buf);
     assert!(result.is_ok());
 
-    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
-        result.unwrap()
-    {
+    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
         assert!(selective_updates_config.is_none());
     } else {
         panic!("Expected Subscribe message");
@@ -195,9 +187,7 @@ fn test_subscribe_without_selective_config_field() {
     let result = FrontendMessage::decode(&mut buf);
     assert!(result.is_ok());
 
-    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
-        result.unwrap()
-    {
+    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
         assert!(selective_updates_config.is_none());
     } else {
         panic!("Expected Subscribe message");
@@ -224,9 +214,7 @@ fn test_subscribe_with_config_disabled() {
     let result = FrontendMessage::decode(&mut buf);
     assert!(result.is_ok());
 
-    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
-        result.unwrap()
-    {
+    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
         assert!(selective_updates_config.is_some());
         let config = selective_updates_config.unwrap();
         assert_eq!(config.enabled, Some(false));
@@ -256,9 +244,7 @@ fn test_subscribe_with_combined_flags() {
     let result = FrontendMessage::decode(&mut buf);
     assert!(result.is_ok());
 
-    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
-        result.unwrap()
-    {
+    if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
         assert!(selective_updates_config.is_some());
         let config = selective_updates_config.unwrap();
         assert_eq!(config.enabled, Some(true));

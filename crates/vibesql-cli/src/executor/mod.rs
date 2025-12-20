@@ -38,7 +38,13 @@ use crate::util::is_memory_database;
 /// - Other values use their standard Display format
 fn format_sql_value(v: &SqlValue) -> String {
     match v {
-        SqlValue::Boolean(b) => if *b { "1".to_string() } else { "0".to_string() },
+        SqlValue::Boolean(b) => {
+            if *b {
+                "1".to_string()
+            } else {
+                "0".to_string()
+            }
+        }
         _ => format!("{}", v),
     }
 }
@@ -105,13 +111,7 @@ impl SqlExecutor {
                             let row_strs: Vec<Option<String>> = row
                                 .values
                                 .iter()
-                                .map(|v| {
-                                    if v.is_null() {
-                                        None
-                                    } else {
-                                        Some(format_sql_value(v))
-                                    }
-                                })
+                                .map(|v| if v.is_null() { None } else { Some(format_sql_value(v)) })
                                 .collect();
                             result.rows.push(row_strs);
                         }
@@ -618,13 +618,13 @@ impl SqlExecutor {
                             Some(index_meta.index_name.clone()),                         // Key_name
                             Some((seq + 1).to_string()), // Seq_in_index
                             Some(col.expect_column_name().to_string()), // Column_name
-                            Some("A".to_string()), // Collation (always Ascending for now)
-                            Some(String::new()),   // Cardinality
-                            Some(String::new()),   // Sub_part
-                            Some(String::new()),   // Packed
-                            Some(String::new()),   // Null
-                            Some("BTREE".to_string()), // Index_type
-                            Some(String::new()),   // Comment
+                            Some("A".to_string()),       // Collation (always Ascending for now)
+                            Some(String::new()),         // Cardinality
+                            Some(String::new()),         // Sub_part
+                            Some(String::new()),         // Packed
+                            Some(String::new()),         // Null
+                            Some("BTREE".to_string()),   // Index_type
+                            Some(String::new()),         // Comment
                         ]);
                     }
                 }
@@ -734,10 +734,7 @@ impl SqlExecutor {
     /// Supports:
     /// - PRAGMA full_column_names (get/set)
     /// - PRAGMA short_column_names (get/set)
-    fn execute_pragma(
-        &mut self,
-        stmt: &vibesql_ast::PragmaStmt,
-    ) -> anyhow::Result<QueryResult> {
+    fn execute_pragma(&mut self, stmt: &vibesql_ast::PragmaStmt) -> anyhow::Result<QueryResult> {
         let pragma_name = stmt.name.to_uppercase();
 
         // Handle setting vs querying

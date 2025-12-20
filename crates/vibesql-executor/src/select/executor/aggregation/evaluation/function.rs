@@ -37,6 +37,7 @@ pub(super) fn evaluate(
             distinct: false,
             args: args.clone(),
             order_by: None,
+            filter: None,
         };
         return super::aggregate_function::evaluate(executor, &agg_expr, group_rows, evaluator);
     }

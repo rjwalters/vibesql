@@ -71,10 +71,7 @@ impl StringOps {
     pub fn concat(left: &SqlValue, right: &SqlValue) -> Result<SqlValue, ExecutorError> {
         let left_str = Self::to_concat_string(left);
         let right_str = Self::to_concat_string(right);
-        Ok(SqlValue::Varchar(arcstr::ArcStr::from(format!(
-            "{}{}",
-            left_str, right_str
-        ))))
+        Ok(SqlValue::Varchar(arcstr::ArcStr::from(format!("{}{}", left_str, right_str))))
     }
 }
 
@@ -152,19 +149,15 @@ mod tests {
         assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("12")));
 
         // String || Integer
-        let result = StringOps::concat(
-            &SqlValue::Varchar(arcstr::ArcStr::from("a")),
-            &SqlValue::Integer(1),
-        )
-        .unwrap();
+        let result =
+            StringOps::concat(&SqlValue::Varchar(arcstr::ArcStr::from("a")), &SqlValue::Integer(1))
+                .unwrap();
         assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("a1")));
 
         // Integer || String
-        let result = StringOps::concat(
-            &SqlValue::Integer(1),
-            &SqlValue::Varchar(arcstr::ArcStr::from("b")),
-        )
-        .unwrap();
+        let result =
+            StringOps::concat(&SqlValue::Integer(1), &SqlValue::Varchar(arcstr::ArcStr::from("b")))
+                .unwrap();
         assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("1b")));
     }
 

@@ -94,6 +94,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "FOLLOWING" => Keyword::Following,
     "UNBOUNDED" => Keyword::Unbounded,
     "CURRENT" => Keyword::Current,
+    "FILTER" => Keyword::Filter,
     "CURRENT_DATE" => Keyword::CurrentDate,
     "CURRENT_TIME" => Keyword::CurrentTime,
     "CURRENT_TIMESTAMP" => Keyword::CurrentTimestamp,

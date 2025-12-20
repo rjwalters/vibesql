@@ -531,7 +531,8 @@ mod tests {
         let count_expr = Expression::AggregateFunction {
             name: vibesql_ast::FunctionIdentifier::new("COUNT"),
             args: vec![Expression::Wildcard],
-            distinct: false, order_by: None,
+            distinct: false,
+            order_by: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&count_expr, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Integer(0));
@@ -540,7 +541,8 @@ mod tests {
         let count_lower = Expression::AggregateFunction {
             name: vibesql_ast::FunctionIdentifier::new("count"),
             args: vec![Expression::Wildcard],
-            distinct: false, order_by: None,
+            distinct: false,
+            order_by: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&count_lower, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Integer(0));
@@ -555,7 +557,8 @@ mod tests {
         let sum_expr = Expression::AggregateFunction {
             name: vibesql_ast::FunctionIdentifier::new("SUM"),
             args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))],
-            distinct: false, order_by: None,
+            distinct: false,
+            order_by: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&sum_expr, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Null);
@@ -570,8 +573,11 @@ mod tests {
         for agg_name in &["AVG", "MIN", "MAX"] {
             let expr = Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new(agg_name),
-                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))],
-                distinct: false, order_by: None,
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "x", false,
+                ))],
+                distinct: false,
+                order_by: None,
             };
             let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
             assert_eq!(result, SqlValue::Null, "{} should return NULL for empty set", agg_name);
@@ -600,7 +606,8 @@ mod tests {
             left: Box::new(Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![Expression::Wildcard],
-                distinct: false, order_by: None,
+                distinct: false,
+                order_by: None,
             }),
             op: vibesql_ast::BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
@@ -621,7 +628,8 @@ mod tests {
             expr: Box::new(Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![Expression::Wildcard],
-                distinct: false, order_by: None,
+                distinct: false,
+                order_by: None,
             }),
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
@@ -639,7 +647,8 @@ mod tests {
             expr: Box::new(Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![Expression::Wildcard],
-                distinct: false, order_by: None,
+                distinct: false,
+                order_by: None,
             }),
             data_type: vibesql_types::DataType::Varchar { max_length: None },
         };
@@ -691,10 +700,12 @@ mod tests {
             expr: Box::new(Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![Expression::Wildcard],
-                distinct: false, order_by: None,
+                distinct: false,
+                order_by: None,
             }),
         };
-        let select_items = vec![SelectItem::Expression { expr: complex_agg, alias: None , source_text: None }];
+        let select_items =
+            vec![SelectItem::Expression { expr: complex_agg, alias: None, source_text: None }];
 
         // fallback_aggregation should return UnsupportedFeature for non-empty rows
         let result = pipeline.fallback_aggregation(input, &select_items, None, None, &ctx);
@@ -723,10 +734,12 @@ mod tests {
             expr: Box::new(Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![Expression::Wildcard],
-                distinct: false, order_by: None,
+                distinct: false,
+                order_by: None,
             }),
         };
-        let select_items = vec![SelectItem::Expression { expr: complex_agg, alias: None , source_text: None }];
+        let select_items =
+            vec![SelectItem::Expression { expr: complex_agg, alias: None, source_text: None }];
 
         // fallback_aggregation should work for empty rows (returns -0 = 0)
         let result = pipeline.fallback_aggregation(input, &select_items, None, None, &ctx);

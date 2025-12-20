@@ -116,12 +116,12 @@ pub(super) fn extract_equijoin_conditions(
         }
         Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             // Check if this is col1 = col2 (equi-join)
-            if let (
-                Expression::ColumnRef(left_col_id),
-                Expression::ColumnRef(right_col_id),
-            ) = (left.as_ref(), right.as_ref())
+            if let (Expression::ColumnRef(left_col_id), Expression::ColumnRef(right_col_id)) =
+                (left.as_ref(), right.as_ref())
             {
-                if left_col_id.schema_canonical().is_none() && right_col_id.schema_canonical().is_none() {
+                if left_col_id.schema_canonical().is_none()
+                    && right_col_id.schema_canonical().is_none()
+                {
                     conditions.push(EquiJoinCondition {
                         left_table: left_col_id.table_canonical().map(|t| t.to_string()),
                         left_column: left_col_id.column_canonical().to_string(),
@@ -184,7 +184,14 @@ fn extract_non_join_predicates_recursive(
 pub(super) fn build_combined_schema(
     batches: &[(String, Option<String>, columnar::ColumnarBatch, vibesql_catalog::TableSchema)],
 ) -> CombinedSchema {
-    let mut combined = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0, hidden_columns: HashSet::new(), outer_schema: None, duplicate_aliases: HashSet::new(), joined_columns: HashSet::new() };
+    let mut combined = CombinedSchema {
+        table_schemas: HashMap::new(),
+        total_columns: 0,
+        hidden_columns: HashSet::new(),
+        outer_schema: None,
+        duplicate_aliases: HashSet::new(),
+        joined_columns: HashSet::new(),
+    };
 
     for (table_name, alias, _batch, schema) in batches {
         let name = alias.as_ref().unwrap_or(table_name);

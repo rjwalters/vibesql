@@ -277,7 +277,9 @@ mod tests {
 
     #[test]
     fn test_aggregate_info_creation() {
-        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false));
+        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "col1", false,
+        ));
         let info = AggregateInfo::new("SUM".to_string(), expr, false);
         assert_eq!(info.function_name, "SUM");
         assert!(!info.distinct);

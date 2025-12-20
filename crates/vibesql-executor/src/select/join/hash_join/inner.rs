@@ -58,12 +58,35 @@ pub(in crate::select::join) fn hash_join_inner(
     let right_slice = right.as_slice();
 
     // Choose build and probe sides (build hash table on smaller table)
-    let (build_rows, probe_rows, build_col_idx, probe_col_idx, left_is_build, build_table_names, probe_table_names) =
-        if left_slice.len() <= right_slice.len() {
-            (left_slice, right_slice, left_col_idx, right_col_idx, true, &left_table_names, &right_table_names)
-        } else {
-            (right_slice, left_slice, right_col_idx, left_col_idx, false, &right_table_names, &left_table_names)
-        };
+    let (
+        build_rows,
+        probe_rows,
+        build_col_idx,
+        probe_col_idx,
+        left_is_build,
+        build_table_names,
+        probe_table_names,
+    ) = if left_slice.len() <= right_slice.len() {
+        (
+            left_slice,
+            right_slice,
+            left_col_idx,
+            right_col_idx,
+            true,
+            &left_table_names,
+            &right_table_names,
+        )
+    } else {
+        (
+            right_slice,
+            left_slice,
+            right_col_idx,
+            left_col_idx,
+            false,
+            &right_table_names,
+            &left_table_names,
+        )
+    };
 
     // Fast path: Try columnar hash join for integer or string keys
     // This provides ~20-30% speedup for typed equi-joins by:
@@ -108,7 +131,14 @@ pub(in crate::select::join) fn hash_join_inner(
                 );
                 return Ok(FromResult::from_rows(
                     combined_schema,
-                    batch_combine_rows_with_table_names(build_rows, probe_rows, &pairs, left_is_build, build_table_names, probe_table_names),
+                    batch_combine_rows_with_table_names(
+                        build_rows,
+                        probe_rows,
+                        &pairs,
+                        left_is_build,
+                        build_table_names,
+                        probe_table_names,
+                    ),
                 ));
             }
         }
@@ -137,7 +167,14 @@ pub(in crate::select::join) fn hash_join_inner(
     // Materialization phase: Create combined rows from index pairs using batch combine
     // This optimizes allocation by pre-computing combined row size
     // Pass table names for ROWID tracking (issue #4370)
-    let result_rows = batch_combine_rows_with_table_names(build_rows, probe_rows, &join_pairs, left_is_build, build_table_names, probe_table_names);
+    let result_rows = batch_combine_rows_with_table_names(
+        build_rows,
+        probe_rows,
+        &join_pairs,
+        left_is_build,
+        build_table_names,
+        probe_table_names,
+    );
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
 }
@@ -169,12 +206,35 @@ pub(in crate::select::join) fn hash_join_inner_multi(
     let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
     // Choose build and probe sides (build hash table on smaller table)
-    let (build_rows, probe_rows, build_col_indices, probe_col_indices, left_is_build, build_table_names, probe_table_names) =
-        if left.rows().len() <= right.rows().len() {
-            (left.rows(), right.rows(), left_col_indices, right_col_indices, true, &left_table_names, &right_table_names)
-        } else {
-            (right.rows(), left.rows(), right_col_indices, left_col_indices, false, &right_table_names, &left_table_names)
-        };
+    let (
+        build_rows,
+        probe_rows,
+        build_col_indices,
+        probe_col_indices,
+        left_is_build,
+        build_table_names,
+        probe_table_names,
+    ) = if left.rows().len() <= right.rows().len() {
+        (
+            left.rows(),
+            right.rows(),
+            left_col_indices,
+            right_col_indices,
+            true,
+            &left_table_names,
+            &right_table_names,
+        )
+    } else {
+        (
+            right.rows(),
+            left.rows(),
+            right_col_indices,
+            left_col_indices,
+            false,
+            &right_table_names,
+            &left_table_names,
+        )
+    };
 
     // Fast path: Try columnar hash join for integer keys
     // This provides significant speedup for integer equi-joins by:
@@ -224,7 +284,14 @@ pub(in crate::select::join) fn hash_join_inner_multi(
                     .collect();
                 return Ok(FromResult::from_rows(
                     combined_schema,
-                    batch_combine_rows_with_table_names(build_rows, probe_rows, &pairs, left_is_build, build_table_names, probe_table_names),
+                    batch_combine_rows_with_table_names(
+                        build_rows,
+                        probe_rows,
+                        &pairs,
+                        left_is_build,
+                        build_table_names,
+                        probe_table_names,
+                    ),
                 ));
             }
         }
@@ -252,7 +319,14 @@ pub(in crate::select::join) fn hash_join_inner_multi(
 
     // Materialization phase: Create combined rows from index pairs using batch combine
     // This optimizes allocation by pre-computing combined row size
-    let result_rows = batch_combine_rows_with_table_names(build_rows, probe_rows, &join_pairs, left_is_build, build_table_names, probe_table_names);
+    let result_rows = batch_combine_rows_with_table_names(
+        build_rows,
+        probe_rows,
+        &join_pairs,
+        left_is_build,
+        build_table_names,
+        probe_table_names,
+    );
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
 }
@@ -302,8 +376,11 @@ pub(in crate::select::join) fn hash_join_inner_arithmetic(
     let right_table_display_name = right_table_id.display().to_string();
 
     // Combine schemas
-    let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_display_name.clone(), right_schema);
+    let combined_schema = CombinedSchema::combine(
+        left.schema.clone(),
+        right_table_display_name.clone(),
+        right_schema,
+    );
 
     let left_slice = left.as_slice();
     let right_slice = right.as_slice();
@@ -358,7 +435,14 @@ pub(in crate::select::join) fn hash_join_inner_arithmetic(
             // For arithmetic join: right is build side, left is probe side
             let swapped_pairs: Vec<(usize, usize)> =
                 pairs.into_iter().map(|(left, right)| (right, left)).collect();
-            let result_rows = batch_combine_rows_with_table_names(right_slice, left_slice, &swapped_pairs, false, &right_table_names, &left_table_names);
+            let result_rows = batch_combine_rows_with_table_names(
+                right_slice,
+                left_slice,
+                &swapped_pairs,
+                false,
+                &right_table_names,
+                &left_table_names,
+            );
             return Ok(FromResult::from_rows(combined_schema, result_rows));
         }
     }
@@ -391,7 +475,14 @@ pub(in crate::select::join) fn hash_join_inner_arithmetic(
     // For arithmetic join: right is build side, left is probe side
     let swapped_pairs: Vec<(usize, usize)> =
         pairs.into_iter().map(|(left, right)| (right, left)).collect();
-    let result_rows = batch_combine_rows_with_table_names(right_slice, left_slice, &swapped_pairs, false, &right_table_names, &left_table_names);
+    let result_rows = batch_combine_rows_with_table_names(
+        right_slice,
+        left_slice,
+        &swapped_pairs,
+        false,
+        &right_table_names,
+        &left_table_names,
+    );
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
 }

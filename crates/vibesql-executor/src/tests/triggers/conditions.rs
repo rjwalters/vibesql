@@ -24,7 +24,7 @@ fn test_when_clause_filters_firing() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             vibesql_ast::ColumnDef {
                 name: "amount".to_string(),
@@ -33,13 +33,13 @@ fn test_when_clause_filters_firing() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&table_stmt, &mut db)
         .expect("Failed to create transactions table");
@@ -55,7 +55,7 @@ fn test_when_clause_filters_firing() {
         when_condition: Some(Box::new(vibesql_ast::Expression::BinaryOp {
             op: vibesql_ast::BinaryOperator::GreaterThan,
             left: Box::new(vibesql_ast::Expression::ColumnRef(
-                vibesql_ast::ColumnIdentifier::simple("amount", false)
+                vibesql_ast::ColumnIdentifier::simple("amount", false),
             )),
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
                 100,
@@ -69,7 +69,10 @@ fn test_when_clause_filters_firing() {
         .expect("Failed to create trigger");
 
     // Insert row with amount=50 (should NOT fire)
-    let insert1 = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert1 = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "TRANSACTIONS".to_string(),
         columns: vec!["id".to_string(), "amount".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -85,7 +88,10 @@ fn test_when_clause_filters_firing() {
     assert_eq!(count_audit_rows(&db), 0);
 
     // Insert row with amount=150 (should fire)
-    let insert2 = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert2 = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "TRANSACTIONS".to_string(),
         columns: vec!["id".to_string(), "amount".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![

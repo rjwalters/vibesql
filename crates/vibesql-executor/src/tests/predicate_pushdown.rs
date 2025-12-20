@@ -55,16 +55,19 @@ fn test_table_local_predicate_applied_at_scan() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("a", false),
+            )),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5))),
         }),
@@ -131,17 +134,19 @@ fn test_multi_table_with_local_predicates() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Join {
-                left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+                left: Box::new(vibesql_ast::FromClause::Table {
+                    quoted: false,
                     name: "t1".to_string(),
                     alias: None,
                     column_aliases: None,
                 }),
-                right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+                right: Box::new(vibesql_ast::FromClause::Table {
+                    quoted: false,
                     name: "t2".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -151,7 +156,8 @@ fn test_multi_table_with_local_predicates() {
                 using_columns: None,
                 natural: false,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "t3".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -163,7 +169,9 @@ fn test_multi_table_with_local_predicates() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(5),
@@ -171,7 +179,9 @@ fn test_multi_table_with_local_predicates() {
             }),
             op: vibesql_ast::BinaryOperator::And,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(7),
@@ -274,31 +284,44 @@ fn test_table_local_predicate_with_explicit_join() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            left: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "orders".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "customers".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "customer_id", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("orders", false, "customer_id", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("customers", false, "customer_id", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified(
+                        "customers",
+                        false,
+                        "customer_id",
+                        false,
+                    ),
+                )),
             }),
             using_columns: None,
             natural: false,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "amount", false))),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::qualified("orders", false, "amount", false),
+            )),
             op: vibesql_ast::BinaryOperator::GreaterThan,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
                 110,
@@ -374,17 +397,20 @@ fn test_table_local_predicate_with_multiple_conditions() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("price", false),
+                )),
                 op: vibesql_ast::BinaryOperator::GreaterThan,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(50),
@@ -392,7 +418,9 @@ fn test_table_local_predicate_with_multiple_conditions() {
             }),
             op: vibesql_ast::BinaryOperator::And,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("stock", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("stock", false),
+                )),
                 op: vibesql_ast::BinaryOperator::GreaterThan,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(5),

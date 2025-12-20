@@ -339,7 +339,11 @@ impl<'arena> ArenaParser<'arena> {
                 let right_ref = self.arena.alloc(right);
                 // IS is equivalent to IS NOT DISTINCT FROM (NULL-safe equals)
                 // IS NOT is equivalent to IS DISTINCT FROM (NULL-safe not equals)
-                left = Expression::IsDistinctFrom { left: left_ref, right: right_ref, negated: !negated };
+                left = Expression::IsDistinctFrom {
+                    left: left_ref,
+                    right: right_ref,
+                    negated: !negated,
+                };
             }
         }
 
@@ -1064,7 +1068,10 @@ impl<'arena> ArenaParser<'arena> {
                     Some(NullsOrder::Last)
                 } else {
                     return Err(crate::ParseError {
-                        message: format!("Expected FIRST or LAST after NULLS, found {:?}", self.peek()),
+                        message: format!(
+                            "Expected FIRST or LAST after NULLS, found {:?}",
+                            self.peek()
+                        ),
                     });
                 }
             } else {
@@ -1092,7 +1099,7 @@ impl<'arena> ArenaParser<'arena> {
             Token::Keyword { keyword: Keyword::Interval, .. } => "INTERVAL".to_string(),
             Token::Keyword { keyword: Keyword::Character, .. } => "CHARACTER".to_string(),
             Token::Keyword { keyword: Keyword::Boolean, .. } => "BOOLEAN".to_string(),
-            _ => return Err(ParseError { message: self.peek().syntax_error() })
+            _ => return Err(ParseError { message: self.peek().syntax_error() }),
         };
         self.advance();
 

@@ -46,9 +46,8 @@ fn execute_insert_sql(db: &mut Database, sql: &str) -> Result<usize, String> {
     let stmt = Parser::parse_sql(sql).map_err(|e| format!("Parse error: {:?}", e))?;
 
     match stmt {
-        Statement::Insert(insert_stmt) => {
-            InsertExecutor::execute(db, &insert_stmt).map_err(|e| format!("Execution error: {:?}", e))
-        }
+        Statement::Insert(insert_stmt) => InsertExecutor::execute(db, &insert_stmt)
+            .map_err(|e| format!("Execution error: {:?}", e)),
         other => Err(format!("Expected INSERT statement, got {:?}", other)),
     }
 }
@@ -293,11 +292,8 @@ fn test_escaped_quotes_in_identifiers() {
     )
     .unwrap();
 
-    execute_insert_sql(
-        &mut db,
-        r#"INSERT INTO "O""Reilly Books" VALUES (1, 'Learning Rust')"#,
-    )
-    .unwrap();
+    execute_insert_sql(&mut db, r#"INSERT INTO "O""Reilly Books" VALUES (1, 'Learning Rust')"#)
+        .unwrap();
 
     let result = execute_select(&db, r#"SELECT "Book""Title" FROM "O""Reilly Books""#).unwrap();
     assert_eq!(result[0].values[0], SqlValue::Varchar(StringValue::from("Learning Rust")));

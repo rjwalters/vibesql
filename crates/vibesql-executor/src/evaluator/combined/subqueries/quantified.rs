@@ -43,7 +43,8 @@ impl CombinedExpressionEvaluator<'_> {
         // Build merged schema and row outside if-else to ensure they live long enough (fix for
         // #2463)
         // Fix for issue #4493: Build merged schema if EITHER current level has tables OR outer level exists
-        let merged_schema = if !self.schema.table_schemas.is_empty() || self.outer_schema.is_some() {
+        let merged_schema = if !self.schema.table_schemas.is_empty() || self.outer_schema.is_some()
+        {
             Some(build_merged_outer_schema(self.schema, self.outer_schema))
         } else {
             None

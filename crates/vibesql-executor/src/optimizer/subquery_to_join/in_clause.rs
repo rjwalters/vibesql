@@ -38,7 +38,9 @@
 
 use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
 
-use super::helpers::{is_self_join, is_simple_single_table_self_join, rewrite_column_refs_with_alias};
+use super::helpers::{
+    is_self_join, is_simple_single_table_self_join, rewrite_column_refs_with_alias,
+};
 
 /// Result of converting an IN subquery to a join
 /// Contains the new FROM clause
@@ -109,15 +111,16 @@ pub(super) fn try_convert_in_to_join(
     if needs_alias {
         if let Expression::ColumnRef(col_id) = &subquery_column {
             if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() {
-            // Check if outer query has exactly one table and it matches the subquery's table
-            let is_simple_self_join = is_simple_single_table_self_join(from, &table_name, &table_alias);
+                // Check if outer query has exactly one table and it matches the subquery's table
+                let is_simple_self_join =
+                    is_simple_single_table_self_join(from, &table_name, &table_alias);
 
-            if !is_simple_self_join {
-                // Self-join with multiple outer tables - unqualified column might be correlated.
-                // Skip optimization to be safe.
-                return None;
-            }
-            // else: Simple self-join with single table - safe to optimize
+                if !is_simple_self_join {
+                    // Self-join with multiple outer tables - unqualified column might be correlated.
+                    // Skip optimization to be safe.
+                    return None;
+                }
+                // else: Simple self-join with single table - safe to optimize
             }
         }
     }
@@ -315,7 +318,12 @@ fn try_convert_aggregate_in_to_join(
     let join_condition = Expression::BinaryOp {
         op: BinaryOperator::Equal,
         left: Box::new(outer_expr.clone()),
-        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&alias, false, &column_name, false))),
+        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+            &alias,
+            false,
+            &column_name,
+            false,
+        ))),
     };
 
     // Create SEMI or ANTI join based on negation

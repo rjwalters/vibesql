@@ -18,7 +18,7 @@ fn test_nested_arithmetic() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
@@ -48,7 +48,9 @@ fn test_nested_arithmetic() {
                     )),
                 }),
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,
@@ -79,7 +81,7 @@ fn test_integer_division_basic() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
@@ -91,7 +93,9 @@ fn test_integer_division_basic() {
                     vibesql_types::SqlValue::Integer(31),
                 )),
             },
-            alias: Some("result".to_string()), source_text: None }],
+            alias: Some("result".to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,

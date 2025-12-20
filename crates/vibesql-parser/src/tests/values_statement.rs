@@ -65,15 +65,9 @@ fn test_values_multiple_rows_multiple_columns() {
     assert_eq!(values.len(), 3);
     assert_eq!(values[0].len(), 2);
     assert_eq!(values[0][0], Expression::Literal(SqlValue::Integer(1)));
-    assert_eq!(
-        values[0][1],
-        Expression::Literal(SqlValue::Varchar("a".into()))
-    );
+    assert_eq!(values[0][1], Expression::Literal(SqlValue::Varchar("a".into())));
     assert_eq!(values[2][0], Expression::Literal(SqlValue::Integer(3)));
-    assert_eq!(
-        values[2][1],
-        Expression::Literal(SqlValue::Varchar("c".into()))
-    );
+    assert_eq!(values[2][1], Expression::Literal(SqlValue::Varchar("c".into())));
 }
 
 #[test]
@@ -95,10 +89,7 @@ fn test_values_union_values() {
     assert!(set_op.right.values.is_some());
     let right_values = set_op.right.values.as_ref().unwrap();
     assert_eq!(right_values.len(), 1);
-    assert_eq!(
-        right_values[0][0],
-        Expression::Literal(SqlValue::Integer(2))
-    );
+    assert_eq!(right_values[0][0], Expression::Literal(SqlValue::Integer(2)));
 }
 
 #[test]

@@ -71,18 +71,19 @@ impl CreateTableExecutor {
         database: &mut Database,
     ) -> Result<String, ExecutorError> {
         // Parse qualified table name (schema.table or just table)
-        let (schema_name, table_name, identifier) =
-            if let Some((schema_part, table_part)) = stmt.table_name.split_once('.') {
-                // Schema-qualified table name - use qualified identifier
-                // Note: We use stmt.quoted for both parts since the parser combined them
-                // In a future iteration, CREATE TABLE could also store schema/table quoted status separately
-                let id = TableIdentifier::qualified(schema_part, stmt.quoted, table_part, stmt.quoted);
-                (schema_part.to_string(), table_part.to_string(), id)
-            } else {
-                // Simple table name - use current schema
-                let id = TableIdentifier::new(&stmt.table_name, stmt.quoted);
-                (database.catalog.get_current_schema().to_string(), stmt.table_name.clone(), id)
-            };
+        let (schema_name, table_name, identifier) = if let Some((schema_part, table_part)) =
+            stmt.table_name.split_once('.')
+        {
+            // Schema-qualified table name - use qualified identifier
+            // Note: We use stmt.quoted for both parts since the parser combined them
+            // In a future iteration, CREATE TABLE could also store schema/table quoted status separately
+            let id = TableIdentifier::qualified(schema_part, stmt.quoted, table_part, stmt.quoted);
+            (schema_part.to_string(), table_part.to_string(), id)
+        } else {
+            // Simple table name - use current schema
+            let id = TableIdentifier::new(&stmt.table_name, stmt.quoted);
+            (database.catalog.get_current_schema().to_string(), stmt.table_name.clone(), id)
+        };
 
         // Check CREATE privilege on the schema
         PrivilegeChecker::check_create(database, &schema_name)?;
@@ -136,41 +137,42 @@ impl CreateTableExecutor {
         }
 
         // Convert AST ColumnDef → Catalog ColumnSchema
-        let mut columns: Vec<ColumnSchema> =
-            stmt.columns
-                .iter()
-                .map(|col_def| {
-                    // For AUTO_INCREMENT columns, set default to NEXT VALUE FOR sequence
-                    let default_value =
-                        if col_def.constraints.iter().any(|c| {
-                            matches!(c.kind, vibesql_ast::ColumnConstraintKind::AutoIncrement)
-                        }) {
-                            // Create sequence name: {table_name}_{column_name}_seq
-                            let sequence_name = format!("{}_{}_seq", table_name, col_def.name);
-                            Some(vibesql_ast::Expression::NextValue { sequence_name })
-                        } else {
-                            col_def.default_value.as_ref().map(|expr| (**expr).clone())
-                        };
+        let mut columns: Vec<ColumnSchema> = stmt
+            .columns
+            .iter()
+            .map(|col_def| {
+                // For AUTO_INCREMENT columns, set default to NEXT VALUE FOR sequence
+                let default_value = if col_def
+                    .constraints
+                    .iter()
+                    .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::AutoIncrement))
+                {
+                    // Create sequence name: {table_name}_{column_name}_seq
+                    let sequence_name = format!("{}_{}_seq", table_name, col_def.name);
+                    Some(vibesql_ast::Expression::NextValue { sequence_name })
+                } else {
+                    col_def.default_value.as_ref().map(|expr| (**expr).clone())
+                };
 
-                    // Extract column-level collation from constraints
-                    let collation = col_def.constraints.iter().find_map(|c| {
-                        if let vibesql_ast::ColumnConstraintKind::Collate(coll) = &c.kind {
-                            Some(coll.clone())
-                        } else {
-                            None
-                        }
-                    });
-
-                    ColumnSchema {
-                        name: col_def.name.clone(),
-                        data_type: col_def.data_type.clone(),
-                        nullable: col_def.nullable,
-                        default_value,
-                        generated_expr: col_def.generated_expr.as_ref().map(|expr| (**expr).clone()),
-                        collation,
+                // Extract column-level collation from constraints
+                let collation = col_def.constraints.iter().find_map(|c| {
+                    if let vibesql_ast::ColumnConstraintKind::Collate(coll) = &c.kind {
+                        Some(coll.clone())
+                    } else {
+                        None
                     }
-                })
-                .collect();
+                });
+
+                ColumnSchema {
+                    name: col_def.name.clone(),
+                    data_type: col_def.data_type.clone(),
+                    nullable: col_def.nullable,
+                    default_value,
+                    generated_expr: col_def.generated_expr.as_ref().map(|expr| (**expr).clone()),
+                    collation,
+                }
+            })
+            .collect();
 
         // Process constraints using the constraint validator
         let constraint_result =
@@ -616,14 +618,9 @@ impl CreateTableExecutor {
     }
 
     /// Derive a column name from an expression
-    fn derive_column_name_from_expr(
-        expr: &vibesql_ast::Expression,
-        counter: &mut usize,
-    ) -> String {
+    fn derive_column_name_from_expr(expr: &vibesql_ast::Expression, counter: &mut usize) -> String {
         match expr {
-            vibesql_ast::Expression::ColumnRef(col_id) => {
-                col_id.column_canonical().to_string()
-            }
+            vibesql_ast::Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
             vibesql_ast::Expression::Literal(_) => {
                 *counter += 1;
                 format!("column{}", counter)

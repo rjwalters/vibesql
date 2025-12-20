@@ -323,7 +323,11 @@ impl ExecutionPipeline for NativeColumnarPipeline {
             // If first aggregate comes before last non-aggregate, order doesn't match columnar
             if let (Some(first_agg), Some(last_non_agg)) = (first_agg_pos, last_non_agg_pos) {
                 if first_agg < last_non_agg {
-                    log::debug!("Native columnar fallback: aggregate at {} before non-aggregate at {}", first_agg, last_non_agg);
+                    log::debug!(
+                        "Native columnar fallback: aggregate at {} before non-aggregate at {}",
+                        first_agg,
+                        last_non_agg
+                    );
                     return Err(ExecutorError::UnsupportedFeature(
                         "SELECT list with aggregates before GROUP BY columns not supported in native columnar".to_string(),
                     ));

@@ -53,15 +53,20 @@ fn create_scalar_subquery(table_name: &str, column_name: &str) -> Box<vibesql_as
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&column_name.to_string(), false)),
-            alias: None, source_text: None }],
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                &column_name.to_string(),
+                false,
+            )),
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: table_name.to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -70,7 +75,7 @@ fn create_scalar_subquery(table_name: &str, column_name: &str) -> Box<vibesql_as
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     })
 }
 
@@ -85,17 +90,22 @@ fn create_aggregate_subquery(
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::Function {
                 name: vibesql_ast::FunctionIdentifier::new(func_name),
-                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&column_name.to_string(), false))],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    &column_name.to_string(),
+                    false,
+                ))],
                 character_unit: None,
             },
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: table_name.to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -104,7 +114,7 @@ fn create_aggregate_subquery(
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     })
 }
 

@@ -81,7 +81,9 @@ impl AssertionChecker {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: check_condition.clone(),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: None,

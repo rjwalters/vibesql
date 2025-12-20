@@ -86,7 +86,11 @@ pub async fn send_subscription_update(
                 .await
                 {
                     // Selective updates sent successfully - update stored result
-                    subscription_manager.update_result_by_wire_id(subscription_id, new_hash, new_rows);
+                    subscription_manager.update_result_by_wire_id(
+                        subscription_id,
+                        new_hash,
+                        new_rows,
+                    );
                     return;
                 }
 
@@ -115,10 +119,7 @@ pub async fn send_subscription_update(
 
                     // Log delta statistics
                     if let SubscriptionUpdate::Delta {
-                        ref inserts,
-                        ref updates,
-                        ref deletes,
-                        ..
+                        ref inserts, ref updates, ref deletes, ..
                     } = delta
                     {
                         debug!(
@@ -177,9 +178,13 @@ pub async fn send_subscription_update(
         }
         Err(e) => {
             // Query failed - send error to subscriber
-            if let Err(send_err) =
-                send_subscription_error(write_half, write_buf, subscription_id, &format!("Query error: {}", e))
-                    .await
+            if let Err(send_err) = send_subscription_error(
+                write_half,
+                write_buf,
+                subscription_id,
+                &format!("Query error: {}", e),
+            )
+            .await
             {
                 warn!("Failed to send subscription error: {}", send_err);
             }

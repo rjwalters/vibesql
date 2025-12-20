@@ -54,20 +54,33 @@ fn test_select_rowid() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("rowid", false)),
-                alias: None, source_text: None },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "rowid", false,
+                )),
+                alias: None,
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false)),
-                alias: None, source_text: None },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "a", false,
+                )),
+                alias: None,
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false)),
-                alias: None, source_text: None },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "b", false,
+                )),
+                alias: None,
+                source_text: None,
+            },
         ],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -108,11 +121,8 @@ fn test_select_underscore_rowid() {
     );
     db.create_table(schema).unwrap();
 
-    db.insert_row(
-        "t1",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(100)]),
-    )
-    .unwrap();
+    db.insert_row("t1", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(100)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -122,14 +132,17 @@ fn test_select_underscore_rowid() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("_rowid_", false)),
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "_rowid_", false,
+            )),
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -161,11 +174,8 @@ fn test_select_oid() {
     );
     db.create_table(schema).unwrap();
 
-    db.insert_row(
-        "t1",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(100)]),
-    )
-    .unwrap();
+    db.insert_row("t1", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(100)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -175,14 +185,17 @@ fn test_select_oid() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("oid", false)),
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "oid", false,
+            )),
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -214,11 +227,8 @@ fn test_rowid_case_insensitive() {
     );
     db.create_table(schema).unwrap();
 
-    db.insert_row(
-        "t1",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(100)]),
-    )
-    .unwrap();
+    db.insert_row("t1", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(100)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -228,14 +238,17 @@ fn test_rowid_case_insensitive() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("ROWID", false)),
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "ROWID", false,
+            )),
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -294,14 +307,17 @@ fn test_real_rowid_column_takes_precedence() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("rowid", false)),
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "rowid", false,
+            )),
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -334,16 +350,10 @@ fn test_rowid_with_table_alias() {
     );
     db.create_table(schema).unwrap();
 
-    db.insert_row(
-        "t1",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(100)]),
-    )
-    .unwrap();
-    db.insert_row(
-        "t1",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(200)]),
-    )
-    .unwrap();
+    db.insert_row("t1", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(100)]))
+        .unwrap();
+    db.insert_row("t1", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(200)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 
@@ -353,14 +363,17 @@ fn test_rowid_with_table_alias() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t", false, "rowid", false)),
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "t", false, "rowid", false,
+            )),
             alias: None,
             source_text: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "t1".to_string(),
             alias: Some("t".to_string()),
             column_aliases: None,
@@ -396,10 +409,7 @@ fn test_explicit_rowid_preserved() {
     // Insert with explicit rowid = 5
     db.insert_row(
         "t1",
-        vibesql_storage::Row::with_row_id(
-            vec![vibesql_types::SqlValue::Integer(100)],
-            5,
-        ),
+        vibesql_storage::Row::with_row_id(vec![vibesql_types::SqlValue::Integer(100)], 5),
     )
     .unwrap();
 
@@ -415,12 +425,16 @@ fn test_explicit_rowid_preserved() {
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("rowid", false)),
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "rowid", false,
+                )),
                 alias: None,
                 source_text: None,
             },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false)),
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "x", false,
+                )),
                 alias: None,
                 source_text: None,
             },
@@ -463,27 +477,18 @@ fn test_mixed_explicit_and_auto_rowid() {
     // Insert with explicit rowid = 10
     db.insert_row(
         "t1",
-        vibesql_storage::Row::with_row_id(
-            vec![vibesql_types::SqlValue::Integer(100)],
-            10,
-        ),
+        vibesql_storage::Row::with_row_id(vec![vibesql_types::SqlValue::Integer(100)], 10),
     )
     .unwrap();
 
     // Insert without explicit rowid (should get auto-assigned based on physical index)
-    db.insert_row(
-        "t1",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(200)]),
-    )
-    .unwrap();
+    db.insert_row("t1", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(200)]))
+        .unwrap();
 
     // Insert with explicit rowid = 20
     db.insert_row(
         "t1",
-        vibesql_storage::Row::with_row_id(
-            vec![vibesql_types::SqlValue::Integer(300)],
-            20,
-        ),
+        vibesql_storage::Row::with_row_id(vec![vibesql_types::SqlValue::Integer(300)], 20),
     )
     .unwrap();
 
@@ -499,12 +504,16 @@ fn test_mixed_explicit_and_auto_rowid() {
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("rowid", false)),
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "rowid", false,
+                )),
                 alias: None,
                 source_text: None,
             },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false)),
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "x", false,
+                )),
                 alias: None,
                 source_text: None,
             },
@@ -627,21 +636,12 @@ fn test_order_by_rowid_desc() {
     db.create_table(schema).unwrap();
 
     // Insert rows
-    db.insert_row(
-        "t1",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(10)]),
-    )
-    .unwrap();
-    db.insert_row(
-        "t1",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(20)]),
-    )
-    .unwrap();
-    db.insert_row(
-        "t1",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(30)]),
-    )
-    .unwrap();
+    db.insert_row("t1", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(10)]))
+        .unwrap();
+    db.insert_row("t1", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(20)]))
+        .unwrap();
+    db.insert_row("t1", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(30)]))
+        .unwrap();
 
     let executor = SelectExecutor::new(&db);
 

@@ -55,10 +55,11 @@ fn test_order_by_single_column_asc() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -67,7 +68,9 @@ fn test_order_by_single_column_asc() {
         group_by: None,
         having: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false)),
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "age", false,
+            )),
             direction: vibesql_ast::OrderDirection::Asc,
             nulls_order: None,
         }]),
@@ -150,10 +153,11 @@ fn test_order_by_multiple_columns() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -163,12 +167,16 @@ fn test_order_by_multiple_columns() {
         having: None,
         order_by: Some(vec![
             vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept", false)),
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "dept", false,
+                )),
                 direction: vibesql_ast::OrderDirection::Asc,
                 nulls_order: None,
             },
             vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false)),
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "age", false,
+                )),
                 direction: vibesql_ast::OrderDirection::Desc,
                 nulls_order: None,
             },
@@ -198,20 +206,15 @@ fn test_order_by_with_join_issue_4552() {
     // Create t1 table
     let schema1 = vibesql_catalog::TableSchema::new(
         "t1".to_string(),
-        vec![
-            vibesql_catalog::ColumnSchema::new(
-                "a".to_string(),
-                vibesql_types::DataType::Integer,
-                false,
-            ),
-        ],
+        vec![vibesql_catalog::ColumnSchema::new(
+            "a".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
     );
     db.create_table(schema1).unwrap();
-    db.insert_row(
-        "t1",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]),
-    )
-    .unwrap();
+    db.insert_row("t1", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]))
+        .unwrap();
 
     // Create t2 table
     let schema2 = vibesql_catalog::TableSchema::new(
@@ -308,16 +311,7 @@ fn test_order_by_with_join_issue_4552() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 3);
     // Should be sorted alphabetically by 'e': a, b, c
-    assert_eq!(
-        result[0].values[2],
-        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("a"))
-    );
-    assert_eq!(
-        result[1].values[2],
-        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("b"))
-    );
-    assert_eq!(
-        result[2].values[2],
-        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("c"))
-    );
+    assert_eq!(result[0].values[2], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("a")));
+    assert_eq!(result[1].values[2], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("b")));
+    assert_eq!(result[2].values[2], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("c")));
 }

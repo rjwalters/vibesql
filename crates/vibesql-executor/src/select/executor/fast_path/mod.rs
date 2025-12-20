@@ -122,8 +122,15 @@ impl SelectExecutor<'_> {
             // catalog.get_table returns &TableSchema, not &Table
             if let Some(table_schema) = self.database.catalog.get_table(table_name) {
                 let effective_name = alias.map(|a| a.as_str()).unwrap_or(table_name);
-                let schema = crate::schema::CombinedSchema::from_table(effective_name.to_string(), table_schema.clone());
-                crate::select::order::resolve_where_aliases_with_schema(where_expr, &stmt.select_list, &schema)
+                let schema = crate::schema::CombinedSchema::from_table(
+                    effective_name.to_string(),
+                    table_schema.clone(),
+                );
+                crate::select::order::resolve_where_aliases_with_schema(
+                    where_expr,
+                    &stmt.select_list,
+                    &schema,
+                )
             } else {
                 // Fallback if schema not found (shouldn't happen in fast path)
                 crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
@@ -175,8 +182,8 @@ impl SelectExecutor<'_> {
             resolved_where.as_ref(),
             stmt.order_by.as_deref(),
             limit, // LIMIT pushdown for ORDER BY optimization
-            None,       // No outer row
-            None,       // No outer schema
+            None,  // No outer row
+            None,  // No outer schema
             |_| unreachable!("Fast path doesn't support subqueries"),
         )?;
 
@@ -208,8 +215,7 @@ impl SelectExecutor<'_> {
 
         // Apply LIMIT/OFFSET
         let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
-        let final_rows =
-            crate::select::helpers::apply_limit_offset(projected_rows, limit, offset);
+        let final_rows = crate::select::helpers::apply_limit_offset(projected_rows, limit, offset);
 
         Ok(final_rows)
     }

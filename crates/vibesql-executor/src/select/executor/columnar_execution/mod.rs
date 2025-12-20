@@ -554,9 +554,7 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
         if has_unsupported_having_aggregates {
-            log::debug!(
-                "Native columnar: skipping - unsupported aggregate expressions in HAVING"
-            );
+            log::debug!("Native columnar: skipping - unsupported aggregate expressions in HAVING");
             return Ok(None);
         }
 

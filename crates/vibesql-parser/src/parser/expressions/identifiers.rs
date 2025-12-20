@@ -191,19 +191,32 @@ impl Parser {
 
                 // schema.table.column
                 Ok(Some(vibesql_ast::Expression::ColumnRef(
-                    vibesql_ast::ColumnIdentifier::fully_qualified(&first, first_quoted, &second, second_quoted, &third, third_quoted)
+                    vibesql_ast::ColumnIdentifier::fully_qualified(
+                        &first,
+                        first_quoted,
+                        &second,
+                        second_quoted,
+                        &third,
+                        third_quoted,
+                    ),
                 )))
             } else {
                 // table.column (two-part name)
                 Ok(Some(vibesql_ast::Expression::ColumnRef(
-                    vibesql_ast::ColumnIdentifier::qualified(&first, first_quoted, &second, second_quoted)
+                    vibesql_ast::ColumnIdentifier::qualified(
+                        &first,
+                        first_quoted,
+                        &second,
+                        second_quoted,
+                    ),
                 )))
             }
         } else {
             // Simple column reference
-            Ok(Some(vibesql_ast::Expression::ColumnRef(
-                vibesql_ast::ColumnIdentifier::simple(&first, first_quoted)
-            )))
+            Ok(Some(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                &first,
+                first_quoted,
+            ))))
         }
     }
 }

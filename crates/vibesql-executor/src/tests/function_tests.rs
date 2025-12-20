@@ -133,12 +133,16 @@ fn test_function_with_parameter() {
             ProceduralStatement::Set {
                 name: "result".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "x", false,
+                    ))),
                     op: BinaryOperator::Multiply,
                     right: Box::new(Expression::Literal(SqlValue::Integer(2))),
                 }),
             },
-            ProceduralStatement::Return(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("result", false)))),
+            ProceduralStatement::Return(Box::new(Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("result", false),
+            ))),
         ],
     );
 
@@ -165,7 +169,9 @@ fn test_function_parameter_shadowing() {
                 data_type: DataType::Integer,
                 default_value: Some(Box::new(Expression::Literal(SqlValue::Integer(100)))),
             },
-            ProceduralStatement::Return(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false)))),
+            ProceduralStatement::Return(Box::new(Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("x", false),
+            ))),
         ],
     );
 
@@ -239,20 +245,30 @@ fn test_function_multiple_parameters() {
             ProceduralStatement::Set {
                 name: "result".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "a", false,
+                    ))),
                     op: BinaryOperator::Plus,
-                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
+                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "b", false,
+                    ))),
                 }),
             },
             ProceduralStatement::Set {
                 name: "result".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("result", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "result", false,
+                    ))),
                     op: BinaryOperator::Plus,
-                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("c", false))),
+                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "c", false,
+                    ))),
                 }),
             },
-            ProceduralStatement::Return(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("result", false)))),
+            ProceduralStatement::Return(Box::new(Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("result", false),
+            ))),
         ],
     );
 
@@ -294,7 +310,9 @@ fn test_function_varchar_return_type() {
                     character_unit: None,
                 }),
             },
-            ProceduralStatement::Return(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("greeting", false)))),
+            ProceduralStatement::Return(Box::new(Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("greeting", false),
+            ))),
         ],
     );
 
@@ -323,7 +341,9 @@ fn test_function_long_body() {
         });
     }
 
-    statements.push(ProceduralStatement::Return(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("counter", false)))));
+    statements.push(ProceduralStatement::Return(Box::new(Expression::ColumnRef(
+        vibesql_ast::ColumnIdentifier::simple("counter", false),
+    ))));
 
     let func = create_simple_function("long_function", vec![], DataType::Integer, statements);
 
@@ -349,11 +369,15 @@ fn test_function_with_control_flow() {
         DataType::Integer,
         vec![ProceduralStatement::If {
             condition: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "x", false,
+                ))),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(0))),
             }),
-            then_statements: vec![ProceduralStatement::Return(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))))],
+            then_statements: vec![ProceduralStatement::Return(Box::new(Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("x", false),
+            )))],
             else_statements: Some(vec![ProceduralStatement::Return(Box::new(
                 Expression::Literal(SqlValue::Integer(0)),
             ))]),

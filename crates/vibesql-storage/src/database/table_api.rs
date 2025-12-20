@@ -28,7 +28,8 @@ impl Database {
         schema: vibesql_catalog::TableSchema,
         identifier: TableIdentifier,
     ) -> Result<(), StorageError> {
-        self.catalog.create_table_with_identifier(schema.clone(), identifier.clone())
+        self.catalog
+            .create_table_with_identifier(schema.clone(), identifier.clone())
             .map_err(|e| StorageError::CatalogError(e.to_string()))?;
 
         // Build qualified name from identifier
@@ -141,7 +142,8 @@ impl Database {
         // This handles the case where storage normalized table name but not schema
         if let Some((schema_part, table_part)) = name.split_once('.') {
             // Try schema lowercase, table uppercase (current storage behavior)
-            let mixed_case = format!("{}.{}", schema_part.to_lowercase(), table_part.to_uppercase());
+            let mixed_case =
+                format!("{}.{}", schema_part.to_lowercase(), table_part.to_uppercase());
             if mixed_case != name && mixed_case != uppercase_name && mixed_case != lowercase_name {
                 if let Some(table) = self.tables.get(&mixed_case) {
                     return Some(table);

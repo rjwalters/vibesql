@@ -38,23 +38,25 @@ fn test_update_with_subquery_multiple_rows_error() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false)),
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "salaries".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
-                group_by: None,
+        group_by: None,
         having: None,
         order_by: None,
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     });
 
     let stmt = UpdateStmt {
@@ -115,11 +117,19 @@ fn test_update_with_subquery_multiple_columns_error() {
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("min_amt", false)),
-                alias: None, source_text: None },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "min_amt", false,
+                )),
+                alias: None,
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
-                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("max_amt", false)),
-                alias: None, source_text: None },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "max_amt", false,
+                )),
+                alias: None,
+                source_text: None,
+            },
         ],
         into_table: None,
         into_variables: None,
@@ -127,16 +137,16 @@ fn test_update_with_subquery_multiple_columns_error() {
             name: "salaries".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
-                group_by: None,
+        group_by: None,
         having: None,
         order_by: None,
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     });
 
     let stmt = UpdateStmt {

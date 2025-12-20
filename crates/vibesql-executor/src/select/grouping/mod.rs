@@ -16,7 +16,9 @@ mod keys;
 mod parallel_sink;
 
 // Re-export public API
-pub(crate) use aggregates::{compare_sql_values, compare_sql_values_with_collation, AggregateAccumulator};
+pub(crate) use aggregates::{
+    compare_sql_values, compare_sql_values_with_collation, AggregateAccumulator,
+};
 pub(crate) use grouping_sets::expressions_equal;
 pub(super) use grouping_sets::{
     expand_group_by_clause, get_base_expressions, resolve_base_expressions_aliases,

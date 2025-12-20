@@ -27,7 +27,10 @@ fn setup_products_table(db: &mut Database) {
 
 /// Helper to insert a row into products table
 fn insert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
-    let stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "products".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -43,7 +46,10 @@ fn insert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
 
 /// Helper to execute an INSERT ... ON DUPLICATE KEY UPDATE statement
 fn upsert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
-    let stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "products".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -202,7 +208,10 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
 
     // Insert users
     let insert = |db: &mut Database, id: i64, name: &str, score: i64| {
-        let stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+        let stmt = vibesql_ast::InsertStmt {
+            schema_name: None,
+            schema_quoted: false,
+            table_quoted: false,
             table_name: "users".to_string(),
             columns: vec![],
             source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -223,7 +232,10 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
     let _ = db.get_columnar("users").unwrap();
 
     // ON DUPLICATE KEY UPDATE with same name (unique key conflict) - should update existing row
-    let upsert_stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let upsert_stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -304,7 +316,10 @@ fn test_on_duplicate_key_update_arithmetic_invalidates_cache() {
     assert_eq!(initial_stock_col.get(0), SqlValue::Integer(10));
 
     // ON DUPLICATE KEY UPDATE with arithmetic: stock = stock + VALUES(stock)
-    let upsert_stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let upsert_stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "products".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -317,7 +332,9 @@ fn test_on_duplicate_key_update_arithmetic_invalidates_cache() {
             column: "stock".to_string(),
             value: vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Plus,
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("stock", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("stock", false),
+                )),
                 right: Box::new(vibesql_ast::Expression::DuplicateKeyValue {
                     column: "stock".to_string(),
                 }),

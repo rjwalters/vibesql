@@ -199,7 +199,7 @@ impl IndexManager {
                         .iter()
                         .map(|col| {
                             let col_idx = table_schema
-                                .get_column_index(&col.expect_column_name())
+                                .get_column_index(col.expect_column_name())
                                 .expect("Index column should exist");
                             let value = &row.values[col_idx];
                             let truncated = super::index_maintenance::apply_prefix_truncation(

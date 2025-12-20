@@ -72,8 +72,7 @@ fn collect_window_functions_from_expression(
             collect_window_functions_from_expression(low, window_functions);
             collect_window_functions_from_expression(high, window_functions);
         }
-        Expression::Like { expr, pattern, .. }
-        | Expression::Glob { expr, pattern, .. } => {
+        Expression::Like { expr, pattern, .. } | Expression::Glob { expr, pattern, .. } => {
             collect_window_functions_from_expression(expr, window_functions);
             collect_window_functions_from_expression(pattern, window_functions);
         }

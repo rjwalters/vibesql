@@ -227,7 +227,9 @@ impl AggregateAnalysis {
     /// Extract table references from an expression
     fn extract_table_refs(expr: &Expression, tables: &mut HashSet<String>) {
         match expr {
-            Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+            Expression::ColumnRef(col_id)
+                if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() =>
+            {
                 tables.insert(col_id.table_canonical().unwrap().to_string());
             }
             Expression::BinaryOp { left, right, .. } => {
@@ -495,7 +497,12 @@ mod tests {
     }
 
     fn make_aggregate(name: &str, arg: Expression) -> Expression {
-        Expression::AggregateFunction { name: vibesql_ast::FunctionIdentifier::new(name), distinct: false, args: vec![arg], order_by: None }
+        Expression::AggregateFunction {
+            name: vibesql_ast::FunctionIdentifier::new(name),
+            distinct: false,
+            args: vec![arg],
+            order_by: None,
+        }
     }
 
     #[test]
@@ -505,7 +512,9 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: make_column_ref("users", "name"),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: None,
@@ -534,10 +543,14 @@ mod tests {
             select_list: vec![
                 SelectItem::Expression {
                     expr: make_column_ref("orders", "customer_id"),
-                    alias: None, source_text: None },
+                    alias: None,
+                    source_text: None,
+                },
                 SelectItem::Expression {
                     expr: make_aggregate("COUNT", Expression::Wildcard),
-                    alias: Some("order_count".to_string()), source_text: None },
+                    alias: Some("order_count".to_string()),
+                    source_text: None,
+                },
             ],
             into_table: None,
             into_variables: None,
@@ -568,10 +581,14 @@ mod tests {
             select_list: vec![
                 SelectItem::Expression {
                     expr: make_column_ref("lineitem", "l_orderkey"),
-                    alias: None, source_text: None },
+                    alias: None,
+                    source_text: None,
+                },
                 SelectItem::Expression {
                     expr: make_aggregate("SUM", make_column_ref("lineitem", "l_quantity")),
-                    alias: Some("total_qty".to_string()), source_text: None },
+                    alias: Some("total_qty".to_string()),
+                    source_text: None,
+                },
             ],
             into_table: None,
             into_variables: None,

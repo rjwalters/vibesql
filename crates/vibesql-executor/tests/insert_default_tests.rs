@@ -25,7 +25,10 @@ fn test_character_varying_column_with_length() {
     db.create_table(schema).unwrap();
 
     // INSERT INTO test_cv VALUES (1, 'Test description')
-    let stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "test_cv".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -69,7 +72,10 @@ fn test_character_varying_column_without_length() {
     db.create_table(schema).unwrap();
 
     // INSERT INTO test_cv_nolen VALUES (1, 'Unlimited length text')
-    let stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "test_cv_nolen".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -117,7 +123,10 @@ fn test_insert_with_default_value() {
     db.create_table(schema).unwrap();
 
     // INSERT INTO users (id, name) VALUES (DEFAULT, 'Alice')
-    let stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "users".to_string(),
         columns: vec!["id".to_string(), "name".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -163,7 +172,10 @@ fn test_insert_default_no_default_value_defined() {
     db.create_table(schema).unwrap();
 
     // INSERT INTO users (id, name) VALUES (DEFAULT, 'Alice')
-    let stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "users".to_string(),
         columns: vec!["id".to_string(), "name".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -393,7 +405,7 @@ fn test_bigint_primary_key_no_autogen() {
             vibesql_catalog::ColumnSchema::new(
                 "id".to_string(),
                 vibesql_types::DataType::Bigint, // NOT Integer!
-                true, // Must be nullable since we're inserting NULL
+                true,                            // Must be nullable since we're inserting NULL
             ),
             vibesql_catalog::ColumnSchema::new(
                 "data".to_string(),

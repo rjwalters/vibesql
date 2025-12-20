@@ -189,11 +189,13 @@ impl SelectExecutor<'_> {
                     Ok(n as usize)
                 }
             }
-            vibesql_types::SqlValue::Null => Err(crate::errors::ExecutorError::InvalidLimitOffset {
-                clause: clause_name.to_string(),
-                value: "NULL".to_string(),
-                reason: "must be an integer".to_string(),
-            }),
+            vibesql_types::SqlValue::Null => {
+                Err(crate::errors::ExecutorError::InvalidLimitOffset {
+                    clause: clause_name.to_string(),
+                    value: "NULL".to_string(),
+                    reason: "must be an integer".to_string(),
+                })
+            }
             other => Err(crate::errors::ExecutorError::InvalidLimitOffset {
                 clause: clause_name.to_string(),
                 value: format!("{:?}", other),

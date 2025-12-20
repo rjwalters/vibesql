@@ -8,7 +8,9 @@ impl Parser {
 
     /// Parse SELECT statement when embedded in another statement (cursor, view, etc.)
     /// This allows tokens after SELECT that belong to the outer statement.
-    pub(crate) fn parse_embedded_select_statement(&mut self) -> Result<vibesql_ast::SelectStmt, ParseError> {
+    pub(crate) fn parse_embedded_select_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::SelectStmt, ParseError> {
         self.parse_select_statement_internal(true, false)
     }
 
@@ -300,7 +302,9 @@ impl Parser {
                 // Nested in set operation: also allow ORDER/LIMIT/OFFSET for outer statement
                 match self.peek() {
                     Token::Semicolon | Token::Eof | Token::RParen => {}
-                    Token::Keyword { keyword: Keyword::Order, .. } | Token::Keyword { keyword: Keyword::Limit, .. } | Token::Keyword { keyword: Keyword::Offset, .. } => {}
+                    Token::Keyword { keyword: Keyword::Order, .. }
+                    | Token::Keyword { keyword: Keyword::Limit, .. }
+                    | Token::Keyword { keyword: Keyword::Offset, .. } => {}
                     _ => return Err(ParseError { message: self.peek().syntax_error() }),
                 }
             }
@@ -335,7 +339,10 @@ impl Parser {
     ///
     /// If `recursive` is true, all CTEs in this list are marked as recursive.
     /// In SQL:1999/SQLite, the RECURSIVE keyword applies to all CTEs in the WITH clause.
-    fn parse_cte_list(&mut self, recursive: bool) -> Result<Vec<vibesql_ast::CommonTableExpr>, ParseError> {
+    fn parse_cte_list(
+        &mut self,
+        recursive: bool,
+    ) -> Result<Vec<vibesql_ast::CommonTableExpr>, ParseError> {
         self.parse_comma_separated_list(|p| p.parse_cte(recursive))
     }
 
@@ -572,8 +579,13 @@ impl Parser {
             let valid_end_token = match self.peek() {
                 Token::Semicolon | Token::Eof | Token::RParen => true,
                 // When nested, allow ORDER BY/LIMIT/OFFSET for outer statement
-                Token::Keyword { keyword: Keyword::Order, .. } | Token::Keyword { keyword: Keyword::Limit, .. } | Token::Keyword { keyword: Keyword::Offset, .. }
-                    if !allow_order_limit => true,
+                Token::Keyword { keyword: Keyword::Order, .. }
+                | Token::Keyword { keyword: Keyword::Limit, .. }
+                | Token::Keyword { keyword: Keyword::Offset, .. }
+                    if !allow_order_limit =>
+                {
+                    true
+                }
                 _ => false,
             };
             if !valid_end_token {

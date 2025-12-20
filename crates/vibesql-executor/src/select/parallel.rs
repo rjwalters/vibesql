@@ -45,9 +45,7 @@ impl ParallelConfig {
         // Cache the user threshold override (or None) - this is checked once
         static THRESHOLD_OVERRIDE: OnceLock<Option<ParallelThresholds>> = OnceLock::new();
         let override_thresholds = THRESHOLD_OVERRIDE.get_or_init(|| {
-            std::env::var("PARALLEL_THRESHOLD")
-                .ok()
-                .map(|s| Self::parse_threshold_override(&s))
+            std::env::var("PARALLEL_THRESHOLD").ok().map(|s| Self::parse_threshold_override(&s))
         });
 
         // Always check current thread count - this allows custom pools to work
@@ -68,10 +66,7 @@ impl ParallelConfig {
 
         // Debug: Log when ParallelConfig is initialized
         if std::env::var("MORSEL_DEBUG").is_ok() {
-            eprintln!(
-                "[MORSEL] ParallelConfig initialized: detected {} threads",
-                num_threads
-            );
+            eprintln!("[MORSEL] ParallelConfig initialized: detected {} threads", num_threads);
         }
 
         // Check for user override of threshold

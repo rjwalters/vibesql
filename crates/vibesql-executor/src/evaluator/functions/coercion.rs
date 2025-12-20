@@ -100,12 +100,7 @@ fn format_sqlite_float(n: f64) -> String {
         return "NaN".to_string();
     }
     if n.is_infinite() {
-        return if n.is_sign_positive() {
-            "Inf"
-        } else {
-            "-Inf"
-        }
-        .to_string();
+        return if n.is_sign_positive() { "Inf" } else { "-Inf" }.to_string();
     }
 
     // SQLite typically uses standard decimal notation
@@ -181,10 +176,7 @@ mod tests {
     #[test]
     fn test_coerce_to_string() {
         assert_eq!(coerce_to_string(&SqlValue::Null), None);
-        assert_eq!(
-            coerce_to_string(&SqlValue::Integer(123)),
-            Some("123".to_string())
-        );
+        assert_eq!(coerce_to_string(&SqlValue::Integer(123)), Some("123".to_string()));
         assert_eq!(
             coerce_to_string(&SqlValue::Varchar(arcstr::ArcStr::from("hello"))),
             Some("hello".to_string())
@@ -195,18 +187,9 @@ mod tests {
     fn test_coerce_to_number() {
         assert_eq!(coerce_to_number(&SqlValue::Null), None);
         assert_eq!(coerce_to_number(&SqlValue::Integer(123)), Some(123.0));
-        assert_eq!(
-            coerce_to_number(&SqlValue::Varchar(arcstr::ArcStr::from("456"))),
-            Some(456.0)
-        );
-        assert_eq!(
-            coerce_to_number(&SqlValue::Varchar(arcstr::ArcStr::from("free"))),
-            Some(0.0)
-        );
-        assert_eq!(
-            coerce_to_number(&SqlValue::Varchar(arcstr::ArcStr::from("-5"))),
-            Some(-5.0)
-        );
+        assert_eq!(coerce_to_number(&SqlValue::Varchar(arcstr::ArcStr::from("456"))), Some(456.0));
+        assert_eq!(coerce_to_number(&SqlValue::Varchar(arcstr::ArcStr::from("free"))), Some(0.0));
+        assert_eq!(coerce_to_number(&SqlValue::Varchar(arcstr::ArcStr::from("-5"))), Some(-5.0));
     }
 
     #[test]

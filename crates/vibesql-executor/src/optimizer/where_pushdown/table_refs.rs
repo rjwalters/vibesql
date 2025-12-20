@@ -64,7 +64,11 @@ fn extract_tables_recursive_branch(
                     let column_lower = col_id.column_canonical().to_lowercase();
                     let mut found = false;
                     for (table_name, (_start_idx, table_schema)) in &schema.table_schemas {
-                        if table_schema.columns.iter().any(|col| col.name.to_lowercase() == column_lower) {
+                        if table_schema
+                            .columns
+                            .iter()
+                            .any(|col| col.name.to_lowercase() == column_lower)
+                        {
                             tables.insert(table_name.to_string());
                             found = true;
                         }

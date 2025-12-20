@@ -240,10 +240,7 @@ fn test_substring_wrong_type_string() {
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     // SUBSTR(123, 1) = SUBSTR("123", 1) = "123"
-    assert_eq!(
-        result,
-        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("123"))
-    );
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("123")));
 }
 
 #[test]
@@ -264,10 +261,7 @@ fn test_substring_wrong_type_start() {
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     // "one" coerces to 0, start=0 returns whole string
-    assert_eq!(
-        result,
-        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))
-    );
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")));
 }
 
 #[test]
@@ -289,10 +283,7 @@ fn test_substring_wrong_type_length() {
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     // "two" coerces to 0, length=0 returns empty string
-    assert_eq!(
-        result,
-        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(""))
-    );
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")));
 }
 
 // ============================================================================

@@ -15,11 +15,13 @@ pub fn create_select_stmt(expr: vibesql_ast::Expression, alias: &str) -> vibesql
     vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr,
-            alias: Some(alias.to_string()), source_text: None }],
+            alias: Some(alias.to_string()),
+            source_text: None,
+        }],
         from: None,
         where_clause: None,
         group_by: None,

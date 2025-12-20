@@ -119,12 +119,8 @@ where
         let left_row_count = left_result.as_slice().len();
         if left_row_count > 0 {
             // Determine if INL should be used based on cost estimation
-            let should_use_inl = should_use_inl_for_semi_join(
-                left_row_count,
-                right,
-                condition,
-                database,
-            );
+            let should_use_inl =
+                should_use_inl_for_semi_join(left_row_count, right, condition, database);
 
             if should_use_inl {
                 // Try exact-match INL first (requires full PK coverage)
@@ -291,8 +287,12 @@ where
     if let (Some(using_cols), Some(left_schema), Some(right_schema)) =
         (using_columns.as_ref(), left_schema_for_using, right_schema_for_using)
     {
-        result =
-            remove_duplicate_columns_for_using_join(result, &left_schema, &right_schema, using_cols)?;
+        result = remove_duplicate_columns_for_using_join(
+            result,
+            &left_schema,
+            &right_schema,
+            using_cols,
+        )?;
     }
 
     Ok(result)
@@ -397,9 +397,13 @@ fn generate_natural_join_condition(
     let mut condition: Option<vibesql_ast::Expression> = None;
     for (left_table, left_col, right_table, right_col) in common_columns {
         let equality = vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&left_table, false, &left_col, false))),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::qualified(&left_table, false, &left_col, false),
+            )),
             op: vibesql_ast::BinaryOperator::Equal,
-            right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&right_table, false, &right_col, false))),
+            right: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::qualified(&right_table, false, &right_col, false),
+            )),
         };
 
         condition = Some(match condition {
@@ -587,12 +591,16 @@ fn predicate_references_only_tables(
     table_set: &HashSet<String>,
 ) -> bool {
     match expr {
-        vibesql_ast::Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+        vibesql_ast::Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() =>
+        {
             let t = col_id.table_canonical().unwrap();
             let t_lower = t.to_lowercase();
             table_set.contains(t) || table_set.contains(&t_lower)
         }
-        vibesql_ast::Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+        vibesql_ast::Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+        {
             // Unqualified column - can't determine which table, assume it might be from nullable
             // side Return false to be conservative (keep the predicate)
             false
@@ -716,11 +724,7 @@ fn should_use_inl_for_semi_join(
     };
 
     // Calculate size ratio
-    let ratio = if left_row_count > 0 {
-        right_row_count / left_row_count
-    } else {
-        0
-    };
+    let ratio = if left_row_count > 0 { right_row_count / left_row_count } else { 0 };
 
     // Decision: Use INL if right table is significantly larger than left
     let use_inl = ratio >= INL_SIZE_RATIO_THRESHOLD;
@@ -925,7 +929,9 @@ fn parse_semi_join_condition(
                 vibesql_ast::Expression::ColumnRef(right_col_id),
             ) = (left.as_ref(), right.as_ref())
             {
-                if left_col_id.schema_canonical().is_some() || right_col_id.schema_canonical().is_some() {
+                if left_col_id.schema_canonical().is_some()
+                    || right_col_id.schema_canonical().is_some()
+                {
                     // Schema-qualified, skip this predicate
                     right_only_preds.push(pred);
                     continue;
@@ -1376,9 +1382,23 @@ fn generate_using_join_condition(
 
         // Create equality condition with qualified column references
         let equality = vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&left_col.0.to_string(), false, &left_col.1, false))),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::qualified(
+                    &left_col.0.to_string(),
+                    false,
+                    &left_col.1,
+                    false,
+                ),
+            )),
             op: vibesql_ast::BinaryOperator::Equal,
-            right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&right_col.0.to_string(), false, &right_col.1, false))),
+            right: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::qualified(
+                    &right_col.0.to_string(),
+                    false,
+                    &right_col.1,
+                    false,
+                ),
+            )),
         };
 
         condition = Some(match condition {

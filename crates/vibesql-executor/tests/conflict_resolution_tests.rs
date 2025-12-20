@@ -23,14 +23,10 @@ fn setup_users_table(db: &mut Database) {
                 DataType::Varchar { max_length: Some(100) },
                 false,
             ),
-            ColumnSchema::new(
-                "name".to_string(),
-                DataType::Varchar { max_length: Some(50) },
-                true,
-            ),
+            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, true),
         ],
-        Some(vec!["id".to_string()]),      // Primary key
-        vec![vec!["email".to_string()]],   // Unique constraint on email
+        Some(vec!["id".to_string()]),    // Primary key
+        vec![vec!["email".to_string()]], // Unique constraint on email
     );
     db.create_table(schema).unwrap();
 }
@@ -223,13 +219,13 @@ fn test_update_or_ignore_primary_key_conflict() {
             column: "id".to_string(),
             value: Expression::Literal(SqlValue::Integer(2)),
         }],
-        where_clause: Some(vibesql_ast::WhereClause::Condition(
-            Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
-                op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
-            },
-        )),
+        where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "id", false,
+            ))),
+            op: vibesql_ast::BinaryOperator::Equal,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        })),
         conflict_clause: Some(ConflictClause::Ignore),
     };
 
@@ -241,9 +237,12 @@ fn test_update_or_ignore_primary_key_conflict() {
     assert_eq!(table.row_count(), 2);
 
     // Alice should still have id=1
-    let alice = table.scan().iter().find(|r| {
-        r.values[1] == SqlValue::Varchar(arcstr::ArcStr::from("alice@test.com"))
-    }).unwrap().clone();
+    let alice = table
+        .scan()
+        .iter()
+        .find(|r| r.values[1] == SqlValue::Varchar(arcstr::ArcStr::from("alice@test.com")))
+        .unwrap()
+        .clone();
     assert_eq!(alice.values[0], SqlValue::Integer(1));
 }
 
@@ -264,13 +263,13 @@ fn test_update_or_ignore_unique_constraint_conflict() {
             column: "email".to_string(),
             value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("bob@test.com"))),
         }],
-        where_clause: Some(vibesql_ast::WhereClause::Condition(
-            Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
-                op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
-            },
-        )),
+        where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "id", false,
+            ))),
+            op: vibesql_ast::BinaryOperator::Equal,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        })),
         conflict_clause: Some(ConflictClause::Ignore),
     };
 
@@ -279,9 +278,7 @@ fn test_update_or_ignore_unique_constraint_conflict() {
 
     // Verify Alice's email is unchanged
     let table = db.get_table("users").unwrap();
-    let alice = table.scan().iter().find(|r| {
-        r.values[0] == SqlValue::Integer(1)
-    }).unwrap().clone();
+    let alice = table.scan().iter().find(|r| r.values[0] == SqlValue::Integer(1)).unwrap().clone();
     assert_eq!(alice.values[1], SqlValue::Varchar(arcstr::ArcStr::from("alice@test.com")));
 }
 
@@ -300,13 +297,13 @@ fn test_update_or_ignore_no_conflict() {
             column: "name".to_string(),
             value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice Updated"))),
         }],
-        where_clause: Some(vibesql_ast::WhereClause::Condition(
-            Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
-                op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
-            },
-        )),
+        where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "id", false,
+            ))),
+            op: vibesql_ast::BinaryOperator::Equal,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        })),
         conflict_clause: Some(ConflictClause::Ignore),
     };
 
@@ -340,13 +337,15 @@ fn test_update_or_replace_primary_key_conflict() {
             column: "id".to_string(),
             value: Expression::Literal(SqlValue::Integer(2)),
         }],
-        where_clause: Some(vibesql_ast::WhereClause::Condition(
-            Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("email", false))),
-                op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("alice@test.com")))),
-            },
-        )),
+        where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "email", false,
+            ))),
+            op: vibesql_ast::BinaryOperator::Equal,
+            right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                "alice@test.com",
+            )))),
+        })),
         conflict_clause: Some(ConflictClause::Replace),
     };
 
@@ -379,13 +378,13 @@ fn test_update_or_replace_unique_constraint_conflict() {
             column: "email".to_string(),
             value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("bob@test.com"))),
         }],
-        where_clause: Some(vibesql_ast::WhereClause::Condition(
-            Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
-                op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
-            },
-        )),
+        where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "id", false,
+            ))),
+            op: vibesql_ast::BinaryOperator::Equal,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        })),
         conflict_clause: Some(ConflictClause::Replace),
     };
 
@@ -398,7 +397,11 @@ fn test_update_or_replace_unique_constraint_conflict() {
 
     let row = &table.scan()[0];
     assert_eq!(row.values[0], SqlValue::Integer(1), "Alice should keep her id=1");
-    assert_eq!(row.values[1], SqlValue::Varchar(arcstr::ArcStr::from("bob@test.com")), "Alice should have Bob's email");
+    assert_eq!(
+        row.values[1],
+        SqlValue::Varchar(arcstr::ArcStr::from("bob@test.com")),
+        "Alice should have Bob's email"
+    );
 }
 
 #[test]
@@ -417,13 +420,13 @@ fn test_update_or_replace_no_conflict() {
             column: "name".to_string(),
             value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice Updated"))),
         }],
-        where_clause: Some(vibesql_ast::WhereClause::Condition(
-            Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
-                op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
-            },
-        )),
+        where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "id", false,
+            ))),
+            op: vibesql_ast::BinaryOperator::Equal,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        })),
         conflict_clause: Some(ConflictClause::Replace),
     };
 
@@ -482,13 +485,13 @@ fn test_update_or_ignore_not_null_violation() {
             column: "email".to_string(),
             value: Expression::Literal(SqlValue::Null),
         }],
-        where_clause: Some(vibesql_ast::WhereClause::Condition(
-            Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
-                op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Integer(1))),
-            },
-        )),
+        where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "id", false,
+            ))),
+            op: vibesql_ast::BinaryOperator::Equal,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        })),
         conflict_clause: Some(ConflictClause::Ignore),
     };
 

@@ -49,7 +49,9 @@ impl super::super::Catalog {
                         {
                             // Check if this user-defined type is actually a domain
                             let normalized_type = type_name.to_lowercase();
-                            if self.domains.contains_key(&normalized_type) && normalized_type == normalized_name {
+                            if self.domains.contains_key(&normalized_type)
+                                && normalized_type == normalized_name
+                            {
                                 columns_using_domain
                                     .push((table_name.clone(), column.name.clone()));
                             }

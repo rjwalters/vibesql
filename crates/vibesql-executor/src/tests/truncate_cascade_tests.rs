@@ -30,7 +30,7 @@ fn create_table_with_pk(db: &mut Database, table_name: &str, pk_column: &str) {
             constraints: vec![], // Use table-level PK instead
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![TableConstraint {
             name: None,
@@ -44,8 +44,8 @@ fn create_table_with_pk(db: &mut Database, table_name: &str, pk_column: &str) {
             },
         }],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&stmt, db).unwrap();
 }
@@ -71,7 +71,7 @@ fn create_table_with_fk(
                 constraints: vec![], // Use table-level PK instead
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: fk_column.to_string(),
@@ -80,7 +80,7 @@ fn create_table_with_fk(
                 constraints: vec![], // Use table-level FK instead
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![
@@ -109,8 +109,8 @@ fn create_table_with_fk(
             },
         ],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&stmt, db).unwrap();
 }

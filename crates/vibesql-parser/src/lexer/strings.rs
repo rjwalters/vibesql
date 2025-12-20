@@ -31,7 +31,7 @@ impl<'a> Lexer<'a> {
         }
 
         // Check for even number of hex digits
-        if hex_chars.len() % 2 != 0 {
+        if !hex_chars.len().is_multiple_of(2) {
             return Err(LexerError {
                 message: "Hex blob literal must have even number of digits".to_string(),
                 position: self.position(),

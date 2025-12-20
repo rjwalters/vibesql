@@ -124,7 +124,9 @@ pub fn evaluate_expression(
 
     match expr {
         // Variable, parameter, or session variable reference
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+        {
             let column = col_id.column_canonical();
             // Check if it's a session variable (starts with @)
             if let Some(var_name) = column.strip_prefix('@') {

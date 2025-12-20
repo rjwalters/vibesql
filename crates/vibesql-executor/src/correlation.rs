@@ -252,7 +252,9 @@ fn is_expression_correlated(
 
             // Check if this column exists in outer schema
             // Only relevant for non-self-join cases where the column might be correlated
-            outer_schema.get_column_index(col_id.table_canonical(), col_id.column_canonical()).is_some()
+            outer_schema
+                .get_column_index(col_id.table_canonical(), col_id.column_canonical())
+                .is_some()
         }
 
         Expression::BinaryOp { left, right, .. } => {
@@ -494,18 +496,22 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false)),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
                 name: "tab0".to_string(),
                 alias: None,
                 column_aliases: None,
-            quoted: false,
+                quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col4", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "col4", false,
+                ))),
                 right: Box::new(Expression::Literal(vibesql_types::SqlValue::Float(97.5))),
             }),
             group_by: None,
@@ -533,13 +539,17 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: None,
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("tab0", false, "col3", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                    "tab0", false, "col3", false,
+                ))),
                 right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(5))),
             }),
             group_by: None,
@@ -556,15 +566,23 @@ mod tests {
 
     #[test]
     fn test_empty_outer_schema() {
-        let outer_schema =
-            CombinedSchema { table_schemas: std::collections::HashMap::new(), total_columns: 0, hidden_columns: std::collections::HashSet::new(), outer_schema: None, duplicate_aliases: std::collections::HashSet::new(), joined_columns: std::collections::HashSet::new() };
+        let outer_schema = CombinedSchema {
+            table_schemas: std::collections::HashMap::new(),
+            total_columns: 0,
+            hidden_columns: std::collections::HashSet::new(),
+            outer_schema: None,
+            duplicate_aliases: std::collections::HashSet::new(),
+            joined_columns: std::collections::HashSet::new(),
+        };
 
         let subquery = SelectStmt {
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: None,

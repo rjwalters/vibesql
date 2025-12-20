@@ -179,7 +179,9 @@ impl SelectExecutor<'_> {
                     } else {
                         // Try to extract column name from expression
                         match expr {
-                            vibesql_ast::Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
+                            vibesql_ast::Expression::ColumnRef(col_id) => {
+                                col_id.column_canonical().to_string()
+                            }
                             vibesql_ast::Expression::AggregateFunction { name, .. } => {
                                 name.to_lowercase()
                             }
@@ -241,7 +243,8 @@ impl SelectExecutor<'_> {
             CombinedExpressionEvaluator::with_database(&result_schema, self.database);
 
         // Evaluate ORDER BY expressions and attach sort keys to rows
-        type SortKey = (vibesql_types::SqlValue, vibesql_ast::OrderDirection, Option<vibesql_ast::NullsOrder>);
+        type SortKey =
+            (vibesql_types::SqlValue, vibesql_ast::OrderDirection, Option<vibesql_ast::NullsOrder>);
         let mut rows_with_keys: Vec<(vibesql_storage::Row, Vec<SortKey>)> = Vec::new();
         for row in rows {
             // Clear CSE cache before evaluating each row to prevent column values
@@ -281,7 +284,8 @@ impl SelectExecutor<'_> {
 
             for ((val_a, dir, nulls_order), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
                 // Handle NULLS FIRST/LAST
-                let (a_is_null, b_is_null) = (matches!(val_a, SqlValue::Null), matches!(val_b, SqlValue::Null));
+                let (a_is_null, b_is_null) =
+                    (matches!(val_a, SqlValue::Null), matches!(val_b, SqlValue::Null));
                 if a_is_null || b_is_null {
                     if a_is_null && b_is_null {
                         continue; // Both null, consider equal for this key
@@ -296,7 +300,11 @@ impl SelectExecutor<'_> {
                         }
                     };
                     return if a_is_null {
-                        if nulls_first { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater }
+                        if nulls_first {
+                            std::cmp::Ordering::Less
+                        } else {
+                            std::cmp::Ordering::Greater
+                        }
                     } else if nulls_first {
                         std::cmp::Ordering::Greater
                     } else {
@@ -339,7 +347,10 @@ fn replace_aggregates_with_columns(
         for (i, agg) in order_by_aggregates.iter().enumerate() {
             if format!("{:?}", expr) == format!("{:?}", agg) {
                 // Replace with column reference to the hidden column
-                return Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&format!("__order_by_agg_{}", i), false));
+                return Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    &format!("__order_by_agg_{}", i),
+                    false,
+                ));
             }
         }
     }
@@ -357,7 +368,10 @@ fn replace_aggregates_with_columns(
         },
         Expression::Function { name, args, character_unit } => Expression::Function {
             name: name.clone(),
-            args: args.iter().map(|a| replace_aggregates_with_columns(a, order_by_aggregates, start_idx)).collect(),
+            args: args
+                .iter()
+                .map(|a| replace_aggregates_with_columns(a, order_by_aggregates, start_idx))
+                .collect(),
             character_unit: character_unit.clone(),
         },
         Expression::Cast { expr: inner, data_type, .. } => Expression::Cast {

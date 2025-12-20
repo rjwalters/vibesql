@@ -96,7 +96,11 @@ impl SelectExecutor<'_> {
                                     continue;
                                 }
                                 let col_name = col_schema.name.clone();
-                                table_columns.push((abs_idx, col_name, effective_table_name.clone()));
+                                table_columns.push((
+                                    abs_idx,
+                                    col_name,
+                                    effective_table_name.clone(),
+                                ));
                             }
                         }
 
@@ -173,7 +177,12 @@ impl SelectExecutor<'_> {
                     if let Some(alias_name) = alias {
                         column_names.push(alias_name.clone());
                     } else {
-                        column_names.push(derive_expression_name_impl(expr, schema, source_text, mode));
+                        column_names.push(derive_expression_name_impl(
+                            expr,
+                            schema,
+                            source_text,
+                            mode,
+                        ));
                     }
                 }
             }

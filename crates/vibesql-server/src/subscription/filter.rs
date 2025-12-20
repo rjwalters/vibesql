@@ -89,7 +89,7 @@ impl SubscriptionFilter {
             Expression::Literal(val) => Ok(val.clone()),
 
             Expression::ColumnRef(col_id) => {
-            let column = col_id.column_canonical();
+                let column = col_id.column_canonical();
                 // Look up column by name (case-insensitive)
                 let idx = self
                     .column_indices

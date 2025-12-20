@@ -50,7 +50,10 @@ impl CombinedExpressionEvaluator<'_> {
     /// 1. Explicit COLLATE clause (highest priority)
     /// 2. Column-level collation from CREATE TABLE definition
     /// 3. None (use default binary collation)
-    pub(crate) fn get_expression_collation(&self, expr: &vibesql_ast::Expression) -> Option<String> {
+    pub(crate) fn get_expression_collation(
+        &self,
+        expr: &vibesql_ast::Expression,
+    ) -> Option<String> {
         match expr {
             // Explicit COLLATE has highest priority
             vibesql_ast::Expression::Collate { collation, .. } => Some(collation.clone()),
@@ -258,13 +261,17 @@ impl CombinedExpressionEvaluator<'_> {
                     // Create TableIdentifier for lookup (handles case-insensitive comparison)
                     let table_id = vibesql_catalog::TableIdentifier::from(table_name);
                     let inner_has_table = self.schema.table_schemas.contains_key(&table_id);
-                    let outer_has_table = self.outer_schema.map_or(false, |outer| {
-                        outer.table_schemas.contains_key(&table_id)
-                    });
+                    let outer_has_table = self
+                        .outer_schema
+                        .map_or(false, |outer| outer.table_schemas.contains_key(&table_id));
                     if !inner_has_table && !outer_has_table {
                         // Table qualifier doesn't exist in query - return "no such column" error
                         return Err(ExecutorError::NoSuchColumn {
-                            column_ref: format!("{}.{}", table_display.unwrap_or(table_name), column_display),
+                            column_ref: format!(
+                                "{}.{}",
+                                table_display.unwrap_or(table_name),
+                                column_display
+                            ),
                         });
                     }
                 }
@@ -281,14 +288,17 @@ impl CombinedExpressionEvaluator<'_> {
                         // Look up the table's schema to find rowid_alias_column
                         let table_id = table.map(vibesql_catalog::TableIdentifier::from);
                         if let Some(table_id) = table_id {
-                            if let Some((start_idx, table_schema)) = self.schema.table_schemas.get(&table_id) {
+                            if let Some((start_idx, table_schema)) =
+                                self.schema.table_schemas.get(&table_id)
+                            {
                                 if let Some(ipk_col_idx) = table_schema.rowid_alias_column {
                                     // Return the IPK column value (offset by start_idx in combined row)
                                     let combined_idx = start_idx + ipk_col_idx;
-                                    return row
-                                        .get(combined_idx)
-                                        .cloned()
-                                        .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: combined_idx });
+                                    return row.get(combined_idx).cloned().ok_or(
+                                        ExecutorError::ColumnIndexOutOfBounds {
+                                            index: combined_idx,
+                                        },
+                                    );
                                 }
                             }
                         } else {
@@ -297,10 +307,11 @@ impl CombinedExpressionEvaluator<'_> {
                             for (start_idx, table_schema) in self.schema.table_schemas.values() {
                                 if let Some(ipk_col_idx) = table_schema.rowid_alias_column {
                                     let combined_idx = start_idx + ipk_col_idx;
-                                    return row
-                                        .get(combined_idx)
-                                        .cloned()
-                                        .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: combined_idx });
+                                    return row.get(combined_idx).cloned().ok_or(
+                                        ExecutorError::ColumnIndexOutOfBounds {
+                                            index: combined_idx,
+                                        },
+                                    );
                                 }
                             }
                         }
@@ -350,8 +361,7 @@ impl CombinedExpressionEvaluator<'_> {
                 // FIX for issue #4493: Support chained context resolution for deeply nested subqueries
                 // First try immediate parent (outer_row + outer_schema)
                 if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
-                    if let Some(col_index) = outer_schema.get_column_index(table, column)
-                    {
+                    if let Some(col_index) = outer_schema.get_column_index(table, column) {
                         return outer_row
                             .get(col_index)
                             .cloned()
@@ -364,8 +374,12 @@ impl CombinedExpressionEvaluator<'_> {
                 if let Some(outer_context) = self.outer_context {
                     // Recursively resolve through the context chain
                     // The outer_context will search its own schema, then its outer schema, etc.
-                    if let (Some(outer_row), Some(_)) = (outer_context.outer_row, outer_context.outer_schema) {
-                        if let Some(col_index) = outer_context.schema.get_column_index(table, column) {
+                    if let (Some(outer_row), Some(_)) =
+                        (outer_context.outer_row, outer_context.outer_schema)
+                    {
+                        if let Some(col_index) =
+                            outer_context.schema.get_column_index(table, column)
+                        {
                             return outer_row
                                 .get(col_index)
                                 .cloned()
@@ -375,12 +389,15 @@ impl CombinedExpressionEvaluator<'_> {
                         if let Some(grandparent_context) = outer_context.outer_context {
                             // TODO: This should be a recursive call, but we need to restructure
                             // For now, this provides 3-level nesting support
-                            if let (Some(grandparent_row), Some(_)) = (grandparent_context.outer_row, grandparent_context.outer_schema) {
-                                if let Some(col_index) = grandparent_context.schema.get_column_index(table, column) {
-                                    return grandparent_row
-                                        .get(col_index)
-                                        .cloned()
-                                        .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: col_index });
+                            if let (Some(grandparent_row), Some(_)) =
+                                (grandparent_context.outer_row, grandparent_context.outer_schema)
+                            {
+                                if let Some(col_index) =
+                                    grandparent_context.schema.get_column_index(table, column)
+                                {
+                                    return grandparent_row.get(col_index).cloned().ok_or(
+                                        ExecutorError::ColumnIndexOutOfBounds { index: col_index },
+                                    );
                                 }
                             }
                         }
@@ -401,7 +418,9 @@ impl CombinedExpressionEvaluator<'_> {
 
                 Err(ExecutorError::ColumnNotFound {
                     column_name: column.to_string(),
-                    table_name: table.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string()),
+                    table_name: table
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
                     searched_tables,
                     available_columns,
                 })
@@ -500,13 +519,21 @@ impl CombinedExpressionEvaluator<'_> {
                             if collation_lower == "nocase" {
                                 // For NOCASE collation, uppercase both string values
                                 let left_transformed = match &left_val {
-                                    SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())),
-                                    SqlValue::Character(s) => SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())),
+                                    SqlValue::Varchar(s) => {
+                                        SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase()))
+                                    }
+                                    SqlValue::Character(s) => {
+                                        SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase()))
+                                    }
                                     other => other.clone(),
                                 };
                                 let right_transformed = match &right_val {
-                                    SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())),
-                                    SqlValue::Character(s) => SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())),
+                                    SqlValue::Varchar(s) => {
+                                        SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase()))
+                                    }
+                                    SqlValue::Character(s) => {
+                                        SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase()))
+                                    }
                                     other => other.clone(),
                                 };
                                 (left_transformed, right_transformed)
@@ -630,7 +657,9 @@ impl CombinedExpressionEvaluator<'_> {
                         vibesql_types::SqlValue::Smallint(0) => true,
                         _ => false,
                     },
-                    vibesql_ast::TruthValue::Unknown => matches!(val, vibesql_types::SqlValue::Null),
+                    vibesql_ast::TruthValue::Unknown => {
+                        matches!(val, vibesql_types::SqlValue::Null)
+                    }
                 };
                 let final_result = if *negated { !result } else { result };
                 Ok(vibesql_types::SqlValue::Boolean(final_result))

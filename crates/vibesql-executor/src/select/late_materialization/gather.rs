@@ -219,9 +219,8 @@ pub fn gather_batch(
         // Parallelize when we have enough rows AND multiple columns
         if batch.column_count() > 1 && config.should_parallelize_scan(selection.len()) {
             // Collect column references first (can't fail)
-            let column_refs: Vec<_> = (0..batch.column_count())
-                .map(|col_idx| batch.column(col_idx))
-                .collect();
+            let column_refs: Vec<_> =
+                (0..batch.column_count()).map(|col_idx| batch.column(col_idx)).collect();
 
             // Check all columns exist before parallel processing
             for (col_idx, col_opt) in column_refs.iter().enumerate() {
@@ -275,10 +274,8 @@ pub fn gather_batch_columns(
         // Parallelize when we have enough rows AND multiple columns
         if column_indices.len() > 1 && config.should_parallelize_scan(selection.len()) {
             // Collect column references and validate first
-            let column_refs: Vec<_> = column_indices
-                .iter()
-                .map(|&col_idx| (col_idx, batch.column(col_idx)))
-                .collect();
+            let column_refs: Vec<_> =
+                column_indices.iter().map(|&col_idx| (col_idx, batch.column(col_idx))).collect();
 
             // Check all columns exist before parallel processing
             for &(col_idx, ref col_opt) in &column_refs {
@@ -352,11 +349,7 @@ pub fn gather_rows(rows: &[Row], selection: &SelectionVector) -> Vec<Row> {
     {
         let config = ParallelConfig::global();
         if config.should_parallelize_scan(selection.len()) {
-            return selection
-                .indices()
-                .par_iter()
-                .map(|&idx| rows[idx as usize].clone())
-                .collect();
+            return selection.indices().par_iter().map(|&idx| rows[idx as usize].clone()).collect();
         }
     }
 

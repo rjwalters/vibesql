@@ -67,10 +67,7 @@ impl SharedDatabase {
 /// Test queries for the benchmark - varying complexity levels
 const QUERIES: &[(&str, &str)] = &[
     // Simple point lookup (fast)
-    (
-        "point_lookup",
-        "SELECT * FROM LINEITEM WHERE L_ORDERKEY = 1 AND L_LINENUMBER = 1",
-    ),
+    ("point_lookup", "SELECT * FROM LINEITEM WHERE L_ORDERKEY = 1 AND L_LINENUMBER = 1"),
     // Simple aggregation
     (
         "count_agg",
@@ -122,7 +119,12 @@ struct ExtendedStats {
 }
 
 impl ExtendedStats {
-    fn from_latencies(name: &str, total_queries: usize, elapsed: Duration, latencies: Vec<Duration>) -> Self {
+    fn from_latencies(
+        name: &str,
+        total_queries: usize,
+        elapsed: Duration,
+        latencies: Vec<Duration>,
+    ) -> Self {
         let mut sorted = latencies.clone();
         sorted.sort();
 
@@ -214,12 +216,8 @@ fn run_concurrent(
         .expect("Failed to create tokio runtime");
 
     let shared_db = Arc::new(shared_db.clone());
-    let queries: Arc<Vec<(String, String)>> = Arc::new(
-        queries
-            .iter()
-            .map(|(n, s)| (n.to_string(), s.to_string()))
-            .collect(),
-    );
+    let queries: Arc<Vec<(String, String)>> =
+        Arc::new(queries.iter().map(|(n, s)| (n.to_string(), s.to_string())).collect());
 
     runtime.block_on(async {
         let start = Instant::now();
@@ -269,12 +267,8 @@ fn run_mixed_workload(
         .expect("Failed to create tokio runtime");
 
     let shared_db = Arc::new(shared_db.clone());
-    let queries: Arc<Vec<(String, String)>> = Arc::new(
-        queries
-            .iter()
-            .map(|(n, s)| (n.to_string(), s.to_string()))
-            .collect(),
-    );
+    let queries: Arc<Vec<(String, String)>> =
+        Arc::new(queries.iter().map(|(n, s)| (n.to_string(), s.to_string())).collect());
 
     runtime.block_on(async {
         let start = Instant::now();
@@ -297,7 +291,9 @@ fn run_mixed_workload(
                         // Simulate some write work (spin briefly)
                         std::thread::sleep(std::time::Duration::from_micros(100));
                         start.elapsed()
-                    }).await.map_err(|e| format!("{}", e))
+                    })
+                    .await
+                    .map_err(|e| format!("{}", e))
                 } else {
                     let sql = &qs[query_idx].1;
                     let guard = db.read();
@@ -355,30 +351,20 @@ fn main() {
     eprintln!("=== Concurrent Query Throughput Benchmark ===");
 
     // Configuration from environment
-    let scale_factor: f64 = env::var("SCALE_FACTOR")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0.1);
+    let scale_factor: f64 =
+        env::var("SCALE_FACTOR").ok().and_then(|s| s.parse().ok()).unwrap_or(0.1);
 
-    let concurrency: usize = env::var("CONCURRENCY")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or_else(num_cpus::get);
+    let concurrency: usize =
+        env::var("CONCURRENCY").ok().and_then(|s| s.parse().ok()).unwrap_or_else(num_cpus::get);
 
-    let warmup_iterations: usize = env::var("WARMUP_ITERATIONS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(2);
+    let warmup_iterations: usize =
+        env::var("WARMUP_ITERATIONS").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
 
-    let benchmark_iterations: usize = env::var("BENCHMARK_ITERATIONS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(5);
+    let benchmark_iterations: usize =
+        env::var("BENCHMARK_ITERATIONS").ok().and_then(|s| s.parse().ok()).unwrap_or(5);
 
-    let query_count: usize = env::var("QUERY_COUNT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(100);
+    let query_count: usize =
+        env::var("QUERY_COUNT").ok().and_then(|s| s.parse().ok()).unwrap_or(100);
 
     eprintln!("Configuration:");
     eprintln!("  Scale factor:          {}", scale_factor);
@@ -420,19 +406,27 @@ fn main() {
         // Sequential
         let seq_stats = run_sequential(&shared_db.read(), QUERIES, query_count);
         eprintln!("Sequential:");
-        eprintln!("  QPS: {:.2}, P50: {:?}, P99: {:?}", seq_stats.qps, seq_stats.p50, seq_stats.p99);
+        eprintln!(
+            "  QPS: {:.2}, P50: {:?}, P99: {:?}",
+            seq_stats.qps, seq_stats.p50, seq_stats.p99
+        );
         sequential_results.push(seq_stats);
 
         // Concurrent
         let conc_stats = run_concurrent(&shared_db, QUERIES, query_count, concurrency);
         eprintln!("Concurrent({}):", concurrency);
-        eprintln!("  QPS: {:.2}, P50: {:?}, P99: {:?}", conc_stats.qps, conc_stats.p50, conc_stats.p99);
+        eprintln!(
+            "  QPS: {:.2}, P50: {:?}, P99: {:?}",
+            conc_stats.qps, conc_stats.p50, conc_stats.p99
+        );
         concurrent_results.push(conc_stats);
     }
 
     // Calculate averages
-    let avg_seq_qps: f64 = sequential_results.iter().map(|s| s.qps).sum::<f64>() / benchmark_iterations as f64;
-    let avg_conc_qps: f64 = concurrent_results.iter().map(|s| s.qps).sum::<f64>() / benchmark_iterations as f64;
+    let avg_seq_qps: f64 =
+        sequential_results.iter().map(|s| s.qps).sum::<f64>() / benchmark_iterations as f64;
+    let avg_conc_qps: f64 =
+        concurrent_results.iter().map(|s| s.qps).sum::<f64>() / benchmark_iterations as f64;
     let scaling_factor = avg_conc_qps / avg_seq_qps;
 
     eprintln!("\n=== Summary ===");
@@ -445,9 +439,8 @@ fn main() {
     // ========================================
     eprintln!("\n=== Concurrency Scaling ===");
 
-    let concurrency_levels = [1, 2, 4, 8, 16].into_iter()
-        .filter(|&c| c <= concurrency * 2)
-        .collect::<Vec<_>>();
+    let concurrency_levels =
+        [1, 2, 4, 8, 16].into_iter().filter(|&c| c <= concurrency * 2).collect::<Vec<_>>();
 
     for &c in &concurrency_levels {
         let stats = run_concurrent(&shared_db, QUERIES, query_count, c);
@@ -492,10 +485,7 @@ fn main() {
         let p99 = percentile(&latencies, 0.99);
         let mean: Duration = latencies.iter().sum::<Duration>() / iterations as u32;
 
-        eprintln!(
-            "  {:<15} mean {:>10.2?}, P50 {:>10.2?}, P99 {:>10.2?}",
-            name, mean, p50, p99
-        );
+        eprintln!("  {:<15} mean {:>10.2?}, P50 {:>10.2?}, P99 {:>10.2?}", name, mean, p50, p99);
     }
 
     // Success criteria check
@@ -504,10 +494,10 @@ fn main() {
 
     // P99 latency check: concurrent P99 should not be more than 5x sequential P99
     // (some increase is expected due to task scheduling overhead)
-    let avg_seq_p99: Duration = sequential_results.iter().map(|s| s.p99).sum::<Duration>()
-        / benchmark_iterations as u32;
-    let avg_conc_p99: Duration = concurrent_results.iter().map(|s| s.p99).sum::<Duration>()
-        / benchmark_iterations as u32;
+    let avg_seq_p99: Duration =
+        sequential_results.iter().map(|s| s.p99).sum::<Duration>() / benchmark_iterations as u32;
+    let avg_conc_p99: Duration =
+        concurrent_results.iter().map(|s| s.p99).sum::<Duration>() / benchmark_iterations as u32;
     let p99_ratio = avg_conc_p99.as_secs_f64() / avg_seq_p99.as_secs_f64();
     let pass_p99 = p99_ratio < 5.0;
 

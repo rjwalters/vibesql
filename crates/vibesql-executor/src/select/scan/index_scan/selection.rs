@@ -96,7 +96,9 @@ pub(crate) fn should_use_index_scan(
 
             // Check if this index can be used for WHERE clause
             let can_use_for_where = where_clause
-                .map(|expr| expression_filters_column(expr, &first_indexed_column.expect_column_name()))
+                .map(|expr| {
+                    expression_filters_column(expr, first_indexed_column.expect_column_name())
+                })
                 .unwrap_or(false);
 
             // Count how many leading index columns are pinned by equality predicates
@@ -136,7 +138,9 @@ pub(crate) fn should_use_index_scan(
                         .iter()
                         .map(|item| {
                             let col_name = match &item.expr {
-                                Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
+                                Expression::ColumnRef(col_id) => {
+                                    col_id.column_canonical().to_string()
+                                }
                                 _ => unreachable!(
                                     "can_use_index_for_order_by ensures simple column refs"
                                 ),
@@ -238,7 +242,9 @@ pub(crate) fn expression_filters_column(expr: &Expression, column_name: &str) ->
 /// TODO: Once schema metadata consistently uses canonical forms, change to direct equality
 pub(super) fn is_column_reference(expr: &Expression, column_name: &str) -> bool {
     match expr {
-        Expression::ColumnRef(col_id) => col_id.column_canonical().eq_ignore_ascii_case(column_name),
+        Expression::ColumnRef(col_id) => {
+            col_id.column_canonical().eq_ignore_ascii_case(column_name)
+        }
         _ => false,
     }
 }
@@ -336,12 +342,16 @@ pub(crate) fn can_use_index_for_order_by_with_pinned(
     for (order_item, index_col) in order_items.iter().zip(remaining_index_columns.iter()) {
         // ORDER BY expression must be a simple column reference
         let order_col_name = match &order_item.expr {
-            Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => col_id.column_canonical(),
+            Expression::ColumnRef(col_id)
+                if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+            {
+                col_id.column_canonical()
+            }
             _ => return false, // Complex expressions not supported
         };
 
         // Column names must match (case-insensitive due to SQL identifier normalization)
-        if !order_col_name.eq_ignore_ascii_case(&index_col.expect_column_name()) {
+        if !order_col_name.eq_ignore_ascii_case(index_col.expect_column_name()) {
             return false;
         }
 
@@ -387,7 +397,7 @@ pub(crate) fn count_pinned_index_columns(
     for index_col in index_columns {
         // Check if this index column is pinned (case-insensitive match)
         let is_pinned =
-            pinned_columns.iter().any(|c| c.eq_ignore_ascii_case(&index_col.expect_column_name()));
+            pinned_columns.iter().any(|c| c.eq_ignore_ascii_case(index_col.expect_column_name()));
         if is_pinned {
             count += 1;
         } else {
@@ -588,7 +598,9 @@ pub(crate) fn cost_based_index_selection(
                         .iter()
                         .map(|item| {
                             let col_name = match &item.expr {
-                                Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
+                                Expression::ColumnRef(col_id) => {
+                                    col_id.column_canonical().to_string()
+                                }
                                 _ => unreachable!(
                                     "can_use_index_for_order_by ensures simple column refs"
                                 ),
@@ -851,7 +863,9 @@ mod tests {
     fn test_expression_filters_column_simple() {
         let expr = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "age", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(25))),
         };
 
@@ -865,12 +879,16 @@ mod tests {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "age", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(18))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("city", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "city", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "Boston",
                 )))),
@@ -908,7 +926,9 @@ mod tests {
         // WHERE I_ID = 42 (uppercase from parser)
         let expr = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("I_ID", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "I_ID", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Integer(42))),
         };
 

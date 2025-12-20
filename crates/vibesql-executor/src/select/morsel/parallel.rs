@@ -389,8 +389,10 @@ pub fn morsel_parallel_group<K, M>(
 ) -> AHashMap<Vec<SqlValue>, Vec<Row>>
 where
     K: Fn(&Row) -> Vec<SqlValue> + Sync + Send,
-    M: Fn(AHashMap<Vec<SqlValue>, Vec<Row>>, AHashMap<Vec<SqlValue>, Vec<Row>>)
-            -> AHashMap<Vec<SqlValue>, Vec<Row>>
+    M: Fn(
+            AHashMap<Vec<SqlValue>, Vec<Row>>,
+            AHashMap<Vec<SqlValue>, Vec<Row>>,
+        ) -> AHashMap<Vec<SqlValue>, Vec<Row>>
         + Sync
         + Send,
 {

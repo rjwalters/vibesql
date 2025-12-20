@@ -47,12 +47,9 @@ fn create_test_tables(db: &mut Database) {
     db.create_table(schema1).unwrap();
 
     let t1 = db.get_table_mut("t1").unwrap();
-    t1.insert(Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100)]))
-        .unwrap();
-    t1.insert(Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(200)]))
-        .unwrap();
-    t1.insert(Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(300)]))
-        .unwrap();
+    t1.insert(Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100)])).unwrap();
+    t1.insert(Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(200)])).unwrap();
+    t1.insert(Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(300)])).unwrap();
 
     // Create t2 (id, t1_id, category)
     let schema2 = TableSchema::new(

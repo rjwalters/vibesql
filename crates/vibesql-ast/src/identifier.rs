@@ -191,17 +191,11 @@ impl TableIdentifier {
         table_name: &str,
         table_quoted: bool,
     ) -> Self {
-        let schema_canonical = if schema_quoted {
-            schema_name.to_string()
-        } else {
-            schema_name.to_ascii_lowercase()
-        };
+        let schema_canonical =
+            if schema_quoted { schema_name.to_string() } else { schema_name.to_ascii_lowercase() };
 
-        let table_canonical = if table_quoted {
-            table_name.to_string()
-        } else {
-            table_name.to_ascii_lowercase()
-        };
+        let table_canonical =
+            if table_quoted { table_name.to_string() } else { table_name.to_ascii_lowercase() };
 
         let canonical = format!("{}.{}", schema_canonical, table_canonical);
         let display = format!("{}.{}", schema_name, table_name);
@@ -442,11 +436,8 @@ impl ColumnIdentifier {
     /// assert_eq!(c.display(), "MyColumn");
     /// ```
     pub fn simple(column: &str, quoted: bool) -> Self {
-        let column_canonical = if quoted {
-            column.to_string()
-        } else {
-            column.to_ascii_lowercase()
-        };
+        let column_canonical =
+            if quoted { column.to_string() } else { column.to_ascii_lowercase() };
 
         Self {
             schema_canonical: None,
@@ -482,23 +473,12 @@ impl ColumnIdentifier {
     /// assert_eq!(c.table_canonical(), Some("users"));
     /// assert_eq!(c.column_canonical(), "id");
     /// ```
-    pub fn qualified(
-        table: &str,
-        table_quoted: bool,
-        column: &str,
-        column_quoted: bool,
-    ) -> Self {
-        let table_canonical = if table_quoted {
-            table.to_string()
-        } else {
-            table.to_ascii_lowercase()
-        };
+    pub fn qualified(table: &str, table_quoted: bool, column: &str, column_quoted: bool) -> Self {
+        let table_canonical =
+            if table_quoted { table.to_string() } else { table.to_ascii_lowercase() };
 
-        let column_canonical = if column_quoted {
-            column.to_string()
-        } else {
-            column.to_ascii_lowercase()
-        };
+        let column_canonical =
+            if column_quoted { column.to_string() } else { column.to_ascii_lowercase() };
 
         let canonical = format!("{}.{}", table_canonical, column_canonical);
         let display = format!("{}.{}", table, column);
@@ -549,23 +529,14 @@ impl ColumnIdentifier {
         column: &str,
         column_quoted: bool,
     ) -> Self {
-        let schema_canonical = if schema_quoted {
-            schema.to_string()
-        } else {
-            schema.to_ascii_lowercase()
-        };
+        let schema_canonical =
+            if schema_quoted { schema.to_string() } else { schema.to_ascii_lowercase() };
 
-        let table_canonical = if table_quoted {
-            table.to_string()
-        } else {
-            table.to_ascii_lowercase()
-        };
+        let table_canonical =
+            if table_quoted { table.to_string() } else { table.to_ascii_lowercase() };
 
-        let column_canonical = if column_quoted {
-            column.to_string()
-        } else {
-            column.to_ascii_lowercase()
-        };
+        let column_canonical =
+            if column_quoted { column.to_string() } else { column.to_ascii_lowercase() };
 
         let canonical = format!("{}.{}.{}", schema_canonical, table_canonical, column_canonical);
         let display = format!("{}.{}.{}", schema, table, column);
@@ -921,10 +892,7 @@ impl FunctionIdentifier {
     /// The canonical form is lowercased for case-insensitive comparison,
     /// while the display form preserves the original case for error messages.
     pub fn new(name: &str) -> Self {
-        Self {
-            canonical: name.to_lowercase(),
-            display: name.to_string(),
-        }
+        Self { canonical: name.to_lowercase(), display: name.to_string() }
     }
 
     /// Get the canonical (lowercase) form for comparison.
@@ -1406,9 +1374,9 @@ mod tests {
     #[test]
     fn test_column_fully_qualified() {
         let c = ColumnIdentifier::fully_qualified(
-            "myApp", true,  // quoted schema
+            "myApp", true, // quoted schema
             "users", false, // unquoted table
-            "ID", false,    // unquoted column
+            "ID", false, // unquoted column
         );
         assert_eq!(c.canonical(), "myApp.users.id");
         assert_eq!(c.schema_canonical(), Some("myApp"));
@@ -1643,9 +1611,9 @@ mod tests {
 
         // Fully qualified
         let fq = ColumnIdentifier::fully_qualified(
-            "myApp", true,  // quoted schema
+            "myApp", true, // quoted schema
             "users", false, // unquoted table
-            "ID", false,    // unquoted column
+            "ID", false, // unquoted column
         );
         assert_eq!(fq.canonical(), "myApp.users.id");
     }
@@ -1662,9 +1630,7 @@ mod tests {
         assert!(qualified.is_qualified());
         assert!(!qualified.is_fully_qualified());
 
-        let fully = ColumnIdentifier::fully_qualified(
-            "myapp", false, "users", false, "id", false,
-        );
+        let fully = ColumnIdentifier::fully_qualified("myapp", false, "users", false, "id", false);
         assert!(!fully.is_ambiguous());
         assert!(fully.is_qualified());
         assert!(fully.is_fully_qualified());

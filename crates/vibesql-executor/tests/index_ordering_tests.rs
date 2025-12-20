@@ -19,7 +19,7 @@ fn test_index_ordering() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             vibesql_ast::ColumnDef {
                 name: "name".to_string(),
@@ -28,19 +28,22 @@ fn test_index_ordering() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     vibesql_executor::CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
 
     // Insert data
-    let insert_stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert_stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![
@@ -89,8 +92,12 @@ fn test_index_ordering() {
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
-            alias: None, source_text: None }],
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "name", false,
+            )),
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
@@ -103,14 +110,16 @@ fn test_index_ordering() {
         group_by: None,
         having: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "name", false,
+            )),
             direction: OrderDirection::Asc,
             nulls_order: None,
         }]),
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     let executor = SelectExecutor::new(&db);

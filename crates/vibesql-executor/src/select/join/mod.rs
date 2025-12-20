@@ -471,11 +471,12 @@ pub(super) fn nested_loop_join(
                 // Use multi-column hash join if there are 2+ join columns
                 if multi_result.equi_joins.left_col_indices.len() >= 2 {
                     // Save schemas for NATURAL JOIN processing before moving left/right
-                    let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
-                        (Some(left.schema.clone()), Some(right.schema.clone()))
-                    } else {
-                        (None, None)
-                    };
+                    let (left_schema_for_dedup, right_schema_for_dedup) =
+                        if natural || using_columns.is_some() {
+                            (Some(left.schema.clone()), Some(right.schema.clone()))
+                        } else {
+                            (None, None)
+                        };
 
                     let mut result = hash_join_inner_multi(
                         left,
@@ -529,11 +530,12 @@ pub(super) fn nested_loop_join(
 
                 // Single-column equi-join: use standard hash join (more efficient for single key)
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
-                    (Some(left.schema.clone()), Some(right.schema.clone()))
-                } else {
-                    (None, None)
-                };
+                let (left_schema_for_dedup, right_schema_for_dedup) =
+                    if natural || using_columns.is_some() {
+                        (Some(left.schema.clone()), Some(right.schema.clone()))
+                    } else {
+                        (None, None)
+                    };
 
                 let mut result = hash_join_inner(
                     left,
@@ -588,11 +590,12 @@ pub(super) fn nested_loop_join(
                 join_analyzer::analyze_or_equi_join(cond, &temp_schema, left_col_count)
             {
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
-                    (Some(left.schema.clone()), Some(right.schema.clone()))
-                } else {
-                    (None, None)
-                };
+                let (left_schema_for_dedup, right_schema_for_dedup) =
+                    if natural || using_columns.is_some() {
+                        (Some(left.schema.clone()), Some(right.schema.clone()))
+                    } else {
+                        (None, None)
+                    };
 
                 let mut result = hash_join_inner(
                     left,
@@ -646,11 +649,12 @@ pub(super) fn nested_loop_join(
                 join_analyzer::analyze_arithmetic_equi_join(cond, &temp_schema, left_col_count)
             {
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
-                    (Some(left.schema.clone()), Some(right.schema.clone()))
-                } else {
-                    (None, None)
-                };
+                let (left_schema_for_dedup, right_schema_for_dedup) =
+                    if natural || using_columns.is_some() {
+                        (Some(left.schema.clone()), Some(right.schema.clone()))
+                    } else {
+                        (None, None)
+                    };
 
                 let mut result = hash_join_inner_arithmetic(
                     left,
@@ -714,11 +718,12 @@ pub(super) fn nested_loop_join(
             // If we found 2+ equi-join conditions, use multi-column hash join
             if left_col_indices.len() >= 2 {
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
-                    (Some(left.schema.clone()), Some(right.schema.clone()))
-                } else {
-                    (None, None)
-                };
+                let (left_schema_for_dedup, right_schema_for_dedup) =
+                    if natural || using_columns.is_some() {
+                        (Some(left.schema.clone()), Some(right.schema.clone()))
+                    } else {
+                        (None, None)
+                    };
 
                 let mut result =
                     hash_join_inner_multi(left, right, &left_col_indices, &right_col_indices)?;
@@ -775,11 +780,12 @@ pub(super) fn nested_loop_join(
                 join_analyzer::analyze_equi_join(equijoin, &temp_schema, left_col_count)
             {
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
-                    (Some(left.schema.clone()), Some(right.schema.clone()))
-                } else {
-                    (None, None)
-                };
+                let (left_schema_for_dedup, right_schema_for_dedup) =
+                    if natural || using_columns.is_some() {
+                        (Some(left.schema.clone()), Some(right.schema.clone()))
+                    } else {
+                        (None, None)
+                    };
 
                 // Found a WHERE clause equijoin suitable for hash join!
                 let mut result = hash_join_inner(
@@ -842,11 +848,12 @@ pub(super) fn nested_loop_join(
                 join_analyzer::analyze_arithmetic_equi_join(equijoin, &temp_schema, left_col_count)
             {
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
-                    (Some(left.schema.clone()), Some(right.schema.clone()))
-                } else {
-                    (None, None)
-                };
+                let (left_schema_for_dedup, right_schema_for_dedup) =
+                    if natural || using_columns.is_some() {
+                        (Some(left.schema.clone()), Some(right.schema.clone()))
+                    } else {
+                        (None, None)
+                    };
 
                 // Found an arithmetic equijoin suitable for hash join!
                 let mut result = hash_join_inner_arithmetic(
@@ -921,11 +928,12 @@ pub(super) fn nested_loop_join(
                 join_analyzer::analyze_multi_column_equi_join(cond, &temp_schema, left_col_count)
             {
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
-                    (Some(left.schema.clone()), Some(right.schema.clone()))
-                } else {
-                    (None, None)
-                };
+                let (left_schema_for_dedup, right_schema_for_dedup) =
+                    if natural || using_columns.is_some() {
+                        (Some(left.schema.clone()), Some(right.schema.clone()))
+                    } else {
+                        (None, None)
+                    };
 
                 // Use multi-column hash join when there are multiple equi-join columns
                 // This ensures all equi-join conditions are matched during hash lookup,
@@ -1206,15 +1214,18 @@ pub(super) fn nested_loop_join(
         if let (Some(ref left_schema), Some(ref right_schema)) =
             (left_schema_for_dedup, right_schema_for_dedup)
         {
-            result =
-                remove_duplicate_columns_for_natural_join(result, left_schema, right_schema)?;
+            result = remove_duplicate_columns_for_natural_join(result, left_schema, right_schema)?;
         }
     } else if let Some(using_cols) = using_columns {
         if let (Some(ref left_schema), Some(ref right_schema)) =
             (left_schema_for_dedup, right_schema_for_dedup)
         {
-            result =
-                remove_duplicate_columns_for_using_join(result, left_schema, right_schema, using_cols)?;
+            result = remove_duplicate_columns_for_using_join(
+                result,
+                left_schema,
+                right_schema,
+                using_cols,
+            )?;
         }
     }
 
@@ -1296,8 +1307,7 @@ fn remove_duplicate_columns_for_using_join(
     use std::collections::HashSet;
 
     // Create a set of USING column names (lowercase for case-insensitive comparison)
-    let using_cols_lower: HashSet<String> =
-        using_cols.iter().map(|c| c.to_lowercase()).collect();
+    let using_cols_lower: HashSet<String> = using_cols.iter().map(|c| c.to_lowercase()).collect();
 
     // Mark all USING columns as "joined columns" so they won't be
     // considered ambiguous when referenced without table qualification (issue #4517)

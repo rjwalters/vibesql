@@ -271,7 +271,7 @@ impl SelectExecutor<'_> {
                         }
                     }
                 }
-                SelectItem::Expression { expr, alias: col_alias , .. } => {
+                SelectItem::Expression { expr, alias: col_alias, .. } => {
                     // Use alias if provided, otherwise derive from expression
                     let col_name = if let Some(a) = col_alias {
                         a.clone()
@@ -614,7 +614,12 @@ impl SelectExecutor<'_> {
                 // Collect aliases from all UNION branches for ORDER BY resolution
                 // Pass database to enable wildcard expansion using table schemas
                 let all_aliases = collect_union_aliases(self.database, stmt);
-                results = self.sort_set_operation_results(results, order_by, &stmt.select_list, &all_aliases)?;
+                results = self.sort_set_operation_results(
+                    results,
+                    order_by,
+                    &stmt.select_list,
+                    &all_aliases,
+                )?;
             }
 
             // Apply LIMIT/OFFSET to the final result (after all set operations and ORDER BY)
@@ -1059,11 +1064,8 @@ impl SelectExecutor<'_> {
             // Pass select_list for table elimination optimization (#3556)
             //
             // Don't pass ORDER BY if there's a set operation - it will be handled at the set operation level
-            let order_by_hint = if stmt.set_operation.is_some() {
-                None
-            } else {
-                stmt.order_by.as_deref()
-            };
+            let order_by_hint =
+                if stmt.set_operation.is_some() { None } else { stmt.order_by.as_deref() };
             let limit_val = stmt
                 .limit
                 .as_ref()
@@ -1185,12 +1187,12 @@ impl SelectExecutor<'_> {
         // If the right side has more set operations, continue processing them
         // This creates the left-to-right evaluation: ((A op B) op C) op D
         if let Some(next_set_op) = &right_stmt.set_operation {
-            left_results = self.execute_set_operations(left_results, next_set_op, cte_results, collations)?;
+            left_results =
+                self.execute_set_operations(left_results, next_set_op, cte_results, collations)?;
         }
 
         Ok(left_results)
     }
-
 }
 
 /// Extract column names from a FROM clause for wildcard expansion
@@ -1256,7 +1258,9 @@ fn collect_select_aliases(
                 } else {
                     // Derive from expression - use column name for ColumnRef
                     match expr {
-                        vibesql_ast::Expression::ColumnRef(col_id) => Some(col_id.column_canonical().to_string()),
+                        vibesql_ast::Expression::ColumnRef(col_id) => {
+                            Some(col_id.column_canonical().to_string())
+                        }
                         _ => None,
                     }
                 };
@@ -1381,14 +1385,18 @@ impl SelectExecutor<'_> {
 
         // Build column name map from the first branch's aliases (with wildcards already expanded)
         // The all_union_aliases already contains expanded column names from collect_union_aliases
-        let column_info: Vec<(String, Option<String>)> = if let Some(first_branch) = all_union_aliases.first() {
-            first_branch.iter().map(|name_opt| {
-                let name = name_opt.clone().unwrap_or_else(|| "?column?".to_string());
-                (name, None) // Original name is the same as alias for expanded wildcards
-            }).collect()
-        } else {
-            Vec::new()
-        };
+        let column_info: Vec<(String, Option<String>)> =
+            if let Some(first_branch) = all_union_aliases.first() {
+                first_branch
+                    .iter()
+                    .map(|name_opt| {
+                        let name = name_opt.clone().unwrap_or_else(|| "?column?".to_string());
+                        (name, None) // Original name is the same as alias for expanded wildcards
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
 
         // Parse order_by items and resolve to column indices
         // (column_index, is_desc, nulls_first, collation)
@@ -1463,7 +1471,10 @@ impl SelectExecutor<'_> {
                 let val_b = b.values.get(*col_idx);
 
                 // Handle NULLs according to nulls_first setting
-                let cmp = match (val_a.map(|v| v.is_null()).unwrap_or(true), val_b.map(|v| v.is_null()).unwrap_or(true)) {
+                let cmp = match (
+                    val_a.map(|v| v.is_null()).unwrap_or(true),
+                    val_b.map(|v| v.is_null()).unwrap_or(true),
+                ) {
                     (true, true) => Ordering::Equal,
                     (true, false) => {
                         if *nulls_first {
@@ -1484,8 +1495,16 @@ impl SelectExecutor<'_> {
                         match (val_a, val_b) {
                             (Some(a_val), Some(b_val)) => {
                                 // Apply collation if specified
-                                let cmp = compare_sql_values_with_collation(a_val, b_val, collation.as_deref());
-                                if *is_desc { cmp.reverse() } else { cmp }
+                                let cmp = compare_sql_values_with_collation(
+                                    a_val,
+                                    b_val,
+                                    collation.as_deref(),
+                                );
+                                if *is_desc {
+                                    cmp.reverse()
+                                } else {
+                                    cmp
+                                }
                             }
                             _ => Ordering::Equal, // Shouldn't happen since we checked is_null above
                         }

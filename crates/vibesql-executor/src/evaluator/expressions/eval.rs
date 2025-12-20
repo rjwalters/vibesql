@@ -15,7 +15,10 @@ impl ExpressionEvaluator<'_> {
     /// This is used to implement SQLite's type affinity rules for comparisons:
     /// - TEXT column vs INTEGER literal → convert INTEGER to TEXT, string compare
     /// - Bare column (NONE affinity) vs INTEGER → type ordering (TEXT > INTEGER)
-    pub(super) fn get_expression_affinity(&self, expr: &vibesql_ast::Expression) -> Option<TypeAffinity> {
+    pub(super) fn get_expression_affinity(
+        &self,
+        expr: &vibesql_ast::Expression,
+    ) -> Option<TypeAffinity> {
         match expr {
             vibesql_ast::Expression::ColumnRef(col_id) => {
                 // Look up the column in the schema to get its declared type
@@ -47,7 +50,10 @@ impl ExpressionEvaluator<'_> {
     /// in the column definition within the CREATE TABLE statement."
     ///
     /// Explicit COLLATE in the query overrides column-level collation.
-    pub(super) fn get_expression_collation(&self, expr: &vibesql_ast::Expression) -> Option<String> {
+    pub(super) fn get_expression_collation(
+        &self,
+        expr: &vibesql_ast::Expression,
+    ) -> Option<String> {
         match expr {
             // Explicit COLLATE has highest priority
             vibesql_ast::Expression::Collate { collation, .. } => Some(collation.clone()),

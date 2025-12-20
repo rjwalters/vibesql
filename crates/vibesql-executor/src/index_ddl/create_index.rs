@@ -126,7 +126,9 @@ impl CreateIndexExecutor {
                 if prefix_len > MAX_PREFIX_LENGTH {
                     return Err(ExecutorError::InvalidIndexDefinition(format!(
                         "Prefix length {} is too large for column '{}' (maximum: {})",
-                        prefix_len, index_col.expect_column_name(), MAX_PREFIX_LENGTH
+                        prefix_len,
+                        index_col.expect_column_name(),
+                        MAX_PREFIX_LENGTH
                     )));
                 }
             }
@@ -505,7 +507,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                generated_expr: None,
+                    generated_expr: None,
                 },
                 ColumnDef {
                     name: "email".to_string(),
@@ -514,7 +516,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                generated_expr: None,
+                    generated_expr: None,
                 },
                 ColumnDef {
                     name: "name".to_string(),
@@ -523,7 +525,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                generated_expr: None,
+                    generated_expr: None,
                 },
             ],
             table_constraints: vec![],
@@ -815,7 +817,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                generated_expr: None,
+                    generated_expr: None,
                 },
                 ColumnDef {
                     name: "embedding".to_string(),
@@ -824,7 +826,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                generated_expr: None,
+                    generated_expr: None,
                 },
                 ColumnDef {
                     name: "content".to_string(),
@@ -833,7 +835,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                generated_expr: None,
+                    generated_expr: None,
                 },
             ],
             table_constraints: vec![],

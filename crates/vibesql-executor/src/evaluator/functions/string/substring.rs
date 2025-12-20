@@ -50,11 +50,7 @@ pub(in crate::evaluator::functions) fn substring(
     };
 
     // Extract optional length with coercion
-    let length = if let Some(len_val) = length_val {
-        coerce_to_integer(len_val)
-    } else {
-        None
-    };
+    let length = if let Some(len_val) = length_val { coerce_to_integer(len_val) } else { None };
 
     // Work with characters (not bytes) for proper UTF-8 handling
     let chars: Vec<char> = s.chars().collect();

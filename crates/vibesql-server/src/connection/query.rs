@@ -20,7 +20,9 @@ use crate::{
     subscription::SubscriptionManager,
 };
 
-use super::protocol::{send_error_response, send_empty_query_response, send_query_result, send_ready_for_query};
+use super::protocol::{
+    send_empty_query_response, send_error_response, send_query_result, send_ready_for_query,
+};
 use super::subscription::{broadcast_mutation, notify_affected_subscriptions};
 use super::TableMutationNotification;
 

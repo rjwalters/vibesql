@@ -66,9 +66,7 @@ use self::extended::{
     handle_sync, ExtendedQueryState,
 };
 use self::io::read_message;
-use self::protocol::{
-    send_backend_key_data, send_parameter_status, send_ready_for_query,
-};
+use self::protocol::{send_backend_key_data, send_parameter_status, send_ready_for_query};
 use self::query::execute_query;
 use self::subscription::{handle_cross_connection_notification, handle_subscribe};
 
@@ -239,17 +237,47 @@ impl ConnectionHandler {
                 info!("User '{}' connected to database '{}'", user, database);
 
                 // Send startup complete messages
-                send_parameter_status(&mut self.write_half, &mut self.write_buf, "server_version", "14.0 (VibeSQL)").await?;
-                send_parameter_status(&mut self.write_half, &mut self.write_buf, "server_encoding", "UTF8").await?;
-                send_parameter_status(&mut self.write_half, &mut self.write_buf, "client_encoding", "UTF8").await?;
-                send_parameter_status(&mut self.write_half, &mut self.write_buf, "DateStyle", "ISO, MDY").await?;
-                send_parameter_status(&mut self.write_half, &mut self.write_buf, "TimeZone", "UTC").await?;
+                send_parameter_status(
+                    &mut self.write_half,
+                    &mut self.write_buf,
+                    "server_version",
+                    "14.0 (VibeSQL)",
+                )
+                .await?;
+                send_parameter_status(
+                    &mut self.write_half,
+                    &mut self.write_buf,
+                    "server_encoding",
+                    "UTF8",
+                )
+                .await?;
+                send_parameter_status(
+                    &mut self.write_half,
+                    &mut self.write_buf,
+                    "client_encoding",
+                    "UTF8",
+                )
+                .await?;
+                send_parameter_status(
+                    &mut self.write_half,
+                    &mut self.write_buf,
+                    "DateStyle",
+                    "ISO, MDY",
+                )
+                .await?;
+                send_parameter_status(&mut self.write_half, &mut self.write_buf, "TimeZone", "UTC")
+                    .await?;
 
                 // Send backend key data (for cancel requests)
                 send_backend_key_data(&mut self.write_half, &mut self.write_buf).await?;
 
                 // Send ready for query
-                send_ready_for_query(&mut self.write_half, &mut self.write_buf, TransactionStatus::Idle).await?;
+                send_ready_for_query(
+                    &mut self.write_half,
+                    &mut self.write_buf,
+                    TransactionStatus::Idle,
+                )
+                .await?;
 
                 Ok(())
             }

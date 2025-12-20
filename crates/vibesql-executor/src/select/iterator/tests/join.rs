@@ -71,9 +71,13 @@ fn test_lazy_nested_loop_join_inner_with_condition() {
 
     // Condition: t1.id = t2.id (column 0 = column 2)
     let condition = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false))),
+        left: Box::new(vibesql_ast::Expression::ColumnRef(
+            vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false),
+        )),
         op: vibesql_ast::BinaryOperator::Equal,
-        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false))),
+        right: Box::new(vibesql_ast::Expression::ColumnRef(
+            vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false),
+        )),
     };
 
     let mut join = LazyNestedLoopJoin::new(
@@ -126,9 +130,13 @@ fn test_lazy_nested_loop_join_left_outer() {
 
     // Condition: t1.id = t2.id
     let condition = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false))),
+        left: Box::new(vibesql_ast::Expression::ColumnRef(
+            vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false),
+        )),
         op: vibesql_ast::BinaryOperator::Equal,
-        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false))),
+        right: Box::new(vibesql_ast::Expression::ColumnRef(
+            vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false),
+        )),
     };
 
     let mut join = LazyNestedLoopJoin::new(

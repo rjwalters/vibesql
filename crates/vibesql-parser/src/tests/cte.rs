@@ -205,7 +205,8 @@ fn test_parse_cte_with_values_multiple_columns() {
 
 #[test]
 fn test_parse_cte_with_values_and_column_names() {
-    let result = Parser::parse_sql("WITH t(x, y) AS (VALUES(1, 'a'), (2, 'b')) SELECT x, y FROM t;");
+    let result =
+        Parser::parse_sql("WITH t(x, y) AS (VALUES(1, 'a'), (2, 'b')) SELECT x, y FROM t;");
     assert!(result.is_ok(), "CTE with VALUES and column names should parse: {:?}", result);
 }
 
@@ -219,9 +220,7 @@ fn test_parse_recursive_cte_with_values() {
 
 #[test]
 fn test_parse_cte_with_values_union_select() {
-    let result = Parser::parse_sql(
-        "WITH t AS (VALUES(1) UNION SELECT 2) SELECT * FROM t;",
-    );
+    let result = Parser::parse_sql("WITH t AS (VALUES(1) UNION SELECT 2) SELECT * FROM t;");
     assert!(result.is_ok(), "CTE with VALUES UNION SELECT should parse: {:?}", result);
 }
 

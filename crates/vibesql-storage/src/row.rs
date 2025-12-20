@@ -57,33 +57,21 @@ impl Row {
     ///
     /// Accepts any iterable that can be converted into a SmallVec.
     pub fn new(values: impl Into<RowValues>) -> Self {
-        Row {
-            values: values.into(),
-            row_id: None,
-            row_ids: None,
-        }
+        Row { values: values.into(), row_id: None, row_ids: None }
     }
 
     /// Create a new row from a Vec of values.
     ///
     /// This is a convenience method that accepts Vec<SqlValue> directly.
     pub fn from_vec(values: Vec<SqlValue>) -> Self {
-        Row {
-            values: SmallVec::from_vec(values),
-            row_id: None,
-            row_ids: None,
-        }
+        Row { values: SmallVec::from_vec(values), row_id: None, row_ids: None }
     }
 
     /// Create a new row with a specific row ID
     ///
     /// Used during table scans to preserve ROWID for SQLite compatibility.
     pub fn with_row_id(values: impl Into<RowValues>, row_id: u64) -> Self {
-        Row {
-            values: values.into(),
-            row_id: Some(row_id),
-            row_ids: None,
-        }
+        Row { values: values.into(), row_id: Some(row_id), row_ids: None }
     }
 
     /// Create a new row with per-table row IDs (for JOIN results)

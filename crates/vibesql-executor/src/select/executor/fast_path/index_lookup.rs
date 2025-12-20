@@ -47,7 +47,11 @@ impl SelectExecutor<'_> {
         // Only applies when LIMIT is specified
         let limit = match &stmt.limit {
             Some(expr) => {
-                let val = crate::select::helpers::evaluate_limit_offset_expr(expr, self.database, "LIMIT")?;
+                let val = crate::select::helpers::evaluate_limit_offset_expr(
+                    expr,
+                    self.database,
+                    "LIMIT",
+                )?;
                 if val > 0 {
                     val
                 } else {
@@ -471,8 +475,7 @@ impl SelectExecutor<'_> {
                 // Apply LIMIT/OFFSET
                 let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
                 let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
-                let limited_rows =
-                    crate::select::helpers::apply_limit_offset(rows, limit, offset);
+                let limited_rows = crate::select::helpers::apply_limit_offset(rows, limit, offset);
 
                 return Ok(Some(limited_rows));
             }

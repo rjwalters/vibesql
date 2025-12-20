@@ -69,12 +69,16 @@ fn test_group_by_select_alias() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept", false)),
-                alias: Some("department".to_string()), source_text: None },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "dept", false,
+                )),
+                alias: Some("department".to_string()),
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: vibesql_ast::FunctionIdentifier::new("COUNT"),
@@ -82,9 +86,12 @@ fn test_group_by_select_alias() {
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
         ],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
@@ -92,7 +99,10 @@ fn test_group_by_select_alias() {
         where_clause: None,
         // GROUP BY "department" - uses alias from SELECT list
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
-            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("department", false)),
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "department",
+                false,
+            )),
         ])),
         having: None,
         order_by: None,
@@ -184,12 +194,16 @@ fn test_group_by_numeric_position() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept", false)),
-                alias: None, source_text: None },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "dept", false,
+                )),
+                alias: None,
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: vibesql_ast::FunctionIdentifier::new("COUNT"),
@@ -197,9 +211,12 @@ fn test_group_by_numeric_position() {
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
         ],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
@@ -294,28 +311,37 @@ fn test_group_by_with_count() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept", false)),
-                alias: None, source_text: None },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "dept", false,
+                )),
+                alias: None,
+                source_text: None,
+            },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     args: vec![vibesql_ast::Expression::Wildcard],
                     character_unit: None,
                 },
-                alias: None, source_text: None },
+                alias: None,
+                source_text: None,
+            },
         ],
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
-            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept", false)),
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "dept", false,
+            )),
         ])),
         having: None,
         order_by: None,

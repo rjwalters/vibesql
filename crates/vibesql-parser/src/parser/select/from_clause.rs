@@ -484,10 +484,7 @@ impl Parser {
                             });
                         }
                         return Err(ParseError {
-                            message: format!(
-                                "unknown join type: {}",
-                                consumed_keywords.join(" ")
-                            ),
+                            message: format!("unknown join type: {}", consumed_keywords.join(" ")),
                         });
                     }
                 } else if let Token::Identifier(id) = self.peek() {
@@ -497,7 +494,9 @@ impl Parser {
                     // Consume any more keywords/identifiers before JOIN
                     loop {
                         match self.peek() {
-                            Token::Keyword { keyword: next_kw, .. } if *next_kw != Keyword::Join => {
+                            Token::Keyword { keyword: next_kw, .. }
+                                if *next_kw != Keyword::Join =>
+                            {
                                 consumed_keywords.push(next_kw.to_string().to_uppercase());
                                 self.advance();
                             }
@@ -539,10 +538,7 @@ impl Parser {
                             self.advance();
                         }
                         return Err(ParseError {
-                            message: format!(
-                                "unknown join type: {}",
-                                consumed_keywords.join(" ")
-                            ),
+                            message: format!("unknown join type: {}", consumed_keywords.join(" ")),
                         });
                     }
                 } else if let Token::Identifier(id) = self.peek() {
@@ -658,18 +654,12 @@ impl Parser {
                             self.advance();
                         }
                         return Err(ParseError {
-                            message: format!(
-                                "unknown join type: {}",
-                                consumed_keywords.join(" ")
-                            ),
+                            message: format!("unknown join type: {}", consumed_keywords.join(" ")),
                         });
                     }
                     _ => {
                         return Err(ParseError {
-                            message: format!(
-                                "unknown join type: {}",
-                                consumed_keywords.join(" ")
-                            ),
+                            message: format!("unknown join type: {}", consumed_keywords.join(" ")),
                         })
                     }
                 }

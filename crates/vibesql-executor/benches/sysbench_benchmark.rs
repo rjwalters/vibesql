@@ -124,12 +124,14 @@ fn bind_expression(expr: &Expression, params: &[SqlValue]) -> Expression {
             args: args.iter().map(|a| bind_expression(a, params)).collect(),
             character_unit: character_unit.clone(),
         },
-        Expression::AggregateFunction { name, distinct, args, order_by } => Expression::AggregateFunction {
-            name: name.clone(),
-            distinct: *distinct,
-            args: args.iter().map(|a| bind_expression(a, params)).collect(),
-            order_by: order_by.clone(),
-        },
+        Expression::AggregateFunction { name, distinct, args, order_by } => {
+            Expression::AggregateFunction {
+                name: name.clone(),
+                distinct: *distinct,
+                args: args.iter().map(|a| bind_expression(a, params)).collect(),
+                order_by: order_by.clone(),
+            }
+        }
         // Pass through expressions that don't contain placeholders
         _ => expr.clone(),
     }
@@ -169,7 +171,8 @@ fn bind_select(stmt: &SelectStmt, params: &[SqlValue]) -> SelectStmt {
 /// Bind values to placeholders in a DeleteStmt
 fn bind_delete(stmt: &DeleteStmt, params: &[SqlValue]) -> DeleteStmt {
     DeleteStmt {
-        quoted: false, only: stmt.only,
+        quoted: false,
+        only: stmt.only,
         table_name: stmt.table_name.clone(),
         where_clause: bind_where_clause(&stmt.where_clause, params),
     }
@@ -179,7 +182,7 @@ fn bind_delete(stmt: &DeleteStmt, params: &[SqlValue]) -> DeleteStmt {
 fn bind_update(stmt: &UpdateStmt, params: &[SqlValue]) -> UpdateStmt {
     UpdateStmt {
         table_name: stmt.table_name.clone(),
-            quoted: false,
+        quoted: false,
         assignments: stmt
             .assignments
             .iter()

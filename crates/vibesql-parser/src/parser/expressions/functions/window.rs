@@ -14,24 +14,26 @@ impl Parser {
         &self,
         name: &str,
         args: Vec<vibesql_ast::Expression>,
+        filter: Option<Box<vibesql_ast::Expression>>,
     ) -> vibesql_ast::WindowFunctionSpec {
         // Use uppercase for matching, FunctionIdentifier preserves original case for display
         let name_upper = name.to_uppercase();
         let func_id = vibesql_ast::FunctionIdentifier::new(name);
 
         match name_upper.as_str() {
-            // Ranking functions
-            "ROW_NUMBER" | "RANK" | "DENSE_RANK" | "NTILE" => {
+            // Ranking functions (FILTER not applicable to ranking functions)
+            "ROW_NUMBER" | "RANK" | "DENSE_RANK" | "NTILE" | "PERCENT_RANK" | "CUME_DIST" => {
                 vibesql_ast::WindowFunctionSpec::Ranking { name: func_id, args }
             }
 
-            // Value functions
-            "LAG" | "LEAD" | "FIRST_VALUE" | "LAST_VALUE" => {
+            // Value functions (FILTER not applicable to value functions)
+            "LAG" | "LEAD" | "FIRST_VALUE" | "LAST_VALUE" | "NTH_VALUE" => {
                 vibesql_ast::WindowFunctionSpec::Value { name: func_id, args }
             }
 
             // Aggregate functions (SUM, AVG, COUNT, MIN, MAX, etc.)
-            _ => vibesql_ast::WindowFunctionSpec::Aggregate { name: func_id, args },
+            // FILTER clause is supported for aggregate window functions
+            _ => vibesql_ast::WindowFunctionSpec::Aggregate { name: func_id, args, filter },
         }
     }
 
@@ -75,15 +77,16 @@ impl Parser {
                 let expr = self.parse_expression()?;
 
                 // Check for optional ASC/DESC
-                let direction = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Asc, .. }) {
-                    self.advance();
-                    vibesql_ast::OrderDirection::Asc
-                } else if matches!(self.peek(), Token::Keyword { keyword: Keyword::Desc, .. }) {
-                    self.advance();
-                    vibesql_ast::OrderDirection::Desc
-                } else {
-                    vibesql_ast::OrderDirection::Asc // Default
-                };
+                let direction =
+                    if matches!(self.peek(), Token::Keyword { keyword: Keyword::Asc, .. }) {
+                        self.advance();
+                        vibesql_ast::OrderDirection::Asc
+                    } else if matches!(self.peek(), Token::Keyword { keyword: Keyword::Desc, .. }) {
+                        self.advance();
+                        vibesql_ast::OrderDirection::Desc
+                    } else {
+                        vibesql_ast::OrderDirection::Asc // Default
+                    };
 
                 order_items.push(vibesql_ast::OrderByItem { expr, direction, nulls_order: None });
 
@@ -98,7 +101,11 @@ impl Parser {
         }
 
         // Parse frame clause (ROWS/RANGE)
-        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Rows, .. } | Token::Keyword { keyword: Keyword::Range, .. }) {
+        if matches!(
+            self.peek(),
+            Token::Keyword { keyword: Keyword::Rows, .. }
+                | Token::Keyword { keyword: Keyword::Range, .. }
+        ) {
             frame = Some(self.parse_frame_clause()?);
         }
 

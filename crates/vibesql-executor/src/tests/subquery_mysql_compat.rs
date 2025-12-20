@@ -61,22 +61,30 @@ fn test_mysql_null_in_empty_subquery() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::In {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("val", false),
+            )),
             subquery: Box::new(vibesql_ast::SelectStmt {
                 with_clause: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
-                    expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
-                    alias: None, source_text: None }],
+                    expr: vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("id", false),
+                    ),
+                    alias: None,
+                    source_text: None,
+                }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table { quoted: false,
+                from: Some(vibesql_ast::FromClause::Table {
+                    quoted: false,
                     name: "empty".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -88,7 +96,7 @@ fn test_mysql_null_in_empty_subquery() {
                 limit: None,
                 offset: None,
                 set_operation: None,
-            values: None,
+                values: None,
             }),
             negated: false,
         }),
@@ -98,7 +106,7 @@ fn test_mysql_null_in_empty_subquery() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     let executor = crate::SelectExecutor::new(&db);
@@ -144,22 +152,30 @@ fn test_mysql_null_not_in_empty_subquery() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::In {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("val", false),
+            )),
             subquery: Box::new(vibesql_ast::SelectStmt {
                 with_clause: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
-                    expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
-                    alias: None, source_text: None }],
+                    expr: vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("id", false),
+                    ),
+                    alias: None,
+                    source_text: None,
+                }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table { quoted: false,
+                from: Some(vibesql_ast::FromClause::Table {
+                    quoted: false,
                     name: "empty".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -171,7 +187,7 @@ fn test_mysql_null_not_in_empty_subquery() {
                 limit: None,
                 offset: None,
                 set_operation: None,
-            values: None,
+                values: None,
             }),
             negated: true, // NOT IN
         }),
@@ -181,7 +197,7 @@ fn test_mysql_null_not_in_empty_subquery() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     let executor = crate::SelectExecutor::new(&db);
@@ -236,22 +252,30 @@ fn test_mysql_null_in_non_empty_without_null() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::In {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("val", false),
+            )),
             subquery: Box::new(vibesql_ast::SelectStmt {
                 with_clause: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
-                    expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
-                    alias: None, source_text: None }],
+                    expr: vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("id", false),
+                    ),
+                    alias: None,
+                    source_text: None,
+                }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table { quoted: false,
+                from: Some(vibesql_ast::FromClause::Table {
+                    quoted: false,
                     name: "values".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -263,7 +287,7 @@ fn test_mysql_null_in_non_empty_without_null() {
                 limit: None,
                 offset: None,
                 set_operation: None,
-            values: None,
+                values: None,
             }),
             negated: false,
         }),
@@ -273,7 +297,7 @@ fn test_mysql_null_in_non_empty_without_null() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     let executor = crate::SelectExecutor::new(&db);
@@ -363,30 +387,40 @@ fn test_mysql_triple_nested_subquery() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("val", false),
+            )),
             op: vibesql_ast::BinaryOperator::LessThan,
             right: Box::new(vibesql_ast::Expression::ScalarSubquery(Box::new(
                 vibesql_ast::SelectStmt {
                     with_clause: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Expression {
-                        expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("max_val", false)),
-                        alias: None, source_text: None }],
+                        expr: vibesql_ast::Expression::ColumnRef(
+                            vibesql_ast::ColumnIdentifier::simple("max_val", false),
+                        ),
+                        alias: None,
+                        source_text: None,
+                    }],
                     into_table: None,
                     into_variables: None,
-                    from: Some(vibesql_ast::FromClause::Table { quoted: false,
+                    from: Some(vibesql_ast::FromClause::Table {
+                        quoted: false,
                         name: "t2".to_string(),
                         alias: None,
                         column_aliases: None,
                     }),
                     where_clause: Some(vibesql_ast::Expression::BinaryOp {
-                        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("max_val", false))),
+                        left: Box::new(vibesql_ast::Expression::ColumnRef(
+                            vibesql_ast::ColumnIdentifier::simple("max_val", false),
+                        )),
                         op: vibesql_ast::BinaryOperator::GreaterThan,
                         right: Box::new(vibesql_ast::Expression::ScalarSubquery(Box::new(
                             vibesql_ast::SelectStmt {
@@ -394,16 +428,24 @@ fn test_mysql_triple_nested_subquery() {
                                 distinct: false,
                                 select_list: vec![vibesql_ast::SelectItem::Expression {
                                     expr: vibesql_ast::Expression::BinaryOp {
-                                        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("multiplier", false))),
+                                        left: Box::new(vibesql_ast::Expression::ColumnRef(
+                                            vibesql_ast::ColumnIdentifier::simple(
+                                                "multiplier",
+                                                false,
+                                            ),
+                                        )),
                                         op: vibesql_ast::BinaryOperator::Multiply,
                                         right: Box::new(vibesql_ast::Expression::Literal(
                                             vibesql_types::SqlValue::Integer(25),
                                         )),
                                     },
-                                    alias: None, source_text: None }],
+                                    alias: None,
+                                    source_text: None,
+                                }],
                                 into_table: None,
                                 into_variables: None,
-                                from: Some(vibesql_ast::FromClause::Table { quoted: false,
+                                from: Some(vibesql_ast::FromClause::Table {
+                                    quoted: false,
                                     name: "t3".to_string(),
                                     alias: None,
                                     column_aliases: None,
@@ -415,7 +457,7 @@ fn test_mysql_triple_nested_subquery() {
                                 limit: None,
                                 offset: None,
                                 set_operation: None,
-            values: None,
+                                values: None,
                             },
                         ))),
                     }),
@@ -425,7 +467,7 @@ fn test_mysql_triple_nested_subquery() {
                     limit: None,
                     offset: None,
                     set_operation: None,
-            values: None,
+                    values: None,
                 },
             ))),
         }),
@@ -435,7 +477,7 @@ fn test_mysql_triple_nested_subquery() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     let executor = crate::SelectExecutor::new(&db);
@@ -510,7 +552,8 @@ fn test_mysql_exists_short_circuit() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "customers".to_string(),
             alias: None,
             column_aliases: None,
@@ -521,16 +564,21 @@ fn test_mysql_exists_short_circuit() {
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
                     expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                    alias: None, source_text: None }],
+                    alias: None,
+                    source_text: None,
+                }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table { quoted: false,
+                from: Some(vibesql_ast::FromClause::Table {
+                    quoted: false,
                     name: "orders".to_string(),
                     alias: None,
                     column_aliases: None,
                 }),
                 where_clause: Some(vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false))),
+                    left: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("customer_id", false),
+                    )),
                     op: vibesql_ast::BinaryOperator::Equal,
                     right: Box::new(vibesql_ast::Expression::Literal(
                         vibesql_types::SqlValue::Integer(1),
@@ -542,7 +590,7 @@ fn test_mysql_exists_short_circuit() {
                 limit: None,
                 offset: None,
                 set_operation: None,
-            values: None,
+                values: None,
             }),
             negated: false,
         }),
@@ -552,7 +600,7 @@ fn test_mysql_exists_short_circuit() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     let executor = crate::SelectExecutor::new(&db);
@@ -631,7 +679,8 @@ fn test_mysql_scalar_within_exists() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
@@ -642,27 +691,37 @@ fn test_mysql_scalar_within_exists() {
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
                     expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                    alias: None, source_text: None }],
+                    alias: None,
+                    source_text: None,
+                }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table { quoted: false,
+                from: Some(vibesql_ast::FromClause::Table {
+                    quoted: false,
                     name: "products".to_string(),
                     alias: Some("p".to_string()),
                     column_aliases: None,
                 }),
                 where_clause: Some(vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("p", false, "price", false))),
+                    left: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::qualified("p", false, "price", false),
+                    )),
                     op: vibesql_ast::BinaryOperator::GreaterThan,
                     right: Box::new(vibesql_ast::Expression::ScalarSubquery(Box::new(
                         vibesql_ast::SelectStmt {
                             with_clause: None,
                             distinct: false,
                             select_list: vec![vibesql_ast::SelectItem::Expression {
-                                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("avg", false)),
-                                alias: None, source_text: None }],
+                                expr: vibesql_ast::Expression::ColumnRef(
+                                    vibesql_ast::ColumnIdentifier::simple("avg", false),
+                                ),
+                                alias: None,
+                                source_text: None,
+                            }],
                             into_table: None,
                             into_variables: None,
-                            from: Some(vibesql_ast::FromClause::Table { quoted: false,
+                            from: Some(vibesql_ast::FromClause::Table {
+                                quoted: false,
                                 name: "average_price".to_string(),
                                 alias: None,
                                 column_aliases: None,
@@ -674,7 +733,7 @@ fn test_mysql_scalar_within_exists() {
                             limit: None,
                             offset: None,
                             set_operation: None,
-            values: None,
+                            values: None,
                         },
                     ))),
                 }),
@@ -684,7 +743,7 @@ fn test_mysql_scalar_within_exists() {
                 limit: None,
                 offset: None,
                 set_operation: None,
-            values: None,
+                values: None,
             }),
             negated: false,
         }),
@@ -694,7 +753,7 @@ fn test_mysql_scalar_within_exists() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
 
     let executor = crate::SelectExecutor::new(&db);

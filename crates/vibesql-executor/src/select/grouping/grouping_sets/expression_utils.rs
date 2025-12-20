@@ -10,10 +10,9 @@ use vibesql_ast::{Expression, WindowFunctionSpec, WindowSpec};
 pub fn expressions_equal(a: &Expression, b: &Expression) -> bool {
     match (a, b) {
         // ColumnRef: SQL:1999 compliant comparison using canonical forms
-        (
-            Expression::ColumnRef(col_id1),
-            Expression::ColumnRef(col_id2),
-        ) if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() => {
+        (Expression::ColumnRef(col_id1), Expression::ColumnRef(col_id2))
+            if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() =>
+        {
             // Use direct equality on canonical forms - they already handle SQL:1999 case sensitivity
             // (unquoted → lowercase, quoted → preserved case)
             let columns_equal = col_id1.column_canonical() == col_id2.column_canonical();
@@ -244,8 +243,8 @@ pub fn expressions_equal(a: &Expression, b: &Expression) -> bool {
 fn window_function_equal(a: &WindowFunctionSpec, b: &WindowFunctionSpec) -> bool {
     match (a, b) {
         (
-            WindowFunctionSpec::Aggregate { name: n1, args: a1 },
-            WindowFunctionSpec::Aggregate { name: n2, args: a2 },
+            WindowFunctionSpec::Aggregate { name: n1, args: a1, .. },
+            WindowFunctionSpec::Aggregate { name: n2, args: a2, .. },
         )
         | (
             WindowFunctionSpec::Ranking { name: n1, args: a1 },
@@ -313,11 +312,20 @@ mod tests {
     }
 
     fn func(name: &str, args: Vec<Expression>) -> Expression {
-        Expression::Function { name: vibesql_ast::FunctionIdentifier::new(name), args, character_unit: None }
+        Expression::Function {
+            name: vibesql_ast::FunctionIdentifier::new(name),
+            args,
+            character_unit: None,
+        }
     }
 
     fn agg(name: &str, args: Vec<Expression>, distinct: bool) -> Expression {
-        Expression::AggregateFunction { name: vibesql_ast::FunctionIdentifier::new(name), distinct, args, order_by: None }
+        Expression::AggregateFunction {
+            name: vibesql_ast::FunctionIdentifier::new(name),
+            distinct,
+            args,
+            order_by: None,
+        }
     }
 
     // --- ColumnRef tests ---

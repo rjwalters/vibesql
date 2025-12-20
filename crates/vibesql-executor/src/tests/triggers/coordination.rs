@@ -45,7 +45,10 @@ fn test_multiple_triggers_fire_in_order() {
         .expect("Failed to create trigger 2");
 
     // Insert a row - should fire both triggers
-    let insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "USERS".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -86,7 +89,10 @@ fn test_trigger_with_multiple_statements() {
         .expect("Failed to create trigger");
 
     // Insert a row - should fire trigger with both statements
-    let insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "USERS".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -120,17 +126,20 @@ fn test_before_trigger_executes_first() {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&counter_stmt, &mut db).expect("Failed to create counter table");
 
     // Initialize counter to 0
-    let init_insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let init_insert = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "COUNTER".to_string(),
         columns: vec!["value".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
@@ -155,7 +164,10 @@ fn test_before_trigger_executes_first() {
         .expect("Failed to create before trigger");
 
     // Insert a row
-    let insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let insert = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "USERS".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -174,11 +186,16 @@ fn test_before_trigger_executes_first() {
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false)),
-            alias: None, source_text: None }],
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "value", false,
+            )),
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "COUNTER".to_string(),
             alias: None,
             column_aliases: None,
@@ -190,7 +207,7 @@ fn test_before_trigger_executes_first() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
     let executor = SelectExecutor::new(&db);
     let result = executor.execute(&select).expect("Failed to select counter");
@@ -204,7 +221,8 @@ fn test_before_trigger_executes_first() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "USERS".to_string(),
             alias: None,
             column_aliases: None,
@@ -216,7 +234,7 @@ fn test_before_trigger_executes_first() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
     let user_result = executor.execute(&user_select).expect("Failed to select users");
     assert_eq!(user_result.len(), 1, "User should be inserted after BEFORE trigger");

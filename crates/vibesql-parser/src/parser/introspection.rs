@@ -12,7 +12,7 @@ impl Parser {
                 self.advance();
                 Ok(string_val)
             }
-            _ => Err(ParseError { message: self.peek().syntax_error() })
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 
@@ -32,7 +32,8 @@ impl Parser {
                 // SHOW FULL COLUMNS - handle FULL modifier for SHOW COLUMNS
                 Ok(vibesql_ast::Statement::ShowColumns(self.parse_show_columns()?))
             }
-            Token::Keyword { keyword: Keyword::Columns, .. } | Token::Keyword { keyword: Keyword::Fields, .. } => {
+            Token::Keyword { keyword: Keyword::Columns, .. }
+            | Token::Keyword { keyword: Keyword::Fields, .. } => {
                 Ok(vibesql_ast::Statement::ShowColumns(self.parse_show_columns()?))
             }
             Token::Keyword { keyword: Keyword::Index, .. }
@@ -221,7 +222,9 @@ impl Parser {
         };
 
         // Check for ANALYZE option (not valid with QUERY PLAN in SQLite, but we parse both)
-        let analyze = if !query_plan && matches!(self.peek(), Token::Keyword { keyword: Keyword::Analyze, .. }) {
+        let analyze = if !query_plan
+            && matches!(self.peek(), Token::Keyword { keyword: Keyword::Analyze, .. })
+        {
             self.advance();
             true
         } else {
@@ -256,7 +259,8 @@ impl Parser {
 
         // Parse the inner statement (SELECT, INSERT, UPDATE, DELETE)
         let statement = match self.peek() {
-            Token::Keyword { keyword: Keyword::Select, .. } | Token::Keyword { keyword: Keyword::With, .. } => {
+            Token::Keyword { keyword: Keyword::Select, .. }
+            | Token::Keyword { keyword: Keyword::With, .. } => {
                 let select_stmt = self.parse_select_statement()?;
                 vibesql_ast::Statement::Select(Box::new(select_stmt))
             }

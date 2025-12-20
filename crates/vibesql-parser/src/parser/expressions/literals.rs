@@ -33,9 +33,7 @@ impl Parser {
             Token::BlobLiteral(bytes) => {
                 let blob_val = bytes.clone();
                 self.advance();
-                Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Blob(
-                    blob_val,
-                ))))
+                Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Blob(blob_val))))
             }
             Token::Keyword { keyword: Keyword::True, .. } => {
                 self.advance();
@@ -71,7 +69,7 @@ impl Parser {
                     _ => {
                         // Treat DATE as column name when not followed by string literal
                         Ok(Some(vibesql_ast::Expression::ColumnRef(
-                            vibesql_ast::ColumnIdentifier::simple("DATE", false)
+                            vibesql_ast::ColumnIdentifier::simple("DATE", false),
                         )))
                     }
                 }
@@ -96,7 +94,7 @@ impl Parser {
                     _ => {
                         // Treat TIME as column name when not followed by string literal
                         Ok(Some(vibesql_ast::Expression::ColumnRef(
-                            vibesql_ast::ColumnIdentifier::simple("TIME", false)
+                            vibesql_ast::ColumnIdentifier::simple("TIME", false),
                         )))
                     }
                 }
@@ -121,7 +119,7 @@ impl Parser {
                     _ => {
                         // Treat TIMESTAMP as column name when not followed by string literal
                         Ok(Some(vibesql_ast::Expression::ColumnRef(
-                            vibesql_ast::ColumnIdentifier::simple("TIMESTAMP", false)
+                            vibesql_ast::ColumnIdentifier::simple("TIMESTAMP", false),
                         )))
                     }
                 }
@@ -158,12 +156,24 @@ impl Parser {
                                 self.advance(); // consume TO keyword
                                 let end_field = match self.peek() {
                                     Token::Identifier(field) => field.to_uppercase(),
-                                    Token::Keyword { keyword: Keyword::Year, .. } => "YEAR".to_string(),
-                                    Token::Keyword { keyword: Keyword::Month, .. } => "MONTH".to_string(),
-                                    Token::Keyword { keyword: Keyword::Day, .. } => "DAY".to_string(),
-                                    Token::Keyword { keyword: Keyword::Hour, .. } => "HOUR".to_string(),
-                                    Token::Keyword { keyword: Keyword::Minute, .. } => "MINUTE".to_string(),
-                                    Token::Keyword { keyword: Keyword::Second, .. } => "SECOND".to_string(),
+                                    Token::Keyword { keyword: Keyword::Year, .. } => {
+                                        "YEAR".to_string()
+                                    }
+                                    Token::Keyword { keyword: Keyword::Month, .. } => {
+                                        "MONTH".to_string()
+                                    }
+                                    Token::Keyword { keyword: Keyword::Day, .. } => {
+                                        "DAY".to_string()
+                                    }
+                                    Token::Keyword { keyword: Keyword::Hour, .. } => {
+                                        "HOUR".to_string()
+                                    }
+                                    Token::Keyword { keyword: Keyword::Minute, .. } => {
+                                        "MINUTE".to_string()
+                                    }
+                                    Token::Keyword { keyword: Keyword::Second, .. } => {
+                                        "SECOND".to_string()
+                                    }
                                     _ => {
                                         return Err(ParseError {
                                             message: "Expected interval field after TO".to_string(),
@@ -177,12 +187,24 @@ impl Parser {
                                 self.advance(); // consume TO identifier (backward compat)
                                 let end_field = match self.peek() {
                                     Token::Identifier(field) => field.to_uppercase(),
-                                    Token::Keyword { keyword: Keyword::Year, .. } => "YEAR".to_string(),
-                                    Token::Keyword { keyword: Keyword::Month, .. } => "MONTH".to_string(),
-                                    Token::Keyword { keyword: Keyword::Day, .. } => "DAY".to_string(),
-                                    Token::Keyword { keyword: Keyword::Hour, .. } => "HOUR".to_string(),
-                                    Token::Keyword { keyword: Keyword::Minute, .. } => "MINUTE".to_string(),
-                                    Token::Keyword { keyword: Keyword::Second, .. } => "SECOND".to_string(),
+                                    Token::Keyword { keyword: Keyword::Year, .. } => {
+                                        "YEAR".to_string()
+                                    }
+                                    Token::Keyword { keyword: Keyword::Month, .. } => {
+                                        "MONTH".to_string()
+                                    }
+                                    Token::Keyword { keyword: Keyword::Day, .. } => {
+                                        "DAY".to_string()
+                                    }
+                                    Token::Keyword { keyword: Keyword::Hour, .. } => {
+                                        "HOUR".to_string()
+                                    }
+                                    Token::Keyword { keyword: Keyword::Minute, .. } => {
+                                        "MINUTE".to_string()
+                                    }
+                                    Token::Keyword { keyword: Keyword::Second, .. } => {
+                                        "SECOND".to_string()
+                                    }
                                     _ => {
                                         return Err(ParseError {
                                             message: "Expected interval field after TO".to_string(),

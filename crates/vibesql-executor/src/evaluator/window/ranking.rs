@@ -216,8 +216,10 @@ pub fn evaluate_cume_dist(
 
             let mut differs = false;
             for order_item in order_items {
-                let val_curr = evaluate_expression(&order_item.expr, curr_row).unwrap_or(SqlValue::Null);
-                let val_next = evaluate_expression(&order_item.expr, next_row).unwrap_or(SqlValue::Null);
+                let val_curr =
+                    evaluate_expression(&order_item.expr, curr_row).unwrap_or(SqlValue::Null);
+                let val_next =
+                    evaluate_expression(&order_item.expr, next_row).unwrap_or(SqlValue::Null);
 
                 if compare_values(&val_curr, &val_next) != Ordering::Equal {
                     differs = true;

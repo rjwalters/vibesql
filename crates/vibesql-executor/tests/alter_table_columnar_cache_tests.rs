@@ -31,7 +31,10 @@ fn setup_test_table(db: &mut Database) {
 
 /// Helper to insert a row into test_table
 fn insert_row(db: &mut Database, id: i64, name: &str, value: i64) {
-    let stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "test_table".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -79,7 +82,7 @@ fn test_add_column_invalidates_columnar_cache() {
             default_value: Some(Box::new(vibesql_ast::Expression::Literal(SqlValue::Integer(42)))),
             constraints: vec![],
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         },
     });
     AlterTableExecutor::execute(&add_col_stmt, &mut db).unwrap();
@@ -189,7 +192,7 @@ fn test_modify_column_invalidates_columnar_cache() {
             default_value: None,
             constraints: vec![],
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         },
     });
     AlterTableExecutor::execute(&modify_col_stmt, &mut db).unwrap();
@@ -251,7 +254,7 @@ fn test_change_column_invalidates_columnar_cache() {
             default_value: None,
             constraints: vec![],
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         },
     });
     AlterTableExecutor::execute(&change_col_stmt, &mut db).unwrap();
@@ -341,7 +344,10 @@ fn test_alter_column_drop_not_null_invalidates_cache() {
     db.create_table(schema).unwrap();
 
     // Insert data
-    let stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "test_table".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -429,7 +435,10 @@ fn test_alter_column_drop_default_invalidates_cache() {
     db.create_table(schema).unwrap();
 
     // Insert data
-    let stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "test_table".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -487,7 +496,7 @@ fn test_multiple_alter_operations_invalidate_cache() {
             default_value: Some(Box::new(vibesql_ast::Expression::Literal(SqlValue::Integer(0)))),
             constraints: vec![],
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         },
     });
     AlterTableExecutor::execute(&add_stmt, &mut db).unwrap();
@@ -588,7 +597,7 @@ fn test_alter_invalidates_prewarmed_cache() {
             default_value: None,
             constraints: vec![],
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         },
     });
     AlterTableExecutor::execute(&add_stmt, &mut db).unwrap();

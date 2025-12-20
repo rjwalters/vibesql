@@ -6,9 +6,7 @@
 
 use std::io::{Read, Write};
 
-use vibesql_ast::{
-    FrameBound, FrameUnit, WindowFrame, WindowFunctionSpec, WindowSpec,
-};
+use vibesql_ast::{FrameBound, FrameUnit, WindowFrame, WindowFunctionSpec, WindowSpec};
 
 use super::super::io::*;
 use crate::StorageError;
@@ -18,7 +16,7 @@ pub(super) fn write_window_function_spec<W: Write>(
     spec: &WindowFunctionSpec,
 ) -> Result<(), StorageError> {
     match spec {
-        WindowFunctionSpec::Aggregate { name, args } => {
+        WindowFunctionSpec::Aggregate { name, args, filter } => {
             writer
                 .write_all(&[0u8])
                 .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
@@ -26,6 +24,17 @@ pub(super) fn write_window_function_spec<W: Write>(
             write_u32(writer, args.len() as u32)?;
             for arg in args {
                 super::write_expression(writer, arg)?;
+            }
+            // Write filter (optional expression)
+            if let Some(f) = filter {
+                writer
+                    .write_all(&[1u8])
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                super::write_expression(writer, f)?;
+            } else {
+                writer
+                    .write_all(&[0u8])
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
             }
         }
         WindowFunctionSpec::Ranking { name, args } => {
@@ -65,7 +74,14 @@ pub(super) fn read_window_function_spec<R: Read>(
             for _ in 0..arg_count {
                 args.push(super::read_expression(reader)?);
             }
-            Ok(WindowFunctionSpec::Aggregate { name, args })
+            // Read filter (optional expression)
+            let has_filter = read_u8(reader)?;
+            let filter = if has_filter == 1 {
+                Some(Box::new(super::read_expression(reader)?))
+            } else {
+                None
+            };
+            Ok(WindowFunctionSpec::Aggregate { name, args, filter })
         }
         1 => {
             let name_str = read_string(reader)?;

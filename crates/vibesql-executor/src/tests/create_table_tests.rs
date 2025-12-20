@@ -32,7 +32,7 @@ fn test_create_simple_table() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -41,13 +41,13 @@ fn test_create_simple_table() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -76,7 +76,7 @@ fn test_create_table_with_multiple_types() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -85,7 +85,7 @@ fn test_create_table_with_multiple_types() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "price".to_string(),
@@ -95,7 +95,7 @@ fn test_create_table_with_multiple_types() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "in_stock".to_string(),
@@ -104,7 +104,7 @@ fn test_create_table_with_multiple_types() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "description".to_string(),
@@ -113,13 +113,13 @@ fn test_create_table_with_multiple_types() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -148,12 +148,12 @@ fn test_create_table_already_exists() {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     // First creation succeeds
@@ -181,7 +181,7 @@ fn test_create_table_with_nullable_columns() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "middle_name".to_string(),
@@ -190,7 +190,7 @@ fn test_create_table_with_nullable_columns() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "manager_id".to_string(),
@@ -199,13 +199,13 @@ fn test_create_table_with_nullable_columns() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -255,12 +255,12 @@ fn test_create_multiple_tables() {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&stmt1, &mut db).unwrap();
 
@@ -275,12 +275,12 @@ fn test_create_multiple_tables() {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&stmt2, &mut db).unwrap();
 
@@ -305,12 +305,12 @@ fn test_create_table_with_special_characters_in_name() {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -332,12 +332,12 @@ fn test_create_table_case_sensitivity() {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&stmt1, &mut db).unwrap();
 
@@ -352,12 +352,12 @@ fn test_create_table_case_sensitivity() {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     // Behavior depends on catalog's case sensitivity
@@ -383,7 +383,7 @@ fn test_create_table_with_spatial_types() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "location".to_string(),
@@ -392,7 +392,7 @@ fn test_create_table_with_spatial_types() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "area".to_string(),
@@ -401,7 +401,7 @@ fn test_create_table_with_spatial_types() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             ColumnDef {
                 name: "regions".to_string(),
@@ -410,13 +410,13 @@ fn test_create_table_with_spatial_types() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -464,8 +464,8 @@ fn test_create_table_multipolygon_sqllogictest() {
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);

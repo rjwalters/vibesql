@@ -124,7 +124,10 @@ pub fn extract_aggregates(
                 let source = match &args[0] {
                     // Fast path: simple column reference
                     Expression::ColumnRef(col_id) => {
-                        let column_idx = schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
+                        let column_idx = schema.get_column_index(
+                            col_id.table_canonical(),
+                            col_id.column_canonical(),
+                        )?;
                         AggregateSource::Column(column_idx)
                     }
                     // New: support binary operations like a * b

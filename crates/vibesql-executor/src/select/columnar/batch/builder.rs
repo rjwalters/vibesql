@@ -410,10 +410,7 @@ mod tests {
         // SQLite allows mixed types in a single column (manifest typing)
         // First row has VARCHAR, subsequent rows have INTEGER
         let rows = vec![
-            Row::new(vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("abc")),
-                SqlValue::Null,
-            ]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("abc")), SqlValue::Null]),
             Row::new(vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("xyz"))]),
             Row::new(vec![SqlValue::Integer(11), SqlValue::Integer(22)]),
             Row::new(vec![SqlValue::Integer(33), SqlValue::Integer(44)]),
@@ -454,10 +451,7 @@ mod tests {
         // Test case where INTEGER comes first, then VARCHAR
         let rows = vec![
             Row::new(vec![SqlValue::Integer(11), SqlValue::Integer(22)]),
-            Row::new(vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("abc")),
-                SqlValue::Null,
-            ]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("abc")), SqlValue::Null]),
         ];
 
         let batch = ColumnarBatch::from_rows(&rows).unwrap();

@@ -27,7 +27,10 @@ fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
             // This handles cases like COUNT(*) parsed as ColumnRef { column: "*" }
             let column = col_id.column_canonical();
             if column != "*" {
-                refs.push(ColumnReference { table: col_id.table_canonical().map(|t| t.to_string()), column: column.to_string() });
+                refs.push(ColumnReference {
+                    table: col_id.table_canonical().map(|t| t.to_string()),
+                    column: column.to_string(),
+                });
             }
         }
         Expression::BinaryOp { left, right, .. } => {
@@ -93,8 +96,7 @@ fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
         Expression::Cast { expr, .. } => {
             extract_column_refs(expr, refs);
         }
-        Expression::Like { expr, pattern, .. }
-        | Expression::Glob { expr, pattern, .. } => {
+        Expression::Like { expr, pattern, .. } | Expression::Glob { expr, pattern, .. } => {
             extract_column_refs(expr, refs);
             extract_column_refs(pattern, refs);
         }
@@ -188,10 +190,7 @@ fn is_rowid_pseudo_column(column: &str) -> bool {
 /// Check if a function name is an aggregate function
 fn is_aggregate_function(name: &str) -> bool {
     let upper = name.to_uppercase();
-    matches!(
-        upper.as_str(),
-        "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "TOTAL" | "GROUP_CONCAT"
-    )
+    matches!(upper.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "TOTAL" | "GROUP_CONCAT")
 }
 
 /// Check if an aggregate function has wrong number of arguments
@@ -305,8 +304,9 @@ fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
                 None
             }
         }
-        Expression::BinaryOp { left, right, .. } => check_aggregate_arg_count(left)
-            .or_else(|| check_aggregate_arg_count(right)),
+        Expression::BinaryOp { left, right, .. } => {
+            check_aggregate_arg_count(left).or_else(|| check_aggregate_arg_count(right))
+        }
         Expression::UnaryOp { expr, .. } => check_aggregate_arg_count(expr),
         Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
@@ -370,8 +370,9 @@ fn find_aggregate_in_expression(expr: &Expression) -> Option<String> {
                 None
             }
         }
-        Expression::BinaryOp { left, right, .. } => find_aggregate_in_expression(left)
-            .or_else(|| find_aggregate_in_expression(right)),
+        Expression::BinaryOp { left, right, .. } => {
+            find_aggregate_in_expression(left).or_else(|| find_aggregate_in_expression(right))
+        }
         Expression::UnaryOp { expr, .. } => find_aggregate_in_expression(expr),
         Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
@@ -396,8 +397,9 @@ fn find_aggregate_in_expression(expr: &Expression) -> Option<String> {
             }
         }
         Expression::IsNull { expr, .. } => find_aggregate_in_expression(expr),
-        Expression::IsDistinctFrom { left, right, .. } => find_aggregate_in_expression(left)
-            .or_else(|| find_aggregate_in_expression(right)),
+        Expression::IsDistinctFrom { left, right, .. } => {
+            find_aggregate_in_expression(left).or_else(|| find_aggregate_in_expression(right))
+        }
         Expression::IsTruthValue { expr, .. } => find_aggregate_in_expression(expr),
         Expression::Between { expr, low, high, .. } => find_aggregate_in_expression(expr)
             .or_else(|| find_aggregate_in_expression(low))
@@ -416,10 +418,12 @@ fn find_aggregate_in_expression(expr: &Expression) -> Option<String> {
         Expression::In { expr, .. } => find_aggregate_in_expression(expr),
         Expression::Exists { .. } => None, // EXISTS subqueries have their own scope
         Expression::Cast { expr, .. } => find_aggregate_in_expression(expr),
-        Expression::Like { expr, pattern, .. } => find_aggregate_in_expression(expr)
-            .or_else(|| find_aggregate_in_expression(pattern)),
-        Expression::Position { substring, string, .. } => find_aggregate_in_expression(substring)
-            .or_else(|| find_aggregate_in_expression(string)),
+        Expression::Like { expr, pattern, .. } => {
+            find_aggregate_in_expression(expr).or_else(|| find_aggregate_in_expression(pattern))
+        }
+        Expression::Position { substring, string, .. } => {
+            find_aggregate_in_expression(substring).or_else(|| find_aggregate_in_expression(string))
+        }
         Expression::Trim { removal_char, string, .. } => {
             if let Some(char_expr) = removal_char {
                 if let Some(found) = find_aggregate_in_expression(char_expr) {
@@ -715,16 +719,12 @@ pub fn validate_select_columns_with_context(
         // Check for wrong argument count FIRST (takes priority over misuse)
         // SQLite reports arg count errors before context errors
         if let Some(agg_name) = check_aggregate_arg_count(where_expr) {
-            return Err(ExecutorError::WrongNumberOfArguments {
-                function_name: agg_name,
-            });
+            return Err(ExecutorError::WrongNumberOfArguments { function_name: agg_name });
         }
 
         // Check for aggregate functions in WHERE clause (misuse of aggregate)
         if let Some(agg_name) = find_aggregate_in_expression(where_expr) {
-            return Err(ExecutorError::MisuseOfAggregate {
-                function_name: agg_name,
-            });
+            return Err(ExecutorError::MisuseOfAggregate { function_name: agg_name });
         }
     }
 
@@ -869,8 +869,7 @@ fn expression_contains_aggregate(expr: &Expression) -> bool {
                 || expression_contains_aggregate(high)
         }
         Expression::InList { expr, values, .. } => {
-            expression_contains_aggregate(expr)
-                || values.iter().any(expression_contains_aggregate)
+            expression_contains_aggregate(expr) || values.iter().any(expression_contains_aggregate)
         }
         Expression::In { expr, .. } => expression_contains_aggregate(expr),
         Expression::Like { expr, pattern, .. } => {
@@ -952,7 +951,9 @@ fn find_aliased_aggregate_misuse_in_expression(
             None
         }
         // Column reference - check if it's an aggregate alias used inside an aggregate
-        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+        {
             let column = col_id.column_canonical();
             // If this column exists in the actual table schema, it's a real column reference,
             // not a reference to a SELECT alias (even if an alias with the same name exists).
@@ -970,22 +971,20 @@ fn find_aliased_aggregate_misuse_in_expression(
         }
         Expression::ColumnRef(_) => None, // Qualified refs can't be aliases
         // Recursively check composite expressions
-        Expression::BinaryOp { left, right, .. } => {
+        Expression::BinaryOp { left, right, .. } => find_aliased_aggregate_misuse_in_expression(
+            left,
+            aggregate_aliases,
+            schema_columns,
+            inside_aggregate,
+        )
+        .or_else(|| {
             find_aliased_aggregate_misuse_in_expression(
-                left,
+                right,
                 aggregate_aliases,
                 schema_columns,
                 inside_aggregate,
             )
-            .or_else(|| {
-                find_aliased_aggregate_misuse_in_expression(
-                    right,
-                    aggregate_aliases,
-                    schema_columns,
-                    inside_aggregate,
-                )
-            })
-        }
+        }),
         Expression::UnaryOp { expr, .. } => find_aliased_aggregate_misuse_in_expression(
             expr,
             aggregate_aliases,
@@ -1283,7 +1282,9 @@ mod tests {
         let schema = make_test_schema();
         let select_list = vec![SelectItem::Expression {
             expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false)),
-            alias: None, source_text: None }];
+            alias: None,
+            source_text: None,
+        }];
 
         let result = validate_select_columns(&select_list, None, &schema);
         assert!(result.is_ok());
@@ -1293,8 +1294,13 @@ mod tests {
     fn test_invalid_column_ref() {
         let schema = make_test_schema();
         let select_list = vec![SelectItem::Expression {
-            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("invalid_column", false)),
-            alias: None, source_text: None }];
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "invalid_column",
+                false,
+            )),
+            alias: None,
+            source_text: None,
+        }];
 
         let result = validate_select_columns(&select_list, None, &schema);
         assert!(result.is_err());
@@ -1312,8 +1318,12 @@ mod tests {
     fn test_qualified_column_ref() {
         let schema = make_test_schema();
         let select_list = vec![SelectItem::Expression {
-            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("products", false, "id", false)),
-            alias: None, source_text: None }];
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "products", false, "id", false,
+            )),
+            alias: None,
+            source_text: None,
+        }];
 
         let result = validate_select_columns(&select_list, None, &schema);
         assert!(result.is_ok());
@@ -1323,8 +1333,15 @@ mod tests {
     fn test_invalid_qualified_column_ref() {
         let schema = make_test_schema();
         let select_list = vec![SelectItem::Expression {
-            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("products", false, "invalid_column", false)),
-            alias: None, source_text: None }];
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "products",
+                false,
+                "invalid_column",
+                false,
+            )),
+            alias: None,
+            source_text: None,
+        }];
 
         let result = validate_select_columns(&select_list, None, &schema);
         assert!(result.is_err());
@@ -1342,10 +1359,15 @@ mod tests {
         let select_list = vec![SelectItem::Expression {
             expr: Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Plus,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("invalid_col", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "invalid_col",
+                    false,
+                ))),
                 right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             },
-            alias: None, source_text: None }];
+            alias: None,
+            source_text: None,
+        }];
 
         let result = validate_select_columns(&select_list, None, &schema);
         assert!(result.is_err());
@@ -1357,7 +1379,10 @@ mod tests {
         let select_list = vec![SelectItem::Wildcard { alias: None }];
         let where_clause = Expression::BinaryOp {
             op: vibesql_ast::BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("nonexistent", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "nonexistent",
+                false,
+            ))),
             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(1))),
         };
 
@@ -1414,7 +1439,9 @@ mod tests {
             expr: Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("MIN"),
                 distinct: false,
-                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("*", false))],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "*", false,
+                ))],
                 order_by: None,
             },
             alias: None,
@@ -1459,7 +1486,9 @@ mod tests {
             expr: Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("min"),
                 distinct: false,
-                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("f1", false))],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "f1", false,
+                ))],
                 order_by: None,
             },
             alias: Some("m".to_string()),
@@ -1474,7 +1503,9 @@ mod tests {
                 distinct: false,
                 args: vec![Expression::BinaryOp {
                     op: vibesql_ast::BinaryOperator::Plus,
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("m", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "m", false,
+                    ))),
                     right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(5))),
                 }],
                 order_by: None,
@@ -1505,7 +1536,9 @@ mod tests {
             expr: Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("min"),
                 distinct: false,
-                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("f1", false))],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "f1", false,
+                ))],
                 order_by: None,
             },
             alias: Some("m".to_string()),
@@ -1515,7 +1548,9 @@ mod tests {
         // HAVING m>0 - alias used directly, not inside an aggregate
         let having_expr = Expression::BinaryOp {
             op: vibesql_ast::BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("m", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "m", false,
+            ))),
             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(0))),
         };
 
@@ -1543,7 +1578,9 @@ mod tests {
 
         let having_expr = Expression::BinaryOp {
             op: vibesql_ast::BinaryOperator::GreaterThan,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("f1", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "f1", false,
+            ))),
             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(0))),
         };
 
@@ -1580,7 +1617,9 @@ mod tests {
             left: Box::new(Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("max"),
                 distinct: false,
-                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "x", false,
+                ))],
                 order_by: None,
             }),
             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(10))),
@@ -1602,7 +1641,9 @@ mod tests {
                 op: vibesql_ast::BinaryOperator::Multiply,
                 left: Box::new(Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Minus,
-                    expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col2", false))),
+                    expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "col2", false,
+                    ))),
                 }),
                 right: Box::new(Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Minus,
@@ -1611,7 +1652,9 @@ mod tests {
                         distinct: false,
                         args: vec![Expression::UnaryOp {
                             op: vibesql_ast::UnaryOperator::Minus,
-                            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col2", false))),
+                            expr: Box::new(Expression::ColumnRef(
+                                vibesql_ast::ColumnIdentifier::simple("col2", false),
+                            )),
                         }],
                         order_by: None,
                     }),
@@ -1626,7 +1669,9 @@ mod tests {
             expr: Box::new(Expression::AggregateFunction {
                 name: vibesql_ast::FunctionIdentifier::new("AVG"),
                 distinct: false,
-                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "col0", false,
+                ))],
                 order_by: None,
             }),
             negated: false,
@@ -1675,7 +1720,9 @@ mod tests {
                 expr: Expression::AggregateFunction {
                     name: vibesql_ast::FunctionIdentifier::new("min"),
                     distinct: false,
-                    args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("f1", false))],
+                    args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "f1", false,
+                    ))],
                     order_by: None,
                 },
                 alias: Some("m".to_string()),
@@ -1696,10 +1743,14 @@ mod tests {
                             left: Box::new(Expression::AggregateFunction {
                                 name: vibesql_ast::FunctionIdentifier::new("min"),
                                 distinct: false,
-                                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("f1", false))],
+                                args: vec![Expression::ColumnRef(
+                                    vibesql_ast::ColumnIdentifier::simple("f1", false),
+                                )],
                                 order_by: None,
                             }),
-                            right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(5))),
+                            right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(
+                                5,
+                            ))),
                         },
                         Expression::Literal(vibesql_types::SqlValue::Integer(11)),
                     ],

@@ -52,23 +52,25 @@ fn test_update_where_in_subquery() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "active_depts".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
-                group_by: None,
+        group_by: None,
         having: None,
         order_by: None,
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     });
 
     // UPDATE employees SET salary = 80000 WHERE dept_id IN (SELECT dept_id FROM active_depts)
@@ -80,7 +82,9 @@ fn test_update_where_in_subquery() {
             value: Expression::Literal(SqlValue::Integer(80000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "dept_id", false,
+            ))),
             subquery,
             negated: false,
         })),
@@ -138,23 +142,25 @@ fn test_update_where_not_in_subquery() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "active_depts".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
-                group_by: None,
+        group_by: None,
         having: None,
         order_by: None,
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     });
 
     // UPDATE employees SET active = FALSE WHERE dept_id NOT IN (SELECT dept_id FROM active_depts)
@@ -166,7 +172,9 @@ fn test_update_where_not_in_subquery() {
             value: Expression::Literal(SqlValue::Boolean(false)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "dept_id", false,
+            ))),
             subquery,
             negated: true,
         })),
@@ -217,23 +225,25 @@ fn test_update_where_subquery_empty_result() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "inactive_depts".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
-                group_by: None,
+        group_by: None,
         having: None,
         order_by: None,
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     });
 
     // UPDATE employees SET active = FALSE WHERE dept_id IN (SELECT dept_id FROM inactive_depts)
@@ -245,7 +255,9 @@ fn test_update_where_subquery_empty_result() {
             value: Expression::Literal(SqlValue::Boolean(false)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "dept_id", false,
+            ))),
             subquery,
             negated: false,
         })),
@@ -306,17 +318,21 @@ fn test_update_where_complex_subquery_condition() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "departments".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: Some(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("budget", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "budget", false,
+            ))),
             op: vibesql_ast::BinaryOperator::GreaterThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(80000))),
         }),
@@ -326,7 +342,7 @@ fn test_update_where_complex_subquery_condition() {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     });
 
     // UPDATE employees SET salary = 70000 WHERE dept_id IN (SELECT dept_id FROM departments WHERE
@@ -339,7 +355,9 @@ fn test_update_where_complex_subquery_condition() {
             value: Expression::Literal(SqlValue::Integer(70000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "dept_id", false,
+            ))),
             subquery,
             negated: false,
         })),
@@ -401,23 +419,25 @@ fn test_update_where_multiple_rows_in_subquery() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "active_depts".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
-                group_by: None,
+        group_by: None,
         having: None,
         order_by: None,
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     });
 
     // UPDATE employees SET active = FALSE WHERE dept_id IN (SELECT dept_id FROM active_depts)
@@ -429,7 +449,9 @@ fn test_update_where_multiple_rows_in_subquery() {
             value: Expression::Literal(SqlValue::Boolean(false)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "dept_id", false,
+            ))),
             subquery,
             negated: false,
         })),

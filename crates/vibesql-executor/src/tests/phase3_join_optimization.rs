@@ -82,16 +82,18 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            left: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "t1".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "t2".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -102,9 +104,13 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
             natural: false,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false))),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false),
+            )),
             op: vibesql_ast::BinaryOperator::Equal,
-            right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false))),
+            right: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false),
+            )),
         }),
         group_by: None,
         having: None,
@@ -202,16 +208,18 @@ fn test_hash_join_multiple_equijoins_in_where() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            left: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "t1".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "t2".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -223,15 +231,23 @@ fn test_hash_join_multiple_equijoins_in_where() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false),
+                )),
             }),
             op: vibesql_ast::BinaryOperator::And,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "value", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("t1", false, "value", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "value", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("t2", false, "value", false),
+                )),
             }),
         }),
         group_by: None,
@@ -309,18 +325,20 @@ fn test_cascading_joins_with_where_equijoins() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Join {
                 left: Box::new(vibesql_ast::FromClause::Join {
-                    left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+                    left: Box::new(vibesql_ast::FromClause::Table {
+                        quoted: false,
                         name: "t1".to_string(),
                         alias: None,
                         column_aliases: None,
                     }),
-                    right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+                    right: Box::new(vibesql_ast::FromClause::Table {
+                        quoted: false,
                         name: "t2".to_string(),
                         alias: None,
                         column_aliases: None,
@@ -330,7 +348,8 @@ fn test_cascading_joins_with_where_equijoins() {
                     using_columns: None,
                     natural: false,
                 }),
-                right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+                right: Box::new(vibesql_ast::FromClause::Table {
+                    quoted: false,
                     name: "t3".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -340,7 +359,8 @@ fn test_cascading_joins_with_where_equijoins() {
                 using_columns: None,
                 natural: false,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "t4".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -353,22 +373,34 @@ fn test_cascading_joins_with_where_equijoins() {
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false))),
+                    left: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false),
+                    )),
                     op: vibesql_ast::BinaryOperator::Equal,
-                    right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false))),
+                    right: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false),
+                    )),
                 }),
                 op: vibesql_ast::BinaryOperator::And,
                 right: Box::new(vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false))),
+                    left: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false),
+                    )),
                     op: vibesql_ast::BinaryOperator::Equal,
-                    right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t3", false, "id", false))),
+                    right: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::qualified("t3", false, "id", false),
+                    )),
                 }),
             }),
             op: vibesql_ast::BinaryOperator::And,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t3", false, "id", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("t3", false, "id", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t4", false, "id", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("t4", false, "id", false),
+                )),
             }),
         }),
         group_by: None,
@@ -457,33 +489,43 @@ fn test_hash_join_with_on_clause_and_where_equijoins() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            left: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "t1".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "t2".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false),
+                )),
             }),
             using_columns: None,
             natural: false,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "key", false))),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::qualified("t1", false, "key", false),
+            )),
             op: vibesql_ast::BinaryOperator::Equal,
-            right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "key", false))),
+            right: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::qualified("t2", false, "key", false),
+            )),
         }),
         group_by: None,
         having: None,
@@ -590,16 +632,18 @@ fn test_multi_column_hash_join_composite_keys() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            left: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "sales".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "inventory".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -608,15 +652,43 @@ fn test_multi_column_hash_join_composite_keys() {
             // ON clause with composite key
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("sales", false, "region_id", false))),
+                    left: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::qualified(
+                            "sales",
+                            false,
+                            "region_id",
+                            false,
+                        ),
+                    )),
                     op: vibesql_ast::BinaryOperator::Equal,
-                    right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("inventory", false, "region_id", false))),
+                    right: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::qualified(
+                            "inventory",
+                            false,
+                            "region_id",
+                            false,
+                        ),
+                    )),
                 }),
                 op: vibesql_ast::BinaryOperator::And,
                 right: Box::new(vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("sales", false, "product_id", false))),
+                    left: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::qualified(
+                            "sales",
+                            false,
+                            "product_id",
+                            false,
+                        ),
+                    )),
                     op: vibesql_ast::BinaryOperator::Equal,
-                    right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("inventory", false, "product_id", false))),
+                    right: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::qualified(
+                            "inventory",
+                            false,
+                            "product_id",
+                            false,
+                        ),
+                    )),
                 }),
             }),
             using_columns: None,
@@ -727,7 +799,7 @@ fn test_star_join_select5_pattern() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
@@ -735,12 +807,14 @@ fn test_star_join_select5_pattern() {
                 left: Box::new(vibesql_ast::FromClause::Join {
                     left: Box::new(vibesql_ast::FromClause::Join {
                         left: Box::new(vibesql_ast::FromClause::Join {
-                            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+                            left: Box::new(vibesql_ast::FromClause::Table {
+                                quoted: false,
                                 name: "t1".to_string(),
                                 alias: None,
                                 column_aliases: None,
                             }),
-                            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+                            right: Box::new(vibesql_ast::FromClause::Table {
+                                quoted: false,
                                 name: "t2".to_string(),
                                 alias: None,
                                 column_aliases: None,
@@ -750,7 +824,8 @@ fn test_star_join_select5_pattern() {
                             using_columns: None,
                             natural: false,
                         }),
-                        right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+                        right: Box::new(vibesql_ast::FromClause::Table {
+                            quoted: false,
                             name: "t3".to_string(),
                             alias: None,
                             column_aliases: None,
@@ -760,7 +835,8 @@ fn test_star_join_select5_pattern() {
                         using_columns: None,
                         natural: false,
                     }),
-                    right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+                    right: Box::new(vibesql_ast::FromClause::Table {
+                        quoted: false,
                         name: "t4".to_string(),
                         alias: None,
                         column_aliases: None,
@@ -770,7 +846,8 @@ fn test_star_join_select5_pattern() {
                     using_columns: None,
                     natural: false,
                 }),
-                right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+                right: Box::new(vibesql_ast::FromClause::Table {
+                    quoted: false,
                     name: "t5".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -780,7 +857,8 @@ fn test_star_join_select5_pattern() {
                 using_columns: None,
                 natural: false,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "t6".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -796,36 +874,56 @@ fn test_star_join_select5_pattern() {
                 left: Box::new(vibesql_ast::Expression::BinaryOp {
                     left: Box::new(vibesql_ast::Expression::BinaryOp {
                         left: Box::new(vibesql_ast::Expression::BinaryOp {
-                            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false))),
+                            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                                vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false),
+                            )),
                             op: vibesql_ast::BinaryOperator::Equal,
-                            right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false))),
+                            right: Box::new(vibesql_ast::Expression::ColumnRef(
+                                vibesql_ast::ColumnIdentifier::qualified("t2", false, "id", false),
+                            )),
                         }),
                         op: vibesql_ast::BinaryOperator::And,
                         right: Box::new(vibesql_ast::Expression::BinaryOp {
-                            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false))),
+                            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                                vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false),
+                            )),
                             op: vibesql_ast::BinaryOperator::Equal,
-                            right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t3", false, "id", false))),
+                            right: Box::new(vibesql_ast::Expression::ColumnRef(
+                                vibesql_ast::ColumnIdentifier::qualified("t3", false, "id", false),
+                            )),
                         }),
                     }),
                     op: vibesql_ast::BinaryOperator::And,
                     right: Box::new(vibesql_ast::Expression::BinaryOp {
-                        left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false))),
+                        left: Box::new(vibesql_ast::Expression::ColumnRef(
+                            vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false),
+                        )),
                         op: vibesql_ast::BinaryOperator::Equal,
-                        right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t4", false, "id", false))),
+                        right: Box::new(vibesql_ast::Expression::ColumnRef(
+                            vibesql_ast::ColumnIdentifier::qualified("t4", false, "id", false),
+                        )),
                     }),
                 }),
                 op: vibesql_ast::BinaryOperator::And,
                 right: Box::new(vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false))),
+                    left: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false),
+                    )),
                     op: vibesql_ast::BinaryOperator::Equal,
-                    right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t5", false, "id", false))),
+                    right: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::qualified("t5", false, "id", false),
+                    )),
                 }),
             }),
             op: vibesql_ast::BinaryOperator::And,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("t1", false, "id", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t6", false, "id", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("t6", false, "id", false),
+                )),
             }),
         }),
         group_by: None,

@@ -38,10 +38,7 @@ fn test_quoted_table_identifier_roundtrip() {
 
     // Verify the quoted flag was preserved
     let loaded_identifier = loaded_db.catalog.get_table_identifier("MyTable").unwrap();
-    assert!(
-        loaded_identifier.is_quoted(),
-        "Loaded table should still be quoted after roundtrip"
-    );
+    assert!(loaded_identifier.is_quoted(), "Loaded table should still be quoted after roundtrip");
     assert_eq!(loaded_identifier.canonical(), "MyTable");
 
     // Cleanup
@@ -63,10 +60,7 @@ fn test_unquoted_table_identifier_roundtrip() {
 
     // Verify the identifier is NOT quoted
     let original_identifier = db.catalog.get_table_identifier("users").unwrap();
-    assert!(
-        !original_identifier.is_quoted(),
-        "Original table should be unquoted"
-    );
+    assert!(!original_identifier.is_quoted(), "Original table should be unquoted");
     assert_eq!(original_identifier.canonical(), "users");
 
     // Save and load using binary format
@@ -97,16 +91,14 @@ fn test_mixed_quoted_unquoted_tables_roundtrip() {
         "users".to_string(),
         vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
     );
-    db.create_table_with_identifier(schema1, TableIdentifier::unquoted("users"))
-        .unwrap();
+    db.create_table_with_identifier(schema1, TableIdentifier::unquoted("users")).unwrap();
 
     // Create a quoted table (case-sensitive)
     let schema2 = TableSchema::new(
         "UserProfiles".to_string(),
         vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
     );
-    db.create_table_with_identifier(schema2, TableIdentifier::quoted("UserProfiles"))
-        .unwrap();
+    db.create_table_with_identifier(schema2, TableIdentifier::quoted("UserProfiles")).unwrap();
 
     // Save and load
     let path = "/tmp/test_mixed_identifiers.vbsql";
@@ -142,8 +134,7 @@ fn test_quoted_table_with_data_roundtrip() {
             ),
         ],
     );
-    db.create_table_with_identifier(schema, TableIdentifier::quoted("CaseSensitiveTable"))
-        .unwrap();
+    db.create_table_with_identifier(schema, TableIdentifier::quoted("CaseSensitiveTable")).unwrap();
 
     // Insert data
     let table = db.get_table_mut("CaseSensitiveTable").unwrap();
@@ -167,10 +158,7 @@ fn test_quoted_table_with_data_roundtrip() {
     let loaded_db = Database::load_binary(path).unwrap();
 
     // Verify quoted flag preserved
-    let identifier = loaded_db
-        .catalog
-        .get_table_identifier("CaseSensitiveTable")
-        .unwrap();
+    let identifier = loaded_db.catalog.get_table_identifier("CaseSensitiveTable").unwrap();
     assert!(identifier.is_quoted());
 
     // Verify data preserved

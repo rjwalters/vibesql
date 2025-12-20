@@ -155,9 +155,7 @@ impl ExpressionEvaluator<'_> {
                     ));
                 }
                 if let Some(db) = self.database {
-                    return Ok(vibesql_types::SqlValue::Integer(
-                        db.last_changes_count() as i64,
-                    ));
+                    return Ok(vibesql_types::SqlValue::Integer(db.last_changes_count() as i64));
                 } else {
                     // No database context available, return 0
                     return Ok(vibesql_types::SqlValue::Integer(0));
@@ -172,9 +170,7 @@ impl ExpressionEvaluator<'_> {
                     ));
                 }
                 if let Some(db) = self.database {
-                    return Ok(vibesql_types::SqlValue::Integer(
-                        db.total_changes_count() as i64,
-                    ));
+                    return Ok(vibesql_types::SqlValue::Integer(db.total_changes_count() as i64));
                 } else {
                     // No database context available, return 0
                     return Ok(vibesql_types::SqlValue::Integer(0));

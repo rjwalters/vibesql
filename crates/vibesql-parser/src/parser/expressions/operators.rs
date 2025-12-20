@@ -110,7 +110,9 @@ impl Parser {
                 Token::Symbol('*') => vibesql_ast::BinaryOperator::Multiply,
                 Token::Symbol('/') => vibesql_ast::BinaryOperator::Divide,
                 Token::Symbol('%') => vibesql_ast::BinaryOperator::Modulo,
-                Token::Keyword { keyword: Keyword::Div, .. } => vibesql_ast::BinaryOperator::IntegerDivide,
+                Token::Keyword { keyword: Keyword::Div, .. } => {
+                    vibesql_ast::BinaryOperator::IntegerDivide
+                }
                 _ => break,
             };
             self.advance();
@@ -487,7 +489,9 @@ impl Parser {
 
     /// Parse postfix expressions (COLLATE)
     /// COLLATE has high precedence, binding tighter than most operators
-    pub(super) fn parse_postfix_expression(&mut self) -> Result<vibesql_ast::Expression, ParseError> {
+    pub(super) fn parse_postfix_expression(
+        &mut self,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
         let mut expr = self.parse_primary_expression()?;
 
         // Handle COLLATE postfix operator

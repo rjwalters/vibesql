@@ -423,14 +423,18 @@ impl Parser {
                             // Validate prefix length range (MySQL compatibility)
                             if value < 1 {
                                 return Err(ParseError {
-                                    message: format!("Key part '{}' length cannot be 0", column_name),
+                                    message: format!(
+                                        "Key part '{}' length cannot be 0",
+                                        column_name
+                                    ),
                                 });
                             }
                             // MySQL InnoDB limit: 3072 bytes for index prefix length
                             if value > 3072 {
                                 return Err(ParseError {
-                                    message: "Specified key was too long; max key length is 3072 bytes"
-                                        .to_string(),
+                                    message:
+                                        "Specified key was too long; max key length is 3072 bytes"
+                                            .to_string(),
                                 });
                             }
 
@@ -616,9 +620,7 @@ impl Parser {
     /// - PRAGMA pragma_name(value);          -- Set pragma value (function syntax)
     /// - PRAGMA database.pragma_name;        -- Database-qualified pragma
     /// - PRAGMA database.pragma_name = value;
-    pub(super) fn parse_pragma_statement(
-        &mut self,
-    ) -> Result<vibesql_ast::PragmaStmt, ParseError> {
+    pub(super) fn parse_pragma_statement(&mut self) -> Result<vibesql_ast::PragmaStmt, ParseError> {
         // Expect PRAGMA keyword
         self.expect_keyword(Keyword::Pragma)?;
 
@@ -696,7 +698,7 @@ impl Parser {
                     }),
                 }
             }
-            _ => Err(ParseError { message: self.peek().syntax_error() })
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 }

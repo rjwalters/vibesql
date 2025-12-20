@@ -15,8 +15,9 @@ use crate::{
     errors::ExecutorError,
     evaluator::{
         window::{
-            calculate_frame, evaluate_avg_window, evaluate_count_window, evaluate_group_concat_window, evaluate_max_window,
-            evaluate_min_window, evaluate_sum_window, partition_rows, sort_partition, Partition,
+            calculate_frame, evaluate_avg_window, evaluate_count_window,
+            evaluate_group_concat_window, evaluate_max_window, evaluate_min_window,
+            evaluate_sum_window, partition_rows, sort_partition, Partition,
         },
         CombinedExpressionEvaluator,
     },
@@ -34,11 +35,13 @@ pub(super) fn evaluate_single_window_function(
     win_func: &WindowFunctionInfo,
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<Vec<SqlValue>, ExecutorError> {
-    // Extract function details
-    let (func_name, args) = match &win_func.function_spec {
-        WindowFunctionSpec::Aggregate { name, args } => (name.as_str(), args.as_slice()),
-        WindowFunctionSpec::Ranking { name, args } => (name.as_str(), args.as_slice()),
-        WindowFunctionSpec::Value { name, args } => (name.as_str(), args.as_slice()),
+    // Extract function details including optional FILTER clause
+    let (func_name, args, filter) = match &win_func.function_spec {
+        WindowFunctionSpec::Aggregate { name, args, filter } => {
+            (name.as_str(), args.as_slice(), filter.as_ref().map(|f| f.as_ref()))
+        }
+        WindowFunctionSpec::Ranking { name, args } => (name.as_str(), args.as_slice(), None),
+        WindowFunctionSpec::Value { name, args } => (name.as_str(), args.as_slice(), None),
     };
 
     // Partition rows using evaluator for column resolution
@@ -91,7 +94,15 @@ pub(super) fn evaluate_single_window_function(
                 .par_iter()
                 .map(|partition| {
                     // Create thread-local evaluator
-                    let (schema, database, outer_row, outer_schema, window_mapping, cte_context, enable_cse) = components;
+                    let (
+                        schema,
+                        database,
+                        outer_row,
+                        outer_schema,
+                        window_mapping,
+                        cte_context,
+                        enable_cse,
+                    ) = components;
                     let local_evaluator = CombinedExpressionEvaluator::from_parallel_components(
                         schema,
                         database,
@@ -106,6 +117,7 @@ pub(super) fn evaluate_single_window_function(
                         partition,
                         func_name,
                         args,
+                        filter,
                         &win_func.window_spec.order_by,
                         &win_func.window_spec.frame,
                         &local_evaluator,
@@ -130,12 +142,26 @@ pub(super) fn evaluate_single_window_function(
             all_results
         } else {
             // Sequential fallback for small datasets
-            evaluate_partitions_sequential(&partitions, func_name, args, &win_func.window_spec, evaluator)?
+            evaluate_partitions_sequential(
+                &partitions,
+                func_name,
+                args,
+                filter,
+                &win_func.window_spec,
+                evaluator,
+            )?
         }
     };
 
     #[cfg(not(feature = "parallel"))]
-    let results_with_indices = evaluate_partitions_sequential(&partitions, func_name, args, &win_func.window_spec, evaluator)?;
+    let results_with_indices = evaluate_partitions_sequential(
+        &partitions,
+        func_name,
+        args,
+        filter,
+        &win_func.window_spec,
+        evaluator,
+    )?;
 
     // Sort by original index to restore original row order
     let mut results_with_indices = results_with_indices;
@@ -152,6 +178,7 @@ fn evaluate_partitions_sequential(
     partitions: &[Partition],
     func_name: &str,
     args: &[Expression],
+    filter: Option<&Expression>,
     window_spec: &vibesql_ast::WindowSpec,
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<Vec<(usize, SqlValue)>, ExecutorError> {
@@ -162,6 +189,7 @@ fn evaluate_partitions_sequential(
             partition,
             func_name,
             args,
+            filter,
             &window_spec.order_by,
             &window_spec.frame,
             evaluator,
@@ -183,6 +211,7 @@ fn evaluate_window_function_for_partition(
     partition: &Partition,
     func_name: &str,
     args: &[Expression],
+    filter: Option<&Expression>,
     order_by: &Option<Vec<vibesql_ast::OrderByItem>>,
     frame_spec: &Option<vibesql_ast::WindowFrame>,
     evaluator: &CombinedExpressionEvaluator,
@@ -424,7 +453,7 @@ fn evaluate_window_function_for_partition(
                         } else {
                             Some(&args[0])
                         };
-                        evaluate_count_window(partition, &frame, arg_expr, eval_fn)
+                        evaluate_count_window(partition, &frame, arg_expr, filter, eval_fn)
                     }
                     "SUM" => {
                         if args.is_empty() {
@@ -432,7 +461,7 @@ fn evaluate_window_function_for_partition(
                                 "SUM requires an argument".to_string(),
                             ));
                         }
-                        evaluate_sum_window(partition, &frame, &args[0], eval_fn)
+                        evaluate_sum_window(partition, &frame, &args[0], filter, eval_fn)
                     }
                     "AVG" => {
                         if args.is_empty() {
@@ -440,7 +469,7 @@ fn evaluate_window_function_for_partition(
                                 "AVG requires an argument".to_string(),
                             ));
                         }
-                        evaluate_avg_window(partition, &frame, &args[0], eval_fn)
+                        evaluate_avg_window(partition, &frame, &args[0], filter, eval_fn)
                     }
                     "MIN" => {
                         if args.is_empty() {
@@ -448,7 +477,7 @@ fn evaluate_window_function_for_partition(
                                 "MIN requires an argument".to_string(),
                             ));
                         }
-                        evaluate_min_window(partition, &frame, &args[0], eval_fn)
+                        evaluate_min_window(partition, &frame, &args[0], filter, eval_fn)
                     }
                     "MAX" => {
                         if args.is_empty() {
@@ -456,7 +485,7 @@ fn evaluate_window_function_for_partition(
                                 "MAX requires an argument".to_string(),
                             ));
                         }
-                        evaluate_max_window(partition, &frame, &args[0], eval_fn)
+                        evaluate_max_window(partition, &frame, &args[0], filter, eval_fn)
                     }
                     "GROUP_CONCAT" | "STRING_AGG" => {
                         if args.is_empty() {
@@ -478,7 +507,9 @@ fn evaluate_window_function_for_partition(
                         } else {
                             ",".to_string()
                         };
-                        evaluate_group_concat_window(partition, &frame, &args[0], &separator, eval_fn)
+                        evaluate_group_concat_window(
+                            partition, &frame, &args[0], &separator, filter, eval_fn,
+                        )
                     }
                     _ => {
                         return Err(ExecutorError::UnsupportedExpression(format!(

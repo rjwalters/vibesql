@@ -108,10 +108,7 @@ fn test_upper_wrong_type() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(
-        result,
-        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("123"))
-    );
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("123")));
 }
 
 #[test]
@@ -183,10 +180,7 @@ fn test_lower_wrong_type() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(
-        result,
-        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("123"))
-    );
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("123")));
 }
 
 #[test]

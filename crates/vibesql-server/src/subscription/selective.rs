@@ -257,11 +257,7 @@ pub fn create_partial_row_update(
     // Convert to u16 for protocol
     let present_columns: Vec<u16> = included_columns.iter().map(|&idx| idx as u16).collect();
 
-    Some(crate::protocol::PartialRowUpdate::new(
-        total_columns as u16,
-        &present_columns,
-        values,
-    ))
+    Some(crate::protocol::PartialRowUpdate::new(total_columns as u16, &present_columns, values))
 }
 
 /// Create a partial row update from old and new rows with metrics recording
@@ -338,9 +334,5 @@ pub fn create_partial_row_update_with_metrics(
     // Convert to u16 for protocol
     let present_columns: Vec<u16> = included_columns.iter().map(|&idx| idx as u16).collect();
 
-    Some(crate::protocol::PartialRowUpdate::new(
-        total_columns as u16,
-        &present_columns,
-        values,
-    ))
+    Some(crate::protocol::PartialRowUpdate::new(total_columns as u16, &present_columns, values))
 }

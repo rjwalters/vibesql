@@ -737,7 +737,10 @@ mod tests {
 
         // l_quantity < 24
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("l_quantity", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "l_quantity",
+                false,
+            ))),
             op: BinaryOperator::LessThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(24))),
         };
@@ -756,13 +759,19 @@ mod tests {
         // l_quantity < 24 AND l_discount >= 0.05
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("l_quantity", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "l_quantity",
+                    false,
+                ))),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(24))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("l_discount", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "l_discount",
+                    false,
+                ))),
                 op: BinaryOperator::GreaterThanOrEqual,
                 right: Box::new(Expression::Literal(SqlValue::Double(0.05))),
             }),
@@ -781,7 +790,10 @@ mod tests {
 
         // l_quantity < 24
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("l_quantity", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "l_quantity",
+                false,
+            ))),
             op: BinaryOperator::LessThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(24))),
         };
@@ -813,13 +825,19 @@ mod tests {
         // Equality (l_discount = 0.05) should be evaluated first (more selective)
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("l_quantity", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "l_quantity",
+                    false,
+                ))),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(100))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("l_discount", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "l_discount",
+                    false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Double(0.05))),
             }),
@@ -876,13 +894,19 @@ mod tests {
         // directly)
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("l_discount", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "l_discount",
+                    false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Double(999.99))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("l_quantity", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "l_quantity",
+                    false,
+                ))),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(24))),
             }),
@@ -907,7 +931,10 @@ mod tests {
 
         // l_quantity > 10
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("l_quantity", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "l_quantity",
+                false,
+            ))),
             op: BinaryOperator::GreaterThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         };
@@ -934,7 +961,10 @@ mod tests {
         // l_quantity NOT BETWEEN 31 AND NULL
         // This should fall back to regular evaluator for proper NULL semantics
         let expr = Expression::Between {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("l_quantity", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "l_quantity",
+                false,
+            ))),
             low: Box::new(Expression::Literal(SqlValue::Integer(31))),
             high: Box::new(Expression::Literal(SqlValue::Null)),
             negated: true,
@@ -947,7 +977,10 @@ mod tests {
 
         // Also test with NULL low bound
         let expr_null_low = Expression::Between {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("l_quantity", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "l_quantity",
+                false,
+            ))),
             low: Box::new(Expression::Literal(SqlValue::Null)),
             high: Box::new(Expression::Literal(SqlValue::Integer(100))),
             negated: false,
@@ -965,7 +998,10 @@ mod tests {
 
         // l_quantity BETWEEN 10 AND 100
         let expr = Expression::Between {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("l_quantity", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "l_quantity",
+                false,
+            ))),
             low: Box::new(Expression::Literal(SqlValue::Integer(10))),
             high: Box::new(Expression::Literal(SqlValue::Integer(100))),
             negated: false,
@@ -1059,14 +1095,26 @@ mod tests {
         let branch1 = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
                 // p_partkey = l_partkey (column-to-column, should be skipped)
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("part", false, "p_partkey", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                    "part",
+                    false,
+                    "p_partkey",
+                    false,
+                ))),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("lineitem", false, "l_partkey", false))),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                    "lineitem",
+                    false,
+                    "l_partkey",
+                    false,
+                ))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
                 // p_brand = 'Brand#12'
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("part", false, "p_brand", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                    "part", false, "p_brand", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "Brand#12",
@@ -1077,14 +1125,26 @@ mod tests {
         let branch2 = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
                 // p_partkey = l_partkey (column-to-column, should be skipped)
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("part", false, "p_partkey", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                    "part",
+                    false,
+                    "p_partkey",
+                    false,
+                ))),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("lineitem", false, "l_partkey", false))),
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                    "lineitem",
+                    false,
+                    "l_partkey",
+                    false,
+                ))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
                 // p_brand = 'Brand#23'
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("part", false, "p_brand", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                    "part", false, "p_brand", false,
+                ))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "Brand#23",
@@ -1125,9 +1185,19 @@ mod tests {
 
         // l_partkey > p_partkey (inequality - should NOT be skipped, should fail compilation)
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("lineitem", false, "l_partkey", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "lineitem",
+                false,
+                "l_partkey",
+                false,
+            ))),
             op: BinaryOperator::GreaterThan,
-            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("part", false, "p_partkey", false))),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "part",
+                false,
+                "p_partkey",
+                false,
+            ))),
         };
 
         // This should fail to compile since column-to-column inequality is not supported

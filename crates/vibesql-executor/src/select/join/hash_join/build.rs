@@ -70,24 +70,22 @@ fn parallel_merge_composite(
 
     // Tree-based parallel merge using rayon's reduce
     // Merges into the larger table to minimize reallocations
-    partial_tables
-        .into_par_iter()
-        .reduce(AHashMap::new, |mut acc, mut partial| {
-            // Merge smaller table into larger to minimize resizing
-            if partial.len() > acc.len() {
-                // Swap: merge acc into partial
-                for (key, mut indices) in acc {
-                    partial.entry(key).or_default().append(&mut indices);
-                }
-                partial
-            } else {
-                // Merge partial into acc
-                for (key, mut indices) in partial {
-                    acc.entry(key).or_default().append(&mut indices);
-                }
-                acc
+    partial_tables.into_par_iter().reduce(AHashMap::new, |mut acc, mut partial| {
+        // Merge smaller table into larger to minimize resizing
+        if partial.len() > acc.len() {
+            // Swap: merge acc into partial
+            for (key, mut indices) in acc {
+                partial.entry(key).or_default().append(&mut indices);
             }
-        })
+            partial
+        } else {
+            // Merge partial into acc
+            for (key, mut indices) in partial {
+                acc.entry(key).or_default().append(&mut indices);
+            }
+            acc
+        }
+    })
 }
 
 /// Tree-based parallel merge for single-key hash tables
@@ -110,21 +108,19 @@ fn parallel_merge_single_key(
     }
 
     // Tree-based parallel merge
-    partial_tables
-        .into_par_iter()
-        .reduce(AHashMap::new, |mut acc, mut partial| {
-            if partial.len() > acc.len() {
-                for (key, mut indices) in acc {
-                    partial.entry(key).or_default().append(&mut indices);
-                }
-                partial
-            } else {
-                for (key, mut indices) in partial {
-                    acc.entry(key).or_default().append(&mut indices);
-                }
-                acc
+    partial_tables.into_par_iter().reduce(AHashMap::new, |mut acc, mut partial| {
+        if partial.len() > acc.len() {
+            for (key, mut indices) in acc {
+                partial.entry(key).or_default().append(&mut indices);
             }
-        })
+            partial
+        } else {
+            for (key, mut indices) in partial {
+                acc.entry(key).or_default().append(&mut indices);
+            }
+            acc
+        }
+    })
 }
 
 /// Tree-based parallel merge for existence hash tables
@@ -147,21 +143,19 @@ fn parallel_merge_existence(
     }
 
     // Tree-based parallel merge
-    partial_tables
-        .into_par_iter()
-        .reduce(AHashMap::new, |mut acc, mut partial| {
-            if partial.len() > acc.len() {
-                for (key, _) in acc {
-                    partial.insert(key, ());
-                }
-                partial
-            } else {
-                for (key, _) in partial {
-                    acc.insert(key, ());
-                }
-                acc
+    partial_tables.into_par_iter().reduce(AHashMap::new, |mut acc, mut partial| {
+        if partial.len() > acc.len() {
+            for (key, _) in acc {
+                partial.insert(key, ());
             }
-        })
+            partial
+        } else {
+            for (key, _) in partial {
+                acc.insert(key, ());
+            }
+            acc
+        }
+    })
 }
 
 /// Create morsels from a row count (local helper for build phase)

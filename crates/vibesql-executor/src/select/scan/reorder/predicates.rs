@@ -92,7 +92,11 @@ pub(super) fn extract_in_predicates_from_or(
                 if col_id.schema_canonical().is_none() {
                     if let Some(t) = col_id.table_canonical() {
                         if table_set.contains(&t.to_lowercase()) {
-                            return Some((t.to_string(), col_id.column_canonical().to_string(), v.clone()));
+                            return Some((
+                                t.to_string(),
+                                col_id.column_canonical().to_string(),
+                                v.clone(),
+                            ));
                         }
                     }
                 }
@@ -103,7 +107,11 @@ pub(super) fn extract_in_predicates_from_or(
                 if col_id.schema_canonical().is_none() {
                     if let Some(t) = col_id.table_canonical() {
                         if table_set.contains(&t.to_lowercase()) {
-                            return Some((t.to_string(), col_id.column_canonical().to_string(), v.clone()));
+                            return Some((
+                                t.to_string(),
+                                col_id.column_canonical().to_string(),
+                                v.clone(),
+                            ));
                         }
                     }
                 }
@@ -141,7 +149,9 @@ pub(super) fn extract_in_predicates_from_or(
         for ((t, c), vals) in col_vals {
             if col_count.get(&(t.clone(), c.clone())) == Some(&branches.len()) && vals.len() >= 2 {
                 let in_pred = Expression::InList {
-                    expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&t, false, &c, false))),
+                    expr: Box::new(Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::qualified(&t, false, &c, false),
+                    )),
                     values: vals.into_iter().map(Expression::Literal).collect(),
                     negated: false,
                 };
@@ -436,19 +446,31 @@ pub(super) fn extract_where_equijoins_with_schema(
                 // Use schema-based lookup
 
                 let left_table = match left.as_ref() {
-                    Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+                    Expression::ColumnRef(col_id)
+                        if col_id.schema_canonical().is_none()
+                            && col_id.table_canonical().is_some() =>
+                    {
                         Some(col_id.table_canonical().unwrap().to_lowercase())
                     }
-                    Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+                    Expression::ColumnRef(col_id)
+                        if col_id.schema_canonical().is_none()
+                            && col_id.table_canonical().is_none() =>
+                    {
                         resolve_column_with_fallback(col_id.column_canonical(), column_to_table)
                     }
                     _ => None,
                 };
                 let right_table = match right.as_ref() {
-                    Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+                    Expression::ColumnRef(col_id)
+                        if col_id.schema_canonical().is_none()
+                            && col_id.table_canonical().is_some() =>
+                    {
                         Some(col_id.table_canonical().unwrap().to_lowercase())
                     }
-                    Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+                    Expression::ColumnRef(col_id)
+                        if col_id.schema_canonical().is_none()
+                            && col_id.table_canonical().is_none() =>
+                    {
                         resolve_column_with_fallback(col_id.column_canonical(), column_to_table)
                     }
                     _ => None,

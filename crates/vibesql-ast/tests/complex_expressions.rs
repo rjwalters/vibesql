@@ -8,7 +8,9 @@ use vibesql_types::{SqlValue, StringValue};
 #[test]
 fn test_case_expression_simple() {
     let expr = Expression::Case {
-        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false)))),
+        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "status", false,
+        )))),
         when_clauses: vec![
             CaseWhen {
                 conditions: vec![Expression::Literal(SqlValue::Integer(1))],
@@ -36,7 +38,9 @@ fn test_case_expression_searched() {
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "age", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(18))),
             }],
             result: Expression::Literal(SqlValue::Varchar(StringValue::from("adult"))),
@@ -56,12 +60,14 @@ fn test_scalar_subquery() {
     let subquery = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Expression {
             expr: Expression::Function {
                 name: vibesql_ast::FunctionIdentifier::new("AVG"),
-                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "salary", false,
+                ))],
                 character_unit: None,
             },
             alias: None,
@@ -72,7 +78,8 @@ fn test_scalar_subquery() {
         from: Some(FromClause::Table {
             name: "employees".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -94,10 +101,13 @@ fn test_in_expression() {
     let subquery = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Expression {
-            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("department_id", false)),
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "department_id",
+                false,
+            )),
             alias: None,
             source_text: None,
         }],
@@ -106,7 +116,8 @@ fn test_in_expression() {
         from: Some(FromClause::Table {
             name: "departments".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -117,7 +128,9 @@ fn test_in_expression() {
     };
 
     let expr = Expression::In {
-        expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
+        expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "dept_id", false,
+        ))),
         subquery: Box::new(subquery),
         negated: false,
     };
@@ -132,7 +145,7 @@ fn test_not_in_expression() {
     let subquery = SelectStmt {
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -140,7 +153,8 @@ fn test_not_in_expression() {
         from: Some(FromClause::Table {
             name: "excluded".to_string(),
             alias: None,
-            column_aliases: None, quoted: false,
+            column_aliases: None,
+            quoted: false,
         }),
         where_clause: None,
         group_by: None,

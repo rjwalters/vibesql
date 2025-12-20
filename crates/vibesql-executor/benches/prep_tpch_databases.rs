@@ -29,9 +29,9 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use tpch::schema::load_vibesql;
 #[cfg(feature = "sqlite")]
 use tpch::schema::load_sqlite_to_file;
+use tpch::schema::load_vibesql;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -95,8 +95,7 @@ fn main() {
     let vibesql_path = output_dir.join(format!("tpch_sf{}.vbsql", scale_factor));
     println!("Creating VibeSQL database: {}", vibesql_path.display());
     let db = load_vibesql(scale_factor);
-    db.save_binary(&vibesql_path)
-        .expect("Failed to save VibeSQL database");
+    db.save_binary(&vibesql_path).expect("Failed to save VibeSQL database");
     println!("  Saved!");
 
     // Create SQLite database if requested

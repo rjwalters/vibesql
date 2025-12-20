@@ -37,23 +37,25 @@ fn test_update_where_scalar_subquery_equal() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("min_salary", false)),
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "config".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
-                group_by: None,
+        group_by: None,
         having: None,
         order_by: None,
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     });
 
     // UPDATE employees SET salary = 55000 WHERE salary = (SELECT min_salary FROM config)
@@ -65,7 +67,9 @@ fn test_update_where_scalar_subquery_equal() {
             value: Expression::Literal(SqlValue::Integer(55000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "salary", false,
+            ))),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(Expression::ScalarSubquery(subquery)),
         })),
@@ -114,26 +118,30 @@ fn test_update_where_scalar_subquery_less_than() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::Function {
                 name: vibesql_ast::FunctionIdentifier::new("AVG"),
-                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "salary", false,
+                ))],
                 character_unit: None,
             },
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "employees".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
-                group_by: None,
+        group_by: None,
         having: None,
         order_by: None,
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     });
 
     // UPDATE employees SET bonus = 5000 WHERE salary < (SELECT AVG(salary) FROM employees)
@@ -145,7 +153,9 @@ fn test_update_where_scalar_subquery_less_than() {
             value: Expression::Literal(SqlValue::Integer(5000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "salary", false,
+            ))),
             op: vibesql_ast::BinaryOperator::LessThan,
             right: Box::new(Expression::ScalarSubquery(subquery)),
         })),
@@ -191,23 +201,25 @@ fn test_update_where_subquery_returns_null() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("max_salary", false)),
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "config".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
-                group_by: None,
+        group_by: None,
         having: None,
         order_by: None,
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     });
 
     // UPDATE employees SET salary = 60000 WHERE salary < (SELECT max_salary FROM config)
@@ -219,7 +231,9 @@ fn test_update_where_subquery_returns_null() {
             value: Expression::Literal(SqlValue::Integer(60000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "salary", false,
+            ))),
             op: vibesql_ast::BinaryOperator::LessThan,
             right: Box::new(Expression::ScalarSubquery(subquery)),
         })),
@@ -272,26 +286,30 @@ fn test_update_where_subquery_with_aggregate() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::Function {
                 name: vibesql_ast::FunctionIdentifier::new("MAX"),
-                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "price", false,
+                ))],
                 character_unit: None,
             },
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "items".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
-                group_by: None,
+        group_by: None,
         having: None,
         order_by: None,
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     });
 
     // UPDATE items SET discounted = TRUE WHERE price = (SELECT MAX(price) FROM items)
@@ -303,7 +321,9 @@ fn test_update_where_subquery_with_aggregate() {
             value: Expression::Literal(SqlValue::Boolean(true)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "price", false,
+            ))),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(Expression::ScalarSubquery(subquery)),
         })),
@@ -368,23 +388,25 @@ fn test_update_where_and_set_both_use_subqueries() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("target", false)),
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "salary_targets".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
-                group_by: None,
+        group_by: None,
         having: None,
         order_by: None,
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     });
 
     // WHERE subquery
@@ -393,23 +415,25 @@ fn test_update_where_and_set_both_use_subqueries() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
-            alias: None, source_text: None }],
+            alias: None,
+            source_text: None,
+        }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
             name: "active_depts".to_string(),
             alias: None,
             column_aliases: None,
-        quoted: false,
+            quoted: false,
         }),
         where_clause: None,
-                group_by: None,
+        group_by: None,
         having: None,
         order_by: None,
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     });
 
     // UPDATE employees SET salary = (SELECT target FROM salary_targets) WHERE dept_id IN (SELECT
@@ -422,7 +446,9 @@ fn test_update_where_and_set_both_use_subqueries() {
             value: Expression::ScalarSubquery(set_subquery),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "dept_id", false,
+            ))),
             subquery: where_subquery,
             negated: false,
         })),

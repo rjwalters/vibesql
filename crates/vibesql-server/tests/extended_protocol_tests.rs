@@ -42,10 +42,7 @@ async fn test_extended_query_basic() {
         .expect("Failed to insert");
 
     // Query with extended protocol (client.query uses Parse/Bind/Execute/Sync)
-    let rows = client
-        .query("SELECT id, name FROM test_table", &[])
-        .await
-        .expect("Failed to query");
+    let rows = client.query("SELECT id, name FROM test_table", &[]).await.expect("Failed to query");
 
     assert_eq!(rows.len(), 1);
 
@@ -99,10 +96,8 @@ async fn test_extended_query_multiple_statements() {
     assert_eq!(rows.len(), 1);
 
     // Query all rows
-    let rows = client
-        .query("SELECT id, value FROM multi_test", &[])
-        .await
-        .expect("Failed to query all");
+    let rows =
+        client.query("SELECT id, value FROM multi_test", &[]).await.expect("Failed to query all");
 
     assert_eq!(rows.len(), 3);
 
@@ -143,10 +138,7 @@ async fn test_prepared_statement_reuse() {
     // Use client.query which internally prepares and executes
     // Run multiple queries to test statement reuse
     for _ in 0..3 {
-        let rows = client
-            .query("SELECT id FROM prep_test", &[])
-            .await
-            .expect("Failed to query");
+        let rows = client.query("SELECT id FROM prep_test", &[]).await.expect("Failed to query");
         assert_eq!(rows.len(), 5);
     }
 
@@ -172,9 +164,7 @@ async fn test_extended_protocol_error() {
     });
 
     // Query non-existent table should return error
-    let result = client
-        .query("SELECT * FROM nonexistent_table", &[])
-        .await;
+    let result = client.query("SELECT * FROM nonexistent_table", &[]).await;
 
     assert!(result.is_err(), "Expected error for non-existent table");
 

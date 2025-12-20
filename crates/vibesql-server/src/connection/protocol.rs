@@ -250,8 +250,12 @@ pub async fn send_query_result(
         }
 
         ExecutionResult::DeclareCursor { cursor_name } => {
-            send_command_complete(write_half, write_buf, &format!("DECLARE CURSOR {}", cursor_name))
-                .await?;
+            send_command_complete(
+                write_half,
+                write_buf,
+                &format!("DECLARE CURSOR {}", cursor_name),
+            )
+            .await?;
         }
 
         ExecutionResult::OpenCursor { cursor_name } => {

@@ -22,9 +22,10 @@ pub fn eval_simple_expr(
     match expr {
         Expression::ColumnRef(col_id) => {
             let column = col_id.column_canonical();
-            let col_idx = schema.get_column_index(col_id.table_canonical(), column).ok_or_else(|| {
-                ExecutorError::UnsupportedExpression(format!("Column not found: {}", column))
-            })?;
+            let col_idx =
+                schema.get_column_index(col_id.table_canonical(), column).ok_or_else(|| {
+                    ExecutorError::UnsupportedExpression(format!("Column not found: {}", column))
+                })?;
             Ok(row.get(col_idx).cloned().unwrap_or(SqlValue::Null))
         }
         Expression::Literal(val) => Ok(val.clone()),

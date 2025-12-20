@@ -1,6 +1,7 @@
 //! Aggregate window functions
 //!
 //! Implements COUNT, SUM, AVG, MIN, MAX with frame support.
+//! SQL:2003 FILTER clause support for conditional aggregation in window functions.
 
 use std::{cmp::Ordering, ops::Range};
 
@@ -10,17 +11,38 @@ use vibesql_types::SqlValue;
 
 use super::{partitioning::Partition, sorting::compare_values};
 
+/// Helper function to check if a row passes the FILTER condition
+/// Returns true if there's no filter, or if the filter evaluates to TRUE
+#[inline]
+fn passes_filter<F>(filter: Option<&Expression>, row: &Row, eval_fn: &F) -> bool
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
+    if let Some(filter_expr) = filter {
+        if let Ok(filter_result) = eval_fn(filter_expr, row) {
+            matches!(filter_result, SqlValue::Boolean(true))
+        } else {
+            false // Evaluation error = skip row
+        }
+    } else {
+        true // No filter = include all rows
+    }
+}
+
 /// Evaluate COUNT aggregate window function over a frame
 ///
 /// Counts rows in the frame. Two variants:
 /// - COUNT(*): counts all rows in frame
 /// - COUNT(expr): counts rows where expr is not NULL
 ///
-/// Example: COUNT(*) OVER (ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)
+/// Supports FILTER clause for conditional aggregation.
+///
+/// Example: COUNT(*) FILTER (WHERE x > 0) OVER (ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)
 pub fn evaluate_count_window<F>(
     partition: &Partition,
     frame: &Range<usize>,
     arg_expr: Option<&Expression>,
+    filter: Option<&Expression>,
     eval_fn: F,
 ) -> SqlValue
 where
@@ -34,6 +56,11 @@ where
         }
 
         let row = &partition.rows[idx];
+
+        // Check FILTER condition first
+        if !passes_filter(filter, row, &eval_fn) {
+            continue;
+        }
 
         // COUNT(*) - count all rows
         if arg_expr.is_none() {
@@ -58,12 +85,14 @@ where
 ///
 /// Sums numeric values in the frame, ignoring NULLs.
 /// Returns NULL if all values are NULL or frame is empty.
+/// Supports FILTER clause for conditional aggregation.
 ///
-/// Example: SUM(amount) OVER (ORDER BY date) for running totals
+/// Example: SUM(amount) FILTER (WHERE status = 'paid') OVER (ORDER BY date) for filtered running totals
 pub fn evaluate_sum_window<F>(
     partition: &Partition,
     frame: &Range<usize>,
     arg_expr: &Expression,
+    filter: Option<&Expression>,
     eval_fn: F,
 ) -> SqlValue
 where
@@ -78,6 +107,11 @@ where
         }
 
         let row = &partition.rows[idx];
+
+        // Check FILTER condition first
+        if !passes_filter(filter, row, &eval_fn) {
+            continue;
+        }
 
         if let Ok(val) = eval_fn(arg_expr, row) {
             match val {
@@ -131,13 +165,15 @@ where
 ///
 /// Computes average of numeric values in the frame, ignoring NULLs.
 /// Returns NULL if all values are NULL or frame is empty.
+/// Supports FILTER clause for conditional aggregation.
 ///
-/// Example: AVG(temperature) OVER (ORDER BY date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)
-/// for 7-day moving average
+/// Example: AVG(temperature) FILTER (WHERE valid = 1) OVER (ORDER BY date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)
+/// for 7-day moving average of valid readings
 pub fn evaluate_avg_window<F>(
     partition: &Partition,
     frame: &Range<usize>,
     arg_expr: &Expression,
+    filter: Option<&Expression>,
     eval_fn: F,
 ) -> SqlValue
 where
@@ -152,6 +188,11 @@ where
         }
 
         let row = &partition.rows[idx];
+
+        // Check FILTER condition first
+        if !passes_filter(filter, row, &eval_fn) {
+            continue;
+        }
 
         if let Ok(val) = eval_fn(arg_expr, row) {
             match val {
@@ -200,12 +241,14 @@ where
 ///
 /// Finds minimum value in the frame, ignoring NULLs.
 /// Returns NULL if all values are NULL or frame is empty.
+/// Supports FILTER clause for conditional aggregation.
 ///
-/// Example: MIN(salary) OVER (PARTITION BY department)
+/// Example: MIN(salary) FILTER (WHERE active = 1) OVER (PARTITION BY department)
 pub fn evaluate_min_window<F>(
     partition: &Partition,
     frame: &Range<usize>,
     arg_expr: &Expression,
+    filter: Option<&Expression>,
     eval_fn: F,
 ) -> SqlValue
 where
@@ -219,6 +262,11 @@ where
         }
 
         let row = &partition.rows[idx];
+
+        // Check FILTER condition first
+        if !passes_filter(filter, row, &eval_fn) {
+            continue;
+        }
 
         if let Ok(val) = eval_fn(arg_expr, row) {
             if matches!(val, SqlValue::Null) {
@@ -242,12 +290,14 @@ where
 ///
 /// Finds maximum value in the frame, ignoring NULLs.
 /// Returns NULL if all values are NULL or frame is empty.
+/// Supports FILTER clause for conditional aggregation.
 ///
-/// Example: MAX(salary) OVER (PARTITION BY department)
+/// Example: MAX(salary) FILTER (WHERE active = 1) OVER (PARTITION BY department)
 pub fn evaluate_max_window<F>(
     partition: &Partition,
     frame: &Range<usize>,
     arg_expr: &Expression,
+    filter: Option<&Expression>,
     eval_fn: F,
 ) -> SqlValue
 where
@@ -261,6 +311,11 @@ where
         }
 
         let row = &partition.rows[idx];
+
+        // Check FILTER condition first
+        if !passes_filter(filter, row, &eval_fn) {
+            continue;
+        }
 
         if let Ok(val) = eval_fn(arg_expr, row) {
             if matches!(val, SqlValue::Null) {
@@ -284,13 +339,15 @@ where
 ///
 /// Concatenates string values in the frame using the specified separator.
 /// Returns NULL if all values are NULL or frame is empty.
+/// Supports FILTER clause for conditional aggregation.
 ///
-/// Example: GROUP_CONCAT(name, ',') OVER (ORDER BY date)
+/// Example: GROUP_CONCAT(name, ',') FILTER (WHERE active = 1) OVER (ORDER BY date)
 pub fn evaluate_group_concat_window<F>(
     partition: &Partition,
     frame: &Range<usize>,
     arg_expr: &Expression,
     separator: &str,
+    filter: Option<&Expression>,
     eval_fn: F,
 ) -> SqlValue
 where
@@ -304,6 +361,11 @@ where
         }
 
         let row = &partition.rows[idx];
+
+        // Check FILTER condition first
+        if !passes_filter(filter, row, &eval_fn) {
+            continue;
+        }
 
         if let Ok(val) = eval_fn(arg_expr, row) {
             match val {

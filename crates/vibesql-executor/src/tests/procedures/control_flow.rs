@@ -482,7 +482,9 @@ fn test_procedure_body_caching_performance() {
             ProceduralStatement::Set {
                 name: "temp".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "x", false,
+                    ))),
                     op: BinaryOperator::Multiply,
                     right: Box::new(Expression::Literal(SqlValue::Integer(2))),
                 }),
@@ -490,7 +492,9 @@ fn test_procedure_body_caching_performance() {
             ProceduralStatement::Set {
                 name: "result".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("temp", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "temp", false,
+                    ))),
                     op: BinaryOperator::Plus,
                     right: Box::new(Expression::Literal(SqlValue::Integer(10))),
                 }),
@@ -525,7 +529,10 @@ fn test_procedure_body_caching_performance() {
             procedure_name: "test_cache_proc".to_string(),
             arguments: vec![
                 Expression::Literal(SqlValue::Integer(i)),
-                Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&format!("@out{}", i), false)),
+                Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    &format!("@out{}", i),
+                    false,
+                )),
             ],
         };
         advanced_objects::execute_call(&call_stmt, &mut db).unwrap();
@@ -577,7 +584,9 @@ fn test_cache_invalidation_on_drop() {
     // Call once to populate cache
     let call_stmt = CallStmt {
         procedure_name: "test_invalidate".to_string(),
-        arguments: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("@out", false))],
+        arguments: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "@out", false,
+        ))],
     };
     advanced_objects::execute_call(&call_stmt, &mut db).unwrap();
     assert_eq!(db.get_session_variable("out"), Some(&SqlValue::Integer(42)));
@@ -611,7 +620,9 @@ fn test_cache_invalidation_on_drop() {
     // Call again - should use new procedure body, not cached old one
     let call_stmt2 = CallStmt {
         procedure_name: "test_invalidate".to_string(),
-        arguments: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("@out2", false))],
+        arguments: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+            "@out2", false,
+        ))],
     };
     advanced_objects::execute_call(&call_stmt2, &mut db).unwrap();
     assert_eq!(db.get_session_variable("out2"), Some(&SqlValue::Integer(99)));

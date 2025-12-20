@@ -26,7 +26,9 @@ fn test_call_procedure_with_in_parameter() {
             },
             ProceduralStatement::Set {
                 name: "greeting".to_string(),
-                value: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))),
+                value: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "name", false,
+                ))),
             },
         ]),
         sql_security: None,
@@ -78,9 +80,13 @@ fn test_call_procedure_with_multiple_parameters() {
             ProceduralStatement::Set {
                 name: "result".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "a", false,
+                    ))),
                     op: BinaryOperator::Plus,
-                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false))),
+                    right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "b", false,
+                    ))),
                 }),
             },
         ]),
@@ -170,7 +176,9 @@ fn test_variable_in_expression() {
             ProceduralStatement::Set {
                 name: "y".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "x", false,
+                    ))),
                     op: BinaryOperator::Multiply,
                     right: Box::new(Expression::Literal(SqlValue::Integer(2))),
                 }),
@@ -223,7 +231,9 @@ fn test_concat_function_in_procedure() {
                 value: Box::new(Expression::Function {
                     name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
                     args: vec![
-                        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("first", false)),
+                        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                            "first", false,
+                        )),
                         Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(" "))),
                         Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("last", false)),
                     ],

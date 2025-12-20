@@ -31,10 +31,10 @@ use vibesql_parser::Parser;
 
 // Import transaction types from shared crate
 pub use vibesql_bench_common::tpcc::{
-    DeliveryInput, NewOrderInput, NewOrderItemInput, OrderStatusInput, PaymentInput,
-    StockLevelInput, TPCCBenchmarkResults, TPCCRng, TPCCWorkload, TransactionResult,
     generate_delivery_input, generate_new_order_input, generate_order_status_input,
-    generate_payment_input, generate_stock_level_input,
+    generate_payment_input, generate_stock_level_input, DeliveryInput, NewOrderInput,
+    NewOrderItemInput, OrderStatusInput, PaymentInput, StockLevelInput, TPCCBenchmarkResults,
+    TPCCRng, TPCCWorkload, TransactionResult,
 };
 
 /// Trait for TPC-C transaction executors.

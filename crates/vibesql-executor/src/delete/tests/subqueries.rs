@@ -190,13 +190,17 @@ mod in_subquery {
             with_clause: None,
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Expression {
-                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
-                alias: None, source_text: None }],
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "dept_id", false,
+                )),
+                alias: None,
+                source_text: None,
+            }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "inactive_depts".to_string(),
                 alias: None,
                 column_aliases: None,
-            quoted: false,
+                quoted: false,
             }),
             where_clause: None,
             group_by: None,
@@ -210,10 +214,13 @@ mod in_subquery {
 
         // DELETE FROM employees WHERE dept_id IN (SELECT dept_id FROM inactive_depts)
         let stmt = DeleteStmt {
-            quoted: false, only: false,
+            quoted: false,
+            only: false,
             table_name: "employees".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::In {
-                expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
+                expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "dept_id", false,
+                ))),
                 subquery,
                 negated: false,
             })),
@@ -248,13 +255,17 @@ mod in_subquery {
             with_clause: None,
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Expression {
-                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
-                alias: None, source_text: None }],
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "dept_id", false,
+                )),
+                alias: None,
+                source_text: None,
+            }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "active_depts".to_string(),
                 alias: None,
                 column_aliases: None,
-            quoted: false,
+                quoted: false,
             }),
             where_clause: None,
             group_by: None,
@@ -268,10 +279,13 @@ mod in_subquery {
 
         // DELETE FROM employees WHERE dept_id NOT IN (SELECT dept_id FROM active_depts)
         let stmt = DeleteStmt {
-            quoted: false, only: false,
+            quoted: false,
+            only: false,
             table_name: "employees".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::In {
-                expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
+                expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "dept_id", false,
+                ))),
                 subquery,
                 negated: true,
             })),
@@ -315,15 +329,19 @@ mod scalar_subquery {
             select_list: vec![vibesql_ast::SelectItem::Expression {
                 expr: Expression::Function {
                     name: vibesql_ast::FunctionIdentifier::new("AVG"),
-                    args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))],
+                    args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "salary", false,
+                    ))],
                     character_unit: None,
                 },
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "employees".to_string(),
                 alias: None,
                 column_aliases: None,
-            quoted: false,
+                quoted: false,
             }),
             where_clause: None,
             group_by: None,
@@ -337,10 +355,13 @@ mod scalar_subquery {
 
         // DELETE FROM employees WHERE salary < (SELECT AVG(salary) FROM employees)
         let stmt = DeleteStmt {
-            quoted: false, only: false,
+            quoted: false,
+            only: false,
             table_name: "employees".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "salary", false,
+                ))),
                 op: vibesql_ast::BinaryOperator::LessThan,
                 right: Box::new(Expression::ScalarSubquery(subquery)),
             })),
@@ -386,15 +407,19 @@ mod scalar_subquery {
             select_list: vec![vibesql_ast::SelectItem::Expression {
                 expr: Expression::Function {
                     name: vibesql_ast::FunctionIdentifier::new("MAX"),
-                    args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
+                    args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "price", false,
+                    ))],
                     character_unit: None,
                 },
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "items".to_string(),
                 alias: None,
                 column_aliases: None,
-            quoted: false,
+                quoted: false,
             }),
             where_clause: None,
             group_by: None,
@@ -408,10 +433,13 @@ mod scalar_subquery {
 
         // DELETE FROM items WHERE price = (SELECT MAX(price) FROM items)
         let stmt = DeleteStmt {
-            quoted: false, only: false,
+            quoted: false,
+            only: false,
             table_name: "items".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "price", false,
+                ))),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(Expression::ScalarSubquery(subquery)),
             })),
@@ -449,13 +477,18 @@ mod scalar_subquery {
             with_clause: None,
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Expression {
-                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("threshold", false)),
-                alias: None, source_text: None }],
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "threshold",
+                    false,
+                )),
+                alias: None,
+                source_text: None,
+            }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "config".to_string(),
                 alias: None,
                 column_aliases: None,
-            quoted: false,
+                quoted: false,
             }),
             where_clause: None,
             group_by: None,
@@ -469,10 +502,13 @@ mod scalar_subquery {
 
         // DELETE FROM employees WHERE salary > (SELECT threshold FROM config)
         let stmt = DeleteStmt {
-            quoted: false, only: false,
+            quoted: false,
+            only: false,
             table_name: "employees".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "salary", false,
+                ))),
                 op: vibesql_ast::BinaryOperator::GreaterThan,
                 right: Box::new(Expression::ScalarSubquery(subquery)),
             })),
@@ -510,13 +546,17 @@ mod empty_subquery {
             with_clause: None,
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Expression {
-                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false)),
-                alias: None, source_text: None }],
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "dept_id", false,
+                )),
+                alias: None,
+                source_text: None,
+            }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "old_depts".to_string(),
                 alias: None,
                 column_aliases: None,
-            quoted: false,
+                quoted: false,
             }),
             where_clause: None,
             group_by: None,
@@ -530,10 +570,13 @@ mod empty_subquery {
 
         // DELETE FROM employees WHERE dept_id IN (SELECT dept_id FROM old_depts)
         let stmt = DeleteStmt {
-            quoted: false, only: false,
+            quoted: false,
+            only: false,
             table_name: "employees".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::In {
-                expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
+                expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "dept_id", false,
+                ))),
                 subquery,
                 negated: false,
             })),
@@ -577,16 +620,23 @@ mod complex_subquery {
             with_clause: None,
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Expression {
-                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false)),
-                alias: None, source_text: None }],
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "customer_id",
+                    false,
+                )),
+                alias: None,
+                source_text: None,
+            }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "inactive_customers".to_string(),
                 alias: None,
                 column_aliases: None,
-            quoted: false,
+                quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "status", false,
+                ))),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "inactive",
@@ -604,10 +654,14 @@ mod complex_subquery {
         // DELETE FROM orders WHERE customer_id IN (SELECT customer_id FROM inactive_customers WHERE
         // status = 'inactive')
         let stmt = DeleteStmt {
-            quoted: false, only: false,
+            quoted: false,
+            only: false,
             table_name: "orders".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::In {
-                expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false))),
+                expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "customer_id",
+                    false,
+                ))),
                 subquery,
                 negated: false,
             })),

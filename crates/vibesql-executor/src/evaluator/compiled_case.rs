@@ -126,7 +126,8 @@ impl CompiledCaseExpression {
     ) -> Option<Self> {
         match result {
             Expression::ColumnRef(col_id) => {
-                let result_col_idx = schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
+                let result_col_idx =
+                    schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
                 Some(CompiledCaseExpression::WhenEqualsThenColumn {
                     condition_col_idx,
                     condition_value,

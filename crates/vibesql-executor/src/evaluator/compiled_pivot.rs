@@ -323,13 +323,18 @@ mod tests {
                 operand: None,
                 when_clauses: vec![CaseWhen {
                     conditions: vec![Expression::BinaryOp {
-                        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("d_day_name", false))),
+                        left: Box::new(Expression::ColumnRef(
+                            vibesql_ast::ColumnIdentifier::simple("d_day_name", false),
+                        )),
                         op: BinaryOperator::Equal,
                         right: Box::new(Expression::Literal(SqlValue::Varchar(
                             arcstr::ArcStr::from(match_value),
                         ))),
                     }],
-                    result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("sales_price", false)),
+                    result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "sales_price",
+                        false,
+                    )),
                 }],
                 else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
             }],
@@ -344,10 +349,14 @@ mod tests {
         let select_list = vec![
             SelectItem::Expression {
                 expr: create_sum_case_expression("Sunday"),
-                alias: Some("sun_sales".to_string()), source_text: None },
+                alias: Some("sun_sales".to_string()),
+                source_text: None,
+            },
             SelectItem::Expression {
                 expr: create_sum_case_expression("Monday"),
-                alias: Some("mon_sales".to_string()), source_text: None },
+                alias: Some("mon_sales".to_string()),
+                source_text: None,
+            },
         ];
 
         let pivot = PivotAggregateGroup::try_detect(&select_list, &schema);
@@ -369,7 +378,9 @@ mod tests {
             .iter()
             .map(|day| SelectItem::Expression {
                 expr: create_sum_case_expression(day),
-                alias: Some(format!("{}_sales", day.to_lowercase())), source_text: None })
+                alias: Some(format!("{}_sales", day.to_lowercase())),
+                source_text: None,
+            })
             .collect();
 
         let pivot = PivotAggregateGroup::try_detect(&select_list, &schema);
@@ -385,7 +396,9 @@ mod tests {
 
         let select_list = vec![SelectItem::Expression {
             expr: create_sum_case_expression("Sunday"),
-            alias: Some("sun_sales".to_string()), source_text: None }];
+            alias: Some("sun_sales".to_string()),
+            source_text: None,
+        }];
 
         let pivot = PivotAggregateGroup::try_detect(&select_list, &schema);
         assert!(pivot.is_none(), "Should not detect pivot with single aggregate");
@@ -407,11 +420,16 @@ mod tests {
                 operand: None,
                 when_clauses: vec![CaseWhen {
                     conditions: vec![Expression::BinaryOp {
-                        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("d_week_seq", false))),
+                        left: Box::new(Expression::ColumnRef(
+                            vibesql_ast::ColumnIdentifier::simple("d_week_seq", false),
+                        )),
                         op: BinaryOperator::Equal,
                         right: Box::new(Expression::Literal(SqlValue::Integer(1))),
                     }],
-                    result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("sales_price", false)),
+                    result: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "sales_price",
+                        false,
+                    )),
                 }],
                 else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
             }],
@@ -419,8 +437,16 @@ mod tests {
         };
 
         let select_list = vec![
-            SelectItem::Expression { expr: expr1, alias: Some("sun_sales".to_string()) , source_text: None },
-            SelectItem::Expression { expr: expr2, alias: Some("week1_sales".to_string()) , source_text: None },
+            SelectItem::Expression {
+                expr: expr1,
+                alias: Some("sun_sales".to_string()),
+                source_text: None,
+            },
+            SelectItem::Expression {
+                expr: expr2,
+                alias: Some("week1_sales".to_string()),
+                source_text: None,
+            },
         ];
 
         let pivot = PivotAggregateGroup::try_detect(&select_list, &schema);
@@ -434,13 +460,19 @@ mod tests {
         let select_list = vec![
             SelectItem::Expression {
                 expr: create_sum_case_expression("Sunday"),
-                alias: Some("sun_sales".to_string()), source_text: None },
+                alias: Some("sun_sales".to_string()),
+                source_text: None,
+            },
             SelectItem::Expression {
                 expr: create_sum_case_expression("Monday"),
-                alias: Some("mon_sales".to_string()), source_text: None },
+                alias: Some("mon_sales".to_string()),
+                source_text: None,
+            },
             SelectItem::Expression {
                 expr: create_sum_case_expression("Tuesday"),
-                alias: Some("tue_sales".to_string()), source_text: None },
+                alias: Some("tue_sales".to_string()),
+                source_text: None,
+            },
         ];
 
         let pivot = PivotAggregateGroup::try_detect(&select_list, &schema).unwrap();
@@ -500,10 +532,14 @@ mod tests {
         let select_list = vec![
             SelectItem::Expression {
                 expr: create_sum_case_expression("Sunday"),
-                alias: Some("sun_sales".to_string()), source_text: None },
+                alias: Some("sun_sales".to_string()),
+                source_text: None,
+            },
             SelectItem::Expression {
                 expr: create_sum_case_expression("Monday"),
-                alias: Some("mon_sales".to_string()), source_text: None },
+                alias: Some("mon_sales".to_string()),
+                source_text: None,
+            },
         ];
 
         let pivot = PivotAggregateGroup::try_detect(&select_list, &schema).unwrap();

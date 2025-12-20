@@ -73,7 +73,11 @@ pub(super) fn build_merged_outer_row<'a>(
         let mut merged_values = outer.values.clone();
         merged_values.extend(current_row.values.iter().cloned());
 
-        std::borrow::Cow::Owned(vibesql_storage::Row { values: merged_values, row_id: None, row_ids: None })
+        std::borrow::Cow::Owned(vibesql_storage::Row {
+            values: merged_values,
+            row_id: None,
+            row_ids: None,
+        })
     } else {
         // No outer row to merge, just use current row
         std::borrow::Cow::Borrowed(current_row)

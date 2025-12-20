@@ -555,7 +555,9 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false)),
-                alias: None, source_text: None }],
+                alias: None,
+                source_text: None,
+            }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
@@ -568,12 +570,16 @@ mod tests {
                 op: BinaryOperator::And,
                 left: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::GreaterThan,
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "col1", false,
+                    ))),
                     right: Box::new(Expression::Literal(SqlValue::Integer(25))),
                 }),
                 right: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::Equal,
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col2", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "col2", false,
+                    ))),
                     right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                         "John",
                     )))),
@@ -610,10 +616,12 @@ mod tests {
                 name: "tab".to_string(),
                 alias: None,
                 column_aliases: None,
-            quoted: false,
+                quoted: false,
             }),
             where_clause: Some(Expression::InList {
-                expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+                expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "id", false,
+                ))),
                 values: vec![
                     Expression::Literal(SqlValue::Integer(1)),
                     Expression::Literal(SqlValue::Integer(2)),

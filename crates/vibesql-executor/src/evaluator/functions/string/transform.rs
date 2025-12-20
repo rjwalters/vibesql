@@ -33,9 +33,7 @@ pub(in crate::evaluator::functions) fn replace(
         None => return Ok(vibesql_types::SqlValue::Null),
     };
 
-    Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-        text.replace(&from, &to),
-    )))
+    Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(text.replace(&from, &to))))
 }
 
 /// REVERSE(string) - Reverse a string
@@ -55,9 +53,7 @@ pub(in crate::evaluator::functions) fn reverse(
         None => Ok(vibesql_types::SqlValue::Null),
         Some(s) => {
             let reversed: String = s.chars().rev().collect();
-            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-                reversed,
-            )))
+            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(reversed)))
         }
     }
 }

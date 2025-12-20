@@ -146,8 +146,12 @@ fn estimate_equality_selectivity(
 ) -> f64 {
     // Try to extract column name and literal value
     let (column_name, literal_value) = match (left, right) {
-        (Expression::ColumnRef(col_id), Expression::Literal(val)) => (col_id.column_canonical(), val),
-        (Expression::Literal(val), Expression::ColumnRef(col_id)) => (col_id.column_canonical(), val),
+        (Expression::ColumnRef(col_id), Expression::Literal(val)) => {
+            (col_id.column_canonical(), val)
+        }
+        (Expression::Literal(val), Expression::ColumnRef(col_id)) => {
+            (col_id.column_canonical(), val)
+        }
         _ => return 0.1, // Can't analyze: default selectivity
     };
 
@@ -175,16 +179,12 @@ fn estimate_range_selectivity(
 ) -> f64 {
     // Extract column and value
     let (column_name, literal_value, operator_str) = match (op, left, right) {
-        (
-            BinaryOperator::LessThan,
-            Expression::ColumnRef(col_id),
-            Expression::Literal(val),
-        ) => (col_id.column_canonical(), val, "<"),
-        (
-            BinaryOperator::GreaterThan,
-            Expression::ColumnRef(col_id),
-            Expression::Literal(val),
-        ) => (col_id.column_canonical(), val, ">"),
+        (BinaryOperator::LessThan, Expression::ColumnRef(col_id), Expression::Literal(val)) => {
+            (col_id.column_canonical(), val, "<")
+        }
+        (BinaryOperator::GreaterThan, Expression::ColumnRef(col_id), Expression::Literal(val)) => {
+            (col_id.column_canonical(), val, ">")
+        }
         (
             BinaryOperator::LessThanOrEqual,
             Expression::ColumnRef(col_id),
@@ -353,7 +353,9 @@ mod tests {
         // status = 'active' should be 3/4 = 75% (of non-null values)
         let pred = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false))),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "status", false,
+            ))),
             right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("active")))),
         };
 
@@ -370,14 +372,18 @@ mod tests {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "status", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "active",
                 )))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::LessThan,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
         };
@@ -403,14 +409,18 @@ mod tests {
             op: BinaryOperator::Or,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "status", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "active",
                 )))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::LessThan,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
         };
@@ -430,7 +440,9 @@ mod tests {
         // Should match all non-null rows: 4/5 = 80%
         // NDV for status is 2 (active, inactive), so selectivity = 2/2 = 1.0
         let pred = Expression::InList {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "status", false,
+            ))),
             values: vec![
                 Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("active"))),
                 Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("inactive"))),
@@ -450,7 +462,9 @@ mod tests {
         // Should match 3/5 = 60% of rows (3 out of 4 non-null have 'active')
         // NDV for status is 2, so selectivity = 1/2 = 0.5
         let pred_single = Expression::InList {
-            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false))),
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "status", false,
+            ))),
             values: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("active")))],
             negated: false,
         };
@@ -475,14 +489,18 @@ mod tests {
                 op: BinaryOperator::Or,
                 left: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::Equal,
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "status", false,
+                    ))),
                     right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                         "active",
                     )))),
                 }),
                 right: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::Equal,
-                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false))),
+                    left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                        "status", false,
+                    ))),
                     right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                         "inactive",
                     )))),
@@ -490,7 +508,9 @@ mod tests {
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::LessThan,
-                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "id", false,
+                ))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(3))),
             }),
         };

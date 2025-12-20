@@ -133,13 +133,12 @@ pub(crate) fn string_to_number(s: &str) -> (i64, f64, bool) {
             } else {
                 // Invalid exponent, backtrack
                 has_exponent = false;
-                end_idx -= if end_idx > 0
-                    && (chars[end_idx - 1] == '+' || chars[end_idx - 1] == '-')
-                {
-                    2
-                } else {
-                    1
-                };
+                end_idx -=
+                    if end_idx > 0 && (chars[end_idx - 1] == '+' || chars[end_idx - 1] == '-') {
+                        2
+                    } else {
+                        1
+                    };
                 break;
             }
         } else {
@@ -548,9 +547,7 @@ pub(crate) fn cast_value(
             };
             // Truncate or pad to exact length
             if string_val.len() > *length {
-                Ok(SqlValue::Character(arcstr::ArcStr::from(
-                    &string_val[..*length],
-                )))
+                Ok(SqlValue::Character(arcstr::ArcStr::from(&string_val[..*length])))
             } else if string_val.len() < *length {
                 // Pad with spaces to reach exact length
                 let padded = format!("{:<width$}", string_val, width = *length);

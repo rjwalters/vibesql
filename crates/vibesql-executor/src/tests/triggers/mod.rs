@@ -38,12 +38,12 @@ pub(super) fn create_audit_table(db: &mut Database) {
             constraints: vec![],
             default_value: None,
             comment: None,
-        generated_expr: None,
+            generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&stmt, db).expect("Failed to create audit_log table");
 }
@@ -61,7 +61,7 @@ pub(super) fn create_users_table(db: &mut Database) {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
             vibesql_ast::ColumnDef {
                 name: "username".to_string(),
@@ -70,13 +70,13 @@ pub(super) fn create_users_table(db: &mut Database) {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-            generated_expr: None,
+                generated_expr: None,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
-            quoted: false,
-            as_query: None,
+        quoted: false,
+        as_query: None,
     };
     CreateTableExecutor::execute(&stmt, db).expect("Failed to create users table");
 }
@@ -89,7 +89,8 @@ pub(super) fn count_audit_rows(db: &Database) -> usize {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table { quoted: false,
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
             name: "AUDIT_LOG".to_string(),
             alias: None,
             column_aliases: None,
@@ -101,7 +102,7 @@ pub(super) fn count_audit_rows(db: &Database) -> usize {
         limit: None,
         offset: None,
         set_operation: None,
-            values: None,
+        values: None,
     };
     let executor = SelectExecutor::new(db);
     let result = executor.execute(&select).expect("Failed to select from audit_log");

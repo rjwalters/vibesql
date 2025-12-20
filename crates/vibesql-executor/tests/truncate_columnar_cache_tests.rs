@@ -28,7 +28,10 @@ fn setup_products_table(db: &mut Database) {
 
 /// Helper to insert a row into products table
 fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
-    let stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "products".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -248,7 +251,10 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
     db.create_table(child_schema).unwrap();
 
     // Insert data into parent using InsertExecutor
-    let parent_stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let parent_stmt = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "categories".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -263,7 +269,10 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
     InsertExecutor::execute(&mut db, &parent_stmt).unwrap();
 
     // Insert data into child using InsertExecutor
-    let child_stmt1 = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let child_stmt1 = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "items".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -276,7 +285,10 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
     };
     InsertExecutor::execute(&mut db, &child_stmt1).unwrap();
 
-    let child_stmt2 = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
+    let child_stmt2 = vibesql_ast::InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
         table_name: "items".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![

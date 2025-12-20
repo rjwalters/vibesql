@@ -267,8 +267,12 @@ fn print_indexes(db: &Database, table_name: &str) -> anyhow::Result<()> {
         println!("\nIndexes:");
         for index in indexes {
             let idx_type = if index.unique { "UNIQUE, btree" } else { "btree" };
-            let columns =
-                index.columns.iter().map(|c| c.expect_column_name().to_string()).collect::<Vec<_>>().join(", ");
+            let columns = index
+                .columns
+                .iter()
+                .map(|c| c.expect_column_name().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
 
             println!("    \"{}\" {}, ({})", index.index_name, idx_type, columns);
         }
