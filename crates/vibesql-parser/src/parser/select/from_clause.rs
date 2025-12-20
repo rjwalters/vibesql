@@ -12,6 +12,13 @@ impl Parser {
         // Parse the first table reference
         let mut left = self.parse_table_reference()?;
 
+        // Check for USING without a preceding JOIN - SQLite error compatibility
+        if self.peek_keyword(Keyword::Using) {
+            return Err(ParseError {
+                message: "a JOIN clause is required before USING".to_string(),
+            });
+        }
+
         // Check for JOINs or commas (left-associative)
         while self.is_join_keyword() || self.peek() == &Token::Comma {
             let (join_type, right, condition, using_columns, natural) =
@@ -426,10 +433,17 @@ impl Parser {
     /// - NATURAL JOIN, NATURAL LEFT JOIN, NATURAL LEFT OUTER JOIN
     /// - LEFT NATURAL JOIN, LEFT OUTER NATURAL JOIN
     /// - OUTER LEFT NATURAL JOIN
+    ///
+    /// Invalid combinations like "INNER OUTER" or "LEFT BOGUS" produce:
+    /// "unknown join type: INNER OUTER" (SQLite-compatible error message)
     pub(crate) fn parse_join_type(&mut self) -> Result<(vibesql_ast::JoinType, bool), ParseError> {
+        // Track consumed join type keywords for error messages
+        let mut consumed_keywords: Vec<String> = Vec::new();
+
         // Check for optional NATURAL keyword first
         let mut is_natural = if self.peek_keyword(Keyword::Natural) {
             self.consume_keyword(Keyword::Natural)?;
+            consumed_keywords.push("NATURAL".to_string());
             true
         } else {
             false
@@ -442,16 +456,68 @@ impl Parser {
             }
             Token::Keyword { keyword: Keyword::Inner, .. } => {
                 self.advance();
+                consumed_keywords.push("INNER".to_string());
                 // Check for NATURAL after INNER (INNER NATURAL JOIN)
                 if self.peek_keyword(Keyword::Natural) {
                     self.consume_keyword(Keyword::Natural)?;
                     is_natural = true;
+                }
+                // Check for invalid combinations like "INNER OUTER" or "INNER BOGUS"
+                if let Token::Keyword { keyword: kw, .. } = self.peek() {
+                    if *kw != Keyword::Join && *kw != Keyword::Natural {
+                        // Consume remaining non-JOIN keywords to build error message
+                        while let Token::Keyword { keyword: next_kw, .. } = self.peek() {
+                            if *next_kw == Keyword::Join {
+                                break;
+                            }
+                            consumed_keywords.push(next_kw.to_string().to_uppercase());
+                            self.advance();
+                        }
+                        // If we ended on JOIN, that's part of an invalid combination
+                        if self.peek_keyword(Keyword::Join) {
+                            // We have something like "INNER OUTER JOIN" - invalid
+                            return Err(ParseError {
+                                message: format!(
+                                    "unknown join type: {}",
+                                    consumed_keywords.join(" ")
+                                ),
+                            });
+                        }
+                        return Err(ParseError {
+                            message: format!(
+                                "unknown join type: {}",
+                                consumed_keywords.join(" ")
+                            ),
+                        });
+                    }
+                } else if let Token::Identifier(id) = self.peek() {
+                    // Handle "INNER BOGUS" where BOGUS is an identifier
+                    consumed_keywords.push(id.to_uppercase());
+                    self.advance();
+                    // Consume any more keywords/identifiers before JOIN
+                    loop {
+                        match self.peek() {
+                            Token::Keyword { keyword: next_kw, .. } if *next_kw != Keyword::Join => {
+                                consumed_keywords.push(next_kw.to_string().to_uppercase());
+                                self.advance();
+                            }
+                            Token::Identifier(id2) => {
+                                consumed_keywords.push(id2.to_uppercase());
+                                self.advance();
+                            }
+                            _ => break,
+                        }
+                    }
+                    return Err(ParseError {
+                        message: format!("unknown join type: {}", consumed_keywords.join(" ")),
+                    });
                 }
                 self.expect_keyword(Keyword::Join)?;
                 vibesql_ast::JoinType::Inner
             }
             Token::Keyword { keyword: Keyword::Left, .. } => {
                 self.advance();
+                consumed_keywords.push("LEFT".to_string());
                 // Optional OUTER keyword
                 if self.peek_keyword(Keyword::Outer) {
                     self.consume_keyword(Keyword::Outer)?;
@@ -461,11 +527,46 @@ impl Parser {
                     self.consume_keyword(Keyword::Natural)?;
                     is_natural = true;
                 }
+                // Check for invalid combinations like "LEFT BOGUS"
+                if let Token::Keyword { keyword: kw, .. } = self.peek() {
+                    if *kw != Keyword::Join && *kw != Keyword::Natural && *kw != Keyword::Outer {
+                        // Consume remaining non-JOIN keywords to build error message
+                        while let Token::Keyword { keyword: next_kw, .. } = self.peek() {
+                            if *next_kw == Keyword::Join {
+                                break;
+                            }
+                            consumed_keywords.push(next_kw.to_string().to_uppercase());
+                            self.advance();
+                        }
+                        return Err(ParseError {
+                            message: format!(
+                                "unknown join type: {}",
+                                consumed_keywords.join(" ")
+                            ),
+                        });
+                    }
+                } else if let Token::Identifier(id) = self.peek() {
+                    // Handle "LEFT BOGUS" where BOGUS is an identifier
+                    consumed_keywords.push(id.to_uppercase());
+                    self.advance();
+                    // Consume any more keywords before JOIN
+                    while let Token::Keyword { keyword: next_kw, .. } = self.peek() {
+                        if *next_kw == Keyword::Join {
+                            break;
+                        }
+                        consumed_keywords.push(next_kw.to_string().to_uppercase());
+                        self.advance();
+                    }
+                    return Err(ParseError {
+                        message: format!("unknown join type: {}", consumed_keywords.join(" ")),
+                    });
+                }
                 self.expect_keyword(Keyword::Join)?;
                 vibesql_ast::JoinType::LeftOuter
             }
             Token::Keyword { keyword: Keyword::Right, .. } => {
                 self.advance();
+                consumed_keywords.push("RIGHT".to_string());
                 // Optional OUTER keyword
                 if self.peek_keyword(Keyword::Outer) {
                     self.consume_keyword(Keyword::Outer)?;
@@ -480,6 +581,7 @@ impl Parser {
             }
             Token::Keyword { keyword: Keyword::Cross, .. } => {
                 self.advance();
+                consumed_keywords.push("CROSS".to_string());
                 // Check for NATURAL after CROSS
                 if self.peek_keyword(Keyword::Natural) {
                     self.consume_keyword(Keyword::Natural)?;
@@ -490,6 +592,7 @@ impl Parser {
             }
             Token::Keyword { keyword: Keyword::Full, .. } => {
                 self.advance();
+                consumed_keywords.push("FULL".to_string());
                 // Optional OUTER keyword
                 if self.peek_keyword(Keyword::Outer) {
                     self.consume_keyword(Keyword::Outer)?;
@@ -505,6 +608,7 @@ impl Parser {
             // Support "OUTER LEFT/RIGHT/FULL JOIN" syntax (SQLite compatibility)
             Token::Keyword { keyword: Keyword::Outer, .. } => {
                 self.advance(); // Consume OUTER
+                consumed_keywords.push("OUTER".to_string());
                 match self.peek() {
                     Token::Keyword { keyword: Keyword::Left, .. } => {
                         self.advance();
@@ -541,14 +645,64 @@ impl Parser {
                         self.advance();
                         vibesql_ast::JoinType::LeftOuter
                     }
+                    Token::Keyword { keyword: kw, .. } => {
+                        // Invalid combination like "OUTER NATURAL INNER"
+                        consumed_keywords.push(kw.to_string().to_uppercase());
+                        self.advance();
+                        // Consume any more keywords before JOIN
+                        while let Token::Keyword { keyword: next_kw, .. } = self.peek() {
+                            if *next_kw == Keyword::Join {
+                                break;
+                            }
+                            consumed_keywords.push(next_kw.to_string().to_uppercase());
+                            self.advance();
+                        }
+                        return Err(ParseError {
+                            message: format!(
+                                "unknown join type: {}",
+                                consumed_keywords.join(" ")
+                            ),
+                        });
+                    }
                     _ => {
                         return Err(ParseError {
-                            message: "Expected LEFT, RIGHT, FULL, or JOIN after OUTER".to_string(),
+                            message: format!(
+                                "unknown join type: {}",
+                                consumed_keywords.join(" ")
+                            ),
                         })
                     }
                 }
             }
-            _ => return Err(ParseError { message: "Expected JOIN keyword".to_string() }),
+            _ => {
+                // Handle "NATURAL AWK SED JOIN" and similar
+                if !consumed_keywords.is_empty() {
+                    // We already consumed NATURAL, now we see something unexpected
+                    while let Token::Keyword { keyword: next_kw, .. } = self.peek() {
+                        if *next_kw == Keyword::Join {
+                            break;
+                        }
+                        consumed_keywords.push(next_kw.to_string().to_uppercase());
+                        self.advance();
+                    }
+                    while let Token::Identifier(id) = self.peek() {
+                        consumed_keywords.push(id.to_uppercase());
+                        self.advance();
+                    }
+                    // Keep consuming keywords until JOIN
+                    while let Token::Keyword { keyword: next_kw, .. } = self.peek() {
+                        if *next_kw == Keyword::Join {
+                            break;
+                        }
+                        consumed_keywords.push(next_kw.to_string().to_uppercase());
+                        self.advance();
+                    }
+                    return Err(ParseError {
+                        message: format!("unknown join type: {}", consumed_keywords.join(" ")),
+                    });
+                }
+                return Err(ParseError { message: "Expected JOIN keyword".to_string() });
+            }
         };
 
         // NATURAL CROSS JOIN is valid SQL and should apply the natural join condition

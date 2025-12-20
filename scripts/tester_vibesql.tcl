@@ -344,6 +344,9 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {^Parse error: (a NATURAL join may not have an ON or USING clause)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
+    if {[regexp -nocase {^Parse error: (a JOIN clause is required before USING)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
     if {[regexp -nocase {^Parse error: (unknown join type: .+)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
