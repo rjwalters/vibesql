@@ -125,6 +125,129 @@ pub fn evaluate_dense_rank(
     ranks
 }
 
+/// Evaluate PERCENT_RANK() window function
+///
+/// Returns the relative rank of the current row: (rank - 1) / (partition_size - 1).
+/// The first row always has percent_rank of 0.0.
+/// The last row (or last tie group) has percent_rank of 1.0.
+/// Returns 0.0 for single-row partitions.
+///
+/// Example for scores [95, 90, 90, 85]:
+///   - ranks: [1, 2, 2, 4]
+///   - percent_rank: [0.0, 0.333..., 0.333..., 1.0]
+///
+/// Requires ORDER BY clause - partitions must be pre-sorted.
+pub fn evaluate_percent_rank(
+    partition: &Partition,
+    order_by: &Option<Vec<OrderByItem>>,
+) -> Vec<SqlValue> {
+    let n = partition.len();
+
+    // Single row partition - return 0.0
+    if n <= 1 {
+        return vec![SqlValue::Numeric(0.0); n];
+    }
+
+    // Get ranks first (reuse RANK logic)
+    let ranks = evaluate_rank(partition, order_by);
+
+    // Convert ranks to percent_rank: (rank - 1) / (n - 1)
+    let denominator = (n - 1) as f64;
+
+    ranks
+        .into_iter()
+        .map(|rank| {
+            if let SqlValue::Integer(r) = rank {
+                SqlValue::Numeric((r - 1) as f64 / denominator)
+            } else {
+                SqlValue::Numeric(0.0)
+            }
+        })
+        .collect()
+}
+
+/// Evaluate CUME_DIST() window function
+///
+/// Returns the cumulative distribution: the fraction of partition rows
+/// that are less than or equal to the current row.
+///
+/// Formula: (number of rows <= current row) / (total rows in partition)
+/// Value range: (0, 1] - always > 0, maximum is 1.0
+///
+/// Example for scores [95, 90, 90, 85] (sorted DESC):
+///   - row 1 (95): 1/4 = 0.25
+///   - rows 2-3 (90): 3/4 = 0.75 (3 rows are <= 90)
+///   - row 4 (85): 4/4 = 1.0
+///   - cume_dist: [0.25, 0.75, 0.75, 1.0]
+///
+/// Requires ORDER BY clause - partitions must be pre-sorted.
+pub fn evaluate_cume_dist(
+    partition: &Partition,
+    order_by: &Option<Vec<OrderByItem>>,
+) -> Vec<SqlValue> {
+    let n = partition.len();
+
+    // Empty partition - shouldn't happen but handle gracefully
+    if n == 0 {
+        return vec![];
+    }
+
+    // Without ORDER BY, all rows are considered equal - cume_dist = 1.0 for all
+    if order_by.is_none() || order_by.as_ref().unwrap().is_empty() {
+        return vec![SqlValue::Numeric(1.0); n];
+    }
+
+    let order_items = order_by.as_ref().unwrap();
+    let mut results = Vec::with_capacity(n);
+
+    // For each row, count how many rows are <= current row
+    // Due to sorting, we can track where the "group" ends
+    let mut group_end_indices = Vec::new();
+    let mut current_group_start = 0;
+
+    for idx in 0..n {
+        let is_last_row = idx == n - 1;
+        let is_new_group = if is_last_row {
+            true // Last row always ends a group
+        } else {
+            // Check if next row differs from current
+            let curr_row = &partition.rows[idx];
+            let next_row = &partition.rows[idx + 1];
+
+            let mut differs = false;
+            for order_item in order_items {
+                let val_curr = evaluate_expression(&order_item.expr, curr_row).unwrap_or(SqlValue::Null);
+                let val_next = evaluate_expression(&order_item.expr, next_row).unwrap_or(SqlValue::Null);
+
+                if compare_values(&val_curr, &val_next) != Ordering::Equal {
+                    differs = true;
+                    break;
+                }
+            }
+            differs
+        };
+
+        if is_new_group {
+            // End of a tie group at index idx
+            let group_end = idx + 1; // 1-based count of rows <= current
+
+            // All rows from current_group_start to idx get the same cume_dist
+            for _ in current_group_start..=idx {
+                group_end_indices.push(group_end);
+            }
+            current_group_start = idx + 1;
+        }
+    }
+
+    // Convert to cumulative distribution values
+    let denominator = n as f64;
+    for group_end in group_end_indices {
+        results.push(SqlValue::Numeric(group_end as f64 / denominator));
+    }
+
+    results
+}
+
 /// Evaluate NTILE(n) window function
 ///
 /// Divides partition into n approximately equal groups (buckets/tiles).
