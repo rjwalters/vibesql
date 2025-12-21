@@ -133,10 +133,10 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "no such table: [string tolower $table_name]"
     }
 
-    # Column not found (generic): "Column 'X' not found..." -> "no such column: x"
-    # SQLite uses "no such column: x" for most column-not-found errors (SELECT, CREATE INDEX, etc.)
-    # The "table T has no column named X" format is only for INSERT INTO t(x) with unknown column,
-    # but that's a rare edge case (only 5 tests). Use the more common format for all cases.
+    # Column not found: "Column 'X' not found..." -> "no such column: x"
+    # SQLite uses "no such column: x" for most column-not-found errors (156 tests).
+    # The "table T has no column named X" format is only for INSERT (5 tests) but we can't
+    # distinguish INSERT from SELECT/UPDATE from the error message alone.
     if {[regexp -nocase {^Column '([^']+)' not found} $error_msg -> col_name]} {
         return "no such column: [string tolower $col_name]"
     }
@@ -307,7 +307,12 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "division by zero"
     }
 
-    # Constraint violations
+    # Constraint violations - try to extract column name for SQLite-compatible format
+    # VibeSQL: "UNIQUE constraint violated: duplicate value for (a)" -> "UNIQUE constraint failed: t.a"
+    if {[regexp -nocase {UNIQUE constraint.*duplicate value for \(([^)]+)\)} $error_msg -> col_name]} {
+        # We don't have table name in the error, so just use the column
+        return "UNIQUE constraint failed: $col_name"
+    }
     if {[regexp -nocase {UNIQUE constraint|duplicate.*primary key|PRIMARY KEY constraint} $error_msg]} {
         return "UNIQUE constraint failed"
     }
