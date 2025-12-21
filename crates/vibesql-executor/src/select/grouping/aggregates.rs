@@ -925,14 +925,39 @@ pub fn compare_sql_values(a: &vibesql_types::SqlValue, b: &vibesql_types::SqlVal
                 }
             }
 
+            // Helper to convert numeric SqlValue to f64 for cross-type comparison
+            fn to_f64(v: &SqlValue) -> Option<f64> {
+                match v {
+                    SqlValue::Integer(i) => Some(*i as f64),
+                    SqlValue::Bigint(i) => Some(*i as f64),
+                    SqlValue::Smallint(i) => Some(*i as f64),
+                    SqlValue::Unsigned(u) => Some(*u as f64),
+                    SqlValue::Float(f) => Some(*f as f64),
+                    SqlValue::Double(d) => Some(*d),
+                    SqlValue::Numeric(n) => Some(*n),
+                    SqlValue::Real(r) => Some(*r as f64),
+                    _ => None,
+                }
+            }
+
             let class_a = type_class(a);
             let class_b = type_class(b);
 
             if class_a != class_b {
                 // Different type classes - use SQLite affinity ordering
                 class_a.cmp(&class_b)
+            } else if class_a == 0 {
+                // Both numeric - try direct comparison first, then cross-type numeric comparison
+                if let Some(ordering) = PartialOrd::partial_cmp(a, b) {
+                    ordering
+                } else if let (Some(fa), Some(fb)) = (to_f64(a), to_f64(b)) {
+                    // Cross-type numeric comparison (e.g., Integer vs Real)
+                    fa.partial_cmp(&fb).unwrap_or(Ordering::Equal)
+                } else {
+                    Ordering::Equal
+                }
             } else {
-                // Same type class - use natural ordering
+                // Same type class (non-numeric) - use natural ordering
                 // partial_cmp returns None for incomparable values (NaN)
                 // Default to Equal to maintain sort stability
                 PartialOrd::partial_cmp(a, b).unwrap_or(Ordering::Equal)
@@ -1341,5 +1366,42 @@ mod tests {
 
         let result = acc.finalize();
         assert_eq!(result, SqlValue::Numeric(0.0));
+    }
+
+    #[test]
+    fn test_compare_sql_values_cross_type_numeric() {
+        // Test cross-type numeric comparison (Integer vs Real)
+        // This is critical for ORDER BY with mixed numeric types (#4609)
+        use std::cmp::Ordering;
+
+        // Integer -2 should be less than Real 1.23
+        assert_eq!(
+            compare_sql_values(&SqlValue::Integer(-2), &SqlValue::Real(1.23)),
+            Ordering::Less
+        );
+
+        // Integer 2 should be greater than Real 1.23
+        assert_eq!(
+            compare_sql_values(&SqlValue::Integer(2), &SqlValue::Real(1.23)),
+            Ordering::Greater
+        );
+
+        // Integer 2 should be greater than Integer -2
+        assert_eq!(
+            compare_sql_values(&SqlValue::Integer(2), &SqlValue::Integer(-2)),
+            Ordering::Greater
+        );
+
+        // Real -2.0 should be less than Integer 2
+        assert_eq!(
+            compare_sql_values(&SqlValue::Real(-2.0), &SqlValue::Integer(2)),
+            Ordering::Less
+        );
+
+        // Same values across types should be equal
+        assert_eq!(
+            compare_sql_values(&SqlValue::Integer(2), &SqlValue::Real(2.0)),
+            Ordering::Equal
+        );
     }
 }
