@@ -103,6 +103,27 @@ impl Database {
         );
     }
 
+    /// Get the case_sensitive_like PRAGMA setting
+    ///
+    /// When OFF (default), LIKE comparisons are case-insensitive for ASCII letters (A-Z = a-z).
+    /// When ON, LIKE comparisons are case-sensitive (strict byte-for-byte matching).
+    ///
+    /// This matches SQLite's default behavior where LIKE is case-insensitive for ASCII.
+    pub fn case_sensitive_like(&self) -> bool {
+        match self.get_session_variable("CASE_SENSITIVE_LIKE") {
+            Some(vibesql_types::SqlValue::Integer(n)) => *n != 0,
+            _ => false, // Default: OFF (case-insensitive LIKE)
+        }
+    }
+
+    /// Set the case_sensitive_like PRAGMA setting
+    pub fn set_case_sensitive_like(&mut self, value: bool) {
+        self.set_session_variable(
+            "CASE_SENSITIVE_LIKE",
+            vibesql_types::SqlValue::Integer(if value { 1 } else { 0 }),
+        );
+    }
+
     /// Set the SQL compatibility mode at runtime
     ///
     /// This allows changing the SQL dialect (MySQL, SQLite, etc.) during a session.

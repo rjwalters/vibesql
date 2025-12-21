@@ -768,6 +768,16 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "CASE_SENSITIVE_LIKE" => {
+                    self.db.set_case_sensitive_like(bool_value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 _ => {
                     // Unknown pragma - silently ignore for SQLite compatibility
                     Ok(QueryResult {
@@ -796,6 +806,16 @@ impl SqlExecutor {
                     let value = if self.db.short_column_names() { "1" } else { "0" };
                     Ok(QueryResult {
                         columns: vec!["short_column_names".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "CASE_SENSITIVE_LIKE" => {
+                    let value = if self.db.case_sensitive_like() { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["case_sensitive_like".to_string()],
                         rows: vec![vec![Some(value.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,

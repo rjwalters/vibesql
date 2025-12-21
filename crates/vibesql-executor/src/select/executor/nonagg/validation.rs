@@ -98,11 +98,27 @@ pub(super) fn validate_where_clause_subqueries(
 /// Handles wildcards by expanding them using table schemas from the database
 ///
 /// Issue #3562: Added CTE context so wildcards can be expanded for CTE references
-fn compute_select_list_column_count(
+/// Issue #4602: Made public for set operation column count validation
+pub(crate) fn compute_select_list_column_count(
     stmt: &vibesql_ast::SelectStmt,
     database: &vibesql_storage::Database,
     cte_results: Option<&HashMap<String, CteResult>>,
 ) -> Result<usize, ExecutorError> {
+    // Issue #4602: Handle VALUES clauses without SELECT list
+    // For statements like "VALUES(1,2,3),(4,5,6)", select_list is empty
+    // and we need to count columns from the VALUES rows
+    if stmt.select_list.is_empty() {
+        if let Some(values_rows) = &stmt.values {
+            if let Some(first_row) = values_rows.first() {
+                return Ok(first_row.len());
+            }
+        }
+        // Empty select_list and no VALUES - can't determine column count
+        return Err(ExecutorError::UnsupportedFeature(
+            "Cannot determine column count for empty SELECT".to_string(),
+        ));
+    }
+
     let mut count = 0;
 
     for item in &stmt.select_list {

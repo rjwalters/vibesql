@@ -83,6 +83,35 @@ impl<'arena> ArenaParser<'arena> {
             None
         };
 
+        // Check for ORDER BY appearing before a set operation (SQLite-compatible error)
+        // This catches: SELECT ... ORDER BY ... UNION SELECT ...
+        if order_by.is_some() {
+            let op_name = if self.peek_keyword(Keyword::Union) {
+                // Check for UNION ALL vs UNION
+                let saved = self.position;
+                self.advance(); // consume UNION
+                let all = self.try_consume_keyword(Keyword::All);
+                self.position = saved; // restore position
+                if all {
+                    Some("UNION ALL")
+                } else {
+                    Some("UNION")
+                }
+            } else if self.peek_keyword(Keyword::Intersect) {
+                Some("INTERSECT")
+            } else if self.peek_keyword(Keyword::Except) {
+                Some("EXCEPT")
+            } else {
+                None
+            };
+
+            if let Some(op) = op_name {
+                return Err(ParseError {
+                    message: format!("ORDER BY clause should come after {} not before", op),
+                });
+            }
+        }
+
         // Parse LIMIT (supports comma syntax: LIMIT offset,count)
         let (limit, offset_from_limit) = if self.try_consume_keyword(Keyword::Limit) {
             let first_expr = self.parse_expression()?;
@@ -107,6 +136,35 @@ impl<'arena> ArenaParser<'arena> {
         } else {
             None
         };
+
+        // Check for LIMIT appearing before a set operation (SQLite-compatible error)
+        // This catches: SELECT ... LIMIT ... UNION SELECT ...
+        if limit.is_some() || offset.is_some() {
+            let op_name = if self.peek_keyword(Keyword::Union) {
+                // Check for UNION ALL vs UNION
+                let saved = self.position;
+                self.advance(); // consume UNION
+                let all = self.try_consume_keyword(Keyword::All);
+                self.position = saved; // restore position
+                if all {
+                    Some("UNION ALL")
+                } else {
+                    Some("UNION")
+                }
+            } else if self.peek_keyword(Keyword::Intersect) {
+                Some("INTERSECT")
+            } else if self.peek_keyword(Keyword::Except) {
+                Some("EXCEPT")
+            } else {
+                None
+            };
+
+            if let Some(op) = op_name {
+                return Err(ParseError {
+                    message: format!("LIMIT clause should come after {} not before", op),
+                });
+            }
+        }
 
         // Issue #4448: Reject ORDER BY after LIMIT/OFFSET
         // SQLite rejects: SELECT f1 FROM test1 LIMIT 5 OFFSET 1 ORDER BY f2

@@ -635,13 +635,16 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
         pattern: &SqlValue,
         negated: bool,
     ) -> Result<SqlValue, ExecutorError> {
+        // Get case_sensitive_like setting from database (default: false = case-insensitive)
+        let case_sensitive = self.database.map(|db| db.case_sensitive_like()).unwrap_or(false);
+
         match (value, pattern) {
             (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
             (SqlValue::Varchar(s), SqlValue::Varchar(p))
             | (SqlValue::Character(s), SqlValue::Varchar(p))
             | (SqlValue::Varchar(s), SqlValue::Character(p))
             | (SqlValue::Character(s), SqlValue::Character(p)) => {
-                let matches = super::pattern::like_match(s, p);
+                let matches = super::pattern::like_match(s, p, case_sensitive);
                 Ok(SqlValue::Boolean(if negated { !matches } else { matches }))
             }
             _ => Err(ExecutorError::TypeError(format!(

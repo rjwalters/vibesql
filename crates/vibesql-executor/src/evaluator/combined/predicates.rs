@@ -192,8 +192,11 @@ impl CombinedExpressionEvaluator<'_> {
             }
         };
 
+        // Get case_sensitive_like setting from database (default: false = case-insensitive)
+        let case_sensitive = self.database.map(|db| db.case_sensitive_like()).unwrap_or(false);
+
         // Perform pattern matching
-        let matches = like_match(&text, &pattern_str);
+        let matches = like_match(&text, &pattern_str, case_sensitive);
 
         // Apply negation if needed
         let result = if negated { !matches } else { matches };

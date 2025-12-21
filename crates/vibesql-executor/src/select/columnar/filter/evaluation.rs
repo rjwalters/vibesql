@@ -194,6 +194,7 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
 /// Match a string against a SQL LIKE pattern
 ///
 /// Uses dynamic programming for pattern matching with `%` and `_` wildcards.
+/// SQLite LIKE is case-insensitive for ASCII letters (A-Z = a-z).
 fn like_match(text: &str, pattern: &str) -> bool {
     let text_chars: Vec<char> = text.chars().collect();
     let pattern_chars: Vec<char> = pattern.chars().collect();
@@ -223,9 +224,19 @@ fn like_match(text: &str, pattern: &str) -> bool {
             if pc == '%' {
                 // % matches zero or more characters
                 dp[i][j] = dp[i][j - 1] || dp[i - 1][j];
-            } else if pc == '_' || pc == tc {
-                // _ matches any single character, or exact match
+            } else if pc == '_' {
+                // _ matches any single character
                 dp[i][j] = dp[i - 1][j - 1];
+            } else {
+                // SQLite LIKE is case-insensitive for ASCII letters
+                let matches = if pc.is_ascii_alphabetic() && tc.is_ascii_alphabetic() {
+                    pc.to_ascii_lowercase() == tc.to_ascii_lowercase()
+                } else {
+                    pc == tc
+                };
+                if matches {
+                    dp[i][j] = dp[i - 1][j - 1];
+                }
             }
         }
     }

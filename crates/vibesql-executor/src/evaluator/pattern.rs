@@ -3,9 +3,14 @@
 /// - % matches any sequence of characters (including empty)
 /// - _ matches exactly one character
 ///
-/// This is a case-sensitive match following SQL:1999 semantics
-pub(crate) fn like_match(text: &str, pattern: &str) -> bool {
-    like_match_recursive(text.as_bytes(), pattern.as_bytes(), 0, 0)
+/// When case_sensitive is false (default SQLite behavior):
+///   - ASCII letters are matched case-insensitively (A-Z = a-z)
+///   - Unicode characters are matched case-sensitively
+///
+/// When case_sensitive is true (PRAGMA case_sensitive_like=ON):
+///   - All characters are matched exactly (byte-for-byte)
+pub(crate) fn like_match(text: &str, pattern: &str, case_sensitive: bool) -> bool {
+    like_match_recursive(text.as_bytes(), pattern.as_bytes(), 0, 0, case_sensitive)
 }
 
 /// SQLite GLOB pattern matching
@@ -133,7 +138,18 @@ fn glob_match_recursive(text: &[u8], pattern: &[u8], text_pos: usize, pattern_po
 }
 
 /// Recursive helper for LIKE pattern matching
-fn like_match_recursive(text: &[u8], pattern: &[u8], text_pos: usize, pattern_pos: usize) -> bool {
+///
+/// When case_sensitive is false (default):
+///   SQLite LIKE is case-insensitive for ASCII letters (A-Z = a-z)
+/// When case_sensitive is true:
+///   All characters are matched exactly
+fn like_match_recursive(
+    text: &[u8],
+    pattern: &[u8],
+    text_pos: usize,
+    pattern_pos: usize,
+    case_sensitive: bool,
+) -> bool {
     // If we've consumed the entire pattern
     if pattern_pos >= pattern.len() {
         // Match succeeds if we've also consumed all of text
@@ -147,7 +163,7 @@ fn like_match_recursive(text: &[u8], pattern: &[u8], text_pos: usize, pattern_po
             // % matches zero or more characters
             // Try matching with % consuming 0 chars, 1 char, 2 chars, etc.
             for skip in 0..=(text.len() - text_pos) {
-                if like_match_recursive(text, pattern, text_pos + skip, pattern_pos + 1) {
+                if like_match_recursive(text, pattern, text_pos + skip, pattern_pos + 1, case_sensitive) {
                     return true;
                 }
             }
@@ -160,20 +176,33 @@ fn like_match_recursive(text: &[u8], pattern: &[u8], text_pos: usize, pattern_po
                 return false;
             }
             // Skip one character in text and one in pattern
-            like_match_recursive(text, pattern, text_pos + 1, pattern_pos + 1)
+            like_match_recursive(text, pattern, text_pos + 1, pattern_pos + 1, case_sensitive)
         }
         _ => {
-            // Regular character must match exactly
+            // Regular character comparison
             if text_pos >= text.len() {
                 // No character left in text
                 return false;
             }
-            if text[text_pos] != pattern_char {
-                // Characters don't match
+            let text_char = text[text_pos];
+
+            let matches = if case_sensitive {
+                // Case-sensitive: exact byte match
+                text_char == pattern_char
+            } else {
+                // Case-insensitive for ASCII letters only (SQLite default)
+                if pattern_char.is_ascii_alphabetic() && text_char.is_ascii_alphabetic() {
+                    pattern_char.to_ascii_lowercase() == text_char.to_ascii_lowercase()
+                } else {
+                    text_char == pattern_char
+                }
+            };
+
+            if !matches {
                 return false;
             }
             // Characters match, continue
-            like_match_recursive(text, pattern, text_pos + 1, pattern_pos + 1)
+            like_match_recursive(text, pattern, text_pos + 1, pattern_pos + 1, case_sensitive)
         }
     }
 }

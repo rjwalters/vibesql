@@ -208,6 +208,33 @@ pub fn coerce_value(
         // The value is stored as-is without conversion.
         (_, DataType::BinaryLargeObject) => Ok(value),
 
+        // SQLite type affinity: any value can be stored in TEXT columns by converting to string
+        // This implements SQLite's behavior where TEXT affinity columns accept any value type
+        (SqlValue::Integer(i), DataType::Varchar { .. }) => {
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(i.to_string())))
+        }
+        (SqlValue::Smallint(i), DataType::Varchar { .. }) => {
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(i.to_string())))
+        }
+        (SqlValue::Bigint(i), DataType::Varchar { .. }) => {
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(i.to_string())))
+        }
+        (SqlValue::Numeric(f), DataType::Varchar { .. }) => {
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
+        }
+        (SqlValue::Float(f), DataType::Varchar { .. }) => {
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
+        }
+        (SqlValue::Real(f), DataType::Varchar { .. }) => {
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
+        }
+        (SqlValue::Double(f), DataType::Varchar { .. }) => {
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
+        }
+        (SqlValue::Boolean(b), DataType::Varchar { .. }) => {
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(if *b { "1" } else { "0" })))
+        }
+
         // Type mismatch
         _ => Err(ExecutorError::UnsupportedExpression(format!(
             "Type mismatch: expected {:?}, got {:?}",

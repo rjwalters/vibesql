@@ -95,9 +95,56 @@ pub fn batch_string_ne(
     result
 }
 
+/// Case-insensitive ASCII string comparison helper
+/// Returns true if strings match ignoring ASCII case differences
+#[inline]
+fn ascii_eq_ignore_case(a: &str, b: &str) -> bool {
+    a.len() == b.len()
+        && a.bytes()
+            .zip(b.bytes())
+            .all(|(ac, bc)| ac.to_ascii_lowercase() == bc.to_ascii_lowercase())
+}
+
+/// Case-insensitive ASCII starts_with check
+#[inline]
+fn ascii_starts_with_ignore_case(text: &str, prefix: &str) -> bool {
+    if text.len() < prefix.len() {
+        return false;
+    }
+    ascii_eq_ignore_case(&text[..prefix.len()], prefix)
+}
+
+/// Case-insensitive ASCII ends_with check
+#[inline]
+fn ascii_ends_with_ignore_case(text: &str, suffix: &str) -> bool {
+    if text.len() < suffix.len() {
+        return false;
+    }
+    ascii_eq_ignore_case(&text[text.len() - suffix.len()..], suffix)
+}
+
+/// Case-insensitive ASCII contains check
+#[inline]
+fn ascii_contains_ignore_case(text: &str, substring: &str) -> bool {
+    if substring.is_empty() {
+        return true;
+    }
+    if text.len() < substring.len() {
+        return false;
+    }
+    // Naive search with case-insensitive comparison
+    for i in 0..=(text.len() - substring.len()) {
+        if ascii_eq_ignore_case(&text[i..i + substring.len()], substring) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Batch string starts_with check (for LIKE 'prefix%' patterns)
 ///
 /// Optimized for patterns like `column LIKE 'ABC%'`
+/// Uses case-insensitive comparison following SQLite LIKE semantics.
 ///
 /// # Arguments
 ///
@@ -113,7 +160,6 @@ pub fn batch_string_starts_with(
     nulls: Option<&[bool]>,
     prefix: &str,
 ) -> Vec<bool> {
-    let prefix_len = prefix.len();
     let mut result = Vec::with_capacity(values.len());
 
     for (i, value) in values.iter().enumerate() {
@@ -125,12 +171,8 @@ pub fn batch_string_starts_with(
             }
         }
 
-        // Fast path: string must be at least as long as prefix
-        if value.len() < prefix_len {
-            result.push(false);
-        } else {
-            result.push(value.starts_with(prefix));
-        }
+        // Case-insensitive prefix check
+        result.push(ascii_starts_with_ignore_case(value, prefix));
     }
 
     result
@@ -139,6 +181,7 @@ pub fn batch_string_starts_with(
 /// Batch string ends_with check (for LIKE '%suffix' patterns)
 ///
 /// Optimized for patterns like `column LIKE '%XYZ'`
+/// Uses case-insensitive comparison following SQLite LIKE semantics.
 ///
 /// # Arguments
 ///
@@ -154,7 +197,6 @@ pub fn batch_string_ends_with(
     nulls: Option<&[bool]>,
     suffix: &str,
 ) -> Vec<bool> {
-    let suffix_len = suffix.len();
     let mut result = Vec::with_capacity(values.len());
 
     for (i, value) in values.iter().enumerate() {
@@ -166,12 +208,8 @@ pub fn batch_string_ends_with(
             }
         }
 
-        // Fast path: string must be at least as long as suffix
-        if value.len() < suffix_len {
-            result.push(false);
-        } else {
-            result.push(value.ends_with(suffix));
-        }
+        // Case-insensitive suffix check
+        result.push(ascii_ends_with_ignore_case(value, suffix));
     }
 
     result
@@ -180,6 +218,7 @@ pub fn batch_string_ends_with(
 /// Batch string contains check (for LIKE '%substring%' patterns)
 ///
 /// Optimized for patterns like `column LIKE '%MIDDLE%'`
+/// Uses case-insensitive comparison following SQLite LIKE semantics.
 ///
 /// # Arguments
 ///
@@ -195,7 +234,6 @@ pub fn batch_string_contains(
     nulls: Option<&[bool]>,
     substring: &str,
 ) -> Vec<bool> {
-    let sub_len = substring.len();
     let mut result = Vec::with_capacity(values.len());
 
     for (i, value) in values.iter().enumerate() {
@@ -207,12 +245,8 @@ pub fn batch_string_contains(
             }
         }
 
-        // Fast path: string must be at least as long as substring
-        if value.len() < sub_len {
-            result.push(false);
-        } else {
-            result.push(value.contains(substring));
-        }
+        // Case-insensitive contains check
+        result.push(ascii_contains_ignore_case(value, substring));
     }
 
     result
@@ -348,7 +382,7 @@ pub fn batch_string_like(
     pattern: &LikePattern,
 ) -> Vec<bool> {
     match pattern {
-        LikePattern::Exact(s) => batch_string_eq(values, nulls, s),
+        LikePattern::Exact(s) => batch_string_eq_ignore_case(values, nulls, s),
         LikePattern::Prefix(prefix) => batch_string_starts_with(values, nulls, prefix),
         LikePattern::Suffix(suffix) => batch_string_ends_with(values, nulls, suffix),
         LikePattern::Contains(substring) => batch_string_contains(values, nulls, substring),
@@ -359,7 +393,32 @@ pub fn batch_string_like(
     }
 }
 
+/// Batch case-insensitive string equality (for LIKE patterns without wildcards)
+fn batch_string_eq_ignore_case(
+    values: &[std::sync::Arc<str>],
+    nulls: Option<&[bool]>,
+    target: &str,
+) -> Vec<bool> {
+    let mut result = Vec::with_capacity(values.len());
+
+    for (i, value) in values.iter().enumerate() {
+        // Check for NULL first
+        if let Some(null_mask) = nulls {
+            if null_mask[i] {
+                result.push(false);
+                continue;
+            }
+        }
+
+        // Case-insensitive equality
+        result.push(ascii_eq_ignore_case(value, target));
+    }
+
+    result
+}
+
 /// Batch prefix and suffix match (for 'prefix%suffix' patterns)
+/// Uses case-insensitive comparison following SQLite LIKE semantics.
 fn batch_string_prefix_suffix(
     values: &[std::sync::Arc<str>],
     nulls: Option<&[bool]>,
@@ -382,7 +441,11 @@ fn batch_string_prefix_suffix(
         if value.len() < min_len {
             result.push(false);
         } else {
-            result.push(value.starts_with(prefix) && value.ends_with(suffix));
+            // Case-insensitive prefix and suffix check
+            result.push(
+                ascii_starts_with_ignore_case(value, prefix)
+                    && ascii_ends_with_ignore_case(value, suffix),
+            );
         }
     }
 
@@ -417,6 +480,7 @@ fn batch_string_like_general(
 /// Match a string against a SQL LIKE pattern
 ///
 /// Uses dynamic programming for pattern matching with `%` and `_` wildcards.
+/// SQLite LIKE is case-insensitive for ASCII letters (A-Z = a-z).
 fn like_match(text: &str, pattern: &str) -> bool {
     let text_chars: Vec<char> = text.chars().collect();
     let pattern_chars: Vec<char> = pattern.chars().collect();
@@ -446,9 +510,19 @@ fn like_match(text: &str, pattern: &str) -> bool {
             if pc == '%' {
                 // % matches zero or more characters
                 dp[i][j] = dp[i][j - 1] || dp[i - 1][j];
-            } else if pc == '_' || pc == tc {
-                // _ matches any single character, or exact match
+            } else if pc == '_' {
+                // _ matches any single character
                 dp[i][j] = dp[i - 1][j - 1];
+            } else {
+                // SQLite LIKE is case-insensitive for ASCII letters
+                let matches = if pc.is_ascii_alphabetic() && tc.is_ascii_alphabetic() {
+                    pc.to_ascii_lowercase() == tc.to_ascii_lowercase()
+                } else {
+                    pc == tc
+                };
+                if matches {
+                    dp[i][j] = dp[i - 1][j - 1];
+                }
             }
         }
     }

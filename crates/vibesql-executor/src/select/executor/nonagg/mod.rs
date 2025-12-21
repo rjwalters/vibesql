@@ -33,3 +33,6 @@ mod without_from;
 // Re-export the public interface
 // The execute_without_aggregation and execute_select_without_from methods
 // are available on SelectExecutor through the impl blocks in the sub-modules
+
+// Re-export validation functions needed for set operation column count validation
+pub(crate) use validation::compute_select_list_column_count;

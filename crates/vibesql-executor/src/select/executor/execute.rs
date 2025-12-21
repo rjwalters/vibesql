@@ -606,7 +606,18 @@ impl SelectExecutor<'_> {
         if let Some(set_op) = &stmt.set_operation {
             // Extract collations from the leftmost SELECT list for set operation comparisons
             let collations = Self::extract_collations_from_select_list(&stmt.select_list);
-            results = self.execute_set_operations(results, set_op, cte_results, &collations)?;
+            // Issue #4602: Compute left column count from AST for schema-level validation
+            // This is needed when the left result set is empty (table has no rows)
+            let left_col_count =
+                super::nonagg::compute_select_list_column_count(stmt, self.database, Some(cte_results))
+                    .ok();
+            results = self.execute_set_operations(
+                results,
+                set_op,
+                cte_results,
+                &collations,
+                left_col_count,
+            )?;
 
             // Apply ORDER BY after set operations (if specified)
             // The UNION's default sort is overridden by explicit ORDER BY
@@ -1131,16 +1142,55 @@ impl SelectExecutor<'_> {
     ///
     /// The `collations` parameter specifies the collation for each column from the leftmost
     /// SELECT statement in the set operation chain. This is used for collation-aware comparisons.
+    ///
+    /// The `expected_col_count` parameter is the column count from the leftmost SELECT,
+    /// computed from AST for schema-level validation even when results are empty.
     fn execute_set_operations(
         &self,
         mut left_results: Vec<vibesql_storage::Row>,
         set_op: &vibesql_ast::SetOperation,
         cte_results: &HashMap<String, CteResult>,
         collations: &[Option<String>],
+        expected_col_count: Option<usize>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         // Execute the immediate right query WITHOUT its set operations
         // This prevents right-recursive evaluation
         let right_stmt = &set_op.right;
+
+        // Issue #4602: Validate column count at schema level BEFORE execution
+        // This catches mismatches even when result sets are empty
+        // Use expected_col_count (from AST), or fall back to actual results
+        let left_col_count = expected_col_count.unwrap_or_else(|| {
+            if !left_results.is_empty() {
+                left_results[0].values.len()
+            } else {
+                0 // Can't determine column count
+            }
+        });
+        if left_col_count > 0 {
+            // Try to compute right side column count from AST
+            // Skip validation if we can't compute it (e.g., complex subqueries)
+            if let Ok(right_col_count) = super::nonagg::compute_select_list_column_count(
+                right_stmt,
+                self.database,
+                Some(cte_results),
+            ) {
+                if right_col_count != left_col_count {
+                    let operator = match (&set_op.op, set_op.all) {
+                        (vibesql_ast::SetOperator::Union, true) => "UNION ALL",
+                        (vibesql_ast::SetOperator::Union, false) => "UNION",
+                        (vibesql_ast::SetOperator::Intersect, true) => "INTERSECT ALL",
+                        (vibesql_ast::SetOperator::Intersect, false) => "INTERSECT",
+                        (vibesql_ast::SetOperator::Except, true) => "EXCEPT ALL",
+                        (vibesql_ast::SetOperator::Except, false) => "EXCEPT",
+                    };
+                    return Err(ExecutorError::SetOperationColumnMismatch {
+                        operator: operator.to_string(),
+                    });
+                }
+            }
+        }
+
         let has_aggregates =
             self.has_aggregates(&right_stmt.select_list) || right_stmt.having.is_some();
         let has_group_by = right_stmt.group_by.is_some();
@@ -1187,8 +1237,13 @@ impl SelectExecutor<'_> {
         // If the right side has more set operations, continue processing them
         // This creates the left-to-right evaluation: ((A op B) op C) op D
         if let Some(next_set_op) = &right_stmt.set_operation {
-            left_results =
-                self.execute_set_operations(left_results, next_set_op, cte_results, collations)?;
+            left_results = self.execute_set_operations(
+                left_results,
+                next_set_op,
+                cte_results,
+                collations,
+                expected_col_count, // Pass through the expected column count
+            )?;
         }
 
         Ok(left_results)

@@ -472,7 +472,9 @@ impl ExpressionEvaluator<'_> {
             }
         };
 
-        let matches = like_match(&text, &pattern_str);
+        // Get case_sensitive_like setting from database (default: false = case-insensitive)
+        let case_sensitive = self.database.map(|db| db.case_sensitive_like()).unwrap_or(false);
+        let matches = like_match(&text, &pattern_str, case_sensitive);
         let result = if negated { !matches } else { matches };
 
         Ok(vibesql_types::SqlValue::Boolean(result))

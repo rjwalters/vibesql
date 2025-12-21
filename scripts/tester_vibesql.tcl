@@ -352,6 +352,14 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {^Parse error: (DISTINCT aggregates must have exactly one argument)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
+    # ORDER BY before set operation errors (SQLite-compatible error messages)
+    if {[regexp -nocase {^Parse error: (ORDER BY clause should come after (?:UNION ALL|UNION|INTERSECT|EXCEPT) not before)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
+    # LIMIT before set operation errors (SQLite-compatible error messages)
+    if {[regexp -nocase {^Parse error: (LIMIT clause should come after (?:UNION ALL|UNION|INTERSECT|EXCEPT) not before)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
     # Fallback for other parse errors (e.g., descriptive messages like "Expected identifier")
     if {[regexp -nocase {^Parse error: (.+)$} $error_msg -> parse_msg]} {
         return "near \"$parse_msg\": syntax error"
