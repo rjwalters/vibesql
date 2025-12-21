@@ -899,6 +899,28 @@ pub(super) fn intreal(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     Ok(args[0].clone())
 }
 
+/// SQLITE_VERSION() - Return the SQLite version string
+///
+/// SQLite returns a version string like "3.46.0".
+/// We return a compatible version for TCL test compatibility.
+/// This function accepts any number of arguments (including sqlite_version(*)).
+pub(super) fn sqlite_version(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    // SQLite's sqlite_version() ignores all arguments (allows sqlite_version(*))
+    let _ = args;
+    Ok(SqlValue::Varchar("3.46.0".into()))
+}
+
+/// SQLITE_SOURCE_ID() - Return the SQLite source ID string
+///
+/// Returns a unique identifier for the SQLite version.
+pub(super) fn sqlite_source_id(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    let _ = args;
+    // Return a plausible source ID for compatibility
+    Ok(SqlValue::Varchar(
+        "2024-05-23 13:25:27 96c92aba00c8375bc32fafcdf12429c58bd8aabfcadab6683e35bbb9cdebf19e".into(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
