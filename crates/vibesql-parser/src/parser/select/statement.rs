@@ -339,7 +339,7 @@ impl Parser {
     ///
     /// If `recursive` is true, all CTEs in this list are marked as recursive.
     /// In SQL:1999/SQLite, the RECURSIVE keyword applies to all CTEs in the WITH clause.
-    fn parse_cte_list(
+    pub(crate) fn parse_cte_list(
         &mut self,
         recursive: bool,
     ) -> Result<Vec<vibesql_ast::CommonTableExpr>, ParseError> {

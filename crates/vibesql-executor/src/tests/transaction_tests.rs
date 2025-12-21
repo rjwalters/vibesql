@@ -119,6 +119,7 @@ fn test_transaction_insert_commit() {
 
     // Insert a row
     let insert_stmt = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -157,6 +158,7 @@ fn test_transaction_insert_rollback() {
 
     // Insert a row
     let insert_stmt = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -191,6 +193,7 @@ fn test_transaction_multiple_operations_commit() {
 
     // Insert initial data outside transaction
     let insert_stmt1 = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -211,6 +214,7 @@ fn test_transaction_multiple_operations_commit() {
 
     // Insert another row
     let insert_stmt2 = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -244,6 +248,7 @@ fn test_transaction_multiple_operations_rollback() {
 
     // Insert initial data outside transaction
     let insert_stmt1 = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -264,6 +269,7 @@ fn test_transaction_multiple_operations_rollback() {
 
     // Insert another row
     let insert_stmt2 = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -305,6 +311,7 @@ fn test_transaction_isolation() {
     BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db1)
         .unwrap();
     let insert_stmt = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -346,6 +353,7 @@ fn test_transaction_nested_operations() {
     // Insert multiple rows
     for i in 1..=5 {
         let insert_stmt = InsertStmt {
+        with_clause: None,
             schema_name: None,
             schema_quoted: false,
             table_quoted: false,
@@ -383,6 +391,7 @@ fn test_transaction_empty_rollback() {
 
     // Insert data outside transaction
     let insert_stmt = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -418,6 +427,7 @@ fn test_multiple_transactions() {
     BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
         .unwrap();
     let insert_stmt1 = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -437,6 +447,7 @@ fn test_multiple_transactions() {
     BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
         .unwrap();
     let insert_stmt2 = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

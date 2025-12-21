@@ -298,6 +298,7 @@ pub fn build_insert_values(
     values: Vec<vibesql_types::SqlValue>,
 ) -> vibesql_ast::InsertStmt {
     vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_name: table_name.to_string(),
@@ -320,6 +321,7 @@ pub fn build_insert_columns(
     values: Vec<vibesql_types::SqlValue>,
 ) -> vibesql_ast::InsertStmt {
     vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_name: table_name.to_string(),

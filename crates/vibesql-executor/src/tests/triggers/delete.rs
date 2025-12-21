@@ -16,6 +16,7 @@ fn test_after_delete_trigger_fires() {
 
     // Insert a user first
     let insert = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -78,6 +79,7 @@ fn test_before_delete_trigger_fires() {
 
     // Insert a user first
     let insert = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

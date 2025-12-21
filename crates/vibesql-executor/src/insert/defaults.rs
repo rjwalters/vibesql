@@ -147,6 +147,17 @@ pub fn evaluate_default_expression(
                 sequence_name
             )))
         }
+        // SQLite compatibility: unquoted identifiers in DEFAULT clauses are treated as string literals
+        // e.g., CREATE TABLE t(x TEXT DEFAULT hello) treats 'hello' as the string "hello"
+        vibesql_ast::Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+        {
+            // Convert the column name to a string literal
+            let col_name = col_id.column_canonical();
+            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                col_name,
+            )))
+        }
         vibesql_ast::Expression::Function { name, .. } => {
             // Evaluate special SQL functions that can be used in DEFAULT
             match name.to_uppercase().as_str() {

@@ -11,6 +11,7 @@ fn test_multi_row_insert_atomic_success() {
     // INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Charlie')
     // All should succeed
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -55,6 +56,7 @@ fn test_multi_row_insert_atomic_failure() {
     // INSERT INTO users VALUES (1, 'Alice'), (NULL, 'Bob'), (3, 'Charlie')
     // Second row violates NOT NULL constraint on id, should fail atomically
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -100,6 +102,7 @@ fn test_multi_row_insert_with_column_list() {
 
     // INSERT INTO users (name, id) VALUES ('Alice', 1), ('Bob', 2)
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -138,6 +141,7 @@ fn test_multi_row_insert_type_mismatch() {
     // INSERT INTO users VALUES (1, 'Alice'), ('not_a_number', 'Bob')
     // Second row has type mismatch, should fail atomically
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -208,6 +212,7 @@ fn test_multi_row_insert_various_data_types() {
     //   (2, 'Bob', FALSE, 87.2),
     //   (3, NULL, NULL, NULL)
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -274,6 +279,7 @@ fn test_multi_row_insert_primary_key_violation() {
     // INSERT INTO users VALUES (1, 'Alice'), (1, 'Bob')
     // Second row violates PRIMARY KEY, should fail atomically
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -313,6 +319,7 @@ fn test_single_row_insert_no_transaction() {
 
     // Single row INSERT should work without implicit transaction
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

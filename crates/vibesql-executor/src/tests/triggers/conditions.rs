@@ -70,6 +70,7 @@ fn test_when_clause_filters_firing() {
 
     // Insert row with amount=50 (should NOT fire)
     let insert1 = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -89,6 +90,7 @@ fn test_when_clause_filters_firing() {
 
     // Insert row with amount=150 (should fire)
     let insert2 = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

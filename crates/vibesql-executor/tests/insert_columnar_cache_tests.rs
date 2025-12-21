@@ -28,6 +28,7 @@ fn setup_products_table(db: &mut Database) {
 /// Helper to insert a row into products table
 fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -157,6 +158,7 @@ fn test_multi_row_insert_invalidates_cache() {
 
     // Multi-row INSERT
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -238,6 +240,7 @@ fn test_insert_select_invalidates_cache() {
     // Populate source table
     let insert_source = |db: &mut Database, id: i64, name: &str, price: i64| {
         let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
             schema_name: None,
             schema_quoted: false,
             table_quoted: false,
@@ -285,6 +288,7 @@ fn test_insert_select_invalidates_cache() {
     };
 
     let insert_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

@@ -53,6 +53,7 @@ fn test_auto_increment_basic_inserts() {
 
     // Insert without specifying id - should auto-generate 1
     let insert1 = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -69,6 +70,7 @@ fn test_auto_increment_basic_inserts() {
 
     // Insert without specifying id - should auto-generate 2
     let insert2 = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -188,6 +190,7 @@ fn test_last_insert_rowid_basic() {
 
     // Insert first row - should auto-generate id=1
     let insert1 = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -207,6 +210,7 @@ fn test_last_insert_rowid_basic() {
 
     // Insert second row - should auto-generate id=2
     let insert2 = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -270,6 +274,7 @@ fn test_last_insert_rowid_multi_row_insert() {
 
     // Multi-row insert - per MySQL semantics, LAST_INSERT_ID returns the FIRST generated ID
     let multi_insert = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -346,6 +351,7 @@ fn test_last_insert_rowid_no_auto_increment() {
 
     // Insert with explicit ID - no auto-generation
     let insert1 = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -412,6 +418,7 @@ fn test_last_insert_rowid_via_select() {
 
     // Insert a row
     let insert1 = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

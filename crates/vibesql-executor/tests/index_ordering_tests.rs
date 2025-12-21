@@ -41,6 +41,7 @@ fn test_index_ordering() {
 
     // Insert data
     let insert_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

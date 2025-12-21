@@ -27,6 +27,7 @@ fn test_basic_savepoint() {
 
     // Insert initial row
     let insert_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -47,6 +48,7 @@ fn test_basic_savepoint() {
 
     // Insert another row
     let insert_stmt2 = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -98,6 +100,7 @@ fn test_nested_savepoints() {
 
     // Insert initial row
     let insert_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -118,6 +121,7 @@ fn test_nested_savepoints() {
 
     // Insert second row
     let insert_stmt2 = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -138,6 +142,7 @@ fn test_nested_savepoints() {
 
     // Insert third row
     let insert_stmt3 = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

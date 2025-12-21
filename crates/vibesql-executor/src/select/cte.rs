@@ -19,7 +19,7 @@ pub type CteResult = (vibesql_catalog::TableSchema, Arc<Vec<vibesql_storage::Row
 /// Execute all CTEs and return their results
 ///
 /// CTEs are executed in order, allowing later CTEs to reference earlier ones.
-pub(super) fn execute_ctes<F>(
+pub fn execute_ctes<F>(
     ctes: &[vibesql_ast::CommonTableExpr],
     executor: F,
 ) -> Result<HashMap<String, CteResult>, ExecutorError>

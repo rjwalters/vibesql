@@ -33,6 +33,7 @@ fn test_create_select_statement() {
 #[test]
 fn test_create_insert_statement() {
     let stmt = Statement::Insert(InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_name: "users".to_string(),

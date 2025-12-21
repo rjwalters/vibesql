@@ -1242,6 +1242,16 @@ fn transform_mixed_grouping_item<V: ExpressionMutVisitor>(
 /// Transform an INSERT statement
 pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertStmt) -> InsertStmt {
     InsertStmt {
+        with_clause: stmt.with_clause.map(|ctes| {
+            ctes.into_iter()
+                .map(|cte| crate::CommonTableExpr {
+                    name: cte.name,
+                    columns: cte.columns,
+                    query: Box::new(transform_select(visitor, *cte.query)),
+                    recursive: cte.recursive,
+                })
+                .collect()
+        }),
         schema_name: stmt.schema_name,
         schema_quoted: stmt.schema_quoted,
         table_name: stmt.table_name,

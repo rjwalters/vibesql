@@ -28,6 +28,7 @@ fn setup_products_table(db: &mut Database) {
 /// Helper to insert a row into products table
 fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -47,6 +48,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
 /// Helper to execute a REPLACE statement
 fn replace_product(db: &mut Database, id: i64, name: &str, price: i64) {
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -198,6 +200,7 @@ fn test_replace_unique_constraint_invalidates_cache() {
     // Insert users
     let insert = |db: &mut Database, id: i64, name: &str, score: i64| {
         let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
             schema_name: None,
             schema_quoted: false,
             table_quoted: false,
@@ -222,6 +225,7 @@ fn test_replace_unique_constraint_invalidates_cache() {
 
     // REPLACE with same name (unique key conflict) - should delete old row and insert new
     let replace_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

@@ -28,6 +28,7 @@ fn setup_products_table(db: &mut Database) {
 /// Helper to insert a row into products table
 fn insert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -47,6 +48,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
 /// Helper to execute an INSERT ... ON DUPLICATE KEY UPDATE statement
 fn upsert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -209,6 +211,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
     // Insert users
     let insert = |db: &mut Database, id: i64, name: &str, score: i64| {
         let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
             schema_name: None,
             schema_quoted: false,
             table_quoted: false,
@@ -233,6 +236,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
 
     // ON DUPLICATE KEY UPDATE with same name (unique key conflict) - should update existing row
     let upsert_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -317,6 +321,7 @@ fn test_on_duplicate_key_update_arithmetic_invalidates_cache() {
 
     // ON DUPLICATE KEY UPDATE with arithmetic: stock = stock + VALUES(stock)
     let upsert_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

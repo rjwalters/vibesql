@@ -31,6 +31,7 @@ fn test_after_insert_trigger_fires() {
 
     // Insert a row - should fire trigger
     let insert = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -74,6 +75,7 @@ fn test_after_insert_trigger_fires_for_each_row() {
 
     // Insert 3 rows - should fire trigger 3 times
     let insert = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -131,6 +133,7 @@ fn test_before_insert_trigger_fires() {
 
     // Insert a row - should fire trigger
     let insert = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

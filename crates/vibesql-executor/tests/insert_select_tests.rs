@@ -10,6 +10,7 @@ fn test_insert_from_select_basic() {
 
     // First insert some data to select from
     let insert_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -68,6 +69,7 @@ fn test_insert_from_select_basic() {
     };
 
     let insert_select_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -92,6 +94,7 @@ fn test_insert_from_select_with_where() {
 
     // Insert multiple users
     let insert_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -164,6 +167,7 @@ fn test_insert_from_select_with_where() {
     };
 
     let insert_select_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -188,6 +192,7 @@ fn test_insert_from_select_column_mismatch() {
 
     // Insert some data
     let insert_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -251,6 +256,7 @@ fn test_insert_from_select_column_mismatch() {
     };
 
     let insert_select_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -290,6 +296,7 @@ fn test_insert_from_select_with_aggregates() {
 
     // Insert sales data
     let insert_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -373,6 +380,7 @@ fn test_insert_from_select_with_aggregates() {
     };
 
     let insert_select_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

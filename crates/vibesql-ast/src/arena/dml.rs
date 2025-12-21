@@ -4,7 +4,11 @@
 
 use bumpalo::collections::Vec as BumpVec;
 
-use super::{expression::Expression, interner::Symbol, select::SelectStmt};
+use super::{
+    expression::Expression,
+    interner::Symbol,
+    select::{CommonTableExpr, SelectStmt},
+};
 
 // ============================================================================
 // INSERT Statement
@@ -43,6 +47,9 @@ pub enum ConflictClause {
 /// INSERT statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertStmt<'arena> {
+    /// Optional WITH clause (CTEs) for INSERT statements
+    /// SQLite supports: WITH cte AS (...) INSERT INTO table SELECT * FROM cte
+    pub with_clause: Option<BumpVec<'arena, CommonTableExpr<'arena>>>,
     /// Optional schema name for schema-qualified table references (e.g., schema.table)
     pub schema_name: Option<Symbol>,
     /// Whether the schema name was quoted (delimited) in the original SQL.

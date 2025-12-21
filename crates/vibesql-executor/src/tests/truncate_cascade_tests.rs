@@ -118,6 +118,7 @@ fn create_table_with_fk(
 /// Helper to insert a row into a table
 fn insert_row(db: &mut Database, table_name: &str, values: Vec<SqlValue>) {
     let stmt = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_name: table_name.to_string(),

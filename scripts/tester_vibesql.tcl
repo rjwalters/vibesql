@@ -1578,15 +1578,24 @@ proc sqlite3 {db args} {
     # for each SQL execution, and memory databases don't persist across processes.
     if {$filename eq ":memory:" || $filename eq ""} {
         # Use temp file instead of :memory: for persistence
-        set ::db_file [file normalize "/tmp/vibesql_test_[pid].vbsql"]
+        set new_file [file normalize "/tmp/vibesql_test_[pid].vbsql"]
     } else {
-        set ::db_file [file normalize $filename]
+        set new_file [file normalize $filename]
     }
 
-    # Clean existing db file for fresh start
-    if {[file exists $::db_file]} {
-        file delete -force $::db_file
+    # Only delete the file if this is a NEW database (different from current)
+    # AND it's the first time we're opening this file in this test run.
+    # This allows tests to do: sqlite3 db test.db; db close; sqlite3 db test.db
+    # and expect data to persist.
+    if {![info exists ::opened_dbs] || [lsearch -exact $::opened_dbs $new_file] < 0} {
+        # First time opening this database file in this test - clean it
+        if {[file exists $new_file]} {
+            catch {file delete -force $new_file}
+        }
+        lappend ::opened_dbs $new_file
     }
+
+    set ::db_file $new_file
 
     # Reset PRAGMA state to defaults for new database
     set ::pragma_full_column_names 0
@@ -1779,7 +1788,13 @@ proc db {cmd args} {
 proc finish_test {} {
     # Clean up temp database
     if {$::db_file ne "" && [file exists $::db_file]} {
-        file delete -force $::db_file
+        catch {file delete -force $::db_file}
+    }
+    # Clean up any other opened databases
+    if {[info exists ::opened_dbs]} {
+        foreach dbf $::opened_dbs {
+            catch {file delete -force $dbf}
+        }
     }
 
     # Print summary
@@ -1811,7 +1826,14 @@ proc omit_test {name reason {append 0}} {
 proc reset_db {} {
     # Reset the database to a clean state
     if {$::db_file ne "" && [file exists $::db_file]} {
-        file delete -force $::db_file
+        catch {file delete -force $::db_file}
+    }
+    # Clear the opened_dbs tracking so next sqlite3 call will create fresh db
+    if {[info exists ::opened_dbs]} {
+        set idx [lsearch -exact $::opened_dbs $::db_file]
+        if {$idx >= 0} {
+            set ::opened_dbs [lreplace $::opened_dbs $idx $idx]
+        }
     }
     # Reset PRAGMA state to defaults
     set ::pragma_full_column_names 0
@@ -1928,6 +1950,12 @@ proc sqlite_register_test_function {args} {
 proc sqlite3_memdebug_fail {args} {
     # SQLite memory debugging - not supported
     return -1
+}
+
+proc sqlite3_test_control {args} {
+    # SQLite test control - internal testing function
+    # Returns 0 to indicate success/no-op
+    return 0
 }
 
 proc breakpoint {} {

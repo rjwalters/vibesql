@@ -99,7 +99,8 @@ fn execute_insert_internal(
         vibesql_ast::InsertSource::Select(select_stmt) => {
             // Try bulk transfer optimization first (Phase 1-3)
             // This provides 10-50x performance improvement for compatible schemas
-            if stmt.columns.is_empty() {
+            // Note: bulk transfer doesn't support CTEs, so skip if with_clause is present
+            if stmt.columns.is_empty() && stmt.with_clause.is_none() {
                 // Only attempt bulk transfer for INSERT INTO table SELECT (no column list)
                 if let Some(count) =
                     super::bulk_transfer::try_bulk_transfer(db, table_name, select_stmt)?
@@ -110,8 +111,23 @@ fn execute_insert_internal(
             }
 
             // Fall back to normal path: execute SELECT and convert to expressions
-            let select_executor = crate::SelectExecutor::new(db);
-            let select_result = select_executor.execute_with_columns(select_stmt)?;
+            // If we have a with_clause (CTEs), execute them first and pass to SelectExecutor
+            let select_result = if let Some(ref cte_list) = stmt.with_clause {
+                // Execute CTEs first
+                let cte_results = crate::select::cte::execute_ctes(cte_list, |cte_query, prior_ctes| {
+                    let cte_executor = crate::SelectExecutor::new_with_cte(db, prior_ctes);
+                    cte_executor
+                        .execute_with_columns(cte_query)
+                        .map(|result| result.rows.into_iter().map(|r| r.into()).collect())
+                })?;
+
+                // Create executor with CTE results
+                let select_executor = crate::SelectExecutor::new_with_cte(db, &cte_results);
+                select_executor.execute_with_columns(select_stmt)?
+            } else {
+                let select_executor = crate::SelectExecutor::new(db);
+                select_executor.execute_with_columns(select_stmt)?
+            };
 
             // Validate column count
             if select_result.columns.len() != target_column_info.len() {

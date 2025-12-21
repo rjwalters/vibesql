@@ -601,6 +601,9 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     /// Convert an arena InsertStmt to an owned InsertStmt.
     pub fn convert_insert(&self, stmt: &arena_dml::InsertStmt<'arena>) -> InsertStmt {
         InsertStmt {
+            with_clause: stmt.with_clause.as_ref().map(|ctes| {
+                ctes.iter().map(|cte| self.convert_cte(cte)).collect()
+            }),
             schema_name: stmt.schema_name.map(|s| self.resolve(s)),
             schema_quoted: stmt.schema_quoted,
             table_name: self.resolve(stmt.table_name),

@@ -2,7 +2,7 @@
 //!
 //! This module contains INSERT, UPDATE, and DELETE statement types.
 
-use crate::{Expression, SelectStmt};
+use crate::{CommonTableExpr, Expression, SelectStmt};
 
 // ============================================================================
 // INSERT Statement
@@ -52,6 +52,9 @@ pub enum ConflictClause {
 /// INSERT statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertStmt {
+    /// Optional WITH clause (CTEs) for INSERT statements
+    /// SQLite supports: WITH cte AS (...) INSERT INTO table SELECT * FROM cte
+    pub with_clause: Option<Vec<CommonTableExpr>>,
     /// Optional schema name for schema-qualified table references (e.g., schema.table)
     pub schema_name: Option<String>,
     /// Whether the schema name was quoted (delimited) in the original SQL.

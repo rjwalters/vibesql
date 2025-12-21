@@ -29,6 +29,7 @@ fn setup_products_table(db: &mut Database) {
 /// Helper to insert a row into products table
 fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -252,6 +253,7 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
 
     // Insert data into parent using InsertExecutor
     let parent_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -270,6 +272,7 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
 
     // Insert data into child using InsertExecutor
     let child_stmt1 = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -286,6 +289,7 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
     InsertExecutor::execute(&mut db, &child_stmt1).unwrap();
 
     let child_stmt2 = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

@@ -106,10 +106,14 @@ impl Parser {
     /// Parse a statement
     pub fn parse_statement(&mut self) -> Result<vibesql_ast::Statement, ParseError> {
         match self.peek() {
-            Token::Keyword { keyword: Keyword::Select, .. }
-            | Token::Keyword { keyword: Keyword::With, .. } => {
+            Token::Keyword { keyword: Keyword::Select, .. } => {
                 let select_stmt = self.parse_select_statement()?;
                 Ok(vibesql_ast::Statement::Select(Box::new(select_stmt)))
+            }
+            Token::Keyword { keyword: Keyword::With, .. } => {
+                // WITH can precede SELECT, INSERT, UPDATE, or DELETE
+                // Parse the CTE list first, then check what statement follows
+                self.parse_with_statement()
             }
             Token::Keyword { keyword: Keyword::Values, .. } => {
                 let select_stmt = self.parse_values_statement()?;
@@ -703,5 +707,270 @@ impl Parser {
     pub fn parse_call_statement(&mut self) -> Result<vibesql_ast::CallStmt, ParseError> {
         self.advance(); // consume CALL
         self.parse_call()
+    }
+
+    /// Parse statement starting with WITH clause (CTEs)
+    ///
+    /// WITH can precede SELECT, INSERT, UPDATE, or DELETE statements.
+    /// This method parses the CTE list first, then dispatches to the appropriate
+    /// statement parser based on the following keyword.
+    fn parse_with_statement(&mut self) -> Result<vibesql_ast::Statement, ParseError> {
+        self.consume_keyword(Keyword::With)?;
+
+        // Check for optional RECURSIVE keyword
+        let recursive = if self.peek_keyword(Keyword::Recursive) {
+            self.consume_keyword(Keyword::Recursive)?;
+            true
+        } else {
+            false
+        };
+
+        // Parse CTE list
+        let cte_list = self.parse_cte_list(recursive)?;
+
+        // Check what statement follows the CTEs
+        match self.peek() {
+            Token::Keyword { keyword: Keyword::Select, .. } => {
+                // For SELECT, we need to reconstruct the statement with the CTEs
+                // The parse_select_statement expects to parse WITH itself, so we need
+                // to create a SelectStmt with the CTEs manually
+                let mut select_stmt = self.parse_select_statement_after_with()?;
+                select_stmt.with_clause = Some(cte_list);
+                Ok(vibesql_ast::Statement::Select(Box::new(select_stmt)))
+            }
+            Token::Keyword { keyword: Keyword::Insert, .. } => {
+                // Parse INSERT with pre-parsed CTEs
+                let insert_stmt = self.parse_insert_statement_with_cte(cte_list)?;
+                Ok(vibesql_ast::Statement::Insert(insert_stmt))
+            }
+            // TODO: Add UPDATE and DELETE with CTEs support
+            _ => Err(ParseError {
+                message: format!(
+                    "Expected SELECT or INSERT after WITH clause, found {}",
+                    self.peek().syntax_error()
+                ),
+            }),
+        }
+    }
+
+    /// Parse SELECT statement after WITH clause has been consumed
+    /// This is similar to parse_select_statement but expects SELECT (not WITH)
+    fn parse_select_statement_after_with(&mut self) -> Result<vibesql_ast::SelectStmt, ParseError> {
+        self.expect_keyword(Keyword::Select)?;
+
+        // Parse optional set quantifier (DISTINCT or ALL)
+        let distinct = if self.peek_keyword(Keyword::Distinct) {
+            self.consume_keyword(Keyword::Distinct)?;
+            true
+        } else if self.peek_keyword(Keyword::All) {
+            self.consume_keyword(Keyword::All)?;
+            false
+        } else {
+            false
+        };
+
+        // Parse SELECT list
+        let select_list = self.parse_select_list()?;
+
+        // Parse optional INTO clause
+        let (into_table, into_variables) = if self.peek_keyword(Keyword::Into) {
+            self.consume_keyword(Keyword::Into)?;
+            if matches!(self.peek(), Token::UserVariable(_)) {
+                let variables = self.parse_comma_separated_list(|p| match p.peek() {
+                    Token::UserVariable(var_name) => {
+                        let name = var_name.clone();
+                        p.advance();
+                        Ok(name)
+                    }
+                    _ => Err(ParseError {
+                        message: "Expected user variable (@var) in procedural SELECT INTO"
+                            .to_string(),
+                    }),
+                })?;
+                (None, Some(variables))
+            } else {
+                (Some(self.parse_identifier()?), None)
+            }
+        } else {
+            (None, None)
+        };
+
+        // Parse optional FROM clause
+        let from = if self.peek_keyword(Keyword::From) {
+            self.consume_keyword(Keyword::From)?;
+            Some(self.parse_from_clause()?)
+        } else {
+            None
+        };
+
+        // Parse optional WHERE clause
+        let where_clause = if self.peek_keyword(Keyword::Where) {
+            self.consume_keyword(Keyword::Where)?;
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
+        // Parse optional GROUP BY clause
+        let group_by = if self.peek_keyword(Keyword::Group) {
+            self.consume_keyword(Keyword::Group)?;
+            self.expect_keyword(Keyword::By)?;
+            Some(self.parse_group_by_clause()?)
+        } else {
+            None
+        };
+
+        // Parse optional HAVING clause
+        let having = if self.peek_keyword(Keyword::Having) {
+            self.consume_keyword(Keyword::Having)?;
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
+        // Parse set operations (UNION, INTERSECT, EXCEPT)
+        let set_operation = if self.peek_keyword(Keyword::Union)
+            || self.peek_keyword(Keyword::Intersect)
+            || self.peek_keyword(Keyword::Except)
+        {
+            let op = if self.peek_keyword(Keyword::Union) {
+                self.consume_keyword(Keyword::Union)?;
+                vibesql_ast::SetOperator::Union
+            } else if self.peek_keyword(Keyword::Intersect) {
+                self.consume_keyword(Keyword::Intersect)?;
+                vibesql_ast::SetOperator::Intersect
+            } else {
+                self.consume_keyword(Keyword::Except)?;
+                vibesql_ast::SetOperator::Except
+            };
+
+            let all = if self.peek_keyword(Keyword::All) {
+                self.consume_keyword(Keyword::All)?;
+                true
+            } else if self.peek_keyword(Keyword::Distinct) {
+                self.consume_keyword(Keyword::Distinct)?;
+                false
+            } else {
+                false
+            };
+
+            let right = if matches!(self.peek(), Token::LParen) {
+                self.advance();
+                let stmt = if self.peek_keyword(Keyword::Values) {
+                    self.parse_values_statement()?
+                } else {
+                    self.parse_select_statement()?
+                };
+                if !matches!(self.peek(), Token::RParen) {
+                    return Err(ParseError {
+                        message: "Expected ')' after parenthesized statement in set operation"
+                            .to_string(),
+                    });
+                }
+                self.advance();
+                Box::new(stmt)
+            } else if self.peek_keyword(Keyword::Values) {
+                Box::new(self.parse_values_statement()?)
+            } else {
+                Box::new(self.parse_select_statement()?)
+            };
+
+            Some(vibesql_ast::SetOperation { op, all, right })
+        } else {
+            None
+        };
+
+        // Parse ORDER BY
+        let order_by = if self.peek_keyword(Keyword::Order) {
+            self.consume_keyword(Keyword::Order)?;
+            self.expect_keyword(Keyword::By)?;
+
+            let order_items = self.parse_comma_separated_list(|p| {
+                let expr = p.parse_expression()?;
+                let direction = if p.peek_keyword(Keyword::Asc) {
+                    p.consume_keyword(Keyword::Asc)?;
+                    vibesql_ast::OrderDirection::Asc
+                } else if p.peek_keyword(Keyword::Desc) {
+                    p.consume_keyword(Keyword::Desc)?;
+                    vibesql_ast::OrderDirection::Desc
+                } else {
+                    vibesql_ast::OrderDirection::Asc
+                };
+
+                let nulls_order = if p.peek_keyword(Keyword::Nulls) {
+                    p.consume_keyword(Keyword::Nulls)?;
+                    if p.peek_keyword(Keyword::First) {
+                        p.consume_keyword(Keyword::First)?;
+                        Some(vibesql_ast::NullsOrder::First)
+                    } else if p.peek_keyword(Keyword::Last) {
+                        p.consume_keyword(Keyword::Last)?;
+                        Some(vibesql_ast::NullsOrder::Last)
+                    } else {
+                        return Err(ParseError {
+                            message: format!(
+                                "Expected FIRST or LAST after NULLS, found {}",
+                                p.peek().syntax_error()
+                            ),
+                        });
+                    }
+                } else {
+                    None
+                };
+
+                Ok(vibesql_ast::OrderByItem { expr, direction, nulls_order })
+            })?;
+
+            Some(order_items)
+        } else {
+            None
+        };
+
+        // Parse LIMIT (supports comma syntax)
+        let (limit, offset_from_limit) = if self.peek_keyword(Keyword::Limit) {
+            self.consume_keyword(Keyword::Limit)?;
+            let first_expr = self.parse_expression()?;
+
+            if matches!(self.peek(), Token::Comma) {
+                self.advance();
+                let second_expr = self.parse_expression()?;
+                (Some(second_expr), Some(first_expr))
+            } else {
+                (Some(first_expr), None)
+            }
+        } else {
+            (None, None)
+        };
+
+        // Parse OFFSET
+        let offset = if offset_from_limit.is_some() {
+            offset_from_limit
+        } else if self.peek_keyword(Keyword::Offset) {
+            self.consume_keyword(Keyword::Offset)?;
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
+        // Consume optional semicolon
+        if matches!(self.peek(), Token::Semicolon) {
+            self.advance();
+        }
+
+        Ok(vibesql_ast::SelectStmt {
+            with_clause: None, // Will be set by caller
+            distinct,
+            select_list,
+            into_table,
+            into_variables,
+            from,
+            where_clause,
+            group_by,
+            having,
+            order_by,
+            limit,
+            offset,
+            set_operation,
+            values: None,
+        })
     }
 }

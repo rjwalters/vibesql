@@ -32,6 +32,7 @@ fn setup_test_table(db: &mut Database) {
 /// Helper to insert a row into test_table
 fn insert_row(db: &mut Database, id: i64, name: &str, value: i64) {
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -345,6 +346,7 @@ fn test_alter_column_drop_not_null_invalidates_cache() {
 
     // Insert data
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -436,6 +438,7 @@ fn test_alter_column_drop_default_invalidates_cache() {
 
     // Insert data
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

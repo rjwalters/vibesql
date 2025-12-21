@@ -453,6 +453,16 @@ impl Parser {
                     None
                 };
 
+                // Check for optional COLLATE clause (SQLite compatibility)
+                // Syntax: column_name COLLATE collation_name
+                if self.peek_keyword(crate::keywords::Keyword::Collate) {
+                    self.advance(); // consume COLLATE
+                    // Parse collation name (e.g., NOCASE, BINARY, RTRIM)
+                    let _collation = self.parse_identifier()?;
+                    // Note: We parse and ignore the collation for now
+                    // Full collation support would require storing it in IndexColumn
+                }
+
                 // Check for optional ASC/DESC
                 let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
                     self.advance(); // consume ASC

@@ -78,6 +78,15 @@ impl<'a> SelectExecutor<'a> {
         }
     }
 
+    /// Create a new SELECT executor with CTE context
+    /// Used for INSERT ... SELECT with CTEs (WITH clause on INSERT statement)
+    pub fn new_with_cte(
+        database: &'a vibesql_storage::Database,
+        cte_context: &'a HashMap<String, super::super::cte::CteResult>,
+    ) -> Self {
+        Self::new_with_cte_and_depth(database, cte_context, 0)
+    }
+
     /// Create a new SELECT executor with outer context for correlated subqueries
     pub fn new_with_outer_context(
         database: &'a vibesql_storage::Database,

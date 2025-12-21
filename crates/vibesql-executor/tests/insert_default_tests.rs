@@ -26,6 +26,7 @@ fn test_character_varying_column_with_length() {
 
     // INSERT INTO test_cv VALUES (1, 'Test description')
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -73,6 +74,7 @@ fn test_character_varying_column_without_length() {
 
     // INSERT INTO test_cv_nolen VALUES (1, 'Unlimited length text')
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -124,6 +126,7 @@ fn test_insert_with_default_value() {
 
     // INSERT INTO users (id, name) VALUES (DEFAULT, 'Alice')
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -173,6 +176,7 @@ fn test_insert_default_no_default_value_defined() {
 
     // INSERT INTO users (id, name) VALUES (DEFAULT, 'Alice')
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -229,6 +233,7 @@ fn test_integer_primary_key_null_autogen_empty_table() {
 
     // INSERT INTO track VALUES (NULL, 'song1')
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -280,6 +285,7 @@ fn test_integer_primary_key_null_autogen_sequential() {
 
     // INSERT first row with NULL → should get id=1
     let stmt1 = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -298,6 +304,7 @@ fn test_integer_primary_key_null_autogen_sequential() {
 
     // INSERT second row with NULL → should get id=2
     let stmt2 = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -347,6 +354,7 @@ fn test_integer_primary_key_null_autogen_after_explicit() {
 
     // INSERT explicit value 100
     let stmt1 = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -365,6 +373,7 @@ fn test_integer_primary_key_null_autogen_after_explicit() {
 
     // INSERT NULL → should get id=101 (max + 1)
     let stmt2 = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -419,6 +428,7 @@ fn test_bigint_primary_key_no_autogen() {
 
     // INSERT NULL should stay as NULL (no auto-generation for BIGINT)
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -467,6 +477,7 @@ fn test_integer_primary_key_null_autogen_multirow() {
     // Multi-row INSERT with all NULLs (like SQLite's orderby1.test)
     // INSERT INTO track VALUES (NULL, 'one'), (NULL, 'two'), (NULL, 'three');
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -547,6 +558,7 @@ fn test_composite_primary_key_no_autogen() {
 
     // INSERT NULL should stay as NULL (no auto-generation for composite PK)
     let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

@@ -34,6 +34,7 @@ fn test_on_duplicate_key_update_basic() {
 
     // Initial INSERT: INSERT INTO products VALUES (1, 'Widget', 10)
     let initial_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -56,6 +57,7 @@ fn test_on_duplicate_key_update_basic() {
     // Upsert: INSERT INTO products VALUES (1, 'Widget', 20) ON DUPLICATE KEY UPDATE stock =
     // VALUES(stock)
     let upsert_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -96,6 +98,7 @@ fn test_on_duplicate_key_update_with_arithmetic() {
 
     // Initial INSERT
     let initial_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -116,6 +119,7 @@ fn test_on_duplicate_key_update_with_arithmetic() {
 
     // Upsert with arithmetic: stock = stock + VALUES(stock)
     let upsert_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -161,6 +165,7 @@ fn test_on_duplicate_key_update_no_conflict() {
 
     // INSERT with ON DUPLICATE KEY UPDATE - no conflict, should insert normally
     let upsert_stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

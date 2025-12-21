@@ -30,6 +30,7 @@ fn test_trigger_failure_causes_rollback() {
 
     // Try to insert - should fail due to trigger error
     let insert = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -100,6 +101,7 @@ fn test_recursion_prevention() {
 
     // Try to insert - should fail with recursion depth error
     let insert = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

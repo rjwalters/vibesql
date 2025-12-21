@@ -134,6 +134,7 @@ impl<'arena> ArenaParser<'arena> {
         self.try_consume(&Token::Semicolon);
 
         let stmt = InsertStmt {
+            with_clause: None,
             schema_name: table_ref.schema_name,
             schema_quoted: table_ref.schema_quoted,
             table_name: table_ref.table_name,
@@ -193,6 +194,7 @@ impl<'arena> ArenaParser<'arena> {
         self.try_consume(&Token::Semicolon);
 
         let stmt = InsertStmt {
+            with_clause: None,
             schema_name: table_ref.schema_name,
             schema_quoted: table_ref.schema_quoted,
             table_name: table_ref.table_name,

@@ -34,6 +34,7 @@ fn setup_users_table(db: &mut Database) {
 /// Helper to insert a user
 fn insert_user(db: &mut Database, id: i64, email: &str, name: &str) {
     let stmt = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_name: "users".to_string(),
@@ -64,6 +65,7 @@ fn test_insert_or_ignore_primary_key_conflict() {
 
     // Try INSERT OR IGNORE with conflicting primary key
     let stmt = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_name: "users".to_string(),
@@ -99,6 +101,7 @@ fn test_insert_or_ignore_unique_constraint_conflict() {
 
     // Try INSERT OR IGNORE with conflicting unique constraint (email)
     let stmt = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_name: "users".to_string(),
@@ -131,6 +134,7 @@ fn test_insert_or_ignore_multi_row() {
 
     // Try INSERT OR IGNORE with multiple rows - some conflict, some don't
     let stmt = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_name: "users".to_string(),
@@ -177,6 +181,7 @@ fn test_insert_or_ignore_no_conflict() {
 
     // INSERT OR IGNORE with no conflicts should insert normally
     let stmt = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_name: "users".to_string(),
@@ -449,6 +454,7 @@ fn test_insert_or_ignore_not_null_violation() {
 
     // Try INSERT OR IGNORE with NULL in NOT NULL column (email)
     let stmt = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_name: "users".to_string(),

@@ -374,6 +374,7 @@ fn test_truncate_resets_auto_increment() {
     // Insert 3 rows (ids should be 1, 2, 3)
     for val in ["a", "b", "c"] {
         let insert = InsertStmt {
+        with_clause: None,
             schema_name: None,
             schema_quoted: false,
             table_quoted: false,
@@ -405,6 +406,7 @@ fn test_truncate_resets_auto_increment() {
 
     // Insert new row - should get id = 1, not 4
     let insert = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -478,6 +480,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
     // Insert 10 rows to get counter up to 10
     for i in 1..=10 {
         let insert = InsertStmt {
+        with_clause: None,
             schema_name: None,
             schema_quoted: false,
             table_quoted: false,
@@ -507,6 +510,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
 
     // Insert new row - should get id = 1, not 11
     let insert = InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,

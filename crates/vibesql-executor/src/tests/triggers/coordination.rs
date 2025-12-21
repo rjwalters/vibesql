@@ -46,6 +46,7 @@ fn test_multiple_triggers_fire_in_order() {
 
     // Insert a row - should fire both triggers
     let insert = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -90,6 +91,7 @@ fn test_trigger_with_multiple_statements() {
 
     // Insert a row - should fire trigger with both statements
     let insert = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -137,6 +139,7 @@ fn test_before_trigger_executes_first() {
 
     // Initialize counter to 0
     let init_insert = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
@@ -165,6 +168,7 @@ fn test_before_trigger_executes_first() {
 
     // Insert a row
     let insert = vibesql_ast::InsertStmt {
+        with_clause: None,
         schema_name: None,
         schema_quoted: false,
         table_quoted: false,
