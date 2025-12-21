@@ -52,7 +52,7 @@ fn test_create_simple_table() {
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), "Table 'users' created successfully in schema 'public'");
+    assert_eq!(result.unwrap(), format!("Table 'users' created successfully in schema '{}'", vibesql_catalog::DEFAULT_SCHEMA));
 
     // Verify table exists in catalog
     assert!(db.catalog.table_exists("users"));

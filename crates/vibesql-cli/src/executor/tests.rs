@@ -3,7 +3,7 @@ use super::{validation, SqlExecutor};
 #[test]
 fn test_list_schemas() {
     let executor = SqlExecutor::new(None).unwrap();
-    // Default database should have "public" schema
+    // Default database should have default schema
     assert!(executor.list_schemas().is_ok());
 }
 
@@ -250,7 +250,7 @@ fn test_show_databases() {
     let mut executor = SqlExecutor::new(None).unwrap();
     let result = executor.execute("SHOW DATABASES").unwrap();
     assert_eq!(result.columns, vec!["Database"]);
-    // Should have at least the default public schema
+    // Should have at least the default schema
     assert!(result.row_count >= 1);
 }
 

@@ -33,7 +33,7 @@ pub fn parse_qualified_name(qualified_name: &str) -> (&str, &str) {
         let (schema, table) = qualified_name.split_at(dot_pos);
         (schema, &table[1..]) // Skip the dot
     } else {
-        ("public", qualified_name)
+        (vibesql_catalog::DEFAULT_SCHEMA, qualified_name)
     }
 }
 
@@ -496,7 +496,7 @@ fn execute_tables_query(catalog: &vibesql_catalog::Catalog) -> Result<SelectResu
     for schema_name in catalog.list_schemas() {
         // Get tables in this schema
         for table_name in catalog.list_tables() {
-            // Check if table belongs to this schema (for now all tables are in public)
+            // Check if table belongs to this schema (for now all tables are in default schema)
             let table_schema_name = &schema_name;
 
             rows.push(Row::new(vec![
@@ -520,7 +520,7 @@ fn execute_tables_query(catalog: &vibesql_catalog::Catalog) -> Result<SelectResu
     for view_name in catalog.list_views() {
         rows.push(Row::new(vec![
             SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
-            SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+            SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // table_schema
             SqlValue::Varchar(arcstr::ArcStr::from(view_name.clone())), // table_name
             SqlValue::Varchar(arcstr::ArcStr::from("VIEW")),    // table_type
             SqlValue::Null,                                     // self_referencing_column_name
@@ -557,7 +557,7 @@ fn execute_columns_query(
 
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
-                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // table_schema
                     SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
                     SqlValue::Varchar(arcstr::ArcStr::from(column.name.clone())), // column_name
                     SqlValue::Integer((ordinal + 1) as i64),            // ordinal_position
@@ -627,10 +627,10 @@ fn execute_table_constraints_query(
                 let constraint_name = format!("{}_pkey", table_name);
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
-                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // constraint_schema
                     SqlValue::Varchar(arcstr::ArcStr::from(constraint_name)), // constraint_name
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
-                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // table_schema
                     SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
                     SqlValue::Varchar(arcstr::ArcStr::from("PRIMARY KEY")), // constraint_type
                     SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_deferrable
@@ -644,10 +644,10 @@ fn execute_table_constraints_query(
                 let constraint_name = format!("{}_{}_key", table_name, idx);
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
-                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // constraint_schema
                     SqlValue::Varchar(arcstr::ArcStr::from(constraint_name)), // constraint_name
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
-                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // table_schema
                     SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
                     SqlValue::Varchar(arcstr::ArcStr::from("UNIQUE")),  // constraint_type
                     SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_deferrable
@@ -664,10 +664,10 @@ fn execute_table_constraints_query(
                     .unwrap_or_else(|| format!("{}_{}_fkey", table_name, fk.parent_table));
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
-                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // constraint_schema
                     SqlValue::Varchar(arcstr::ArcStr::from(constraint_name)), // constraint_name
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
-                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // table_schema
                     SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
                     SqlValue::Varchar(arcstr::ArcStr::from("FOREIGN KEY")), // constraint_type
                     SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_deferrable
@@ -680,10 +680,10 @@ fn execute_table_constraints_query(
             for (check_name, _check_expr) in &table_schema.check_constraints {
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
-                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // constraint_schema
                     SqlValue::Varchar(arcstr::ArcStr::from(check_name.clone())), // constraint_name
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
-                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // table_schema
                     SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
                     SqlValue::Varchar(arcstr::ArcStr::from("CHECK")),   // constraint_type
                     SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_deferrable
@@ -713,10 +713,10 @@ fn execute_key_column_usage_query(
                 for (ordinal, col_name) in pk_cols.iter().enumerate() {
                     rows.push(Row::new(vec![
                         SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
-                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // constraint_schema
                         SqlValue::Varchar(arcstr::ArcStr::from(constraint_name.clone())), // constraint_name
                         SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
-                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // table_schema
                         SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
                         SqlValue::Varchar(arcstr::ArcStr::from(col_name.to_string())), // column_name
                         SqlValue::Integer((ordinal + 1) as i64), // ordinal_position
@@ -734,10 +734,10 @@ fn execute_key_column_usage_query(
                 for (ordinal, col_name) in unique_cols.iter().enumerate() {
                     rows.push(Row::new(vec![
                         SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
-                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // constraint_schema
                         SqlValue::Varchar(arcstr::ArcStr::from(constraint_name.clone())), // constraint_name
                         SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
-                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // table_schema
                         SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
                         SqlValue::Varchar(arcstr::ArcStr::from(col_name.to_string())), // column_name
                         SqlValue::Integer((ordinal + 1) as i64), // ordinal_position
@@ -760,15 +760,15 @@ fn execute_key_column_usage_query(
                 {
                     rows.push(Row::new(vec![
                         SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
-                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // constraint_schema
                         SqlValue::Varchar(arcstr::ArcStr::from(constraint_name.clone())), // constraint_name
                         SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
-                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)),  // table_schema
                         SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
                         SqlValue::Varchar(arcstr::ArcStr::from(col_name.to_string())), // column_name
                         SqlValue::Integer((ordinal + 1) as i64), // ordinal_position
                         SqlValue::Integer((ordinal + 1) as i64), // position_in_unique_constraint
-                        SqlValue::Varchar(arcstr::ArcStr::from("public")), // referenced_table_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(vibesql_catalog::DEFAULT_SCHEMA)), // referenced_table_schema
                         SqlValue::Varchar(arcstr::ArcStr::from(fk.parent_table.clone())), // referenced_table_name
                         SqlValue::Varchar(arcstr::ArcStr::from(ref_col_name.to_string())), // referenced_column_name
                     ]));
@@ -979,7 +979,7 @@ mod tests {
             ("information_schema", "tables")
         );
         assert_eq!(parse_qualified_name("public.users"), ("public", "users"));
-        assert_eq!(parse_qualified_name("users"), ("public", "users"));
+        assert_eq!(parse_qualified_name("users"), (vibesql_catalog::DEFAULT_SCHEMA, "users"));
     }
 
     #[test]
@@ -1004,7 +1004,7 @@ mod tests {
 
         assert_eq!(result.columns[0], "catalog_name");
         assert_eq!(result.columns[1], "schema_name");
-        assert!(!result.rows.is_empty()); // Should have at least "public" schema
+        assert!(!result.rows.is_empty()); // Should have at least default schema
     }
 
     #[test]

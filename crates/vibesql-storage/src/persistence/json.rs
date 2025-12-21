@@ -30,7 +30,7 @@ use crate::{Database, Row, StorageError, Table};
 pub struct JsonDatabase {
     /// Metadata about the format
     pub vibesql: JsonMetadata,
-    /// Database schemas (excluding 'public' which is implicit)
+    /// Database schemas (excluding default schema which is implicit)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub schemas: Vec<JsonSchema>,
     /// Database roles
@@ -82,7 +82,7 @@ pub struct JsonTable {
 }
 
 fn default_schema_name() -> String {
-    "public".to_string()
+    vibesql_catalog::DEFAULT_SCHEMA.to_string()
 }
 
 /// Column schema
@@ -242,12 +242,12 @@ impl Database {
             }
         };
 
-        // Schemas (excluding default 'public')
+        // Schemas (excluding default schema)
         let schemas = self
             .catalog
             .list_schemas()
             .into_iter()
-            .filter(|name| name != "public")
+            .filter(|name| name != vibesql_catalog::DEFAULT_SCHEMA)
             .map(|name| JsonSchema { name })
             .collect();
 
@@ -356,7 +356,7 @@ fn table_to_json(table_name: &str, table: &Table) -> Result<JsonTable, StorageEr
     let schema_name = if let Some(idx) = table_name.find('.') {
         table_name[..idx].to_string()
     } else {
-        "public".to_string()
+        vibesql_catalog::DEFAULT_SCHEMA.to_string()
     };
 
     let unqualified_name = if let Some(idx) = table_name.find('.') {

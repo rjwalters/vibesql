@@ -16,9 +16,9 @@ impl super::Catalog {
 
     /// Drop a schema.
     pub fn drop_schema(&mut self, name: &str, cascade: bool) -> Result<(), CatalogError> {
-        // Don't allow dropping the public schema
-        if name == "public" {
-            return Err(CatalogError::SchemaNotEmpty("public".to_string()));
+        // Don't allow dropping the default schema
+        if name == crate::DEFAULT_SCHEMA {
+            return Err(CatalogError::SchemaNotEmpty(crate::DEFAULT_SCHEMA.to_string()));
         }
 
         let schema =

@@ -620,7 +620,7 @@ mod tests {
         let result = executor.execute_show_databases(&stmt).unwrap();
         assert_eq!(result.columns, vec!["Database"]);
 
-        // Should have at least the 'public' schema
+        // Should have at least the default schema
         assert!(!result.rows.is_empty());
 
         let schema_names: Vec<&str> = result
@@ -632,7 +632,7 @@ mod tests {
             })
             .collect();
 
-        assert!(schema_names.contains(&"public"));
+        assert!(schema_names.contains(&vibesql_catalog::DEFAULT_SCHEMA));
     }
 
     #[test]

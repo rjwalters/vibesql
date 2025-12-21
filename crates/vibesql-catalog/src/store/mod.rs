@@ -72,7 +72,7 @@ impl Catalog {
     pub fn new() -> Self {
         let mut catalog = Catalog {
             schemas: HashMap::new(),
-            current_schema: "public".to_string(),
+            current_schema: crate::DEFAULT_SCHEMA.to_string(),
             privilege_grants: Vec::new(),
             roles: HashSet::new(),
             domains: HashMap::new(),
@@ -98,8 +98,11 @@ impl Catalog {
             case_sensitive_identifiers: false,
         };
 
-        // Create the default "public" schema
-        catalog.schemas.insert("public".to_string(), Schema::new("public".to_string()));
+        // Create the default schema (SQLite uses "main")
+        catalog.schemas.insert(
+            crate::DEFAULT_SCHEMA.to_string(),
+            Schema::new(crate::DEFAULT_SCHEMA.to_string()),
+        );
 
         catalog
     }
