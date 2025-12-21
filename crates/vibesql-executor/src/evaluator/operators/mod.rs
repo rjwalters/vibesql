@@ -6,12 +6,14 @@
 //! with dedicated logic and tests.
 
 mod arithmetic;
+mod bitwise;
 mod comparison;
 mod logical;
 mod string;
 mod vector;
 
 use arithmetic::ArithmeticOps;
+use bitwise::BitwiseOps;
 use comparison::ComparisonOps;
 use logical::LogicalOps;
 use string::StringOps;
@@ -77,6 +79,12 @@ impl OperatorRegistry {
 
             // String operators
             Concat => StringOps::concat(left, right),
+
+            // Bitwise operators
+            BitwiseAnd => BitwiseOps::and(left, right),
+            BitwiseOr => BitwiseOps::or(left, right),
+            LeftShift => BitwiseOps::left_shift(left, right),
+            RightShift => BitwiseOps::right_shift(left, right),
 
             // Vector distance operators (pgvector compatible)
             CosineDistance => VectorOps::cosine_distance(left, right),

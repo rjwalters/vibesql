@@ -65,6 +65,10 @@ impl ToSql for BinaryOperator {
             BinaryOperator::CosineDistance => "<->".to_string(),
             BinaryOperator::NegativeInnerProduct => "<#>".to_string(),
             BinaryOperator::L2Distance => "<=>".to_string(),
+            BinaryOperator::BitwiseAnd => "&".to_string(),
+            BinaryOperator::BitwiseOr => "|".to_string(),
+            BinaryOperator::LeftShift => "<<".to_string(),
+            BinaryOperator::RightShift => ">>".to_string(),
         }
     }
 }
@@ -75,6 +79,7 @@ impl ToSql for UnaryOperator {
             UnaryOperator::Not => "NOT".to_string(),
             UnaryOperator::Minus => "-".to_string(),
             UnaryOperator::Plus => "+".to_string(),
+            UnaryOperator::BitwiseNot => "~".to_string(),
             UnaryOperator::IsNull => "IS NULL".to_string(),
             UnaryOperator::IsNotNull => "IS NOT NULL".to_string(),
         }
@@ -328,6 +333,7 @@ impl ToSql for Expression {
                     UnaryOperator::Not => format!("NOT {}", maybe_paren(&expr_sql, expr)),
                     UnaryOperator::Minus => format!("-{}", maybe_paren(&expr_sql, expr)),
                     UnaryOperator::Plus => format!("+{}", maybe_paren(&expr_sql, expr)),
+                    UnaryOperator::BitwiseNot => format!("~{}", maybe_paren(&expr_sql, expr)),
                     UnaryOperator::IsNull => format!("{} IS NULL", expr_sql),
                     UnaryOperator::IsNotNull => format!("{} IS NOT NULL", expr_sql),
                 }
@@ -602,6 +608,9 @@ fn operator_precedence(op: &BinaryOperator) -> u8 {
     match op {
         BinaryOperator::Or => 1,
         BinaryOperator::And => 2,
+        // Bitwise OR has lower precedence than AND in SQLite
+        BinaryOperator::BitwiseOr => 3,
+        BinaryOperator::BitwiseAnd => 4,
         BinaryOperator::Equal
         | BinaryOperator::NotEqual
         | BinaryOperator::LessThan
@@ -610,12 +619,14 @@ fn operator_precedence(op: &BinaryOperator) -> u8 {
         | BinaryOperator::GreaterThanOrEqual
         | BinaryOperator::CosineDistance
         | BinaryOperator::NegativeInnerProduct
-        | BinaryOperator::L2Distance => 3,
-        BinaryOperator::Plus | BinaryOperator::Minus | BinaryOperator::Concat => 4,
+        | BinaryOperator::L2Distance => 5,
+        // Shift operators are between comparison and addition
+        BinaryOperator::LeftShift | BinaryOperator::RightShift => 6,
+        BinaryOperator::Plus | BinaryOperator::Minus | BinaryOperator::Concat => 7,
         BinaryOperator::Multiply
         | BinaryOperator::Divide
         | BinaryOperator::IntegerDivide
-        | BinaryOperator::Modulo => 5,
+        | BinaryOperator::Modulo => 8,
     }
 }
 

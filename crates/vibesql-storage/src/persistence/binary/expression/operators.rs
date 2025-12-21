@@ -31,6 +31,11 @@ impl_simple_enum_serialization!(
         BinaryOperator::CosineDistance => 40,
         BinaryOperator::NegativeInnerProduct => 41,
         BinaryOperator::L2Distance => 42,
+        // Bitwise operators
+        BinaryOperator::BitwiseAnd => 50,
+        BinaryOperator::BitwiseOr => 51,
+        BinaryOperator::LeftShift => 52,
+        BinaryOperator::RightShift => 53,
     }
 );
 
@@ -45,5 +50,6 @@ impl_simple_enum_serialization!(
         UnaryOperator::Plus => 2,
         UnaryOperator::IsNull => 3,
         UnaryOperator::IsNotNull => 4,
+        UnaryOperator::BitwiseNot => 5,
     }
 );

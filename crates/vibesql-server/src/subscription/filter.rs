@@ -277,6 +277,13 @@ impl SubscriptionFilter {
             UnaryOperator::IsNull | UnaryOperator::IsNotNull => {
                 Err("IsNull/IsNotNull should be handled by Expression::IsNull".to_string())
             }
+            UnaryOperator::BitwiseNot => match val {
+                SqlValue::Null => Ok(SqlValue::Null),
+                SqlValue::Integer(i) => Ok(SqlValue::Integer(!i)),
+                SqlValue::Bigint(i) => Ok(SqlValue::Integer(!i)),
+                SqlValue::Smallint(i) => Ok(SqlValue::Integer(!((*i) as i64))),
+                _ => Err("Bitwise NOT requires integer operand".to_string()),
+            },
         }
     }
 

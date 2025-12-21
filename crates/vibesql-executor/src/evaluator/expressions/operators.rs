@@ -4,7 +4,7 @@
 
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
+use crate::{errors::ExecutorError, evaluator::casting::to_i64};
 
 /// Evaluate a unary operation
 ///
@@ -71,6 +71,10 @@ pub(crate) fn eval_unary_op(
         (Not, SqlValue::Timestamp(_)) => Ok(SqlValue::Boolean(false)), /* Timestamp values are */
         // truthy
         (Not, SqlValue::Interval(_)) => Ok(SqlValue::Boolean(false)), // Interval values are truthy
+
+        // Bitwise NOT (~) - converts to integer and flips all bits
+        (BitwiseNot, SqlValue::Null) => Ok(SqlValue::Null),
+        (BitwiseNot, val) => Ok(SqlValue::Integer(!to_i64(val)?)),
 
         // Type errors
         (Plus, val) => Err(ExecutorError::TypeMismatch {

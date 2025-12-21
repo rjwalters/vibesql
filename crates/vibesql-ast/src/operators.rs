@@ -26,6 +26,12 @@ pub enum BinaryOperator {
     // String
     Concat, /* || */
 
+    // Bitwise
+    BitwiseAnd, // &
+    BitwiseOr,  // |
+    LeftShift,  // <<
+    RightShift, // >>
+
     // Vector distance operators (pgvector compatible)
     CosineDistance,       // <-> (1 - cosine_similarity)
     NegativeInnerProduct, // <#> (negative dot product for MIPS)
@@ -41,9 +47,10 @@ pub enum BinaryOperator {
 /// Unary operators for SQL expressions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOperator {
-    Not,       // NOT
-    Minus,     // - (negation)
-    Plus,      // + (unary plus)
-    IsNull,    // IS NULL
-    IsNotNull, // IS NOT NULL
+    Not,        // NOT
+    Minus,      // - (negation)
+    Plus,       // + (unary plus)
+    BitwiseNot, // ~ (bitwise NOT)
+    IsNull,     // IS NULL
+    IsNotNull,  // IS NOT NULL
 }
