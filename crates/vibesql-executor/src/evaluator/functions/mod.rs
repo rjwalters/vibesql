@@ -143,8 +143,6 @@ pub(super) fn eval_scalar_function(
         "CONCAT_WS" => sqlite_compat::concat_ws(args),
         "QUOTE" => sqlite_compat::quote(args),
         "INTREAL" => sqlite_compat::intreal(args),
-        "SQLITE_VERSION" => sqlite_compat::sqlite_version(args),
-        "SQLITE_SOURCE_ID" => sqlite_compat::sqlite_source_id(args),
 
         // Type conversion functions
         "TO_NUMBER" => conversion::to_number(args),
