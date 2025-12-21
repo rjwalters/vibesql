@@ -63,6 +63,47 @@ impl SelectExecutor<'_> {
         // Check if we have outer context (for correlated subqueries)
         let has_outer_context = self.outer_row.is_some() && self.outer_schema.is_some();
 
+        // Evaluate WHERE clause first - if it's false, return empty result (SQLite compatibility)
+        // This handles cases like `SELECT 99 WHERE 0` which should return no rows
+        if let Some(where_clause) = &stmt.where_clause {
+            let where_result = if has_outer_context {
+                let outer_row = self.outer_row.unwrap();
+                let outer_schema = self.outer_schema.unwrap();
+                let empty_combined_schema = crate::schema::CombinedSchema::empty();
+                let evaluator = CombinedExpressionEvaluator::with_database_and_outer_context(
+                    &empty_combined_schema,
+                    self.database,
+                    outer_row,
+                    outer_schema,
+                );
+                evaluator.eval(where_clause, outer_row)?
+            } else {
+                let empty_schema = vibesql_catalog::TableSchema::new("".to_string(), vec![]);
+                let evaluator = ExpressionEvaluator::with_database(&empty_schema, self.database);
+                let empty_row = vibesql_storage::Row::new(vec![]);
+                evaluator.eval(where_clause, &empty_row)?
+            };
+
+            // Check if WHERE condition is truthy (SQLite boolean semantics)
+            let is_truthy = match &where_result {
+                vibesql_types::SqlValue::Boolean(b) => *b,
+                vibesql_types::SqlValue::Null => false,
+                vibesql_types::SqlValue::Integer(n) => *n != 0,
+                vibesql_types::SqlValue::Smallint(n) => *n != 0,
+                vibesql_types::SqlValue::Bigint(n) => *n != 0,
+                vibesql_types::SqlValue::Float(f) => *f != 0.0,
+                vibesql_types::SqlValue::Real(f) => *f != 0.0,
+                vibesql_types::SqlValue::Double(f) => *f != 0.0,
+                vibesql_types::SqlValue::Numeric(n) => *n != 0.0,
+                _ => true, // Non-numeric values are truthy
+            };
+
+            if !is_truthy {
+                // WHERE clause is false - return empty result
+                return Ok(vec![]);
+            }
+        }
+
         // Evaluate each item in the SELECT list
         let mut values = Vec::new();
         for item in &stmt.select_list {

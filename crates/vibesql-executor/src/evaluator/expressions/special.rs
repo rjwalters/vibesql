@@ -203,6 +203,17 @@ impl ExpressionEvaluator<'_> {
                 }
                 return Ok(vibesql_types::SqlValue::Bigint(0));
             }
+            // Handle sqlite_version() - Ignores any arguments (including * wildcard)
+            // SQLite allows sqlite_version(*) syntax for TCL test compatibility
+            "SQLITE_VERSION" => {
+                return Ok(vibesql_types::SqlValue::Varchar("3.46.0".into()));
+            }
+            // Handle sqlite_source_id() - Ignores any arguments
+            "SQLITE_SOURCE_ID" => {
+                return Ok(vibesql_types::SqlValue::Varchar(
+                    "2024-05-23 13:25:27 96c92aba00c8375bc32fafcdf12429c58bd8aabfcadab6683e35bbb9cdebf19e".into(),
+                ));
+            }
             _ => {}
         }
 
