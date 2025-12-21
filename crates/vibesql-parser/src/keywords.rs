@@ -259,6 +259,7 @@ pub enum Keyword {
     Read,
     Only,
     Oids,
+    Rowid,
     Open,
     Fetch,
     Close,
@@ -364,7 +365,8 @@ impl Keyword {
             Keyword::Microsecond |
             // SQLite compatibility: TYPE and SQL are not reserved in SQLite
             // (allows unquoted access to sqlite_master.type and sqlite_master.sql columns)
-            Keyword::Type | Keyword::Sql |
+            // ROWID is the pseudo-column for implicit row IDs in SQLite tables
+            Keyword::Type | Keyword::Sql | Keyword::Rowid |
             // Vector index parameter: M is only contextual in HNSW WITH clause
             // SQLite TCL tests commonly use 'm' as a column name
             Keyword::M |
@@ -602,6 +604,7 @@ impl fmt::Display for Keyword {
             Keyword::Read => "READ",
             Keyword::Only => "ONLY",
             Keyword::Oids => "OIDS",
+            Keyword::Rowid => "ROWID",
             Keyword::Open => "OPEN",
             Keyword::Fetch => "FETCH",
             Keyword::Close => "CLOSE",

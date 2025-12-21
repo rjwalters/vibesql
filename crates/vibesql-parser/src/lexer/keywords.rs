@@ -257,6 +257,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "ONLY" => Keyword::Only,
     "WRITE" => Keyword::Write,
     "OIDS" => Keyword::Oids,
+    "ROWID" => Keyword::Rowid,
     "OPEN" => Keyword::Open,
     "FETCH" => Keyword::Fetch,
     "CLOSE" => Keyword::Close,

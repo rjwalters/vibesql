@@ -203,16 +203,24 @@ impl Parser {
         // Parse optional table options (MySQL extensions)
         let table_options = self.parse_table_options()?;
 
-        // Parse optional WITH OIDS / WITHOUT OIDS clause
-        // This is a PostgreSQL extension that we parse but ignore in execution
+        // Parse optional WITH OIDS / WITHOUT OIDS clause (PostgreSQL)
+        // or WITHOUT ROWID clause (SQLite)
+        // These are parsed but ignored in execution
         if self.peek_keyword(Keyword::With) {
             self.advance(); // consume WITH
             self.expect_keyword(Keyword::Oids)?;
             // We parse it but don't store it - just for compatibility
         } else if self.peek_keyword(Keyword::Without) {
             self.advance(); // consume WITHOUT
-            self.expect_keyword(Keyword::Oids)?;
-            // We parse it but don't store it - just for compatibility
+            if self.peek_keyword(Keyword::Oids) {
+                self.advance(); // consume OIDS
+            } else if self.peek_keyword(Keyword::Rowid) {
+                self.advance(); // consume ROWID (SQLite WITHOUT ROWID tables)
+            } else {
+                return Err(ParseError {
+                    message: "Expected OIDS or ROWID after WITHOUT".to_string(),
+                });
+            }
         }
 
         // Expect semicolon or EOF
