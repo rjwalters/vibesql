@@ -834,7 +834,9 @@ proc parse_raw_result {output} {
     # This is how VibeSQL outputs a single-column NULL result
     # Check this BEFORE stripping the trailing newline
     if {$output eq "\n"} {
-        return [list ""]
+        # Return null_string if set, otherwise empty string
+        set null_rep [expr {[info exists ::null_string] && $::null_string ne "" ? $::null_string : ""}]
+        return [list $null_rep]
     }
 
     # Strip exactly one trailing newline if present.
@@ -856,15 +858,23 @@ proc parse_raw_result {output} {
         # Handle empty lines (represent rows where all values are NULL)
         # For a single-column query with NULL, the line will be empty
         if {$line eq ""} {
-            # Empty line = row with single NULL value = empty string
-            lappend data ""
+            # Empty line = row with single NULL value
+            # Use null_string if set, otherwise empty string
+            set null_rep [expr {[info exists ::null_string] && $::null_string ne "" ? $::null_string : ""}]
+            lappend data $null_rep
             continue
         }
 
         # Split by pipe and add each value to the result
         # In raw format, values are pipe-separated on each line
+        # Empty values represent NULL - use null_string if set
+        set null_rep [expr {[info exists ::null_string] && $::null_string ne "" ? $::null_string : ""}]
         foreach val [split $line "|"] {
-            lappend data $val
+            if {$val eq ""} {
+                lappend data $null_rep
+            } else {
+                lappend data $val
+            }
         }
     }
 
@@ -1168,6 +1178,15 @@ proc uses_sqlite_internals {script} {
     # sqlite3_test_control - test harness control function
     if {[regexp {sqlite3_test_control} $script]} {
         return [list 1 "uses sqlite3_test_control (test harness function)"]
+    }
+
+    # SQLite version functions - internal to SQLite, not SQL functionality
+    # We don't pretend to be SQLite; we offer compatible SQL functionality
+    if {[regexp {sqlite_version\s*\(} $script]} {
+        return [list 1 "uses sqlite_version() (SQLite internal function)"]
+    }
+    if {[regexp {sqlite_source_id\s*\(} $script]} {
+        return [list 1 "uses sqlite_source_id() (SQLite internal function)"]
     }
 
     return [list 0 ""]
@@ -1638,7 +1657,11 @@ proc db {cmd args} {
             # No-op
         }
         nullvalue {
-            # Sets the string used for NULL - ignore
+            # Sets the string used for NULL values
+            # This is an alias for 'null' command
+            if {[llength $args] > 0} {
+                set ::null_string [lindex $args 0]
+            }
             return
         }
         null {

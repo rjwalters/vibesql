@@ -599,6 +599,7 @@ impl std::fmt::Display for ExecutorError {
                 )
             }
             ExecutorError::InsertColumnCountMismatch { table_name, expected, provided } => {
+                // SQLite format: "table T has N columns but M values were supplied"
                 write!(
                     f,
                     "table {} has {} columns but {} values were supplied",
