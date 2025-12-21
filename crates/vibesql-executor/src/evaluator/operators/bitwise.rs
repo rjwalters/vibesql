@@ -32,6 +32,7 @@ impl BitwiseOps {
     /// Bitwise NOT operator (~)
     /// This is a unary operator but we provide it here for consistency
     #[inline]
+    #[allow(dead_code)] // Provided for completeness; will be used when unary ~ is implemented
     pub fn not(value: &SqlValue) -> Result<SqlValue, ExecutorError> {
         let val_i64 = to_i64(value)?;
         Ok(SqlValue::Integer(!val_i64))

@@ -273,7 +273,7 @@ pub(super) fn hex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             // Latin-1 encoding: each char value IS the byte value
             let has_latin1_high_bytes = s.chars().any(|c| {
                 let code = c as u32;
-                code >= 0x80 && code <= 0xFF
+                (0x80..=0xFF).contains(&code)
             });
 
             if has_latin1_high_bytes {

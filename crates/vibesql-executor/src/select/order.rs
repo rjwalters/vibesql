@@ -778,7 +778,7 @@ pub(crate) fn resolve_order_by_alias<'a>(
             // not be transformed to 'tests_affected' (which doesn't exist in the schema).
             //
             // Only transform to alias when the column does NOT exist in the FROM schema (rare case).
-            let column_exists_in_schema = schema.map_or(false, |s| {
+            let column_exists_in_schema = schema.is_some_and(|s| {
                 // Check if column exists in any table in the schema
                 s.table_schemas.values().any(|(_start_idx, table_schema)| {
                     table_schema.get_column_index(column).is_some()

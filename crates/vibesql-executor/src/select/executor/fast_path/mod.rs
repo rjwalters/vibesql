@@ -193,10 +193,11 @@ impl SelectExecutor<'_> {
         let rows = from_result.into_rows();
 
         // Apply remaining WHERE clause if not already filtered
-        let filtered_rows = if where_filtered || resolved_where.is_none() {
-            rows
-        } else {
-            self.apply_where_filter_fast(resolved_where.as_ref().unwrap(), rows, &schema)?
+        let filtered_rows = match (&resolved_where, where_filtered) {
+            (Some(where_expr), false) => {
+                self.apply_where_filter_fast(where_expr, rows, &schema)?
+            }
+            _ => rows,
         };
 
         // Apply ORDER BY sorting if needed (index didn't provide the order)

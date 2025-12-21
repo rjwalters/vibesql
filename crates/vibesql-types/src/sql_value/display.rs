@@ -49,10 +49,10 @@ fn format_scientific_sqlite(s: &str) -> String {
         let (mantissa, exp_part) = s.split_at(e_pos);
         let exp_str = &exp_part[1..]; // Skip the 'e'
 
-        let (sign, exp_digits) = if exp_str.starts_with('-') {
-            ("-", &exp_str[1..])
-        } else if exp_str.starts_with('+') {
-            ("+", &exp_str[1..])
+        let (sign, exp_digits) = if let Some(stripped) = exp_str.strip_prefix('-') {
+            ("-", stripped)
+        } else if let Some(stripped) = exp_str.strip_prefix('+') {
+            ("+", stripped)
         } else {
             ("+", exp_str)
         };

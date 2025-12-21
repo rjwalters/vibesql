@@ -263,13 +263,13 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                         SqlValue::Smallint(n) => *n != 0,
                         _ => false,
                     },
-                    vibesql_ast::arena::TruthValue::False => match &val {
-                        SqlValue::Boolean(false) => true,
-                        SqlValue::Integer(0) => true,
-                        SqlValue::Bigint(0) => true,
-                        SqlValue::Smallint(0) => true,
-                        _ => false,
-                    },
+                    vibesql_ast::arena::TruthValue::False => matches!(
+                        val,
+                        SqlValue::Boolean(false)
+                            | SqlValue::Integer(0)
+                            | SqlValue::Bigint(0)
+                            | SqlValue::Smallint(0)
+                    ),
                     vibesql_ast::arena::TruthValue::Unknown => matches!(val, SqlValue::Null),
                 };
                 Ok(SqlValue::Boolean(if *negated { !result } else { result }))

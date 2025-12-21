@@ -230,7 +230,7 @@ fn like_match(text: &str, pattern: &str) -> bool {
             } else {
                 // SQLite LIKE is case-insensitive for ASCII letters
                 let matches = if pc.is_ascii_alphabetic() && tc.is_ascii_alphabetic() {
-                    pc.to_ascii_lowercase() == tc.to_ascii_lowercase()
+                    pc.eq_ignore_ascii_case(&tc)
                 } else {
                     pc == tc
                 };

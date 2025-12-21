@@ -80,7 +80,7 @@ impl CreateIndexExecutor {
 
         // Validate that all indexed columns exist in the table
         for index_col in &stmt.columns {
-            if table_schema.get_column(&index_col.expect_column_name()).is_none() {
+            if table_schema.get_column(index_col.expect_column_name()).is_none() {
                 let available_columns =
                     table_schema.columns.iter().map(|c| c.name.clone()).collect();
                 return Err(ExecutorError::ColumnNotFound {
@@ -104,7 +104,7 @@ impl CreateIndexExecutor {
                 }
 
                 // Prefix length should only be used with string columns
-                let column = table_schema.get_column(&index_col.expect_column_name()).unwrap(); // Safe: already validated above
+                let column = table_schema.get_column(index_col.expect_column_name()).unwrap(); // Safe: already validated above
                 match column.data_type {
                     vibesql_types::DataType::Varchar { .. }
                     | vibesql_types::DataType::Character { .. } => {

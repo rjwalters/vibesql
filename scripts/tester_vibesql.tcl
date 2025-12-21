@@ -34,6 +34,7 @@ set ::in_transaction 0
 # These are prepended to every SQL execution to maintain consistent state
 set ::pragma_full_column_names 0   ;# Default: OFF
 set ::pragma_short_column_names 1  ;# Default: ON
+set ::pragma_case_sensitive_like 0 ;# Default: OFF (case-insensitive LIKE)
 
 # SQLite configuration variables (used by tests)
 set ::AUTOVACUUM 0       ;# Auto-vacuum not supported
@@ -398,19 +399,20 @@ proc translate_error_to_sqlite {vibesql_error} {
 # are typically defined at the test file level, not in intermediate procedures.
 # Searching inner-to-outer would incorrectly pick up local variables with the same name.
 proc substitute_tcl_vars {sql} {
-    # Quick check: if no $ variables, return immediately
-    # Match both $var and ${var} patterns
-    if {![regexp {\$[a-zA-Z_\{]} $sql]} {
+    # Quick check: if no $ or : variables, return immediately
+    # Match both $var, ${var}, and :var patterns
+    if {![regexp {\$[a-zA-Z_\{]} $sql] && ![regexp {:[a-zA-Z_]} $sql]} {
         return $sql
     }
 
     # Get the maximum stack depth to search
     set max_level [info level]
 
-    # Find all variable references: $var and ${var} patterns
+    # Find all variable references: $var, ${var}, and :var patterns
     # We'll process each one individually for proper SQL quoting
     set result $sql
 
+    # First handle $var patterns
     # Pattern to match TCL variable references in SQL
     # Matches: $varname or ${varname}
     # Note: We need to be careful not to match things like $1 (positional params)
@@ -470,6 +472,54 @@ proc substitute_tcl_vars {sql} {
             $sql_value]
     }
 
+    # Now handle :varname patterns (SQLite named placeholder syntax)
+    # Pattern matches: :varname where varname starts with letter/underscore
+    set colon_pattern {:([a-zA-Z_][a-zA-Z0-9_]*)}
+
+    # Keep substituting until no more matches or no progress
+    set prev_result ""
+    while {$result ne $prev_result} {
+        set prev_result $result
+
+        # Find the first :variable reference
+        if {![regexp $colon_pattern $result match varname]} {
+            break
+        }
+
+        # Try to get the variable value - search from OUTERMOST level inward
+        set found 0
+        set value ""
+
+        # First try global scope (level #0)
+        if {[catch {set value [uplevel #0 [list set $varname]]}] == 0} {
+            set found 1
+        }
+
+        # If not global, search from outermost to innermost stack level
+        if {!$found} {
+            for {set level $max_level} {$level >= 1} {incr level -1} {
+                if {[catch {set value [uplevel $level [list set $varname]]}] == 0} {
+                    set found 1
+                    break
+                }
+            }
+        }
+
+        if {!$found} {
+            # Variable not found - leave it as-is (will cause SQL error, but that's expected)
+            break
+        }
+
+        # Format the value as a SQL literal
+        set sql_value [format_sql_value $value]
+
+        # Replace the first occurrence of this variable reference
+        set result [string replace $result \
+            [string first $match $result] \
+            [expr {[string first $match $result] + [string length $match] - 1}] \
+            $sql_value]
+    }
+
     return $result
 }
 
@@ -513,6 +563,10 @@ proc build_pragma_prefix {} {
         append prefix "PRAGMA full_column_names=$::pragma_full_column_names;\n"
         append prefix "PRAGMA short_column_names=$::pragma_short_column_names;\n"
     }
+    # Include case_sensitive_like if it's been set to ON
+    if {$::pragma_case_sensitive_like != 0} {
+        append prefix "PRAGMA case_sensitive_like=$::pragma_case_sensitive_like;\n"
+    }
     return $prefix
 }
 
@@ -543,6 +597,18 @@ proc track_pragma_setting {sql} {
             set ::pragma_short_column_names 1
         } else {
             set ::pragma_short_column_names 0
+        }
+        set found 1
+    }
+
+    # Look for case_sensitive_like settings (find all occurrences, use last one)
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?case_sensitive_like\s*[=(]\s*(\w+)\s*[)]?} $sql]
+    foreach {match value} $matches {
+        set upper [string toupper $value]
+        if {$upper eq "ON" || $upper eq "TRUE" || $upper eq "YES" || $value eq "1"} {
+            set ::pragma_case_sensitive_like 1
+        } else {
+            set ::pragma_case_sensitive_like 0
         }
         set found 1
     }
@@ -1608,6 +1674,7 @@ proc sqlite3 {db args} {
     # Reset PRAGMA state to defaults for new database
     set ::pragma_full_column_names 0
     set ::pragma_short_column_names 1
+    set ::pragma_case_sensitive_like 0
 
     # Create db command alias - if name is not "db" (which already exists)
     # create an alias to the global db proc
@@ -1846,6 +1913,7 @@ proc reset_db {} {
     # Reset PRAGMA state to defaults
     set ::pragma_full_column_names 0
     set ::pragma_short_column_names 1
+    set ::pragma_case_sensitive_like 0
 }
 
 proc forcedelete {args} {
@@ -1883,6 +1951,17 @@ proc sqlite3_db_config {args} {
     # SQLite database configuration - ignore
     # This is used to set/get various database configuration options
     return 0
+}
+
+proc sqlite3_exec {db sql} {
+    # SQLite sqlite3_exec API - execute SQL statement(s) directly
+    # Returns {result_code output}
+    # result_code: 0 = success, non-zero = error
+    # For our purposes, we just execute and return success
+    if {[catch {execsql $sql} err]} {
+        return [list 1 $err]
+    }
+    return [list 0 {}]
 }
 
 proc sqlite3_limit {db limit_name args} {

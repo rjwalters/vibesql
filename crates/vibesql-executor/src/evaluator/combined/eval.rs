@@ -18,7 +18,7 @@ impl CombinedExpressionEvaluator<'_> {
                 let column = col_id.column_canonical();
 
                 // Look up the column in the combined schema to get its declared type
-                for (_table_id, (_start_idx, table_schema)) in &self.schema.table_schemas {
+                for (_start_idx, table_schema) in self.schema.table_schemas.values() {
                     // If table qualifier is specified, check if this is the right table
                     if let Some(t) = table {
                         let table_name_lower = table_schema.name.to_lowercase();
@@ -63,7 +63,7 @@ impl CombinedExpressionEvaluator<'_> {
                 let column = col_id.column_canonical();
 
                 // Look up the column in the combined schema
-                for (_table_id, (_start_idx, table_schema)) in &self.schema.table_schemas {
+                for (_start_idx, table_schema) in self.schema.table_schemas.values() {
                     // If table qualifier is specified, check if this is the right table
                     if let Some(t) = table {
                         let table_name_lower = table_schema.name.to_lowercase();
@@ -263,7 +263,7 @@ impl CombinedExpressionEvaluator<'_> {
                     let inner_has_table = self.schema.table_schemas.contains_key(&table_id);
                     let outer_has_table = self
                         .outer_schema
-                        .map_or(false, |outer| outer.table_schemas.contains_key(&table_id));
+                        .is_some_and(|outer| outer.table_schemas.contains_key(&table_id));
                     if !inner_has_table && !outer_has_table {
                         // Table qualifier doesn't exist in query - return "no such column" error
                         return Err(ExecutorError::NoSuchColumn {
@@ -655,13 +655,13 @@ impl CombinedExpressionEvaluator<'_> {
                         vibesql_types::SqlValue::Smallint(n) => *n != 0,
                         _ => false,
                     },
-                    vibesql_ast::TruthValue::False => match &val {
-                        vibesql_types::SqlValue::Boolean(false) => true,
-                        vibesql_types::SqlValue::Integer(0) => true,
-                        vibesql_types::SqlValue::Bigint(0) => true,
-                        vibesql_types::SqlValue::Smallint(0) => true,
-                        _ => false,
-                    },
+                    vibesql_ast::TruthValue::False => matches!(
+                        val,
+                        vibesql_types::SqlValue::Boolean(false)
+                            | vibesql_types::SqlValue::Integer(0)
+                            | vibesql_types::SqlValue::Bigint(0)
+                            | vibesql_types::SqlValue::Smallint(0)
+                    ),
                     vibesql_ast::TruthValue::Unknown => {
                         matches!(val, vibesql_types::SqlValue::Null)
                     }

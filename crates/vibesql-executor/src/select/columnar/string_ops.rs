@@ -102,7 +102,7 @@ fn ascii_eq_ignore_case(a: &str, b: &str) -> bool {
     a.len() == b.len()
         && a.bytes()
             .zip(b.bytes())
-            .all(|(ac, bc)| ac.to_ascii_lowercase() == bc.to_ascii_lowercase())
+            .all(|(ac, bc)| ac.eq_ignore_ascii_case(&bc))
 }
 
 /// Case-insensitive ASCII starts_with check
@@ -516,7 +516,7 @@ fn like_match(text: &str, pattern: &str) -> bool {
             } else {
                 // SQLite LIKE is case-insensitive for ASCII letters
                 let matches = if pc.is_ascii_alphabetic() && tc.is_ascii_alphabetic() {
-                    pc.to_ascii_lowercase() == tc.to_ascii_lowercase()
+                    pc.eq_ignore_ascii_case(&tc)
                 } else {
                     pc == tc
                 };

@@ -118,7 +118,7 @@ fn execute_insert_internal(
                     let cte_executor = crate::SelectExecutor::new_with_cte(db, prior_ctes);
                     cte_executor
                         .execute_with_columns(cte_query)
-                        .map(|result| result.rows.into_iter().map(|r| r.into()).collect())
+                        .map(|result| result.rows.into_iter().collect())
                 })?;
 
                 // Create executor with CTE results

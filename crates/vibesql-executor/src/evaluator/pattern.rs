@@ -192,7 +192,7 @@ fn like_match_recursive(
             } else {
                 // Case-insensitive for ASCII letters only (SQLite default)
                 if pattern_char.is_ascii_alphabetic() && text_char.is_ascii_alphabetic() {
-                    pattern_char.to_ascii_lowercase() == text_char.to_ascii_lowercase()
+                    pattern_char.eq_ignore_ascii_case(&text_char)
                 } else {
                     text_char == pattern_char
                 }

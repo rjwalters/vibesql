@@ -1122,11 +1122,13 @@ impl SelectExecutor<'_> {
         select_list
             .iter()
             .map(|item| {
-                if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
-                    // Check if the expression is a COLLATE expression
-                    if let vibesql_ast::Expression::Collate { collation, .. } = expr {
-                        return Some(collation.clone());
-                    }
+                // Check if the item is an expression with a COLLATE clause
+                if let vibesql_ast::SelectItem::Expression {
+                    expr: vibesql_ast::Expression::Collate { collation, .. },
+                    ..
+                } = item
+                {
+                    return Some(collation.clone());
                 }
                 None
             })
@@ -1399,7 +1401,7 @@ impl SelectExecutor<'_> {
         // Use case-insensitive matching for SQLite compatibility
         let col_idx = column_info.iter().position(|(alias, orig)| {
             alias.eq_ignore_ascii_case(column)
-                || orig.as_ref().map_or(false, |o| o.eq_ignore_ascii_case(column))
+                || orig.as_ref().is_some_and(|o| o.eq_ignore_ascii_case(column))
         });
 
         // If not found, check if any branch has this alias (SQLite compatibility)

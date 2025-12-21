@@ -450,6 +450,7 @@ impl DeleteExecutor {
 
     /// Validate that all column references in the WHERE clause exist in the schema
     /// This catches errors like "DELETE FROM t WHERE nonexistent_col = 5" even on empty tables
+    #[allow(clippy::only_used_in_recursion)] // table_name preserved for future error messages
     fn validate_where_columns(
         expr: &vibesql_ast::Expression,
         schema: &vibesql_catalog::TableSchema,
@@ -466,7 +467,7 @@ impl DeleteExecutor {
                     || col_name.eq_ignore_ascii_case("_rowid_")
                     || col_name.eq_ignore_ascii_case("oid");
                 if !is_rowid
-                    && !schema.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&col_name))
+                    && !schema.columns.iter().any(|c| c.name.eq_ignore_ascii_case(col_name))
                 {
                     return Err(ExecutorError::NoSuchColumn { column_ref: col_name.to_string() });
                 }

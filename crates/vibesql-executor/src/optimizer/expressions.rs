@@ -219,13 +219,13 @@ pub fn optimize_expression(
                         SqlValue::Smallint(n) => *n != 0,
                         _ => false,
                     },
-                    vibesql_ast::TruthValue::False => match val {
-                        SqlValue::Boolean(false) => true,
-                        SqlValue::Integer(0) => true,
-                        SqlValue::Bigint(0) => true,
-                        SqlValue::Smallint(0) => true,
-                        _ => false,
-                    },
+                    vibesql_ast::TruthValue::False => matches!(
+                        val,
+                        SqlValue::Boolean(false)
+                            | SqlValue::Integer(0)
+                            | SqlValue::Bigint(0)
+                            | SqlValue::Smallint(0)
+                    ),
                     vibesql_ast::TruthValue::Unknown => matches!(val, SqlValue::Null),
                 };
                 let final_result = if *negated { !result } else { result };
