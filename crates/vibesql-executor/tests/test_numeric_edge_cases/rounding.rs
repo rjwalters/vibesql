@@ -93,16 +93,17 @@ fn test_ceil_negative() {
 
 // Tests for Numeric type support (issue #1708)
 
+// SQLite round() always returns REAL (Double) for compatibility
 #[test]
 fn test_round_numeric() {
     let (evaluator, row) = create_test_evaluator();
     let expr = create_function_expr("ROUND", vec![SqlValue::Numeric(3.14159)]);
     let result = evaluator.eval(&expr, &row).unwrap();
     match result {
-        SqlValue::Numeric(n) => {
+        SqlValue::Double(n) => {
             assert!((n - 3.0).abs() < 0.001, "Expected 3.0, got {}", n);
         }
-        _ => panic!("Expected Numeric result, got {:?}", result),
+        _ => panic!("Expected Double result (SQLite REAL), got {:?}", result),
     }
 }
 
@@ -113,10 +114,10 @@ fn test_round_numeric_with_precision() {
         create_function_expr("ROUND", vec![SqlValue::Numeric(3.14159), SqlValue::Integer(2)]);
     let result = evaluator.eval(&expr, &row).unwrap();
     match result {
-        SqlValue::Numeric(n) => {
+        SqlValue::Double(n) => {
             assert!((n - 3.14).abs() < 0.001, "Expected 3.14, got {}", n);
         }
-        _ => panic!("Expected Numeric result, got {:?}", result),
+        _ => panic!("Expected Double result (SQLite REAL), got {:?}", result),
     }
 }
 
@@ -127,10 +128,10 @@ fn test_round_numeric_negative_precision() {
         create_function_expr("ROUND", vec![SqlValue::Numeric(123.456), SqlValue::Integer(-1)]);
     let result = evaluator.eval(&expr, &row).unwrap();
     match result {
-        SqlValue::Numeric(n) => {
+        SqlValue::Double(n) => {
             assert!((n - 120.0).abs() < 0.001, "Expected 120.0, got {}", n);
         }
-        _ => panic!("Expected Numeric result, got {:?}", result),
+        _ => panic!("Expected Double result (SQLite REAL), got {:?}", result),
     }
 }
 

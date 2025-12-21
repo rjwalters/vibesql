@@ -29,25 +29,31 @@ pub fn round(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         0
     };
 
-    // Fast path for numeric types to preserve their original type
+    // SQLite always returns REAL from round(), regardless of input type
+    // This ensures whole numbers display with ".0" suffix (e.g., "2.0" not "2")
     match value {
         SqlValue::Null => return Ok(SqlValue::Null),
-        SqlValue::Integer(n) => return Ok(SqlValue::Integer(*n)),
+        SqlValue::Integer(n) => {
+            // Convert integer to double for SQLite-compatible output
+            let n = *n as f64;
+            let multiplier = 10_f64.powi(precision);
+            return Ok(SqlValue::Double((n * multiplier).round() / multiplier));
+        }
         SqlValue::Float(f) => {
-            let multiplier = 10_f32.powi(precision);
-            return Ok(SqlValue::Float((f * multiplier).round() / multiplier));
+            let multiplier = 10_f64.powi(precision);
+            return Ok(SqlValue::Double(((*f as f64) * multiplier).round() / multiplier));
         }
         SqlValue::Double(f) => {
             let multiplier = 10_f64.powi(precision);
             return Ok(SqlValue::Double((f * multiplier).round() / multiplier));
         }
         SqlValue::Real(f) => {
-            let multiplier = 10_f32.powi(precision);
-            return Ok(SqlValue::Real((f * multiplier).round() / multiplier));
+            let multiplier = 10_f64.powi(precision);
+            return Ok(SqlValue::Double(((*f as f64) * multiplier).round() / multiplier));
         }
         SqlValue::Numeric(n) => {
             let multiplier = 10_f64.powi(precision);
-            return Ok(SqlValue::Numeric((n * multiplier).round() / multiplier));
+            return Ok(SqlValue::Double((n * multiplier).round() / multiplier));
         }
         _ => {}
     }
