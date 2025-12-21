@@ -4,7 +4,7 @@ use chrono::{Datelike, Timelike};
 
 use super::super::{
     core::{CombinedExpressionEvaluator, ExpressionEvaluator},
-    pattern::like_match,
+    pattern::{glob_match, like_match},
 };
 use crate::errors::ExecutorError;
 
@@ -197,6 +197,57 @@ impl CombinedExpressionEvaluator<'_> {
 
         // Perform pattern matching
         let matches = like_match(&text, &pattern_str, case_sensitive);
+
+        // Apply negation if needed
+        let result = if negated { !matches } else { matches };
+
+        Ok(vibesql_types::SqlValue::Boolean(result))
+    }
+
+    /// Evaluate GLOB pattern matching: expr GLOB pattern (SQLite)
+    /// Supports Unix-style wildcards: * (any chars), ? (single char), [...] (character class)
+    /// GLOB is always case-sensitive (unlike LIKE which is case-insensitive by default)
+    pub(super) fn eval_glob(
+        &self,
+        expr: &vibesql_ast::Expression,
+        pattern: &vibesql_ast::Expression,
+        negated: bool,
+        row: &vibesql_storage::Row,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        let expr_val = self.eval(expr, row)?;
+        let pattern_val = self.eval(pattern, row)?;
+
+        // Extract string values
+        let text = match expr_val {
+            vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => {
+                s.clone()
+            }
+            vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+            _ => {
+                return Err(ExecutorError::TypeMismatch {
+                    left: expr_val,
+                    op: "GLOB".to_string(),
+                    right: pattern_val,
+                })
+            }
+        };
+
+        let pattern_str = match pattern_val {
+            vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => {
+                s.clone()
+            }
+            vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+            _ => {
+                return Err(ExecutorError::TypeMismatch {
+                    left: expr_val,
+                    op: "GLOB".to_string(),
+                    right: pattern_val,
+                })
+            }
+        };
+
+        // Perform GLOB pattern matching (always case-sensitive)
+        let matches = glob_match(&text, &pattern_str);
 
         // Apply negation if needed
         let result = if negated { !matches } else { matches };
