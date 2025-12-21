@@ -221,6 +221,17 @@ impl ExpressionEvaluator<'_> {
             }
         }
 
+        // Check for wildcard expressions in function arguments
+        // Scalar functions don't accept wildcards (only aggregate functions like COUNT(*) do)
+        // SQLite returns "wrong number of arguments to function X()" for this case
+        for arg in args {
+            if matches!(arg, vibesql_ast::Expression::Wildcard) {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: name.to_lowercase(),
+                });
+            }
+        }
+
         // Standard function call: evaluate all arguments eagerly
         let mut arg_values = Vec::new();
         for arg in args {
