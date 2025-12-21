@@ -289,6 +289,10 @@ pub(super) fn hex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 s.as_bytes().iter().map(|b| format!("{:02X}", b)).collect()
             }
         }
+        SqlValue::Blob(bytes) => {
+            // Convert blob bytes directly to hex representation
+            bytes.iter().map(|b| format!("{:02X}", b)).collect()
+        }
         // SQLite coerces all other types to TEXT first, then converts to hex
         _ => {
             let s = args[0].to_string();

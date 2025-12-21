@@ -8,14 +8,15 @@ use crate::evaluator::functions::coercion::{coerce_to_integer, coerce_to_string}
 /// SUBSTRING(string, start [, length]) - Extract substring (SQLite compatible)
 ///
 /// SQLite's substr() behavior:
-/// - 1-based indexing: position 1 = first character
+/// - 1-based indexing: position 1 = first character/byte
 /// - Negative start: count from end (-1 = last char, -2 = 2nd from end)
 /// - Zero start: treated as position before first character
 /// - Negative length: extract leftward from start position
 /// - Zero length: return empty string
 ///
-/// SQLite compatibility: Automatically coerces numeric types to strings.
-/// - SUBSTR(12345, 2, 3) returns "234"
+/// SQLite compatibility:
+/// - Automatically coerces numeric types to strings: SUBSTR(12345, 2, 3) returns "234"
+/// - For BLOB inputs, operates on bytes and returns BLOB (preserves type)
 pub(in crate::evaluator::functions) fn substring(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
@@ -37,12 +38,6 @@ pub(in crate::evaluator::functions) fn substring(
         return Ok(vibesql_types::SqlValue::Null);
     }
 
-    // Extract string with coercion (supports numeric types)
-    let s = match coerce_to_string(string_val) {
-        Some(s) => s,
-        None => return Ok(vibesql_types::SqlValue::Null),
-    };
-
     // Extract start position (1-based in SQL) with coercion
     let start = match coerce_to_integer(start_val) {
         Some(n) => n,
@@ -52,6 +47,19 @@ pub(in crate::evaluator::functions) fn substring(
     // Extract optional length with coercion
     let length = if let Some(len_val) = length_val { coerce_to_integer(len_val) } else { None };
 
+    // Handle BLOB inputs: operate on bytes and return BLOB
+    if let vibesql_types::SqlValue::Blob(bytes) = string_val {
+        let byte_count = bytes.len() as i64;
+        let result = sqlite_substr_bytes(bytes, byte_count, start, length);
+        return Ok(vibesql_types::SqlValue::Blob(result));
+    }
+
+    // Extract string with coercion (supports numeric types)
+    let s = match coerce_to_string(string_val) {
+        Some(s) => s,
+        None => return Ok(vibesql_types::SqlValue::Null),
+    };
+
     // Work with characters (not bytes) for proper UTF-8 handling
     let chars: Vec<char> = s.chars().collect();
     let char_count = chars.len() as i64;
@@ -60,6 +68,97 @@ pub(in crate::evaluator::functions) fn substring(
     let result = sqlite_substr(&chars, char_count, start, length);
 
     Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(result)))
+}
+
+/// Implements SQLite's substr() algorithm for BLOB (byte-based)
+///
+/// Same algorithm as sqlite_substr but operates on bytes instead of characters.
+fn sqlite_substr_bytes(bytes: &[u8], byte_count: i64, start: i64, length: Option<i64>) -> Vec<u8> {
+    // Handle the case where no length is specified
+    let len = match length {
+        Some(l) => l,
+        None => {
+            // No length: extract from start to end
+            if start > 0 {
+                // Positive start: from position to end
+                if start > byte_count {
+                    return Vec::new();
+                }
+                let start_idx = (start - 1) as usize;
+                return bytes[start_idx..].to_vec();
+            } else if start < 0 {
+                // Negative start: from position-from-end to end
+                let start_from_end = (-start) as usize;
+                if start_from_end > bytes.len() {
+                    return bytes.to_vec();
+                }
+                let start_idx = bytes.len() - start_from_end;
+                return bytes[start_idx..].to_vec();
+            } else {
+                // start == 0: position before first byte, return all bytes
+                return bytes.to_vec();
+            }
+        }
+    };
+
+    // Zero length always returns empty
+    if len == 0 {
+        return Vec::new();
+    }
+
+    if len > 0 {
+        // Positive length: extract rightward
+        if start > 0 {
+            if start > byte_count {
+                return Vec::new();
+            }
+            let start_idx = (start - 1) as usize;
+            let end_idx = std::cmp::min(start_idx + len as usize, bytes.len());
+            bytes[start_idx..end_idx].to_vec()
+        } else if start < 0 {
+            let start_from_end = (-start) as usize;
+            if start_from_end > bytes.len() {
+                let effective_len = (len + start) as usize;
+                if effective_len == 0 || len + start <= 0 {
+                    return Vec::new();
+                }
+                return bytes[..std::cmp::min(effective_len, bytes.len())].to_vec();
+            }
+            let start_idx = bytes.len() - start_from_end;
+            let end_idx = std::cmp::min(start_idx + len as usize, bytes.len());
+            bytes[start_idx..end_idx].to_vec()
+        } else {
+            // start == 0, positive length
+            let effective_len = (len - 1) as usize;
+            if effective_len == 0 {
+                return Vec::new();
+            }
+            bytes[..std::cmp::min(effective_len, bytes.len())].to_vec()
+        }
+    } else {
+        // Negative length: extract leftward
+        let abs_len = (-len) as usize;
+
+        if start > 0 {
+            let end_pos = (start - 1) as usize;
+            if end_pos == 0 {
+                return Vec::new();
+            }
+            let start_pos = end_pos.saturating_sub(abs_len);
+            bytes[start_pos..end_pos].to_vec()
+        } else if start < 0 {
+            let start_from_end = (-start) as usize;
+            if start_from_end > bytes.len() {
+                return Vec::new();
+            }
+            let end_pos = bytes.len() - start_from_end;
+            let start_pos = end_pos.saturating_sub(abs_len);
+            bytes[start_pos..end_pos].to_vec()
+        } else {
+            // start == 0, negative length
+            Vec::new()
+        }
+    }
 }
 
 /// Implements SQLite's substr() algorithm
