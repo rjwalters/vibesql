@@ -147,7 +147,7 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 Ok(Token::RParen)
             }
-            '=' | '<' | '>' | '!' | '|' => self.tokenize_operator(ch),
+            '=' | '<' | '>' | '!' | '|' | '&' | '~' => self.tokenize_operator(ch),
             '@' => {
                 // Check for @@ (session variable) or @ (user variable)
                 if self.peek_byte(1) == Some(b'@') {

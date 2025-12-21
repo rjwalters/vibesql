@@ -55,6 +55,22 @@ fn evaluate_values_expression(
                 vibesql_ast::UnaryOperator::IsNotNull => {
                     Ok(vibesql_types::SqlValue::Boolean(!inner_val.is_null()))
                 }
+                vibesql_ast::UnaryOperator::BitwiseNot => match inner_val {
+                    vibesql_types::SqlValue::Integer(n) => {
+                        Ok(vibesql_types::SqlValue::Integer(!n))
+                    }
+                    vibesql_types::SqlValue::Bigint(n) => {
+                        Ok(vibesql_types::SqlValue::Integer(!n))
+                    }
+                    vibesql_types::SqlValue::Smallint(n) => {
+                        Ok(vibesql_types::SqlValue::Integer(!(n as i64)))
+                    }
+                    vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
+                    _ => Err(ExecutorError::TypeError(format!(
+                        "Cannot apply bitwise NOT to value of type {:?}",
+                        inner_val.get_type()
+                    ))),
+                },
             }
         }
         _ => Err(ExecutorError::UnsupportedExpression(format!(
