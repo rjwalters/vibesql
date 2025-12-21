@@ -18,6 +18,10 @@ pub enum MultiCharOperator {
     DoubleEqual,
     /// || (string concatenation)
     Concat,
+    /// << (left shift, SQLite bitwise)
+    LeftShift,
+    /// >> (right shift, SQLite bitwise)
+    RightShift,
     /// <-> (cosine distance - pgvector compatible)
     CosineDistance,
     /// <#> (negative inner product - pgvector compatible)
@@ -35,6 +39,8 @@ impl fmt::Display for MultiCharOperator {
             MultiCharOperator::NotEqualAlt => write!(f, "<>"),
             MultiCharOperator::DoubleEqual => write!(f, "=="),
             MultiCharOperator::Concat => write!(f, "||"),
+            MultiCharOperator::LeftShift => write!(f, "<<"),
+            MultiCharOperator::RightShift => write!(f, ">>"),
             MultiCharOperator::CosineDistance => write!(f, "<->"),
             MultiCharOperator::NegativeInnerProduct => write!(f, "<#>"),
             MultiCharOperator::L2Distance => write!(f, "<=>"),

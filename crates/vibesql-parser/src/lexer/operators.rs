@@ -15,6 +15,11 @@ impl<'a> Lexer<'a> {
 
                 let next_ch = self.current_char();
                 match next_ch {
+                    '<' => {
+                        // << (left shift)
+                        self.advance();
+                        Ok(Token::Operator(MultiCharOperator::LeftShift))
+                    }
                     '-' => {
                         // Could be <-> (cosine distance)
                         if self.peek_byte(1) == Some(b'>') {
@@ -64,6 +69,11 @@ impl<'a> Lexer<'a> {
                             self.advance();
                             Ok(Token::Operator(MultiCharOperator::GreaterEqual))
                         }
+                        ('>', '>') => {
+                            // >> (right shift)
+                            self.advance();
+                            Ok(Token::Operator(MultiCharOperator::RightShift))
+                        }
                         ('!', '=') => {
                             self.advance();
                             Ok(Token::Operator(MultiCharOperator::NotEqual))
@@ -85,12 +95,19 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     Ok(Token::Operator(MultiCharOperator::Concat))
                 } else {
-                    Err(LexerError {
-                        message: "Unexpected character: '|' (did you mean '||'?)".to_string(),
-                        position: self.position() - 1,
-                        near_token: Some("|".to_string()),
-                    })
+                    // Single | is bitwise OR in SQLite
+                    Ok(Token::Symbol('|'))
                 }
+            }
+            '&' => {
+                // & is bitwise AND in SQLite
+                self.advance();
+                Ok(Token::Symbol('&'))
+            }
+            '~' => {
+                // ~ is bitwise NOT in SQLite
+                self.advance();
+                Ok(Token::Symbol('~'))
             }
             _ => {
                 self.advance();
