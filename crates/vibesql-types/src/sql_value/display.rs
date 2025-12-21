@@ -14,7 +14,7 @@ fn format_f64(n: f64) -> String {
         return "NaN".to_string();
     }
     if n.is_infinite() {
-        return if n > 0.0 { "Infinity".to_string() } else { "-Infinity".to_string() };
+        return if n > 0.0 { "inf".to_string() } else { "-inf".to_string() };
     }
 
     // Normalize negative zero to positive zero (SQLite behavior)
@@ -74,7 +74,7 @@ fn format_f32(n: f32) -> String {
         return "NaN".to_string();
     }
     if n.is_infinite() {
-        return if n > 0.0 { "Infinity".to_string() } else { "-Infinity".to_string() };
+        return if n > 0.0 { "inf".to_string() } else { "-inf".to_string() };
     }
 
     // Normalize negative zero to positive zero (SQLite behavior)
@@ -211,8 +211,8 @@ mod tests {
     fn test_numeric_display_special_values() {
         // Special values
         assert_eq!(format!("{}", SqlValue::Numeric(f64::NAN)), "NaN");
-        assert_eq!(format!("{}", SqlValue::Numeric(f64::INFINITY)), "Infinity");
-        assert_eq!(format!("{}", SqlValue::Numeric(f64::NEG_INFINITY)), "-Infinity");
+        assert_eq!(format!("{}", SqlValue::Numeric(f64::INFINITY)), "inf");
+        assert_eq!(format!("{}", SqlValue::Numeric(f64::NEG_INFINITY)), "-inf");
     }
 
     #[test]
@@ -239,8 +239,8 @@ mod tests {
     fn test_double_display_special_values() {
         // Double type handles special values
         assert_eq!(format!("{}", SqlValue::Double(f64::NAN)), "NaN");
-        assert_eq!(format!("{}", SqlValue::Double(f64::INFINITY)), "Infinity");
-        assert_eq!(format!("{}", SqlValue::Double(f64::NEG_INFINITY)), "-Infinity");
+        assert_eq!(format!("{}", SqlValue::Double(f64::INFINITY)), "inf");
+        assert_eq!(format!("{}", SqlValue::Double(f64::NEG_INFINITY)), "-inf");
         assert_eq!(format!("{}", SqlValue::Double(123.45)), "123.45");
     }
 
