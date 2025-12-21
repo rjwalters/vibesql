@@ -8,6 +8,7 @@ use crate::sql_value::SqlValue;
 /// - Use minimal representation (shortest round-trip safe string)
 /// - KEEP ".0" for whole numbers to distinguish REAL from INTEGER (SQLite behavior)
 /// - Use scientific notation for very small or very large values
+/// - Normalize -0.0 to 0.0 (SQLite behavior)
 fn format_f64(n: f64) -> String {
     if n.is_nan() {
         return "NaN".to_string();
@@ -16,12 +17,16 @@ fn format_f64(n: f64) -> String {
         return if n > 0.0 { "Infinity".to_string() } else { "-Infinity".to_string() };
     }
 
+    // Normalize negative zero to positive zero (SQLite behavior)
+    let n = if n == 0.0 { 0.0 } else { n };
+
     let abs_n = n.abs();
 
     // Use scientific notation for very large or very small numbers (like SQLite)
+    // SQLite format: 1.0e+15, 1.0e-05 (lowercase e, explicit +/-, 2-digit exponent)
     if abs_n >= 1e15 || (abs_n < 1e-4 && abs_n != 0.0) {
         let s = format!("{:e}", n);
-        return s;
+        return format_scientific_sqlite(&s);
     }
 
     // Use ryu for shortest round-trip representation
@@ -33,9 +38,37 @@ fn format_f64(n: f64) -> String {
     s.to_string()
 }
 
+/// Format scientific notation like SQLite: 1.0e+15, 1.0e-05
+/// - Lowercase 'e'
+/// - Explicit + or - sign for exponent
+/// - Two-digit exponent (padded with leading zero if needed)
+fn format_scientific_sqlite(s: &str) -> String {
+    // Input format from Rust: "1.5e10" or "1.5e-5"
+    // Output format for SQLite: "1.5e+10" or "1.5e-05"
+    if let Some(e_pos) = s.find('e') {
+        let (mantissa, exp_part) = s.split_at(e_pos);
+        let exp_str = &exp_part[1..]; // Skip the 'e'
+
+        let (sign, exp_digits) = if exp_str.starts_with('-') {
+            ("-", &exp_str[1..])
+        } else if exp_str.starts_with('+') {
+            ("+", &exp_str[1..])
+        } else {
+            ("+", exp_str)
+        };
+
+        // Pad exponent to 2 digits
+        let exp_num: i32 = exp_digits.parse().unwrap_or(0);
+        format!("{}e{}{:02}", mantissa, sign, exp_num.abs())
+    } else {
+        s.to_string()
+    }
+}
+
 /// Format a f32 value like SQLite does.
 /// IMPORTANT: Format at f32 precision, not f64, to avoid exposing
 /// representation differences (e.g., 1.1f32 becomes 1.100000023841858 as f64)
+/// - Normalize -0.0 to 0.0 (SQLite behavior)
 fn format_f32(n: f32) -> String {
     if n.is_nan() {
         return "NaN".to_string();
@@ -44,12 +77,16 @@ fn format_f32(n: f32) -> String {
         return if n > 0.0 { "Infinity".to_string() } else { "-Infinity".to_string() };
     }
 
+    // Normalize negative zero to positive zero (SQLite behavior)
+    let n = if n == 0.0 { 0.0 } else { n };
+
     let abs_n = n.abs();
 
     // Use scientific notation for very large or very small numbers (like SQLite)
+    // SQLite format: 1.0e+15, 1.0e-05 (lowercase e, explicit +/-, 2-digit exponent)
     if abs_n >= 1e15 || (abs_n < 1e-4 && abs_n != 0.0) {
         let s = format!("{:e}", n);
-        return s;
+        return format_scientific_sqlite(&s);
     }
 
     // Use ryu for shortest round-trip representation at f32 precision
@@ -134,12 +171,22 @@ mod tests {
 
     #[test]
     fn test_format_f64_scientific() {
-        // Very large numbers use scientific notation
-        assert_eq!(format_f64(1e15), "1e15");
-        assert_eq!(format_f64(1e16), "1e16");
+        // Very large numbers use scientific notation (SQLite format: e+XX or e-XX)
+        assert_eq!(format_f64(1e15), "1e+15");
+        assert_eq!(format_f64(1e16), "1e+16");
         // Very small numbers use scientific notation
-        assert_eq!(format_f64(0.00001), "1e-5");
+        assert_eq!(format_f64(0.00001), "1e-05");
         assert_eq!(format_f64(1e-10), "1e-10");
+    }
+
+    #[test]
+    fn test_format_scientific_sqlite() {
+        // Test the SQLite-compatible scientific notation formatter
+        assert_eq!(format_scientific_sqlite("1e15"), "1e+15");
+        assert_eq!(format_scientific_sqlite("1e5"), "1e+05");
+        assert_eq!(format_scientific_sqlite("1.5e-5"), "1.5e-05");
+        assert_eq!(format_scientific_sqlite("1.5e-15"), "1.5e-15");
+        assert_eq!(format_scientific_sqlite("9.22337203685478e18"), "9.22337203685478e+18");
     }
 
     #[test]
@@ -205,5 +252,14 @@ mod tests {
         assert_eq!(format_f64(0.0), "0.0");
         assert_eq!(format_f64(45.5), "45.5");
         assert_eq!(format_f64(123.456), "123.456");
+    }
+
+    #[test]
+    fn test_format_negative_zero() {
+        // SQLite behavior: -0.0 should be normalized to 0.0
+        assert_eq!(format_f64(-0.0), "0.0");
+        assert_eq!(format_f32(-0.0f32), "0.0");
+        // Result of 0.0 * -1.0 should be "0.0", not "-0.0"
+        assert_eq!(format_f64(0.0 * -1.0), "0.0");
     }
 }

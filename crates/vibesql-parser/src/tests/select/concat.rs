@@ -85,15 +85,14 @@ fn test_lex_concat_operator() {
 }
 
 #[test]
-fn test_lex_single_pipe_error() {
-    let mut lexer = Lexer::new("'a' | 'b'");
-    let result = lexer.tokenize();
+fn test_lex_single_pipe_bitwise_or() {
+    // Single | is now a valid bitwise OR operator (SQLite compatibility)
+    let mut lexer = Lexer::new("5 | 3");
+    let tokens = lexer.tokenize().unwrap();
 
-    assert!(result.is_err());
-    match result {
-        Err(LexerError { message, .. }) => {
-            assert!(message.contains("did you mean '||'?"));
-        }
-        _ => panic!("Expected lexer error"),
-    }
+    assert_eq!(tokens.len(), 4); // 5, |, 3, EOF
+    assert_eq!(tokens[0], Token::Number("5".to_string()));
+    assert_eq!(tokens[1], Token::Symbol('|'));
+    assert_eq!(tokens[2], Token::Number("3".to_string()));
+    assert_eq!(tokens[3], Token::Eof);
 }
