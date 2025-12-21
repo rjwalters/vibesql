@@ -269,15 +269,15 @@ pub(super) fn build_column_to_table_map(
                 // Regular table: get columns from database
                 // Try multiple case variations and schema prefixes since database keys may vary
                 let actual_table_name = &tr.name;
-                let public_prefixed = format!("public.{}", actual_table_name);
+                let schema_prefixed = format!("{}.{}", vibesql_catalog::DEFAULT_SCHEMA, actual_table_name);
                 let table = database
                     .tables
                     .get(actual_table_name)
                     .or_else(|| database.tables.get(&actual_table_name.to_lowercase()))
                     .or_else(|| database.tables.get(&actual_table_name.to_uppercase()))
-                    .or_else(|| database.tables.get(&public_prefixed))
-                    .or_else(|| database.tables.get(&public_prefixed.to_lowercase()))
-                    .or_else(|| database.tables.get(&public_prefixed.to_uppercase()))
+                    .or_else(|| database.tables.get(&schema_prefixed))
+                    .or_else(|| database.tables.get(&schema_prefixed.to_lowercase()))
+                    .or_else(|| database.tables.get(&schema_prefixed.to_uppercase()))
                     .or_else(|| {
                         // Case-insensitive search through all tables (handles schema.table format)
                         let target = actual_table_name.to_lowercase();
@@ -300,15 +300,15 @@ pub(super) fn build_column_to_table_map(
             }
         } else {
             // Direct table lookup without TableRef
-            let public_prefixed = format!("public.{}", table_name);
+            let schema_prefixed = format!("{}.{}", vibesql_catalog::DEFAULT_SCHEMA, table_name);
             let table = database
                 .tables
                 .get(table_name)
                 .or_else(|| database.tables.get(&table_lower))
                 .or_else(|| database.tables.get(&table_name.to_uppercase()))
-                .or_else(|| database.tables.get(&public_prefixed))
-                .or_else(|| database.tables.get(&public_prefixed.to_lowercase()))
-                .or_else(|| database.tables.get(&public_prefixed.to_uppercase()))
+                .or_else(|| database.tables.get(&schema_prefixed))
+                .or_else(|| database.tables.get(&schema_prefixed.to_lowercase()))
+                .or_else(|| database.tables.get(&schema_prefixed.to_uppercase()))
                 .or_else(|| {
                     // Case-insensitive search through all tables (handles schema.table format)
                     database

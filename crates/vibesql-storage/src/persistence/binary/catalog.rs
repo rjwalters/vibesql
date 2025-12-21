@@ -13,7 +13,7 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
     // Write schemas
     let schemas: Vec<String> = db.catalog.list_schemas()
         .into_iter()
-        .filter(|s| s != "public") // Skip default public schema
+        .filter(|s| s != vibesql_catalog::DEFAULT_SCHEMA) // Skip default schema
         .collect();
 
     write_u32(writer, schemas.len() as u32)?;

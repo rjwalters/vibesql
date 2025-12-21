@@ -3,6 +3,10 @@
 //! Provides metadata structures for tables and columns along with the catalog
 //! registry that tracks table schemas.
 
+/// Default schema name for SQLite compatibility.
+/// SQLite uses "main" as the default database/schema name.
+pub const DEFAULT_SCHEMA: &str = "main";
+
 mod advanced_objects;
 mod column;
 mod domain;

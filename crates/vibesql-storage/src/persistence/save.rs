@@ -49,11 +49,11 @@ impl Database {
         writeln!(writer)
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
-        // Export schemas (except default 'public' which always exists)
+        // Export schemas (except default schema which always exists)
         writeln!(writer, "-- Schemas")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
         for schema_name in &self.catalog.list_schemas() {
-            if schema_name != "public" {
+            if schema_name != vibesql_catalog::DEFAULT_SCHEMA {
                 writeln!(writer, "CREATE SCHEMA {};", schema_name)
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
             }
