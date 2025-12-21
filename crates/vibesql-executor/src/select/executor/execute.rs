@@ -1432,7 +1432,7 @@ impl SelectExecutor<'_> {
         &self,
         mut rows: Vec<vibesql_storage::Row>,
         order_by: &[vibesql_ast::OrderByItem],
-        _select_list: &[vibesql_ast::SelectItem],
+        select_list: &[vibesql_ast::SelectItem],
         all_union_aliases: &[Vec<Option<String>>], // Aliases from all UNION branches (wildcards expanded)
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         use crate::select::grouping::compare_sql_values_with_collation;
@@ -1469,7 +1469,7 @@ impl SelectExecutor<'_> {
                     (Self::resolve_order_by_column(column, &column_info, all_union_aliases), None)
                 }
                 // COLLATE expression: ORDER BY x COLLATE nocase
-                // Extract the column reference and resolve it
+                // Extract the expression and resolve it
                 vibesql_ast::Expression::Collate { expr, collation } => {
                     let col_idx = match expr.as_ref() {
                         vibesql_ast::Expression::ColumnRef(col_id) => {
@@ -1479,12 +1479,34 @@ impl SelectExecutor<'_> {
                         vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) => {
                             Some((*n as usize).saturating_sub(1))
                         }
-                        _ => None,
+                        // For complex expressions inside COLLATE, match against select_list
+                        other_expr => select_list.iter().enumerate().find_map(|(idx, item)| {
+                            if let vibesql_ast::SelectItem::Expression { expr: select_expr, .. } =
+                                item
+                            {
+                                if select_expr == other_expr {
+                                    return Some(idx);
+                                }
+                            }
+                            None
+                        }),
                     };
                     (col_idx, Some(collation.clone()))
                 }
-                // Complex expressions not supported in compound query ORDER BY
-                _ => (None, None),
+                // Complex expressions (aggregates, arithmetic, etc.): match against first SELECT's select_list
+                // SQLite allows ORDER BY to reference expressions from the first SELECT
+                // e.g., SELECT count(*) FROM t UNION SELECT n FROM t2 ORDER BY count(*)
+                other_expr => {
+                    let col_idx = select_list.iter().enumerate().find_map(|(idx, item)| {
+                        if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                            if expr == other_expr {
+                                return Some(idx);
+                            }
+                        }
+                        None
+                    });
+                    (col_idx, None)
+                }
             };
 
             if let Some(col_idx) = col_idx_opt {
