@@ -91,7 +91,8 @@ pub fn evaluate_insert_expression_with_trigger_context(
 }
 
 /// Evaluate a DEFAULT expression to get its value
-/// Supports literals, special functions (CURRENT_DATE, CURRENT_USER, etc.), and sequences
+/// Supports literals, special functions (CURRENT_DATE, CURRENT_USER, etc.), sequences,
+/// and unary expressions (+val, -val) for numeric defaults
 /// Note: For NextValue expressions, this function signature needs database access
 /// This will require refactoring to pass db context
 pub fn evaluate_default_expression(
@@ -99,6 +100,45 @@ pub fn evaluate_default_expression(
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     match expr {
         vibesql_ast::Expression::Literal(lit) => Ok(lit.clone()),
+        // Support unary plus/minus for DEFAULT expressions like "default +4.32" or "default -5"
+        vibesql_ast::Expression::UnaryOp { op, expr } => {
+            let inner = evaluate_default_expression(expr)?;
+            match op {
+                vibesql_ast::UnaryOperator::Plus => Ok(inner), // +x = x
+                vibesql_ast::UnaryOperator::Minus => {
+                    // Negate the value
+                    match inner {
+                        vibesql_types::SqlValue::Integer(i) => {
+                            Ok(vibesql_types::SqlValue::Integer(-i))
+                        }
+                        vibesql_types::SqlValue::Bigint(i) => {
+                            Ok(vibesql_types::SqlValue::Bigint(-i))
+                        }
+                        vibesql_types::SqlValue::Smallint(i) => {
+                            Ok(vibesql_types::SqlValue::Smallint(-i))
+                        }
+                        vibesql_types::SqlValue::Float(f) => {
+                            Ok(vibesql_types::SqlValue::Float(-f))
+                        }
+                        vibesql_types::SqlValue::Real(f) => Ok(vibesql_types::SqlValue::Real(-f)),
+                        vibesql_types::SqlValue::Double(f) => {
+                            Ok(vibesql_types::SqlValue::Double(-f))
+                        }
+                        vibesql_types::SqlValue::Numeric(f) => {
+                            Ok(vibesql_types::SqlValue::Numeric(-f))
+                        }
+                        _ => Err(ExecutorError::UnsupportedExpression(format!(
+                            "Cannot apply unary minus to {:?}",
+                            inner
+                        ))),
+                    }
+                }
+                _ => Err(ExecutorError::UnsupportedExpression(format!(
+                    "Unary operator {:?} not supported in DEFAULT expressions",
+                    op
+                ))),
+            }
+        }
         vibesql_ast::Expression::NextValue { sequence_name } => {
             // NEXT VALUE FOR sequence - this should have been handled at a higher level
             // with access to the database. If we get here, it's an error.

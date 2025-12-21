@@ -146,34 +146,30 @@ pub fn coerce_value(
         (SqlValue::Numeric(f), DataType::DoublePrecision) => Ok(SqlValue::Double(*f)),
 
         // Numeric literal → Integer types
+        // SQLite type affinity: try to convert to integer if possible,
+        // otherwise keep as numeric (SQLite stores values with actual type, not column affinity)
         (SqlValue::Numeric(f), DataType::Integer) => {
             if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
                 Ok(SqlValue::Integer(*f as i64))
             } else {
-                Err(ExecutorError::UnsupportedExpression(format!(
-                    "Cannot convert numeric '{}' to Integer (must be whole number in range)",
-                    f
-                )))
+                // SQLite affinity: non-integer values stay as REAL in INTEGER column
+                Ok(SqlValue::Numeric(*f))
             }
         }
         (SqlValue::Numeric(f), DataType::Smallint) => {
             if f.fract() == 0.0 && *f >= i16::MIN as f64 && *f <= i16::MAX as f64 {
                 Ok(SqlValue::Smallint(*f as i16))
             } else {
-                Err(ExecutorError::UnsupportedExpression(format!(
-                    "Cannot convert numeric '{}' to Smallint (must be whole number in range)",
-                    f
-                )))
+                // SQLite affinity: non-integer values stay as REAL in SMALLINT column
+                Ok(SqlValue::Numeric(*f))
             }
         }
         (SqlValue::Numeric(f), DataType::Bigint) => {
             if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
                 Ok(SqlValue::Bigint(*f as i64))
             } else {
-                Err(ExecutorError::UnsupportedExpression(format!(
-                    "Cannot convert numeric '{}' to Bigint (must be whole number in range)",
-                    f
-                )))
+                // SQLite affinity: non-integer values stay as REAL in BIGINT column
+                Ok(SqlValue::Numeric(*f))
             }
         }
 

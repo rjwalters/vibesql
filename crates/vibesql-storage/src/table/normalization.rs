@@ -66,8 +66,13 @@ impl<'a> RowNormalizer<'a> {
     ) -> Result<(), StorageError> {
         match expected_type {
             // Exact numeric types
+            // SQLite type affinity: INTEGER columns can store REAL/NUMERIC values
+            // (value keeps its actual type, column type is just a preference)
             DataType::Integer => {
-                if !matches!(value, SqlValue::Integer(_)) {
+                if !matches!(
+                    value,
+                    SqlValue::Integer(_) | SqlValue::Numeric(_) | SqlValue::Double(_) | SqlValue::Real(_) | SqlValue::Float(_)
+                ) {
                     return Err(StorageError::TypeMismatch {
                         column: column_name.to_string(),
                         expected: "INTEGER".to_string(),
@@ -76,7 +81,10 @@ impl<'a> RowNormalizer<'a> {
                 }
             }
             DataType::Smallint => {
-                if !matches!(value, SqlValue::Smallint(_)) {
+                if !matches!(
+                    value,
+                    SqlValue::Smallint(_) | SqlValue::Numeric(_) | SqlValue::Double(_) | SqlValue::Real(_) | SqlValue::Float(_)
+                ) {
                     return Err(StorageError::TypeMismatch {
                         column: column_name.to_string(),
                         expected: "SMALLINT".to_string(),
@@ -85,7 +93,10 @@ impl<'a> RowNormalizer<'a> {
                 }
             }
             DataType::Bigint => {
-                if !matches!(value, SqlValue::Bigint(_)) {
+                if !matches!(
+                    value,
+                    SqlValue::Bigint(_) | SqlValue::Numeric(_) | SqlValue::Double(_) | SqlValue::Real(_) | SqlValue::Float(_)
+                ) {
                     return Err(StorageError::TypeMismatch {
                         column: column_name.to_string(),
                         expected: "BIGINT".to_string(),
