@@ -444,3 +444,75 @@ fn test_parse_hex_literal_in_comparison() {
     let result = Parser::parse_sql("SELECT * FROM t WHERE col = x'ABCD';");
     assert!(result.is_ok(), "Hex literal in comparison should parse: {:?}", result);
 }
+
+// ========================================================================
+// Large Integer Literal Tests
+// ========================================================================
+
+#[test]
+fn test_parse_i64_min_literal() {
+    // i64::MIN (-9223372036854775808) is a special case:
+    // The positive value 9223372036854775808 overflows i64, but when negated
+    // it becomes i64::MIN which is valid. This should parse as Integer, not Numeric.
+    let result = Parser::parse_sql("SELECT -9223372036854775808;");
+    assert!(result.is_ok(), "i64::MIN literal should parse: {:?}", result);
+
+    let stmt = result.unwrap();
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert_eq!(select.select_list.len(), 1);
+            match &select.select_list[0] {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
+                    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(i)) => {
+                        assert_eq!(*i, i64::MIN);
+                    }
+                    _ => panic!("Expected Integer literal for i64::MIN, got {:?}", expr),
+                },
+                _ => panic!("Expected expression"),
+            }
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_parse_i64_max_literal() {
+    // i64::MAX (9223372036854775807) should parse as Integer
+    let result = Parser::parse_sql("SELECT 9223372036854775807;");
+    assert!(result.is_ok(), "i64::MAX literal should parse: {:?}", result);
+
+    let stmt = result.unwrap();
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(i)) => {
+                    assert_eq!(*i, i64::MAX);
+                }
+                _ => panic!("Expected Integer literal for i64::MAX"),
+            },
+            _ => panic!("Expected expression"),
+        },
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_parse_large_positive_as_numeric() {
+    // Values larger than i64::MAX should parse as Numeric
+    let result = Parser::parse_sql("SELECT 9223372036854775808;");
+    assert!(result.is_ok(), "Large positive literal should parse: {:?}", result);
+
+    let stmt = result.unwrap();
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Numeric(_)) => {
+                    // This is correct - too large for i64, so it becomes Numeric
+                }
+                _ => panic!("Expected Numeric literal for value > i64::MAX, got {:?}", expr),
+            },
+            _ => panic!("Expected expression"),
+        },
+        _ => panic!("Expected SELECT statement"),
+    }
+}

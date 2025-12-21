@@ -406,6 +406,15 @@ impl<'arena> ArenaParser<'arena> {
             }
             Token::Symbol('-') => {
                 self.advance();
+                // Special case: handle i64::MIN (-9223372036854775808)
+                // The positive value 9223372036854775808 overflows i64, but when
+                // negated it becomes i64::MIN which is valid.
+                if let Token::Number(n) = self.peek() {
+                    if n == "9223372036854775808" {
+                        self.advance();
+                        return Ok(Expression::Literal(SqlValue::Integer(i64::MIN)));
+                    }
+                }
                 let expr = self.parse_unary_expression()?;
                 let expr_ref = self.arena.alloc(expr);
                 Ok(Expression::UnaryOp { op: UnaryOperator::Minus, expr: expr_ref })

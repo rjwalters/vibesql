@@ -55,7 +55,7 @@ impl Parser {
             {
                 // Restore position and let the other parsers handle it
                 self.position = saved_pos;
-                return self.parse_comparison_expression();
+                return self.parse_bitwise_or_expression();
             }
 
             // It's a unary NOT - parse the expression it applies to
@@ -67,8 +67,76 @@ impl Parser {
                 expr: Box::new(expr),
             })
         } else {
-            self.parse_comparison_expression()
+            self.parse_bitwise_or_expression()
         }
+    }
+
+    /// Parse bitwise OR expression (handles |)
+    /// Precedence: between NOT and bitwise AND
+    pub(super) fn parse_bitwise_or_expression(
+        &mut self,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
+        let mut left = self.parse_bitwise_and_expression()?;
+
+        while self.peek() == &Token::Symbol('|') {
+            self.advance();
+            let right = self.parse_bitwise_and_expression()?;
+            left = vibesql_ast::Expression::BinaryOp {
+                op: vibesql_ast::BinaryOperator::BitwiseOr,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parse bitwise AND expression (handles &)
+    /// Precedence: between bitwise OR and comparison
+    pub(super) fn parse_bitwise_and_expression(
+        &mut self,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
+        let mut left = self.parse_comparison_expression()?;
+
+        while self.peek() == &Token::Symbol('&') {
+            self.advance();
+            let right = self.parse_comparison_expression()?;
+            left = vibesql_ast::Expression::BinaryOp {
+                op: vibesql_ast::BinaryOperator::BitwiseAnd,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parse shift expression (handles <<, >>)
+    /// Precedence: between comparison and additive
+    pub(super) fn parse_shift_expression(&mut self) -> Result<vibesql_ast::Expression, ParseError> {
+        let mut left = self.parse_additive_expression()?;
+
+        loop {
+            let op = match self.peek() {
+                Token::Operator(crate::token::MultiCharOperator::LeftShift) => {
+                    vibesql_ast::BinaryOperator::LeftShift
+                }
+                Token::Operator(crate::token::MultiCharOperator::RightShift) => {
+                    vibesql_ast::BinaryOperator::RightShift
+                }
+                _ => break,
+            };
+            self.advance();
+
+            let right = self.parse_additive_expression()?;
+            left = vibesql_ast::Expression::BinaryOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
     }
 
     /// Parse additive expression (handles +, -, and ||)
@@ -133,7 +201,7 @@ impl Parser {
     pub(super) fn parse_comparison_expression(
         &mut self,
     ) -> Result<vibesql_ast::Expression, ParseError> {
-        let mut left = self.parse_additive_expression()?;
+        let mut left = self.parse_shift_expression()?;
 
         // Check for IN operator (including NOT IN) and BETWEEN (including NOT BETWEEN)
         if self.peek_keyword(Keyword::Not) {
@@ -188,9 +256,9 @@ impl Parser {
                 };
 
                 // Parse low AND high
-                let low = self.parse_additive_expression()?;
+                let low = self.parse_shift_expression()?;
                 self.consume_keyword(Keyword::And)?;
-                let high = self.parse_additive_expression()?;
+                let high = self.parse_shift_expression()?;
 
                 return Ok(vibesql_ast::Expression::Between {
                     expr: Box::new(left),
@@ -204,7 +272,7 @@ impl Parser {
                 self.consume_keyword(Keyword::Like)?;
 
                 // Parse pattern expression
-                let pattern = self.parse_additive_expression()?;
+                let pattern = self.parse_shift_expression()?;
 
                 return Ok(vibesql_ast::Expression::Like {
                     expr: Box::new(left),
@@ -216,7 +284,7 @@ impl Parser {
                 self.consume_keyword(Keyword::Glob)?;
 
                 // Parse pattern expression
-                let pattern = self.parse_additive_expression()?;
+                let pattern = self.parse_shift_expression()?;
 
                 return Ok(vibesql_ast::Expression::Glob {
                     expr: Box::new(left),
@@ -347,7 +415,9 @@ impl Parser {
                             vibesql_ast::BinaryOperator::NegativeInnerProduct
                         }
                         MultiCharOperator::L2Distance => vibesql_ast::BinaryOperator::L2Distance,
-                        MultiCharOperator::Concat => {
+                        MultiCharOperator::Concat
+                        | MultiCharOperator::LeftShift
+                        | MultiCharOperator::RightShift => {
                             return Err(ParseError {
                                 message: format!("Unexpected operator: {}", op),
                             })
@@ -391,7 +461,7 @@ impl Parser {
                 });
             }
 
-            let right = self.parse_additive_expression()?;
+            let right = self.parse_shift_expression()?;
             left = vibesql_ast::Expression::BinaryOp {
                 op,
                 left: Box::new(left),
@@ -415,7 +485,7 @@ impl Parser {
             if self.peek_keyword(Keyword::Distinct) {
                 self.consume_keyword(Keyword::Distinct)?;
                 self.expect_keyword(Keyword::From)?;
-                let right = self.parse_additive_expression()?;
+                let right = self.parse_shift_expression()?;
                 left = vibesql_ast::Expression::IsDistinctFrom {
                     left: Box::new(left),
                     right: Box::new(right),
@@ -449,7 +519,7 @@ impl Parser {
             } else {
                 // SQLite compatibility: IS <expr> - compare using IS semantics (NULL-safe equals)
                 // This handles cases like `expr IS 0` or `expr IS 1`
-                let right = self.parse_additive_expression()?;
+                let right = self.parse_shift_expression()?;
                 left = vibesql_ast::Expression::IsDistinctFrom {
                     left: Box::new(left),
                     right: Box::new(right),
@@ -463,9 +533,9 @@ impl Parser {
         Ok(left)
     }
 
-    /// Parse unary expression (handles unary +/- operators)
+    /// Parse unary expression (handles unary +, -, ~ operators)
     pub(super) fn parse_unary_expression(&mut self) -> Result<vibesql_ast::Expression, ParseError> {
-        // Check for unary + or -
+        // Check for unary +, -, or ~
         match self.peek() {
             Token::Symbol('+') => {
                 self.advance();
@@ -477,9 +547,30 @@ impl Parser {
             }
             Token::Symbol('-') => {
                 self.advance();
+                // Special case: handle i64::MIN (-9223372036854775808)
+                // The positive value 9223372036854775808 overflows i64, but when
+                // negated it becomes i64::MIN which is valid. We need to detect
+                // this case and parse the combined negative number as i64.
+                if let Token::Number(n) = self.peek() {
+                    if n == "9223372036854775808" {
+                        // This is the only number that overflows i64 but is valid when negated
+                        self.advance();
+                        return Ok(vibesql_ast::Expression::Literal(
+                            vibesql_types::SqlValue::Integer(i64::MIN),
+                        ));
+                    }
+                }
                 let expr = self.parse_unary_expression()?;
                 Ok(vibesql_ast::Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Minus,
+                    expr: Box::new(expr),
+                })
+            }
+            Token::Symbol('~') => {
+                self.advance();
+                let expr = self.parse_unary_expression()?;
+                Ok(vibesql_ast::Expression::UnaryOp {
+                    op: vibesql_ast::UnaryOperator::BitwiseNot,
                     expr: Box::new(expr),
                 })
             }
