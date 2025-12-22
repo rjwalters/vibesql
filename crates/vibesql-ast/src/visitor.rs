@@ -1083,6 +1083,7 @@ pub fn transform_select<V: ExpressionMutVisitor>(visitor: &mut V, stmt: SelectSt
                     columns: cte.columns,
                     query: Box::new(transform_select(visitor, *cte.query)),
                     recursive: cte.recursive,
+                    materialization: cte.materialization,
                 })
                 .collect()
         }),
@@ -1249,6 +1250,7 @@ pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertSt
                     columns: cte.columns,
                     query: Box::new(transform_select(visitor, *cte.query)),
                     recursive: cte.recursive,
+                    materialization: cte.materialization,
                 })
                 .collect()
         }),

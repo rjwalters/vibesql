@@ -9,6 +9,21 @@ use crate::Expression;
 // Common Table Expressions (CTEs)
 // ============================================================================
 
+/// CTE materialization hint for optimizer control
+///
+/// Controls whether the CTE should be materialized (computed once and stored)
+/// or inlined (substituted into each reference like a view).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CteMaterialization {
+    /// No hint provided - optimizer decides (default)
+    #[default]
+    Default,
+    /// Force materialization - compute once and store result
+    Materialized,
+    /// Force inlining - substitute CTE into each reference
+    NotMaterialized,
+}
+
 /// Common Table Expression (CTE) definition
 ///
 /// CTEs are temporary named result sets defined with the WITH clause that exist
@@ -29,6 +44,8 @@ pub struct CommonTableExpr {
     /// Whether this is a RECURSIVE CTE (SQLite/SQL:1999)
     /// Recursive CTEs must use UNION ALL and may reference themselves in the recursive term
     pub recursive: bool,
+    /// Materialization hint for optimizer control (AS MATERIALIZED / AS NOT MATERIALIZED)
+    pub materialization: CteMaterialization,
 }
 
 // ============================================================================

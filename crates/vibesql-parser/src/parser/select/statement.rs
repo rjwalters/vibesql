@@ -465,6 +465,18 @@ impl Parser {
         // Expect AS keyword
         self.expect_keyword(Keyword::As)?;
 
+        // Parse optional materialization hint: MATERIALIZED or NOT MATERIALIZED
+        let materialization = if self.peek_keyword(Keyword::Not) {
+            self.advance(); // consume NOT
+            self.expect_keyword(Keyword::Materialized)?;
+            vibesql_ast::CteMaterialization::NotMaterialized
+        } else if self.peek_keyword(Keyword::Materialized) {
+            self.advance(); // consume MATERIALIZED
+            vibesql_ast::CteMaterialization::Materialized
+        } else {
+            vibesql_ast::CteMaterialization::Default
+        };
+
         // Expect opening paren for subquery
         if !matches!(self.peek(), Token::LParen) {
             return Err(ParseError {
@@ -487,7 +499,7 @@ impl Parser {
         }
         self.advance(); // consume ')'
 
-        Ok(vibesql_ast::CommonTableExpr { name, columns, query, recursive })
+        Ok(vibesql_ast::CommonTableExpr { name, columns, query, recursive, materialization })
     }
 
     /// Parse a VALUES statement (standalone or in set operations)

@@ -76,6 +76,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "EXCEPT" => Keyword::Except,
     "WITH" => Keyword::With,
     "RECURSIVE" => Keyword::Recursive,
+    "MATERIALIZED" => Keyword::Materialized,
     "DATE" => Keyword::Date,
     "DEFAULT" => Keyword::Default,
     "TIME" => Keyword::Time,

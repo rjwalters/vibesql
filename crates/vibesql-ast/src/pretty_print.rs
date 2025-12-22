@@ -28,9 +28,9 @@ use crate::{
     },
     operators::{BinaryOperator, UnaryOperator},
     select::{
-        CommonTableExpr, FromClause, GroupByClause, GroupingElement, GroupingSet, JoinType,
-        MixedGroupingItem, OrderByItem, OrderDirection, SelectItem, SelectStmt, SetOperation,
-        SetOperator,
+        CommonTableExpr, CteMaterialization, FromClause, GroupByClause, GroupingElement,
+        GroupingSet, JoinType, MixedGroupingItem, OrderByItem, OrderDirection, SelectItem,
+        SelectStmt, SetOperation, SetOperator,
     },
 };
 
@@ -919,7 +919,13 @@ impl ToSql for CommonTableExpr {
         if let Some(cols) = &self.columns {
             result.push_str(&format!(" ({})", cols.join(", ")));
         }
-        result.push_str(&format!(" AS ({})", self.query.to_sql()));
+        // Include materialization hint if specified
+        let materialization_hint = match self.materialization {
+            CteMaterialization::Default => "",
+            CteMaterialization::Materialized => " MATERIALIZED",
+            CteMaterialization::NotMaterialized => " NOT MATERIALIZED",
+        };
+        result.push_str(&format!(" AS{}({})", materialization_hint, self.query.to_sql()));
         result
     }
 }

@@ -229,3 +229,73 @@ fn test_parse_cte_with_values_sum() {
     let result = Parser::parse_sql("WITH t(x) AS (VALUES(1), (2), (3)) SELECT SUM(x) FROM t;");
     assert!(result.is_ok(), "CTE with VALUES and aggregate should parse: {:?}", result);
 }
+
+// ========================================================================
+// CTE Materialization Hint Tests
+// ========================================================================
+
+#[test]
+fn test_parse_cte_materialized() {
+    let result = Parser::parse_sql(
+        "WITH t(b) AS MATERIALIZED (SELECT b FROM t1 LEFT JOIN t2 ON c IN (SELECT x FROM t3)) SELECT * FROM t;",
+    );
+    assert!(result.is_ok(), "CTE with MATERIALIZED hint should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_cte_not_materialized() {
+    let result = Parser::parse_sql(
+        "WITH t(b) AS NOT MATERIALIZED (SELECT b FROM t1 LEFT JOIN t2 ON c IN (SELECT x FROM t3)) SELECT * FROM t;",
+    );
+    assert!(result.is_ok(), "CTE with NOT MATERIALIZED hint should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_cte_materialized_verify_ast() {
+    use vibesql_ast::{CteMaterialization, Statement};
+
+    let stmt = Parser::parse_sql("WITH t AS MATERIALIZED (SELECT 1) SELECT * FROM t;").unwrap();
+    match stmt {
+        Statement::Select(select) => {
+            let cte = &select.with_clause.as_ref().unwrap()[0];
+            assert_eq!(cte.materialization, CteMaterialization::Materialized);
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_parse_cte_not_materialized_verify_ast() {
+    use vibesql_ast::{CteMaterialization, Statement};
+
+    let stmt = Parser::parse_sql("WITH t AS NOT MATERIALIZED (SELECT 1) SELECT * FROM t;").unwrap();
+    match stmt {
+        Statement::Select(select) => {
+            let cte = &select.with_clause.as_ref().unwrap()[0];
+            assert_eq!(cte.materialization, CteMaterialization::NotMaterialized);
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_parse_cte_default_materialization() {
+    use vibesql_ast::{CteMaterialization, Statement};
+
+    let stmt = Parser::parse_sql("WITH t AS (SELECT 1) SELECT * FROM t;").unwrap();
+    match stmt {
+        Statement::Select(select) => {
+            let cte = &select.with_clause.as_ref().unwrap()[0];
+            assert_eq!(cte.materialization, CteMaterialization::Default);
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_parse_cte_materialized_with_column_list() {
+    let result = Parser::parse_sql(
+        "WITH t(a, b) AS MATERIALIZED (SELECT 1, 2) SELECT * FROM t;",
+    );
+    assert!(result.is_ok(), "CTE with column list and MATERIALIZED should parse: {:?}", result);
+}

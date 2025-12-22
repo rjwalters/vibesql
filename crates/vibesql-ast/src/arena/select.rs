@@ -6,6 +6,7 @@ use super::{
     expression::{Expression, OrderByItem},
     interner::Symbol,
 };
+use crate::CteMaterialization;
 
 /// Common Table Expression (CTE) definition
 #[derive(Debug, Clone, PartialEq)]
@@ -15,6 +16,8 @@ pub struct CommonTableExpr<'arena> {
     pub query: &'arena SelectStmt<'arena>,
     /// Whether this is a RECURSIVE CTE
     pub recursive: bool,
+    /// Materialization hint for optimizer control
+    pub materialization: CteMaterialization,
 }
 
 /// Arena-allocated SELECT statement structure

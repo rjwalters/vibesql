@@ -69,6 +69,8 @@ pub enum Keyword {
     Except,
     With,
     Recursive,
+    // CTE materialization hints (SQL:1999)
+    Materialized,
     Date,
     Time,
     Timestamp,
@@ -448,6 +450,7 @@ impl fmt::Display for Keyword {
             Keyword::Except => "EXCEPT",
             Keyword::With => "WITH",
             Keyword::Recursive => "RECURSIVE",
+            Keyword::Materialized => "MATERIALIZED",
             Keyword::Date => "DATE",
             Keyword::Time => "TIME",
             Keyword::Timestamp => "TIMESTAMP",
