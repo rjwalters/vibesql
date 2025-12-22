@@ -7,7 +7,8 @@ use vibesql_storage::Database;
 use super::integrity::check_no_child_references;
 use crate::{
     dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
-    privilege_checker::PrivilegeChecker, truncate_validation::can_use_truncate,
+    privilege_checker::PrivilegeChecker, sqlite_schema::is_sqlite_schema_table,
+    truncate_validation::can_use_truncate,
 };
 
 /// Executor for DELETE statements
@@ -117,6 +118,14 @@ impl DeleteExecutor {
         // Note: stmt.only is currently ignored (treated as false)
         // ONLY keyword is used in table inheritance to exclude derived tables.
         // Since table inheritance is not yet implemented, we treat all deletes the same.
+
+        // Check if target is sqlite_master/sqlite_schema (read-only system table)
+        if is_sqlite_schema_table(&stmt.table_name) {
+            return Err(ExecutorError::SqliteSystemTableReadOnly {
+                table_name: stmt.table_name.clone(),
+                operation: "modified".to_string(),
+            });
+        }
 
         // Check DELETE privilege on the table
         PrivilegeChecker::check_delete(database, &stmt.table_name)?;

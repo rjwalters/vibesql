@@ -34,7 +34,7 @@ use vibesql_storage::{statistics::CostEstimator, Database};
 
 use crate::{
     dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
-    privilege_checker::PrivilegeChecker,
+    privilege_checker::PrivilegeChecker, sqlite_schema::is_sqlite_schema_table,
 };
 
 /// Executor for UPDATE statements
@@ -150,6 +150,14 @@ impl UpdateExecutor {
         procedural_context: Option<&crate::procedural::ExecutionContext>,
         trigger_context: Option<&crate::trigger_execution::TriggerContext>,
     ) -> Result<usize, ExecutorError> {
+        // Check if target is sqlite_master/sqlite_schema (read-only system table)
+        if is_sqlite_schema_table(&stmt.table_name) {
+            return Err(ExecutorError::SqliteSystemTableReadOnly {
+                table_name: stmt.table_name.clone(),
+                operation: "modified".to_string(),
+            });
+        }
+
         // Check UPDATE privilege on the table
         PrivilegeChecker::check_update(database, &stmt.table_name)?;
 
