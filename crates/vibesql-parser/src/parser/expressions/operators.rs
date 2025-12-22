@@ -530,6 +530,16 @@ impl Parser {
             }
         }
 
+        // SQLite compatibility: ISNULL and NOTNULL as postfix operators
+        // These are equivalent to IS NULL and IS NOT NULL respectively
+        if self.peek_keyword(Keyword::Isnull) {
+            self.consume_keyword(Keyword::Isnull)?;
+            left = vibesql_ast::Expression::IsNull { expr: Box::new(left), negated: false };
+        } else if self.peek_keyword(Keyword::Notnull) {
+            self.consume_keyword(Keyword::Notnull)?;
+            left = vibesql_ast::Expression::IsNull { expr: Box::new(left), negated: true };
+        }
+
         Ok(left)
     }
 

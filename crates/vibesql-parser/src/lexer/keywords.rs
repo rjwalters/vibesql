@@ -65,6 +65,9 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "EXISTS" => Keyword::Exists,
     "IF" => Keyword::If,
     "IS" => Keyword::Is,
+    // SQLite ISNULL/NOTNULL postfix operators
+    "ISNULL" => Keyword::Isnull,
+    "NOTNULL" => Keyword::Notnull,
     "ALL" => Keyword::All,
     "ANY" => Keyword::Any,
     "SOME" => Keyword::Some,

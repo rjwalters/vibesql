@@ -130,3 +130,141 @@ fn test_not_null_is_null_parsing() {
         _ => panic!("Expected UnaryOp(NOT), got {:?}", where_clause),
     }
 }
+
+/// Tests for SQLite ISNULL postfix operator
+/// ISNULL is equivalent to IS NULL
+#[test]
+fn test_isnull_operator() {
+    // Parse: SELECT * FROM t WHERE col0 ISNULL
+    let sql = "SELECT * FROM t WHERE col0 ISNULL";
+    let stmt = Parser::parse_sql(sql).expect("Should parse");
+
+    let select = match stmt {
+        vibesql_ast::Statement::Select(s) => s,
+        _ => panic!("Expected SELECT statement"),
+    };
+
+    let where_clause = select.where_clause.expect("Should have WHERE clause");
+
+    // This should parse as: IsNull(col0, negated: false)
+    match &where_clause {
+        Expression::IsNull { expr, negated } => {
+            assert!(!*negated, "ISNULL should have negated=false (equivalent to IS NULL)");
+
+            match &**expr {
+                Expression::ColumnRef(col_id) => {
+                    let table = col_id.table_canonical();
+                    let column = col_id.column_canonical();
+                    assert!(table.is_none());
+                    assert_eq!(column, "col0");
+                }
+                _ => panic!("Expected column reference, got {:?}", expr),
+            }
+        }
+        _ => panic!("Expected IsNull, got {:?}", where_clause),
+    }
+}
+
+/// Tests for SQLite NOTNULL postfix operator
+/// NOTNULL is equivalent to IS NOT NULL
+#[test]
+fn test_notnull_operator() {
+    // Parse: SELECT * FROM t WHERE col0 NOTNULL
+    let sql = "SELECT * FROM t WHERE col0 NOTNULL";
+    let stmt = Parser::parse_sql(sql).expect("Should parse");
+
+    let select = match stmt {
+        vibesql_ast::Statement::Select(s) => s,
+        _ => panic!("Expected SELECT statement"),
+    };
+
+    let where_clause = select.where_clause.expect("Should have WHERE clause");
+
+    // This should parse as: IsNull(col0, negated: true)
+    match &where_clause {
+        Expression::IsNull { expr, negated } => {
+            assert!(*negated, "NOTNULL should have negated=true (equivalent to IS NOT NULL)");
+
+            match &**expr {
+                Expression::ColumnRef(col_id) => {
+                    let table = col_id.table_canonical();
+                    let column = col_id.column_canonical();
+                    assert!(table.is_none());
+                    assert_eq!(column, "col0");
+                }
+                _ => panic!("Expected column reference, got {:?}", expr),
+            }
+        }
+        _ => panic!("Expected IsNull, got {:?}", where_clause),
+    }
+}
+
+/// Test ISNULL with complex expressions
+#[test]
+fn test_isnull_complex_expression() {
+    // Parse: SELECT * FROM t WHERE (a + b) ISNULL
+    let sql = "SELECT * FROM t WHERE (a + b) ISNULL";
+    let stmt = Parser::parse_sql(sql).expect("Should parse");
+
+    let select = match stmt {
+        vibesql_ast::Statement::Select(s) => s,
+        _ => panic!("Expected SELECT statement"),
+    };
+
+    let where_clause = select.where_clause.expect("Should have WHERE clause");
+
+    // This should parse as: IsNull((a + b), negated: false)
+    match &where_clause {
+        Expression::IsNull { expr, negated } => {
+            assert!(!*negated, "ISNULL should have negated=false");
+
+            // Inner should be a binary op (a + b)
+            match &**expr {
+                Expression::BinaryOp { op, .. } => {
+                    assert_eq!(*op, vibesql_ast::BinaryOperator::Plus);
+                }
+                _ => panic!("Expected BinaryOp, got {:?}", expr),
+            }
+        }
+        _ => panic!("Expected IsNull, got {:?}", where_clause),
+    }
+}
+
+/// Test NOT col ISNULL precedence
+#[test]
+fn test_not_isnull_precedence() {
+    // Parse: SELECT * FROM t WHERE NOT col0 ISNULL
+    // This should parse as: NOT (col0 ISNULL) = NOT (col0 IS NULL)
+    let sql = "SELECT * FROM t WHERE NOT col0 ISNULL";
+    let stmt = Parser::parse_sql(sql).expect("Should parse");
+
+    let select = match stmt {
+        vibesql_ast::Statement::Select(s) => s,
+        _ => panic!("Expected SELECT statement"),
+    };
+
+    let where_clause = select.where_clause.expect("Should have WHERE clause");
+
+    // Should be: UnaryOp(Not, IsNull(col0, negated: false))
+    match &where_clause {
+        Expression::UnaryOp { op, expr } => {
+            assert_eq!(*op, UnaryOperator::Not, "Outer operator should be NOT");
+
+            match &**expr {
+                Expression::IsNull { expr: inner_expr, negated } => {
+                    assert!(!*negated, "ISNULL should not be negated");
+
+                    match &**inner_expr {
+                        Expression::ColumnRef(col_id) => {
+                            let column = col_id.column_canonical();
+                            assert_eq!(column, "col0");
+                        }
+                        _ => panic!("Expected column reference, got {:?}", inner_expr),
+                    }
+                }
+                _ => panic!("Expected IS NULL expression, got {:?}", expr),
+            }
+        }
+        _ => panic!("Expected UnaryOp(NOT), got {:?}", where_clause),
+    }
+}

@@ -103,6 +103,9 @@ pub enum Keyword {
     References,
     // IS NULL keywords
     Is,
+    // SQLite ISNULL/NOTNULL postfix operators
+    Isnull,
+    Notnull,
     // Transaction keywords
     Begin,
     Commit,
@@ -474,6 +477,8 @@ impl fmt::Display for Keyword {
             Keyword::Check => "CHECK",
             Keyword::References => "REFERENCES",
             Keyword::Is => "IS",
+            Keyword::Isnull => "ISNULL",
+            Keyword::Notnull => "NOTNULL",
             Keyword::Begin => "BEGIN",
             Keyword::Commit => "COMMIT",
             Keyword::Rollback => "ROLLBACK",
