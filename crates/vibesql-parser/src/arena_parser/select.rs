@@ -263,11 +263,22 @@ impl<'arena> ArenaParser<'arena> {
         };
 
         self.consume_keyword(Keyword::As)?;
+
+        // Parse optional materialization hint: MATERIALIZED or NOT MATERIALIZED
+        let materialization = if self.try_consume_keyword(Keyword::Not) {
+            self.consume_keyword(Keyword::Materialized)?;
+            vibesql_ast::CteMaterialization::NotMaterialized
+        } else if self.try_consume_keyword(Keyword::Materialized) {
+            vibesql_ast::CteMaterialization::Materialized
+        } else {
+            vibesql_ast::CteMaterialization::Default
+        };
+
         self.expect_token(Token::LParen)?;
         let query = self.parse_select_statement()?;
         self.expect_token(Token::RParen)?;
 
-        Ok(CommonTableExpr { name, columns, query, recursive })
+        Ok(CommonTableExpr { name, columns, query, recursive, materialization })
     }
 
     /// Parse select list.

@@ -463,6 +463,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             columns: cte.columns.as_ref().map(|v| v.iter().map(|s| self.resolve(*s)).collect()),
             query: Box::new(self.convert_select(cte.query)),
             recursive: cte.recursive,
+            materialization: cte.materialization,
         }
     }
 
