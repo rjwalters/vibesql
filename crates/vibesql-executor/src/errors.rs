@@ -89,9 +89,14 @@ pub enum ExecutorError {
         provided: usize,
     },
     InsertColumnCountMismatch {
-        table_name: String,
         expected: usize,
         provided: usize,
+    },
+    /// Column not found in INSERT statement (SQLite-compatible error)
+    /// Format: "table T has no column named C"
+    InsertNoSuchColumn {
+        table_name: String,
+        column_name: String,
     },
     CastError {
         from_type: String,
@@ -598,13 +603,13 @@ impl std::fmt::Display for ExecutorError {
                     )
                 )
             }
-            ExecutorError::InsertColumnCountMismatch { table_name, expected, provided } => {
-                // SQLite format: "table T has N columns but M values were supplied"
-                write!(
-                    f,
-                    "table {} has {} columns but {} values were supplied",
-                    table_name, expected, provided
-                )
+            ExecutorError::InsertColumnCountMismatch { expected, provided } => {
+                // SQLite format: "N values for M columns"
+                write!(f, "{} values for {} columns", provided, expected)
+            }
+            ExecutorError::InsertNoSuchColumn { table_name, column_name } => {
+                // SQLite format: "table T has no column named C"
+                write!(f, "table {} has no column named {}", table_name, column_name)
             }
             ExecutorError::CastError { from_type, to_type } => {
                 write!(
