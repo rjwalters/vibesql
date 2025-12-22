@@ -2,6 +2,8 @@
 pub enum ExecutorError {
     TableNotFound(String),
     TableAlreadyExists(String),
+    /// SQLite system table may not be modified (sqlite_master, sqlite_schema)
+    SqliteSystemTableReadOnly { table_name: String, operation: String },
     ColumnNotFound {
         column_name: String,
         table_name: String,
@@ -384,6 +386,10 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::TableAlreadyExists(name) => {
                 write!(f, "{}", vibe_msg!("executor-table-already-exists", name = name.as_str()))
+            }
+            ExecutorError::SqliteSystemTableReadOnly { table_name, operation } => {
+                // SQLite-compatible error message format
+                write!(f, "table {} may not be {}", table_name, operation)
             }
             ExecutorError::ColumnNotFound {
                 column_name,

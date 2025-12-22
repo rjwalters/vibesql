@@ -1,7 +1,10 @@
 use vibesql_catalog::TableIdentifier;
 use vibesql_storage::statistics::CostEstimator;
 
-use crate::{dml_cost::DmlOptimizer, errors::ExecutorError, privilege_checker::PrivilegeChecker};
+use crate::{
+    dml_cost::DmlOptimizer, errors::ExecutorError, privilege_checker::PrivilegeChecker,
+    sqlite_schema::is_sqlite_schema_table,
+};
 
 /// Execute an INSERT statement
 /// Returns number of rows inserted
@@ -45,6 +48,14 @@ fn execute_insert_internal(
         Some(schema) => format!("{}.{}", schema, stmt.table_name),
         None => stmt.table_name.clone(),
     };
+
+    // Check if target is sqlite_master/sqlite_schema (read-only system table)
+    if is_sqlite_schema_table(&stmt.table_name) {
+        return Err(ExecutorError::SqliteSystemTableReadOnly {
+            table_name: stmt.table_name.clone(),
+            operation: "modified".to_string(),
+        });
+    }
 
     // Check INSERT privilege on the table
     PrivilegeChecker::check_insert(db, &full_table_name)?;

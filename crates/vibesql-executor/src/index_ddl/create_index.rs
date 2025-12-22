@@ -6,7 +6,7 @@ use vibesql_storage::{
     Database, SpatialIndexMetadata,
 };
 
-use crate::{errors::ExecutorError, privilege_checker::PrivilegeChecker};
+use crate::{errors::ExecutorError, privilege_checker::PrivilegeChecker, sqlite_schema::is_sqlite_schema_table};
 
 /// Executor for CREATE INDEX statements
 pub struct CreateIndexExecutor;
@@ -60,6 +60,14 @@ impl CreateIndexExecutor {
             } else {
                 (database.catalog.get_current_schema().to_string(), stmt.table_name.clone())
             };
+
+        // Check if target is sqlite_master/sqlite_schema (read-only system table)
+        if is_sqlite_schema_table(&table_name) {
+            return Err(ExecutorError::SqliteSystemTableReadOnly {
+                table_name: table_name.clone(),
+                operation: "indexed".to_string(),
+            });
+        }
 
         // Check CREATE privilege on the schema
         PrivilegeChecker::check_create(database, &schema_name)?;
