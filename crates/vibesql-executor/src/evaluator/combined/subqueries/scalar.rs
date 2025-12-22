@@ -120,12 +120,27 @@ impl CombinedExpressionEvaluator<'_> {
                 return crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows);
             }
         } else {
-            // Has outer_schema but not in schema.table_schemas - skip caching
-            // Still pass CTE context if available (fix for TPC-H Q15)
+            // Has outer_schema but not in schema.table_schemas - still pass outer context!
+            // This is critical for double-nested subqueries like SELECT (SELECT (SELECT a)) FROM t1
+            // where the middle SELECT has no FROM but needs to pass outer context to innermost.
+            // FIX for issue #4618 (subquery-3.3.4)
+            let merged_schema = build_merged_outer_schema(self.schema, self.outer_schema);
+            let merged_row = build_merged_outer_row(row, self.outer_row);
             let select_executor = if let Some(cte_ctx) = self.cte_context {
-                crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+                crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
+                    database,
+                    &merged_row,
+                    &merged_schema,
+                    cte_ctx,
+                    self.depth,
+                )
             } else {
-                crate::select::SelectExecutor::new(database)
+                crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                    database,
+                    &merged_row,
+                    &merged_schema,
+                    self.depth,
+                )
             };
             let rows = select_executor.execute(subquery)?;
             return crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows);
