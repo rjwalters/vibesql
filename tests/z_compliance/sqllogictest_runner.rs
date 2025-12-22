@@ -94,6 +94,10 @@ impl VibeSqlDB {
                     vibesql_executor::InsertExecutor::execute(&mut self.db, &insert_stmt)
                         .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
 
+                // Track changes count for changes() and total_changes() functions
+                self.db.set_last_changes_count(rows_affected);
+                self.db.increment_total_changes_count(rows_affected);
+
                 // Invalidate cache for this table
                 self.cache.invalidate_table(table_name);
 
@@ -111,6 +115,10 @@ impl VibeSqlDB {
                     vibesql_executor::UpdateExecutor::execute(&update_stmt, &mut self.db)
                         .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
 
+                // Track changes count for changes() and total_changes() functions
+                self.db.set_last_changes_count(rows_affected);
+                self.db.increment_total_changes_count(rows_affected);
+
                 // Invalidate cache for this table
                 self.cache.invalidate_table(table_name);
 
@@ -127,6 +135,10 @@ impl VibeSqlDB {
                 let rows_affected =
                     vibesql_executor::DeleteExecutor::execute(&delete_stmt, &mut self.db)
                         .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+
+                // Track changes count for changes() and total_changes() functions
+                self.db.set_last_changes_count(rows_affected);
+                self.db.increment_total_changes_count(rows_affected);
 
                 // Invalidate cache for this table
                 self.cache.invalidate_table(table_name);

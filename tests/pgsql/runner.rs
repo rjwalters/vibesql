@@ -316,16 +316,25 @@ fn execute_statement(
         Statement::Insert(insert_stmt) => {
             let rows_affected = vibesql_executor::InsertExecutor::execute(db, &insert_stmt)
                 .map_err(|e| format!("{:?}", e))?;
+            // Track changes count for changes() and total_changes() functions
+            db.set_last_changes_count(rows_affected);
+            db.increment_total_changes_count(rows_affected);
             Ok(vec![format!("{} rows inserted", rows_affected)])
         }
         Statement::Update(update_stmt) => {
             let rows_affected = vibesql_executor::UpdateExecutor::execute(&update_stmt, db)
                 .map_err(|e| format!("{:?}", e))?;
+            // Track changes count for changes() and total_changes() functions
+            db.set_last_changes_count(rows_affected);
+            db.increment_total_changes_count(rows_affected);
             Ok(vec![format!("{} rows updated", rows_affected)])
         }
         Statement::Delete(delete_stmt) => {
             let rows_deleted = vibesql_executor::DeleteExecutor::execute(&delete_stmt, db)
                 .map_err(|e| format!("{:?}", e))?;
+            // Track changes count for changes() and total_changes() functions
+            db.set_last_changes_count(rows_deleted);
+            db.increment_total_changes_count(rows_deleted);
             Ok(vec![format!("{} rows deleted", rows_deleted)])
         }
         Statement::CreateTrigger(trigger_stmt) => {
