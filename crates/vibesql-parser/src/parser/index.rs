@@ -370,9 +370,11 @@ impl Parser {
     ///
     /// Supports both simple column references and expression indexes:
     /// - Column: `col1`, `col1 ASC`, `col1(10)` (with prefix length)
-    /// - Expression: `(lower(name))`, `(a + b) DESC`
+    /// - Expression: `(lower(name))`, `(a + b) DESC`, `0`, `0 LIKE col`
     ///
-    /// SQLite/PostgreSQL syntax: expressions must be wrapped in parentheses
+    /// SQLite allows expressions without parentheses, so we must detect when
+    /// the token cannot be a column name (e.g., numeric literals) and parse
+    /// as an expression instead.
     fn parse_index_column_list(&mut self) -> Result<Vec<vibesql_ast::IndexColumn>, ParseError> {
         let mut columns = Vec::new();
         loop {
@@ -389,6 +391,23 @@ impl Parser {
                 let expr = self.parse_expression()?;
 
                 self.expect_token(Token::RParen)?;
+
+                // Check for optional ASC/DESC
+                let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
+                    self.advance();
+                    vibesql_ast::OrderDirection::Asc
+                } else if self.peek_keyword(crate::keywords::Keyword::Desc) {
+                    self.advance();
+                    vibesql_ast::OrderDirection::Desc
+                } else {
+                    vibesql_ast::OrderDirection::Asc
+                };
+
+                columns.push(vibesql_ast::IndexColumn::new_expression(expr, direction));
+            } else if matches!(self.peek(), Token::Number(_)) {
+                // Numeric literal - cannot be a column name, must be an expression
+                // SQLite allows: CREATE INDEX i ON t(0), CREATE INDEX i ON t(0 LIKE col)
+                let expr = self.parse_expression()?;
 
                 // Check for optional ASC/DESC
                 let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
