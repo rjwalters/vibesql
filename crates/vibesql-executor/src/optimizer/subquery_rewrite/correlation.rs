@@ -160,12 +160,16 @@ pub(crate) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt)
                 || else_result.as_ref().is_some_and(|e| has_external_column_refs(e, subquery))
         }
 
-        Expression::ScalarSubquery(_)
-        | Expression::In { .. }
-        | Expression::Exists { .. }
-        | Expression::QuantifiedComparison { .. } => {
-            // Nested subqueries are handled separately
-            false
+        // Nested subqueries: check if they reference external columns
+        // FIX for issue #4618: Recursively check nested subqueries for correlations
+        Expression::ScalarSubquery(subq) | Expression::Exists { subquery: subq, .. } => {
+            is_correlated(subq)
+        }
+        Expression::In { subquery: subq, expr, .. } => {
+            has_external_column_refs(expr, subquery) || is_correlated(subq)
+        }
+        Expression::QuantifiedComparison { expr, subquery: subq, .. } => {
+            has_external_column_refs(expr, subquery) || is_correlated(subq)
         }
 
         Expression::InList { expr, values, .. } => {

@@ -227,7 +227,24 @@ fn collect_correlation_refs_from_expr(
         vibesql_ast::Expression::Interval { value, .. } => {
             collect_correlation_refs_from_expr(value, outer_schema, subquery_tables, refs);
         }
-        // Literals, subqueries, and special expressions don't contribute to correlation
+        // Nested subqueries: recursively collect correlation refs from their contents
+        // FIX for issue #4618: Previously we skipped nested subqueries, which caused
+        // incorrect caching when an outer subquery contained a nested subquery that
+        // referenced outer columns (e.g., SELECT (SELECT (SELECT a)) FROM t1).
+        vibesql_ast::Expression::ScalarSubquery(subq)
+        | vibesql_ast::Expression::Exists { subquery: subq, .. } => {
+            // Recursively collect correlation refs from the nested subquery
+            collect_correlation_refs(subq, outer_schema, subquery_tables, refs);
+        }
+        vibesql_ast::Expression::In { subquery: subq, expr, .. } => {
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+            collect_correlation_refs(subq, outer_schema, subquery_tables, refs);
+        }
+        vibesql_ast::Expression::QuantifiedComparison { expr, subquery, .. } => {
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+            collect_correlation_refs(subquery, outer_schema, subquery_tables, refs);
+        }
+        // Literals and other expressions don't contribute to correlation
         _ => {}
     }
 }
