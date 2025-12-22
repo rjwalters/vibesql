@@ -171,7 +171,7 @@ where
             derived::execute_derived_table(query, alias, column_aliases.as_ref(), execute_subquery)
         }
         vibesql_ast::FromClause::Values { rows, alias, column_aliases } => {
-            values::execute_values(rows, alias, column_aliases.as_ref())
+            values::execute_values(rows, alias, column_aliases.as_ref(), Some(database))
         }
     }
 }
