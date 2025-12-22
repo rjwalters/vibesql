@@ -218,8 +218,9 @@ impl SelectExecutor<'_> {
 
         let is_desc = order_by[0].direction == vibesql_ast::OrderDirection::Desc;
 
-        // Get PK index from database's index infrastructure (pk_{table_name})
-        let pk_index_name = format!("pk_{}", table_name);
+        // Get PK index from database's index infrastructure (sqlite_autoindex_{table_name}_1)
+        // Primary key index is always the first auto-index created
+        let pk_index_name = format!("sqlite_autoindex_{}_1", table_name);
         let pk_index_data = match self.database.get_index_data(&pk_index_name) {
             Some(idx) => idx,
             None => return Ok(None),

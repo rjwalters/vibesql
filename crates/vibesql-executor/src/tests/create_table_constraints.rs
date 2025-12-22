@@ -321,12 +321,12 @@ fn test_auto_index_for_single_column_primary_key() {
     let result = CreateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_ok());
 
-    // Verify pk_t1 index was auto-created
-    assert!(db.index_exists("pk_t1"), "Expected pk_t1 index to be auto-created");
+    // Verify sqlite_autoindex_t1_1 index was auto-created (SQLite naming convention)
+    assert!(db.index_exists("sqlite_autoindex_t1_1"), "Expected sqlite_autoindex_t1_1 index to be auto-created");
 
     // Verify index metadata in catalog
-    let index_meta = db.catalog.get_index("t1", "pk_t1");
-    assert!(index_meta.is_some(), "Expected pk_t1 in catalog");
+    let index_meta = db.catalog.get_index("t1", "sqlite_autoindex_t1_1");
+    assert!(index_meta.is_some(), "Expected sqlite_autoindex_t1_1 in catalog");
     let index_meta = index_meta.unwrap();
     assert_eq!(index_meta.table_name, "t1");
     assert!(index_meta.is_unique);
@@ -386,11 +386,11 @@ fn test_auto_index_for_composite_primary_key() {
     let result = CreateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_ok());
 
-    // Verify pk_t2 index was auto-created
-    assert!(db.index_exists("pk_t2"), "Expected pk_t2 index to be auto-created");
+    // Verify sqlite_autoindex_t2_1 index was auto-created (SQLite naming convention)
+    assert!(db.index_exists("sqlite_autoindex_t2_1"), "Expected sqlite_autoindex_t2_1 index to be auto-created");
 
     // Verify index has both columns
-    let index_meta = db.catalog.get_index("t2", "pk_t2").unwrap();
+    let index_meta = db.catalog.get_index("t2", "sqlite_autoindex_t2_1").unwrap();
     assert_eq!(index_meta.columns.len(), 2);
     assert_eq!(index_meta.columns[0].column_name, "a");
     assert_eq!(index_meta.columns[1].column_name, "b");
@@ -434,11 +434,11 @@ fn test_auto_index_for_single_unique_constraint() {
     let result = CreateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_ok());
 
-    // Verify uq_t3_email index was auto-created
-    assert!(db.index_exists("uq_t3_email"), "Expected uq_t3_email index to be auto-created");
+    // Verify sqlite_autoindex_t3_1 index was auto-created (SQLite naming convention)
+    assert!(db.index_exists("sqlite_autoindex_t3_1"), "Expected sqlite_autoindex_t3_1 index to be auto-created");
 
     // Verify index metadata
-    let index_meta = db.catalog.get_index("t3", "uq_t3_email").unwrap();
+    let index_meta = db.catalog.get_index("t3", "sqlite_autoindex_t3_1").unwrap();
     assert_eq!(index_meta.table_name, "t3");
     assert!(index_meta.is_unique);
     assert_eq!(index_meta.columns.len(), 1);
@@ -495,9 +495,9 @@ fn test_auto_index_for_multiple_unique_constraints() {
     let result = CreateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_ok());
 
-    // Verify both unique indexes were auto-created
-    assert!(db.index_exists("uq_t4_email"), "Expected uq_t4_email index to be auto-created");
-    assert!(db.index_exists("uq_t4_phone"), "Expected uq_t4_phone index to be auto-created");
+    // Verify both unique indexes were auto-created (SQLite naming convention)
+    assert!(db.index_exists("sqlite_autoindex_t4_1"), "Expected sqlite_autoindex_t4_1 index to be auto-created");
+    assert!(db.index_exists("sqlite_autoindex_t4_2"), "Expected sqlite_autoindex_t4_2 index to be auto-created");
 }
 
 #[test]
@@ -552,11 +552,11 @@ fn test_auto_index_for_composite_unique_constraint() {
     let result = CreateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_ok());
 
-    // Verify uq_t5_a_b index was auto-created
-    assert!(db.index_exists("uq_t5_a_b"), "Expected uq_t5_a_b index to be auto-created");
+    // Verify sqlite_autoindex_t5_1 index was auto-created (SQLite naming convention)
+    assert!(db.index_exists("sqlite_autoindex_t5_1"), "Expected sqlite_autoindex_t5_1 index to be auto-created");
 
     // Verify index has both columns
-    let index_meta = db.catalog.get_index("t5", "uq_t5_a_b").unwrap();
+    let index_meta = db.catalog.get_index("t5", "sqlite_autoindex_t5_1").unwrap();
     assert_eq!(index_meta.columns.len(), 2);
     assert_eq!(index_meta.columns[0].column_name, "a");
     assert_eq!(index_meta.columns[1].column_name, "b");
@@ -604,8 +604,9 @@ fn test_auto_index_for_primary_key_plus_unique() {
     assert!(result.is_ok());
 
     // Verify both indexes were auto-created
-    assert!(db.index_exists("pk_t6"), "Expected pk_t6 index to be auto-created");
-    assert!(db.index_exists("uq_t6_email"), "Expected uq_t6_email index to be auto-created");
+    // PK gets _1, UNIQUE gets _2 (SQLite naming convention)
+    assert!(db.index_exists("sqlite_autoindex_t6_1"), "Expected sqlite_autoindex_t6_1 (PK) index to be auto-created");
+    assert!(db.index_exists("sqlite_autoindex_t6_2"), "Expected sqlite_autoindex_t6_2 (UNIQUE) index to be auto-created");
 }
 
 #[test]
@@ -653,8 +654,8 @@ fn test_auto_index_visible_in_catalog() {
     let indexes = db.catalog.get_table_indexes("users");
     assert_eq!(indexes.len(), 2, "Expected 2 indexes for users table");
 
-    // Index names should include both pk and uq indexes
+    // Index names should follow SQLite naming convention
     let index_names: Vec<&str> = indexes.iter().map(|i| i.name.as_str()).collect();
-    assert!(index_names.contains(&"pk_users"), "pk_users should be in catalog");
-    assert!(index_names.contains(&"uq_users_email"), "uq_users_email should be in catalog");
+    assert!(index_names.contains(&"sqlite_autoindex_users_1"), "sqlite_autoindex_users_1 (PK) should be in catalog");
+    assert!(index_names.contains(&"sqlite_autoindex_users_2"), "sqlite_autoindex_users_2 (UNIQUE) should be in catalog");
 }

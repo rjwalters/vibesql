@@ -364,9 +364,13 @@ impl CreateTableExecutor {
         table_name: &str,
         table_schema: &TableSchema,
     ) -> Result<(), ExecutorError> {
+        // Counter for SQLite-compatible auto-index naming: sqlite_autoindex_<table>_<n>
+        let mut autoindex_counter = 1;
+
         // Auto-create PRIMARY KEY index
         if let Some(pk_cols) = &table_schema.primary_key {
-            let index_name = format!("pk_{}", table_name);
+            let index_name = format!("sqlite_autoindex_{}_{}", table_name, autoindex_counter);
+            autoindex_counter += 1;
 
             // Create IndexColumn specs for the PRIMARY KEY columns
             let index_columns: Vec<IndexColumn> = pk_cols
@@ -406,7 +410,8 @@ impl CreateTableExecutor {
 
         // Auto-create UNIQUE constraint indexes
         for unique_cols in &table_schema.unique_constraints {
-            let index_name = format!("uq_{}_{}", table_name, unique_cols.join("_"));
+            let index_name = format!("sqlite_autoindex_{}_{}", table_name, autoindex_counter);
+            autoindex_counter += 1;
 
             // Create IndexColumn specs for the UNIQUE columns
             let index_columns: Vec<IndexColumn> = unique_cols
