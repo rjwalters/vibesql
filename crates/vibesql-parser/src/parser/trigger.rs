@@ -8,11 +8,13 @@ impl Parser {
     ///
     /// Syntax:
     ///   CREATE TRIGGER trigger_name
-    ///   {BEFORE | AFTER | INSTEAD OF} {INSERT | UPDATE | DELETE}
+    ///   [{BEFORE | AFTER | INSTEAD OF}] {INSERT | UPDATE | DELETE}
     ///   ON table_name
     ///   [FOR EACH {ROW | STATEMENT}]
     ///   [WHEN (condition)]
     ///   triggered_action
+    ///
+    /// Note: BEFORE/AFTER/INSTEAD OF is optional; defaults to BEFORE (SQLite compatibility)
     pub(super) fn parse_create_trigger_statement(
         &mut self,
     ) -> Result<vibesql_ast::CreateTriggerStmt, ParseError> {
@@ -25,7 +27,7 @@ impl Parser {
         // Parse trigger name
         let trigger_name = self.parse_identifier()?;
 
-        // Parse timing: BEFORE | AFTER | INSTEAD OF
+        // Parse timing: BEFORE | AFTER | INSTEAD OF (optional, defaults to BEFORE per SQLite)
         let timing = if self.try_consume_keyword(Keyword::Before) {
             vibesql_ast::TriggerTiming::Before
         } else if self.try_consume_keyword(Keyword::After) {
@@ -34,9 +36,18 @@ impl Parser {
             self.expect_keyword(Keyword::Of)?;
             vibesql_ast::TriggerTiming::InsteadOf
         } else {
-            return Err(ParseError {
-                message: "Expected BEFORE, AFTER, or INSTEAD OF after trigger name".to_string(),
-            });
+            // SQLite allows omitting the timing, defaulting to BEFORE
+            // Check if next token is an event keyword (INSERT, UPDATE, DELETE)
+            if self.peek_keyword(Keyword::Insert)
+                || self.peek_keyword(Keyword::Update)
+                || self.peek_keyword(Keyword::Delete)
+            {
+                vibesql_ast::TriggerTiming::Before
+            } else {
+                return Err(ParseError {
+                    message: "Expected BEFORE, AFTER, INSTEAD OF, or event (INSERT/UPDATE/DELETE) after trigger name".to_string(),
+                });
+            }
         };
 
         // Parse event: INSERT | UPDATE [OF columns] | DELETE
