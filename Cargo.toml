@@ -40,7 +40,7 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 glob = "0.3"
 md-5 = "0.10"
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
 chrono = "0.4"
 
 [workspace]
