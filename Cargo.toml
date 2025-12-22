@@ -436,6 +436,10 @@ path = "tests/regression/issue_4527_order_by_aggregate_position.rs"
 name = "issue_4530_correlated_subquery_no_from"
 path = "tests/regression/issue_4530_correlated_subquery_no_from.rs"
 
+[[test]]
+name = "issue_4638_join_on_integer"
+path = "tests/regression/issue_4638_join_on_integer.rs"
+
 # Parser tests - SQL parsing and syntax
 [[test]]
 name = "coverage_improvements"
