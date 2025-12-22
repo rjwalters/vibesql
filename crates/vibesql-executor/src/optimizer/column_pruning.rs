@@ -212,7 +212,15 @@ pub fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<Column
         }
 
         Expression::ScalarSubquery(subquery) => {
-            // Extract columns from subquery's where clause (may reference outer columns)
+            // Extract columns from subquery's SELECT list (may reference outer columns)
+            // Issue #4618: Column references in SELECT list like `(SELECT b)` where `b`
+            // comes from the outer query must be collected to avoid incorrect pruning.
+            for item in &subquery.select_list {
+                if let SelectItem::Expression { expr, .. } = item {
+                    collect_columns_from_expr(expr, columns);
+                }
+            }
+            // Also extract columns from subquery's WHERE clause (may reference outer columns)
             if let Some(where_clause) = &subquery.where_clause {
                 collect_columns_from_expr(where_clause, columns);
             }
@@ -220,7 +228,13 @@ pub fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<Column
 
         Expression::In { expr, subquery, .. } => {
             collect_columns_from_expr(expr, columns);
-            // Extract columns from IN subquery's where clause (may reference outer columns)
+            // Extract columns from IN subquery's SELECT list (may reference outer columns)
+            for item in &subquery.select_list {
+                if let SelectItem::Expression { expr, .. } = item {
+                    collect_columns_from_expr(expr, columns);
+                }
+            }
+            // Also extract columns from IN subquery's WHERE clause (may reference outer columns)
             if let Some(where_clause) = &subquery.where_clause {
                 collect_columns_from_expr(where_clause, columns);
             }
@@ -278,7 +292,13 @@ pub fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<Column
         }
 
         Expression::Exists { subquery, .. } => {
-            // Extract columns from EXISTS subquery's where clause (may reference outer columns)
+            // Extract columns from EXISTS subquery's SELECT list (may reference outer columns)
+            for item in &subquery.select_list {
+                if let SelectItem::Expression { expr, .. } = item {
+                    collect_columns_from_expr(expr, columns);
+                }
+            }
+            // Also extract columns from EXISTS subquery's WHERE clause (may reference outer columns)
             if let Some(where_clause) = &subquery.where_clause {
                 collect_columns_from_expr(where_clause, columns);
             }
@@ -286,6 +306,13 @@ pub fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<Column
 
         Expression::QuantifiedComparison { expr, subquery, .. } => {
             collect_columns_from_expr(expr, columns);
+            // Extract columns from subquery's SELECT list (may reference outer columns)
+            for item in &subquery.select_list {
+                if let SelectItem::Expression { expr, .. } = item {
+                    collect_columns_from_expr(expr, columns);
+                }
+            }
+            // Also extract columns from subquery's WHERE clause (may reference outer columns)
             if let Some(where_clause) = &subquery.where_clause {
                 collect_columns_from_expr(where_clause, columns);
             }
