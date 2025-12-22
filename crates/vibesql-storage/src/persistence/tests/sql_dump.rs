@@ -263,13 +263,13 @@ fn test_sql_dump_with_indexes() {
 
     db.create_table(schema).unwrap();
 
-    // Create indexes (use fully qualified table name)
+    // Create indexes (use unqualified table name - will resolve to default schema)
     let idx1 = vibesql_ast::IndexColumn::Column {
         column_name: "name".to_string(),
         direction: vibesql_ast::OrderDirection::Asc,
         prefix_length: None,
     };
-    db.create_index("idx_name".to_string(), "public.test_indexes".to_string(), false, vec![idx1])
+    db.create_index("idx_name".to_string(), "test_indexes".to_string(), false, vec![idx1])
         .unwrap();
 
     let idx2 = vibesql_ast::IndexColumn::Column {
@@ -279,7 +279,7 @@ fn test_sql_dump_with_indexes() {
     };
     db.create_index(
         "idx_email_unique".to_string(),
-        "public.test_indexes".to_string(),
+        "test_indexes".to_string(),
         true,
         vec![idx2],
     )
@@ -297,7 +297,7 @@ fn test_sql_dump_with_indexes() {
         content.contains("CREATE UNIQUE INDEX idx_email_unique"),
         "Should contain CREATE UNIQUE INDEX idx_email_unique"
     );
-    assert!(content.contains("ON public.test_indexes"), "Should reference test_indexes table");
+    assert!(content.contains("ON test_indexes"), "Should reference test_indexes table");
     assert!(content.contains("Asc"), "Index direction should be included");
 
     // Cleanup
