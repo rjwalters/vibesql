@@ -39,6 +39,32 @@ fn check_cross_join_size_limit(left_count: usize, right_count: usize) -> Result<
     Ok(())
 }
 
+/// Convert a SqlValue to boolean for JOIN condition evaluation.
+///
+/// SQLite allows any expression in JOIN ON clauses, treating non-zero values as true
+/// and zero as false. This function implements that behavior for SQLite compatibility.
+///
+/// - Boolean(true) -> true
+/// - Boolean(false) -> false
+/// - Null -> false
+/// - Integer(0) -> false
+/// - Integer(non-zero) -> true
+/// - Other types -> error
+fn eval_join_condition_to_bool(
+    value: vibesql_types::SqlValue,
+) -> Result<bool, ExecutorError> {
+    match value {
+        vibesql_types::SqlValue::Boolean(b) => Ok(b),
+        vibesql_types::SqlValue::Null => Ok(false),
+        // SQLite treats integer 0 as false, non-zero as true
+        vibesql_types::SqlValue::Integer(i) => Ok(i != 0),
+        other => Err(ExecutorError::InvalidWhereClause(format!(
+            "JOIN condition must evaluate to boolean, got: {:?}",
+            other
+        ))),
+    }
+}
+
 /// Optimized evaluation result for equijoin conditions
 #[derive(Debug)]
 enum EquijoinEvalStrategy {
@@ -153,19 +179,9 @@ fn execute_optimized_equijoin(
                 // Clear CSE cache before evaluation
                 evaluator.as_ref().unwrap().clear_cse_cache();
 
-                let matches =
-                    match evaluator.as_ref().unwrap().eval(remaining_cond, &combined_row)? {
-                        vibesql_types::SqlValue::Boolean(true) => true,
-                        vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => {
-                            false
-                        }
-                        other => {
-                            return Err(ExecutorError::InvalidWhereClause(format!(
-                                "JOIN condition must evaluate to boolean, got: {:?}",
-                                other
-                            )))
-                        }
-                    };
+                let matches = eval_join_condition_to_bool(
+                    evaluator.as_ref().unwrap().eval(remaining_cond, &combined_row)?,
+                )?;
 
                 if matches {
                     result_rows.push(combined_row);
@@ -259,17 +275,9 @@ fn execute_nested_loop_classic(
             evaluator.clear_cse_cache();
 
             // Evaluate join condition
-            let matches = match evaluator.eval(condition.as_ref().unwrap(), &combined_row)? {
-                vibesql_types::SqlValue::Boolean(true) => true,
-                vibesql_types::SqlValue::Boolean(false) => false,
-                vibesql_types::SqlValue::Null => false,
-                other => {
-                    return Err(ExecutorError::InvalidWhereClause(format!(
-                        "JOIN condition must evaluate to boolean, got: {:?}",
-                        other
-                    )))
-                }
-            };
+            let matches = eval_join_condition_to_bool(
+                evaluator.eval(condition.as_ref().unwrap(), &combined_row)?,
+            )?;
 
             if matches {
                 result_rows.push(combined_row);
@@ -476,16 +484,14 @@ fn execute_nested_loop_parallel(
                                     evaluator.clear_cse_cache();
 
                                     match evaluator.eval(cond, &combined_row) {
-                                        Ok(vibesql_types::SqlValue::Boolean(true)) => true,
-                                        Ok(vibesql_types::SqlValue::Boolean(false))
-                                        | Ok(vibesql_types::SqlValue::Null) => false,
-                                        Ok(other) => {
-                                            *error_ref.lock().unwrap() =
-                                                Some(ExecutorError::InvalidWhereClause(format!(
-                                                    "JOIN condition must evaluate to boolean, got: {:?}",
-                                                    other
-                                                )));
-                                            break 'outer;
+                                        Ok(value) => {
+                                            match eval_join_condition_to_bool(value) {
+                                                Ok(b) => b,
+                                                Err(e) => {
+                                                    *error_ref.lock().unwrap() = Some(e);
+                                                    break 'outer;
+                                                }
+                                            }
                                         }
                                         Err(e) => {
                                             *error_ref.lock().unwrap() = Some(e);
@@ -688,17 +694,7 @@ pub(super) fn nested_loop_left_outer_join(
 
             // Evaluate join condition
             let matches = if let Some(cond) = condition {
-                match evaluator.eval(cond, &combined_row)? {
-                    vibesql_types::SqlValue::Boolean(true) => true,
-                    vibesql_types::SqlValue::Boolean(false) => false,
-                    vibesql_types::SqlValue::Null => false,
-                    other => {
-                        return Err(ExecutorError::InvalidWhereClause(format!(
-                            "JOIN condition must evaluate to boolean, got: {:?}",
-                            other
-                        )))
-                    }
-                }
+                eval_join_condition_to_bool(evaluator.eval(cond, &combined_row)?)?
             } else {
                 true // No condition = CROSS JOIN
             };
@@ -833,17 +829,7 @@ pub(super) fn nested_loop_full_outer_join(
 
             // Evaluate join condition
             let matches = if let Some(cond) = condition {
-                match evaluator.eval(cond, &combined_row)? {
-                    vibesql_types::SqlValue::Boolean(true) => true,
-                    vibesql_types::SqlValue::Boolean(false) => false,
-                    vibesql_types::SqlValue::Null => false,
-                    other => {
-                        return Err(ExecutorError::InvalidWhereClause(format!(
-                            "JOIN condition must evaluate to boolean, got: {:?}",
-                            other
-                        )))
-                    }
-                }
+                eval_join_condition_to_bool(evaluator.eval(cond, &combined_row)?)?
             } else {
                 true
             };
