@@ -251,7 +251,8 @@ fn test_insert_column_not_found() {
 
     let result = InsertExecutor::execute(&mut db, &stmt);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), ExecutorError::ColumnNotFound { .. }));
+    // SQLite-compatible error: "table T has no column named C"
+    assert!(matches!(result.unwrap_err(), ExecutorError::InsertNoSuchColumn { .. }));
 }
 
 #[test]

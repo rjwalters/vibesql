@@ -56,11 +56,10 @@ pub fn resolve_target_columns_with_rowid(
                 rowid_position = Some(input_idx);
             } else {
                 // Column not found and not a pseudo-column
-                return Err(ExecutorError::ColumnNotFound {
-                    column_name: col_name.to_string(),
+                // Use SQLite-compatible error: "table T has no column named C"
+                return Err(ExecutorError::InsertNoSuchColumn {
                     table_name: table_name.to_string(),
-                    searched_tables: vec![table_name.to_string()],
-                    available_columns: schema.columns.iter().map(|c| c.name.clone()).collect(),
+                    column_name: col_name.to_string(),
                 });
             }
         }
@@ -73,13 +72,12 @@ pub fn resolve_target_columns_with_rowid(
 pub fn validate_row_column_counts(
     rows: &[Vec<vibesql_ast::Expression>],
     expected_count: usize,
-    table_name: &str,
+    _table_name: &str,
 ) -> Result<(), ExecutorError> {
     for value_exprs in rows.iter() {
         if value_exprs.len() != expected_count {
-            // Match SQLite's error message format exactly
+            // Match SQLite's error message format exactly: "N values for M columns"
             return Err(ExecutorError::InsertColumnCountMismatch {
-                table_name: table_name.to_string(),
                 expected: expected_count,
                 provided: value_exprs.len(),
             });
