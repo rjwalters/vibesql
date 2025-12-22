@@ -178,11 +178,57 @@ fn test_drop_trigger_restrict() {
     }
 }
 
+/// Test that omitting timing defaults to BEFORE (SQLite compatibility)
 #[test]
-fn test_create_trigger_missing_timing() {
+fn test_create_trigger_optional_timing_defaults_to_before() {
     let sql = "CREATE TRIGGER my_trigger INSERT ON my_table BEGIN END;";
     let result = Parser::parse_sql(sql);
-    assert!(result.is_err(), "Should fail without timing");
+    assert!(result.is_ok(), "Should parse without timing: {:?}", result.err());
+
+    let stmt = result.unwrap();
+    match stmt {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.trigger_name, "my_trigger");
+            assert_eq!(trigger.timing, TriggerTiming::Before, "Default timing should be BEFORE");
+            assert_eq!(trigger.event, TriggerEvent::Insert);
+            assert_eq!(trigger.table_name, "my_table");
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+/// Test omitting timing with UPDATE event
+#[test]
+fn test_create_trigger_optional_timing_update() {
+    let sql = "CREATE TRIGGER my_trigger UPDATE ON my_table BEGIN END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Should parse without timing: {:?}", result.err());
+
+    let stmt = result.unwrap();
+    match stmt {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.timing, TriggerTiming::Before, "Default timing should be BEFORE");
+            assert!(matches!(trigger.event, TriggerEvent::Update(None)));
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+/// Test omitting timing with DELETE event
+#[test]
+fn test_create_trigger_optional_timing_delete() {
+    let sql = "CREATE TRIGGER my_trigger DELETE ON my_table BEGIN END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Should parse without timing: {:?}", result.err());
+
+    let stmt = result.unwrap();
+    match stmt {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.timing, TriggerTiming::Before, "Default timing should be BEFORE");
+            assert_eq!(trigger.event, TriggerEvent::Delete);
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
 }
 
 #[test]
