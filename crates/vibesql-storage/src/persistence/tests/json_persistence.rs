@@ -858,15 +858,14 @@ fn test_json_index_roundtrip() {
 
     db.create_table(schema).unwrap();
 
-    // Create index
+    // Create index (use unqualified table name - will resolve to default schema)
     let idx = vibesql_ast::IndexColumn::Column {
         column_name: "name".to_string(),
         direction: vibesql_ast::OrderDirection::Asc,
         prefix_length: None,
     };
 
-    // Use qualified table name for index creation (indexes require qualified names)
-    db.create_index("idx_name".to_string(), "public.test_indexes".to_string(), false, vec![idx])
+    db.create_index("idx_name".to_string(), "test_indexes".to_string(), false, vec![idx])
         .unwrap();
 
     // Save to JSON

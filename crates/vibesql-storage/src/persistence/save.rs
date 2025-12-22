@@ -151,14 +151,16 @@ impl Database {
             }
         }
 
-        // Export indexes (skip auto-generated PK indexes which are recreated by PRIMARY KEY
-        // constraint)
+        // Export indexes (skip auto-generated indexes which are recreated by constraints)
         writeln!(writer, "-- Indexes")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
         for index_name in self.list_indexes() {
-            // Skip primary key indexes - these are automatically created by the PRIMARY KEY
-            // constraint. PK indexes follow the naming convention "pk_<table_name>" (lowercase)
-            if index_name.to_lowercase().starts_with("pk_") {
+            // Skip auto-generated indexes - these are automatically created by constraints:
+            // - "pk_<table_name>" indexes are created by PRIMARY KEY constraints
+            // - "sqlite_autoindex_<table>_<n>" indexes are created by PRIMARY KEY/UNIQUE constraints
+            //   (follows SQLite naming convention for implicit indexes)
+            let lower_name = index_name.to_lowercase();
+            if lower_name.starts_with("pk_") || lower_name.starts_with("sqlite_autoindex_") {
                 continue;
             }
             let metadata = self.get_index(&index_name).unwrap();

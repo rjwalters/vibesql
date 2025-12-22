@@ -262,10 +262,18 @@ impl Database {
             }
         }
 
-        // Indexes
+        // Indexes (skip auto-generated indexes which are recreated by constraints)
         let indexes = self
             .list_indexes()
             .into_iter()
+            .filter(|index_name| {
+                // Skip auto-generated indexes - these are automatically created by constraints:
+                // - "pk_<table_name>" indexes are created by PRIMARY KEY constraints
+                // - "sqlite_autoindex_<table>_<n>" indexes are created by PRIMARY KEY/UNIQUE
+                //   constraints (follows SQLite naming convention for implicit indexes)
+                let lower_name = index_name.to_lowercase();
+                !lower_name.starts_with("pk_") && !lower_name.starts_with("sqlite_autoindex_")
+            })
             .filter_map(|index_name| {
                 self.get_index(&index_name).map(|metadata| JsonIndex {
                     name: index_name,
@@ -500,9 +508,10 @@ fn json_database_to_db(json_db: JsonDatabase) -> Result<Database, StorageError> 
         // Create table - Database::create_table() automatically qualifies with default schema
         db.create_table(table_schema.clone())?;
 
-        // Insert rows using qualified table name
+        // Insert rows using the default schema (since that's where create_table puts the table)
         if !json_table.rows.is_empty() {
-            let qualified_name = format!("{}.{}", json_table.schema, json_table.name);
+            let default_schema = db.catalog.get_current_schema();
+            let qualified_name = format!("{}.{}", default_schema, json_table.name);
             if let Some(table) = db.get_table_mut(&qualified_name) {
                 for json_row in json_table.rows {
                     let row = json_row_to_row(&json_row, &table_schema)?;
