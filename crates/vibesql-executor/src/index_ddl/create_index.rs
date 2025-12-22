@@ -566,7 +566,7 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            "Index 'idx_users_email' created successfully on table 'public.users'"
+            "Index 'idx_users_email' created successfully on table 'main.users'"
         );
 
         // Verify index exists
@@ -714,7 +714,7 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            "Index 'idx_users_email' created successfully on table 'public.users'"
+            "Index 'idx_users_email' created successfully on table 'main.users'"
         );
         assert!(db.index_exists("idx_users_email"));
     }
@@ -760,11 +760,11 @@ mod tests {
         let mut db = Database::new();
         create_test_table(&mut db);
 
-        // Create index using schema-qualified table name (with default public schema)
+        // Create index using schema-qualified table name (with default main schema)
         let index_stmt = CreateIndexStmt {
             index_name: "idx_users_email_qualified".to_string(),
             if_not_exists: false,
-            table_name: "public.users".to_string(), // Explicitly qualify with public schema
+            table_name: "main.users".to_string(), // Explicitly qualify with main schema
             index_type: vibesql_ast::IndexType::BTree { unique: false },
             columns: vec![IndexColumn::Column {
                 column_name: "email".to_string(),
@@ -777,7 +777,7 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            "Index 'idx_users_email_qualified' created successfully on table 'public.users'"
+            "Index 'idx_users_email_qualified' created successfully on table 'main.users'"
         );
 
         // Verify index exists

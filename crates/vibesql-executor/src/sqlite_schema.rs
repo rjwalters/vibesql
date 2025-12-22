@@ -192,7 +192,7 @@ fn generate_create_index_sql(index: &vibesql_catalog::IndexMetadata) -> String {
         .collect();
 
     format!(
-        "CREATE {}INDEX {} ON {} ({})",
+        "CREATE {}INDEX {} ON {}({})",
         unique_str,
         index.name,
         index.table_name,
@@ -513,7 +513,7 @@ mod tests {
         );
 
         let sql = generate_create_index_sql(&index);
-        assert_eq!(sql, "CREATE INDEX idx_name ON users (last_name, first_name DESC)");
+        assert_eq!(sql, "CREATE INDEX idx_name ON users(last_name, first_name DESC)");
     }
 
     #[test]
@@ -531,7 +531,7 @@ mod tests {
         );
 
         let sql = generate_create_index_sql(&index);
-        assert_eq!(sql, "CREATE UNIQUE INDEX idx_email ON users (email(50))");
+        assert_eq!(sql, "CREATE UNIQUE INDEX idx_email ON users(email(50))");
     }
 
     #[test]
