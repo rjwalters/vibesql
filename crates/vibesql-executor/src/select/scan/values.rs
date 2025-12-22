@@ -5,80 +5,9 @@
 //!
 //! Example: `SELECT * FROM (VALUES(1,'a'), (2,'b')) AS t(x, y)`
 
-use crate::{errors::ExecutorError, schema::CombinedSchema};
-
-/// Evaluate a simple expression to SqlValue
-/// Supports literals and basic expressions. For VALUES clauses,
-/// expressions are typically constants.
-fn evaluate_values_expression(
-    expr: &vibesql_ast::Expression,
-) -> Result<vibesql_types::SqlValue, ExecutorError> {
-    match expr {
-        vibesql_ast::Expression::Literal(val) => Ok(val.clone()),
-        vibesql_ast::Expression::UnaryOp { op, expr } => {
-            let inner_val = evaluate_values_expression(expr)?;
-            match op {
-                vibesql_ast::UnaryOperator::Minus => match inner_val {
-                    vibesql_types::SqlValue::Integer(n) => {
-                        Ok(vibesql_types::SqlValue::Integer(-n))
-                    }
-                    vibesql_types::SqlValue::Bigint(n) => Ok(vibesql_types::SqlValue::Bigint(-n)),
-                    vibesql_types::SqlValue::Smallint(n) => {
-                        Ok(vibesql_types::SqlValue::Smallint(-n))
-                    }
-                    vibesql_types::SqlValue::Numeric(n) => {
-                        Ok(vibesql_types::SqlValue::Numeric(-n))
-                    }
-                    vibesql_types::SqlValue::Double(n) => Ok(vibesql_types::SqlValue::Double(-n)),
-                    vibesql_types::SqlValue::Float(n) => Ok(vibesql_types::SqlValue::Float(-n)),
-                    vibesql_types::SqlValue::Real(n) => Ok(vibesql_types::SqlValue::Real(-n)),
-                    vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
-                    _ => Err(ExecutorError::TypeError(format!(
-                        "Cannot negate value of type {:?}",
-                        inner_val.get_type()
-                    ))),
-                },
-                vibesql_ast::UnaryOperator::Plus => Ok(inner_val),
-                vibesql_ast::UnaryOperator::Not => match inner_val {
-                    vibesql_types::SqlValue::Boolean(b) => {
-                        Ok(vibesql_types::SqlValue::Boolean(!b))
-                    }
-                    vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
-                    _ => Err(ExecutorError::TypeError(format!(
-                        "Cannot apply NOT to value of type {:?}",
-                        inner_val.get_type()
-                    ))),
-                },
-                vibesql_ast::UnaryOperator::IsNull => {
-                    Ok(vibesql_types::SqlValue::Boolean(inner_val.is_null()))
-                }
-                vibesql_ast::UnaryOperator::IsNotNull => {
-                    Ok(vibesql_types::SqlValue::Boolean(!inner_val.is_null()))
-                }
-                vibesql_ast::UnaryOperator::BitwiseNot => match inner_val {
-                    vibesql_types::SqlValue::Integer(n) => {
-                        Ok(vibesql_types::SqlValue::Integer(!n))
-                    }
-                    vibesql_types::SqlValue::Bigint(n) => {
-                        Ok(vibesql_types::SqlValue::Integer(!n))
-                    }
-                    vibesql_types::SqlValue::Smallint(n) => {
-                        Ok(vibesql_types::SqlValue::Integer(!(n as i64)))
-                    }
-                    vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
-                    _ => Err(ExecutorError::TypeError(format!(
-                        "Cannot apply bitwise NOT to value of type {:?}",
-                        inner_val.get_type()
-                    ))),
-                },
-            }
-        }
-        _ => Err(ExecutorError::UnsupportedExpression(format!(
-            "Expression type {:?} not supported in VALUES clause. Only literals are currently supported.",
-            std::any::type_name_of_val(expr)
-        ))),
-    }
-}
+use crate::{
+    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema,
+};
 
 /// Execute a VALUES table constructor
 ///
@@ -90,10 +19,13 @@ fn evaluate_values_expression(
 /// * `rows` - The VALUE rows, each containing expressions for columns
 /// * `alias` - The table alias (required)
 /// * `column_aliases` - Optional column name overrides
+/// * `database` - Optional database reference for expression evaluation (enables
+///   function calls, subqueries, etc.)
 pub(crate) fn execute_values(
     rows: &[Vec<vibesql_ast::Expression>],
     alias: &str,
     column_aliases: Option<&Vec<String>>,
+    database: Option<&vibesql_storage::Database>,
 ) -> Result<super::FromResult, ExecutorError> {
     // Handle empty VALUES - return empty result with appropriate schema
     if rows.is_empty() {
@@ -110,6 +42,18 @@ pub(crate) fn execute_values(
     // Determine expected column count from first row
     let expected_columns = rows[0].len();
 
+    // Create an empty schema and row for expression evaluation
+    // VALUES expressions should not reference columns, so this is safe
+    let empty_schema = CombinedSchema::empty();
+    let empty_row = vibesql_storage::Row::new(vec![]);
+
+    // Create evaluator - use database if available for function calls, subqueries, etc.
+    let evaluator = if let Some(db) = database {
+        CombinedExpressionEvaluator::with_database(&empty_schema, db)
+    } else {
+        CombinedExpressionEvaluator::new(&empty_schema)
+    };
+
     // Evaluate all rows and collect results
     let mut result_rows = Vec::with_capacity(rows.len());
     for (row_idx, row_exprs) in rows.iter().enumerate() {
@@ -124,7 +68,7 @@ pub(crate) fn execute_values(
         // Evaluate each expression in the row
         let mut values = Vec::with_capacity(row_exprs.len());
         for expr in row_exprs {
-            let value = evaluate_values_expression(expr).map_err(|e| {
+            let value = evaluator.eval(expr, &empty_row).map_err(|e| {
                 ExecutorError::TypeError(format!(
                     "Error evaluating VALUES row {}: {}",
                     row_idx + 1,

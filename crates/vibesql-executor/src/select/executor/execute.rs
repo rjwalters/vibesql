@@ -608,9 +608,12 @@ impl SelectExecutor<'_> {
             let collations = Self::extract_collations_from_select_list(&stmt.select_list);
             // Issue #4602: Compute left column count from AST for schema-level validation
             // This is needed when the left result set is empty (table has no rows)
-            let left_col_count =
-                super::nonagg::compute_select_list_column_count(stmt, self.database, Some(cte_results))
-                    .ok();
+            let left_col_count = super::nonagg::compute_select_list_column_count(
+                stmt,
+                self.database,
+                Some(cte_results),
+            )
+            .ok();
             results = self.execute_set_operations(
                 results,
                 set_op,
@@ -665,8 +668,12 @@ impl SelectExecutor<'_> {
         // Handle standalone VALUES statements (Issue #4546)
         // VALUES(1,2), (3,4) returns rows directly without a SELECT list
         if let Some(values_rows) = &stmt.values {
-            let from_result =
-                crate::select::scan::values::execute_values(values_rows, "_values_", None)?;
+            let from_result = crate::select::scan::values::execute_values(
+                values_rows,
+                "_values_",
+                None,
+                Some(self.database),
+            )?;
             let mut results = from_result.into_rows();
 
             // Apply ORDER BY if specified
@@ -1218,8 +1225,12 @@ impl SelectExecutor<'_> {
             self.execute_without_aggregation(right_stmt, from_result, cte_results)?
         } else if let Some(values_rows) = &right_stmt.values {
             // Handle standalone VALUES in set operation right side (Issue #4546)
-            let from_result =
-                crate::select::scan::values::execute_values(values_rows, "_values_", None)?;
+            let from_result = crate::select::scan::values::execute_values(
+                values_rows,
+                "_values_",
+                None,
+                Some(self.database),
+            )?;
             from_result.into_rows()
         } else {
             self.execute_select_without_from(right_stmt)?
@@ -1483,8 +1494,9 @@ impl SelectExecutor<'_> {
                         }
                         // For complex expressions inside COLLATE, match against select_list
                         other_expr => select_list.iter().enumerate().find_map(|(idx, item)| {
-                            if let vibesql_ast::SelectItem::Expression { expr: select_expr, .. } =
-                                item
+                            if let vibesql_ast::SelectItem::Expression {
+                                expr: select_expr, ..
+                            } = item
                             {
                                 if select_expr == other_expr {
                                     return Some(idx);
