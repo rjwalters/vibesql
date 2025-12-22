@@ -41,7 +41,7 @@ arrow-arith = "57.1"  # For SIMD-accelerated temporal operations
 arrow-select = "57.1"
 
 # Optional comparison engine dependencies
-rusqlite = { version = "0.37", features = ["bundled"], optional = true }
+rusqlite = { version = "0.38", features = ["bundled"], optional = true }
 duckdb = { version = "1.1", features = ["bundled"], optional = true }
 mysql = { version = "26.0", optional = true }
 
