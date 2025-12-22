@@ -136,6 +136,9 @@ pub fn execute_sql(
 
             let rows_affected = vibesql_executor::InsertExecutor::execute(db, &insert_stmt)
                 .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            // Track changes count for changes() and total_changes() functions
+            db.set_last_changes_count(rows_affected);
+            db.increment_total_changes_count(rows_affected);
             Ok(DBOutput::StatementComplete(rows_affected as u64))
         }
         vibesql_ast::Statement::Update(update_stmt) => {
@@ -149,6 +152,9 @@ pub fn execute_sql(
 
             let rows_affected = vibesql_executor::UpdateExecutor::execute(&update_stmt, db)
                 .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            // Track changes count for changes() and total_changes() functions
+            db.set_last_changes_count(rows_affected);
+            db.increment_total_changes_count(rows_affected);
             Ok(DBOutput::StatementComplete(rows_affected as u64))
         }
         vibesql_ast::Statement::Delete(delete_stmt) => {
@@ -162,6 +168,9 @@ pub fn execute_sql(
 
             let rows_affected = vibesql_executor::DeleteExecutor::execute(&delete_stmt, db)
                 .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            // Track changes count for changes() and total_changes() functions
+            db.set_last_changes_count(rows_affected);
+            db.increment_total_changes_count(rows_affected);
             Ok(DBOutput::StatementComplete(rows_affected as u64))
         }
         vibesql_ast::Statement::DropTable(drop_stmt) => {
