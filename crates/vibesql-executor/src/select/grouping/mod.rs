@@ -22,7 +22,7 @@ pub(crate) use aggregates::{
 pub(crate) use grouping_sets::expressions_equal;
 pub(super) use grouping_sets::{
     expand_group_by_clause, get_base_expressions, resolve_base_expressions_aliases,
-    resolve_grouping_set_aliases, resolve_having_aliases_with_schema, GroupingContext,
+    resolve_grouping_set_aliases, resolve_having_aliases_with_values, GroupingContext,
 };
 pub(super) use hash::group_rows;
 pub(crate) use keys::{GroupKey, GroupKeySpec};

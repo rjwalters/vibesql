@@ -10,7 +10,7 @@ mod expression_utils;
 // Re-export public API
 pub use alias_resolution::{
     resolve_base_expressions_aliases, resolve_grouping_set_aliases,
-    resolve_having_aliases_with_schema,
+    resolve_having_aliases_with_values,
 };
 pub use expansion::{expand_group_by_clause, get_base_expressions};
 pub use expression_utils::expressions_equal;

@@ -365,3 +365,70 @@ fn test_having_valid_aggregate_alias_in_order_by() {
         _ => panic!("Expected SELECT"),
     }
 }
+
+/// Test for issue #4676: Outer query SELECT alias accessible in correlated subquery HAVING
+///
+/// When a HAVING clause contains a correlated subquery (EXISTS, IN, etc.), the subquery
+/// should be able to reference SELECT aliases from the outer query.
+/// Example:
+///   SELECT a.x, avg(a.y) AS avg1 FROM t AS a GROUP BY a.x
+///   HAVING NOT EXISTS(SELECT b.x FROM t AS b GROUP BY b.x HAVING avg1 > avg(b.y))
+///
+/// The `avg1` alias in the inner HAVING should resolve to the outer query's computed value.
+#[test]
+fn test_having_outer_alias_in_correlated_subquery() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Create test table
+    let create_sql = "CREATE TABLE t34(x INTEGER, y INTEGER)";
+    let stmt = Parser::parse_sql(create_sql).unwrap();
+    match stmt {
+        Statement::CreateTable(create_stmt) => {
+            CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
+        }
+        _ => panic!("Expected CREATE TABLE"),
+    }
+
+    // Insert data: x=1 has avg(y)=2.0, x=2 has avg(y)=5.0, x=3 has avg(y)=7.0
+    for (x, y) in [(1, 1), (1, 2), (1, 3), (2, 4), (2, 5), (2, 6), (3, 7)] {
+        let insert_sql = format!("INSERT INTO t34 VALUES ({}, {})", x, y);
+        let stmt = Parser::parse_sql(&insert_sql).unwrap();
+        match stmt {
+            Statement::Insert(insert_stmt) => {
+                InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
+            }
+            _ => panic!("Expected INSERT"),
+        }
+    }
+
+    // Query: Find groups where NO other group has a lower average
+    // Expected: Only x=1 (avg1=2.0) qualifies because no group has avg2 < 2.0
+    let query = r#"
+        SELECT a.x, avg(a.y) AS avg1 FROM t34 AS a GROUP BY a.x
+        HAVING NOT EXISTS(
+            SELECT b.x, avg(b.y) AS avg2 FROM t34 AS b GROUP BY b.x
+            HAVING avg1 > avg2
+        )
+    "#;
+
+    let stmt = Parser::parse_sql(query).unwrap();
+    match stmt {
+        Statement::Select(select_stmt) => {
+            let executor = SelectExecutor::new(&db);
+            let result = executor.execute(&select_stmt);
+
+            assert!(result.is_ok(), "Query should succeed: {:?}", result.err());
+            let rows = result.unwrap();
+
+            // Only x=1 should be returned
+            assert_eq!(rows.len(), 1, "Only the group with the minimum average should be returned");
+
+            let x_value = match &rows[0].values[0] {
+                vibesql_types::SqlValue::Integer(v) => *v,
+                _ => panic!("Expected integer for x"),
+            };
+            assert_eq!(x_value, 1, "x=1 has the minimum average (2.0)");
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}
