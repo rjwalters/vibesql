@@ -44,6 +44,16 @@ impl BitwiseOps {
         let left_i64 = to_i64(left)?;
         let right_i64 = to_i64(right)?;
 
+        // Handle i64::MIN specially - shifting by this extreme amount returns 0
+        if right_i64 == i64::MIN {
+            // Left shift by i64::MIN acts like right shift by huge amount
+            if left_i64 < 0 {
+                return Ok(SqlValue::Integer(-1));
+            } else {
+                return Ok(SqlValue::Integer(0));
+            }
+        }
+
         // SQLite behavior for shifts:
         // - If shift amount is negative, shift in opposite direction
         // - If shift amount is >= 64, result is 0 (or -1 for >> on negative numbers)
@@ -76,6 +86,12 @@ impl BitwiseOps {
     pub fn right_shift(left: &SqlValue, right: &SqlValue) -> Result<SqlValue, ExecutorError> {
         let left_i64 = to_i64(left)?;
         let right_i64 = to_i64(right)?;
+
+        // Handle i64::MIN specially - shifting by this extreme amount returns 0
+        // (or -1 for negative left values in left_shift direction)
+        if right_i64 == i64::MIN {
+            return Ok(SqlValue::Integer(0));
+        }
 
         let result = if right_i64 < 0 {
             // Negative shift amount: shift in opposite direction

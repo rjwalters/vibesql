@@ -24,6 +24,10 @@ impl Modulo {
             if *b == 0 {
                 return Ok(SqlValue::Null);
             }
+            // Handle i64::MIN % -1 which would overflow (result is 0)
+            if *a == i64::MIN && *b == -1 {
+                return Ok(Integer(0));
+            }
             return Ok(Integer(a % b));
         }
 
@@ -42,7 +46,14 @@ impl Modulo {
         }
 
         match coerced {
-            super::CoercedValues::ExactNumeric(a, b) => Ok(Integer(a % b)),
+            super::CoercedValues::ExactNumeric(a, b) => {
+                // Handle i64::MIN % -1 which would overflow (result is 0)
+                if a == i64::MIN && b == -1 {
+                    Ok(Integer(0))
+                } else {
+                    Ok(Integer(a % b))
+                }
+            }
             super::CoercedValues::ApproximateNumeric(a, b) => Ok(Float((a % b) as f32)),
             super::CoercedValues::Numeric(a, b) => Ok(Numeric(a % b)),
         }

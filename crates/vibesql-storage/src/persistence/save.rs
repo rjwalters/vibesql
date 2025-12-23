@@ -287,7 +287,20 @@ pub(super) fn sql_value_to_literal(value: &vibesql_types::SqlValue) -> String {
         SqlValue::Smallint(n) => n.to_string(),
         SqlValue::Bigint(n) => n.to_string(),
         SqlValue::Unsigned(n) => n.to_string(),
-        SqlValue::Numeric(f) => f.to_string(),
+        SqlValue::Numeric(f) => {
+            // Handle special float values that would be parsed as identifiers
+            if f.is_nan() {
+                "'NaN'".to_string()
+            } else if f.is_infinite() {
+                if f.is_sign_positive() {
+                    "'Infinity'".to_string()
+                } else {
+                    "'-Infinity'".to_string()
+                }
+            } else {
+                f.to_string()
+            }
+        }
         SqlValue::Float(f) | SqlValue::Real(f) => {
             if f.is_nan() {
                 "'NaN'".to_string()
