@@ -146,13 +146,49 @@ pub fn resolve_having_aliases(
 /// because table columns take precedence over aliases in SQL.
 ///
 /// The `schema_columns` parameter should contain lowercase column names from the table schema.
-pub fn resolve_having_aliases_with_schema(
+///
+/// Note: For HAVING clauses with correlated subqueries, use `resolve_having_aliases_with_values`
+/// instead, as it also resolves outer alias references within subqueries.
+#[allow(dead_code)]
+fn resolve_having_aliases_with_schema(
     having_expr: &Expression,
     select_list: &[vibesql_ast::SelectItem],
     group_by_exprs: &[Expression],
     schema_columns: &std::collections::HashSet<String>,
 ) -> Expression {
     resolve_having_aliases_inner(having_expr, select_list, group_by_exprs, Some(schema_columns))
+}
+
+/// Resolve aliases in HAVING expression with schema awareness and computed alias values.
+///
+/// This variant also traverses into subqueries (EXISTS, IN, etc.) and replaces
+/// references to outer SELECT aliases with their computed literal values.
+/// This is necessary for correlated subqueries that reference outer aliases
+/// in their HAVING clauses (issue #4676).
+///
+/// Example:
+/// ```sql
+/// SELECT a.x, avg(a.y) AS avg1 FROM t AS a GROUP BY a.x
+/// HAVING NOT EXISTS(
+///   SELECT b.x, avg(b.y) AS avg2 FROM t AS b GROUP BY b.x
+///   HAVING avg1 > avg2  -- avg1 from outer query
+/// )
+/// ```
+/// Here `avg1` in the inner HAVING is resolved to its computed value (e.g., 2.5).
+pub fn resolve_having_aliases_with_values(
+    having_expr: &Expression,
+    select_list: &[vibesql_ast::SelectItem],
+    group_by_exprs: &[Expression],
+    schema_columns: &std::collections::HashSet<String>,
+    alias_values: &std::collections::HashMap<String, vibesql_types::SqlValue>,
+) -> Expression {
+    resolve_having_aliases_with_values_inner(
+        having_expr,
+        select_list,
+        group_by_exprs,
+        Some(schema_columns),
+        alias_values,
+    )
 }
 
 /// Check if a column name matches any GROUP BY column expression
@@ -377,6 +413,492 @@ fn resolve_having_aliases_inner(
 
         // For other expression types, return as-is
         _ => having_expr.clone(),
+    }
+}
+
+/// Inner implementation for resolving HAVING aliases with computed values.
+/// Traverses into subqueries and replaces outer alias references with literal values.
+fn resolve_having_aliases_with_values_inner(
+    having_expr: &Expression,
+    select_list: &[vibesql_ast::SelectItem],
+    group_by_exprs: &[Expression],
+    schema_columns: Option<&std::collections::HashSet<String>>,
+    alias_values: &std::collections::HashMap<String, vibesql_types::SqlValue>,
+) -> Expression {
+    match having_expr {
+        // Check if this column reference matches a SELECT list alias
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+        {
+            let column = col_id.column_canonical();
+
+            // Skip alias resolution if this column is in GROUP BY
+            if is_group_by_column(column, group_by_exprs) {
+                return having_expr.clone();
+            }
+
+            // Skip alias resolution if this column exists in the table schema
+            if let Some(schema_cols) = schema_columns {
+                if schema_cols.contains(&column.to_lowercase()) {
+                    return having_expr.clone();
+                }
+            }
+
+            // Search for matching alias in SELECT list and replace with expression
+            for item in select_list {
+                if let vibesql_ast::SelectItem::Expression {
+                    expr, alias: Some(alias_name), ..
+                } = item
+                {
+                    if alias_name.eq_ignore_ascii_case(column) {
+                        return expr.clone();
+                    }
+                }
+            }
+            having_expr.clone()
+        }
+
+        // Recursively resolve in binary operations
+        Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
+            left: Box::new(resolve_having_aliases_with_values_inner(
+                left,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+                alias_values,
+            )),
+            op: *op,
+            right: Box::new(resolve_having_aliases_with_values_inner(
+                right,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+                alias_values,
+            )),
+        },
+
+        // Recursively resolve in unary operations
+        Expression::UnaryOp { op, expr } => Expression::UnaryOp {
+            op: *op,
+            expr: Box::new(resolve_having_aliases_with_values_inner(
+                expr,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+                alias_values,
+            )),
+        },
+
+        // Recursively resolve in function arguments
+        Expression::Function { name, args, character_unit } => Expression::Function {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|a| {
+                    resolve_having_aliases_with_values_inner(
+                        a,
+                        select_list,
+                        group_by_exprs,
+                        schema_columns,
+                        alias_values,
+                    )
+                })
+                .collect(),
+            character_unit: character_unit.clone(),
+        },
+
+        // Recursively resolve in aggregate function arguments
+        Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
+            Expression::AggregateFunction {
+                name: name.clone(),
+                distinct: *distinct,
+                args: args
+                    .iter()
+                    .map(|a| {
+                        resolve_having_aliases_with_values_inner(
+                            a,
+                            select_list,
+                            group_by_exprs,
+                            schema_columns,
+                            alias_values,
+                        )
+                    })
+                    .collect(),
+                order_by: order_by.clone(),
+                filter: filter.as_ref().map(|f| {
+                    Box::new(resolve_having_aliases_with_values_inner(
+                        f,
+                        select_list,
+                        group_by_exprs,
+                        schema_columns,
+                        alias_values,
+                    ))
+                }),
+            }
+        }
+
+        // Recursively resolve in CASE expressions
+        Expression::Case { operand, when_clauses, else_result } => {
+            let resolved_operand = operand.as_ref().map(|o| {
+                Box::new(resolve_having_aliases_with_values_inner(
+                    o,
+                    select_list,
+                    group_by_exprs,
+                    schema_columns,
+                    alias_values,
+                ))
+            });
+            let resolved_when_clauses = when_clauses
+                .iter()
+                .map(|wc| vibesql_ast::CaseWhen {
+                    conditions: wc
+                        .conditions
+                        .iter()
+                        .map(|c| {
+                            resolve_having_aliases_with_values_inner(
+                                c,
+                                select_list,
+                                group_by_exprs,
+                                schema_columns,
+                                alias_values,
+                            )
+                        })
+                        .collect(),
+                    result: resolve_having_aliases_with_values_inner(
+                        &wc.result,
+                        select_list,
+                        group_by_exprs,
+                        schema_columns,
+                        alias_values,
+                    ),
+                })
+                .collect();
+            let resolved_else = else_result.as_ref().map(|e| {
+                Box::new(resolve_having_aliases_with_values_inner(
+                    e,
+                    select_list,
+                    group_by_exprs,
+                    schema_columns,
+                    alias_values,
+                ))
+            });
+            Expression::Case {
+                operand: resolved_operand,
+                when_clauses: resolved_when_clauses,
+                else_result: resolved_else,
+            }
+        }
+
+        // Recursively resolve in boolean expressions
+        Expression::Conjunction(terms) => Expression::Conjunction(
+            terms
+                .iter()
+                .map(|t| {
+                    resolve_having_aliases_with_values_inner(
+                        t,
+                        select_list,
+                        group_by_exprs,
+                        schema_columns,
+                        alias_values,
+                    )
+                })
+                .collect(),
+        ),
+        Expression::Disjunction(terms) => Expression::Disjunction(
+            terms
+                .iter()
+                .map(|t| {
+                    resolve_having_aliases_with_values_inner(
+                        t,
+                        select_list,
+                        group_by_exprs,
+                        schema_columns,
+                        alias_values,
+                    )
+                })
+                .collect(),
+        ),
+
+        // Recursively resolve in comparison expressions
+        Expression::Between { expr, low, high, negated, symmetric } => Expression::Between {
+            expr: Box::new(resolve_having_aliases_with_values_inner(
+                expr,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+                alias_values,
+            )),
+            low: Box::new(resolve_having_aliases_with_values_inner(
+                low,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+                alias_values,
+            )),
+            high: Box::new(resolve_having_aliases_with_values_inner(
+                high,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+                alias_values,
+            )),
+            negated: *negated,
+            symmetric: *symmetric,
+        },
+
+        Expression::IsNull { expr, negated } => Expression::IsNull {
+            expr: Box::new(resolve_having_aliases_with_values_inner(
+                expr,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+                alias_values,
+            )),
+            negated: *negated,
+        },
+
+        // Handle EXISTS subquery - traverse into the subquery and resolve outer aliases
+        Expression::Exists { subquery, negated } => {
+            let resolved_subquery = resolve_outer_aliases_in_subquery(subquery, alias_values);
+            Expression::Exists { subquery: Box::new(resolved_subquery), negated: *negated }
+        }
+
+        // Handle IN with subquery - resolve outer aliases in subquery
+        Expression::In { expr, subquery, negated } => {
+            let resolved_expr = resolve_having_aliases_with_values_inner(
+                expr,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+                alias_values,
+            );
+            let resolved_subquery = resolve_outer_aliases_in_subquery(subquery, alias_values);
+            Expression::In {
+                expr: Box::new(resolved_expr),
+                subquery: Box::new(resolved_subquery),
+                negated: *negated,
+            }
+        }
+
+        // Handle scalar subquery - resolve outer aliases in subquery
+        Expression::ScalarSubquery(subquery) => {
+            let resolved_subquery = resolve_outer_aliases_in_subquery(subquery, alias_values);
+            Expression::ScalarSubquery(Box::new(resolved_subquery))
+        }
+
+        // Handle quantified comparison (ALL/ANY/SOME) - resolve outer aliases in subquery
+        Expression::QuantifiedComparison { expr, op, quantifier, subquery } => {
+            let resolved_expr = resolve_having_aliases_with_values_inner(
+                expr,
+                select_list,
+                group_by_exprs,
+                schema_columns,
+                alias_values,
+            );
+            let resolved_subquery = resolve_outer_aliases_in_subquery(subquery, alias_values);
+            Expression::QuantifiedComparison {
+                expr: Box::new(resolved_expr),
+                op: *op,
+                quantifier: quantifier.clone(),
+                subquery: Box::new(resolved_subquery),
+            }
+        }
+
+        // For other expression types, return as-is
+        _ => having_expr.clone(),
+    }
+}
+
+/// Resolve outer alias references in a subquery by replacing them with literal values.
+/// This enables correlated subqueries to access outer SELECT aliases.
+fn resolve_outer_aliases_in_subquery(
+    subquery: &vibesql_ast::SelectStmt,
+    alias_values: &std::collections::HashMap<String, vibesql_types::SqlValue>,
+) -> vibesql_ast::SelectStmt {
+    // Create a clone and resolve aliases in the HAVING clause
+    let resolved_having = subquery
+        .having
+        .as_ref()
+        .map(|having_expr| resolve_outer_alias_refs_to_literals(having_expr, alias_values));
+
+    // Also resolve in WHERE clause (for correlated subqueries that reference outer aliases there)
+    let resolved_where = subquery
+        .where_clause
+        .as_ref()
+        .map(|where_expr| resolve_outer_alias_refs_to_literals(where_expr, alias_values));
+
+    // Build the resolved subquery
+    vibesql_ast::SelectStmt {
+        with_clause: subquery.with_clause.clone(),
+        distinct: subquery.distinct,
+        select_list: subquery.select_list.clone(),
+        into_table: subquery.into_table.clone(),
+        into_variables: subquery.into_variables.clone(),
+        from: subquery.from.clone(),
+        where_clause: resolved_where,
+        group_by: subquery.group_by.clone(),
+        having: resolved_having,
+        order_by: subquery.order_by.clone(),
+        limit: subquery.limit.clone(),
+        offset: subquery.offset.clone(),
+        set_operation: subquery.set_operation.clone(),
+        values: subquery.values.clone(),
+    }
+}
+
+/// Replace unqualified column references that match outer aliases with literal values.
+/// This is the core transformation that makes outer SELECT aliases accessible in subqueries.
+fn resolve_outer_alias_refs_to_literals(
+    expr: &Expression,
+    alias_values: &std::collections::HashMap<String, vibesql_types::SqlValue>,
+) -> Expression {
+    match expr {
+        // Check if this unqualified column reference matches an outer alias
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+        {
+            let column = col_id.column_canonical();
+            // Look up the column name in alias_values (case-insensitive)
+            for (alias_name, value) in alias_values {
+                if alias_name.eq_ignore_ascii_case(column) {
+                    // Found a match - replace with literal value
+                    return Expression::Literal(value.clone());
+                }
+            }
+            // Not an outer alias, keep as-is
+            expr.clone()
+        }
+
+        // Recursively process compound expressions
+        Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
+            left: Box::new(resolve_outer_alias_refs_to_literals(left, alias_values)),
+            op: *op,
+            right: Box::new(resolve_outer_alias_refs_to_literals(right, alias_values)),
+        },
+
+        Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
+            op: *op,
+            expr: Box::new(resolve_outer_alias_refs_to_literals(inner, alias_values)),
+        },
+
+        Expression::Function { name, args, character_unit } => Expression::Function {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|a| resolve_outer_alias_refs_to_literals(a, alias_values))
+                .collect(),
+            character_unit: character_unit.clone(),
+        },
+
+        Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
+            Expression::AggregateFunction {
+                name: name.clone(),
+                distinct: *distinct,
+                args: args
+                    .iter()
+                    .map(|a| resolve_outer_alias_refs_to_literals(a, alias_values))
+                    .collect(),
+                order_by: order_by.clone(),
+                filter: filter
+                    .as_ref()
+                    .map(|f| Box::new(resolve_outer_alias_refs_to_literals(f, alias_values))),
+            }
+        }
+
+        Expression::Case { operand, when_clauses, else_result } => Expression::Case {
+            operand: operand
+                .as_ref()
+                .map(|o| Box::new(resolve_outer_alias_refs_to_literals(o, alias_values))),
+            when_clauses: when_clauses
+                .iter()
+                .map(|wc| vibesql_ast::CaseWhen {
+                    conditions: wc
+                        .conditions
+                        .iter()
+                        .map(|c| resolve_outer_alias_refs_to_literals(c, alias_values))
+                        .collect(),
+                    result: resolve_outer_alias_refs_to_literals(&wc.result, alias_values),
+                })
+                .collect(),
+            else_result: else_result
+                .as_ref()
+                .map(|e| Box::new(resolve_outer_alias_refs_to_literals(e, alias_values))),
+        },
+
+        Expression::Conjunction(terms) => Expression::Conjunction(
+            terms.iter().map(|t| resolve_outer_alias_refs_to_literals(t, alias_values)).collect(),
+        ),
+
+        Expression::Disjunction(terms) => Expression::Disjunction(
+            terms.iter().map(|t| resolve_outer_alias_refs_to_literals(t, alias_values)).collect(),
+        ),
+
+        Expression::Between { expr, low, high, negated, symmetric } => Expression::Between {
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
+            low: Box::new(resolve_outer_alias_refs_to_literals(low, alias_values)),
+            high: Box::new(resolve_outer_alias_refs_to_literals(high, alias_values)),
+            negated: *negated,
+            symmetric: *symmetric,
+        },
+
+        Expression::IsNull { expr, negated } => Expression::IsNull {
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
+            negated: *negated,
+        },
+
+        Expression::InList { expr, values, negated } => Expression::InList {
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
+            values: values
+                .iter()
+                .map(|v| resolve_outer_alias_refs_to_literals(v, alias_values))
+                .collect(),
+            negated: *negated,
+        },
+
+        Expression::Like { expr, pattern, negated } => Expression::Like {
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
+            pattern: Box::new(resolve_outer_alias_refs_to_literals(pattern, alias_values)),
+            negated: *negated,
+        },
+
+        Expression::Glob { expr, pattern, negated } => Expression::Glob {
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
+            pattern: Box::new(resolve_outer_alias_refs_to_literals(pattern, alias_values)),
+            negated: *negated,
+        },
+
+        Expression::Cast { expr, data_type } => Expression::Cast {
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
+            data_type: data_type.clone(),
+        },
+
+        // Nested subqueries - recursively resolve in their clauses
+        Expression::Exists { subquery, negated } => {
+            let resolved_subquery = resolve_outer_aliases_in_subquery(subquery, alias_values);
+            Expression::Exists { subquery: Box::new(resolved_subquery), negated: *negated }
+        }
+
+        Expression::In { expr, subquery, negated } => Expression::In {
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
+            subquery: Box::new(resolve_outer_aliases_in_subquery(subquery, alias_values)),
+            negated: *negated,
+        },
+
+        Expression::ScalarSubquery(subquery) => Expression::ScalarSubquery(Box::new(
+            resolve_outer_aliases_in_subquery(subquery, alias_values),
+        )),
+
+        Expression::QuantifiedComparison { expr, op, quantifier, subquery } => {
+            Expression::QuantifiedComparison {
+                expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
+                op: *op,
+                quantifier: quantifier.clone(),
+                subquery: Box::new(resolve_outer_aliases_in_subquery(subquery, alias_values)),
+            }
+        }
+
+        // For other expressions, return as-is
+        _ => expr.clone(),
     }
 }
 
