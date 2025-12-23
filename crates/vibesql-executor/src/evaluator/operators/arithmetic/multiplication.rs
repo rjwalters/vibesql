@@ -19,19 +19,21 @@ impl Multiplication {
         }
 
         // Fast path for integers (both modes)
+        // SQLite converts to float on overflow instead of erroring
         if let (Integer(a), Integer(b)) = (left, right) {
-            return a
+            return Ok(a
                 .checked_mul(*b)
                 .map(Integer)
-                .ok_or(ExecutorError::IntegerOverflow);
+                .unwrap_or_else(|| Double(*a as f64 * *b as f64)));
         }
 
         // Use helper for type coercion
+        // SQLite converts to float on overflow instead of erroring
         match coerce_numeric_values(left, right, "*")? {
-            super::CoercedValues::ExactNumeric(a, b) => a
+            super::CoercedValues::ExactNumeric(a, b) => Ok(a
                 .checked_mul(b)
                 .map(Integer)
-                .ok_or(ExecutorError::IntegerOverflow),
+                .unwrap_or_else(|| Double(a as f64 * b as f64))),
             super::CoercedValues::ApproximateNumeric(a, b) => Ok(Float((a * b) as f32)),
             super::CoercedValues::Numeric(a, b) => Ok(Numeric(a * b)),
         }
