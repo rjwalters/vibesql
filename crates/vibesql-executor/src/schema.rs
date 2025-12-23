@@ -258,17 +258,31 @@ impl CombinedSchema {
 
         // Add all tables from right schema with adjusted start indices
         for (table_id, (start_index, schema)) in right.table_schemas {
-            // Track duplicate table alias/name - but NOT for self-joins
-            // (same logic as combine())
+            let adjusted_start = left_total + start_index;
+
+            // Check if this table already exists in the left schema
             if let Some((_, existing_schema)) = table_schemas.get(&table_id) {
                 // Only mark as duplicate if it's a different table with the same alias
                 if existing_schema != &schema {
                     duplicate_aliases.insert(table_id.clone());
                 }
-            }
 
-            let adjusted_start = left_total + start_index;
-            table_schemas.insert(table_id, (adjusted_start, schema));
+                // For self-joins (same table appearing twice), we need to keep BOTH
+                // entries so that USING/NATURAL join conditions can distinguish between
+                // the left and right instances. Use a synthetic suffix to create a
+                // unique key for the right-side instance.
+                // The synthetic key format "__selfjoin_right_<original_name>_<start_idx>"
+                // ensures uniqueness even for multi-way self-joins.
+                let synthetic_key = TableIdentifier::unquoted(&format!(
+                    "__selfjoin_right_{}_{}",
+                    table_id.canonical(),
+                    adjusted_start
+                ));
+                table_schemas.insert(synthetic_key, (adjusted_start, schema));
+            } else {
+                // No conflict - insert normally
+                table_schemas.insert(table_id, (adjusted_start, schema));
+            }
         }
 
         // Merge hidden columns, adjusting right side indices

@@ -350,11 +350,27 @@ fn remove_duplicate_columns_for_using_join(
 ///
 /// Returns None if there are no common columns (which means NATURAL JOIN should behave like CROSS
 /// JOIN)
+///
+/// For self-joins (where left and right have the same table name), we use synthetic table
+/// identifiers to ensure the condition correctly distinguishes between the left and right instances.
 fn generate_natural_join_condition(
     left_schema: &crate::schema::CombinedSchema,
     right_schema: &crate::schema::CombinedSchema,
 ) -> Result<Option<vibesql_ast::Expression>, ExecutorError> {
     use std::collections::HashMap;
+
+    // Check if this is a self-join case (same table names on both sides)
+    let left_table_names: std::collections::HashSet<_> = left_schema
+        .table_schemas
+        .keys()
+        .map(|k| k.canonical().to_lowercase())
+        .collect();
+    let right_table_names: std::collections::HashSet<_> = right_schema
+        .table_schemas
+        .keys()
+        .map(|k| k.canonical().to_lowercase())
+        .collect();
+    let is_self_join = !left_table_names.is_disjoint(&right_table_names);
 
     // Get all column names from left schema (normalized to lowercase for case-insensitive
     // comparison)
@@ -370,8 +386,9 @@ fn generate_natural_join_condition(
     }
 
     // Find common column names from right schema
-    let mut common_columns: Vec<(String, String, String, String)> = Vec::new(); // (left_table, left_col, right_table, right_col)
-    for (table_name, (_table_idx, table_schema)) in &right_schema.table_schemas {
+    // Store: (left_table, left_col, right_table, right_col, right_table_start_idx)
+    let mut common_columns: Vec<(String, String, String, String, usize)> = Vec::new();
+    for (table_name, (table_idx, table_schema)) in &right_schema.table_schemas {
         for col in &table_schema.columns {
             let lowercase_name = col.name.to_lowercase();
             if let Some(left_occurrences) = left_columns.get(&lowercase_name) {
@@ -382,6 +399,7 @@ fn generate_natural_join_condition(
                         left_col.clone(),
                         table_name.to_string(),
                         col.name.clone(),
+                        *table_idx,
                     ));
                 }
             }
@@ -395,14 +413,27 @@ fn generate_natural_join_condition(
 
     // Build the join condition as an AND chain of equalities
     let mut condition: Option<vibesql_ast::Expression> = None;
-    for (left_table, left_col, right_table, right_col) in common_columns {
+    for (left_table, left_col, right_table, right_col, right_table_start) in common_columns {
+        // For self-joins, use synthetic table name for right side that matches
+        // what CombinedSchema::merge will create
+        let right_table_ref = if is_self_join {
+            let adjusted_start = left_schema.total_columns + right_table_start;
+            format!(
+                "__selfjoin_right_{}_{}",
+                right_table.to_lowercase(),
+                adjusted_start
+            )
+        } else {
+            right_table
+        };
+
         let equality = vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef(
                 vibesql_ast::ColumnIdentifier::qualified(&left_table, false, &left_col, false),
             )),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::ColumnRef(
-                vibesql_ast::ColumnIdentifier::qualified(&right_table, false, &right_col, false),
+                vibesql_ast::ColumnIdentifier::qualified(&right_table_ref, false, &right_col, false),
             )),
         };
 
@@ -1335,52 +1366,100 @@ fn try_prefix_scan_semi_join(
 ///
 /// This function finds the specified columns in both schemas and creates
 /// properly qualified column references for the join condition.
+///
+/// For self-joins (where left and right have the same table name), we use
+/// synthetic table identifiers that match what CombinedSchema::merge creates,
+/// allowing the condition to correctly distinguish between left and right instances.
 fn generate_using_join_condition(
     columns: &[String],
     left_schema: &crate::schema::CombinedSchema,
     right_schema: &crate::schema::CombinedSchema,
 ) -> Result<Option<vibesql_ast::Expression>, ExecutorError> {
-    // Find column locations in both schemas
     let mut condition: Option<vibesql_ast::Expression> = None;
+
+    // Check if this is a self-join case (same table names on both sides)
+    // In this case, we need to use column indices instead of table-qualified names
+    // because both would resolve to the same column position in the combined schema.
+    let left_table_names: std::collections::HashSet<_> = left_schema
+        .table_schemas
+        .keys()
+        .map(|k| k.canonical().to_lowercase())
+        .collect();
+    let right_table_names: std::collections::HashSet<_> = right_schema
+        .table_schemas
+        .keys()
+        .map(|k| k.canonical().to_lowercase())
+        .collect();
+    let is_self_join = !left_table_names.is_disjoint(&right_table_names);
 
     for col_name in columns {
         let col_lower = col_name.to_lowercase();
 
-        // Find column in left schema (case-insensitive)
+        // Find column in left schema (case-insensitive) - also get absolute index
         let left_col = left_schema
             .table_schemas
             .iter()
-            .find_map(|(table_name, (_idx, table_schema))| {
-                table_schema.columns.iter().find_map(|col| {
-                    if col.name.to_lowercase() == col_lower {
-                        Some((table_name.clone(), col.name.clone()))
-                    } else {
-                        None
-                    }
-                })
+            .find_map(|(table_name, (start_idx, table_schema))| {
+                table_schema
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .find_map(|(col_offset, col)| {
+                        if col.name.to_lowercase() == col_lower {
+                            Some((table_name.clone(), col.name.clone(), start_idx + col_offset))
+                        } else {
+                            None
+                        }
+                    })
             })
             .ok_or_else(|| ExecutorError::JoinUsingColumnNotPresent {
                 column_name: col_name.to_string(),
             })?;
 
-        // Find column in right schema (case-insensitive)
+        // Find column in right schema (case-insensitive) - get absolute index and table start
         let right_col = right_schema
             .table_schemas
             .iter()
-            .find_map(|(table_name, (_idx, table_schema))| {
-                table_schema.columns.iter().find_map(|col| {
-                    if col.name.to_lowercase() == col_lower {
-                        Some((table_name.clone(), col.name.clone()))
-                    } else {
-                        None
-                    }
-                })
+            .find_map(|(table_name, (start_idx, table_schema))| {
+                table_schema
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .find_map(|(col_offset, col)| {
+                        if col.name.to_lowercase() == col_lower {
+                            // Return: (table_name, col_name, absolute_col_idx, table_start_idx)
+                            Some((
+                                table_name.clone(),
+                                col.name.clone(),
+                                start_idx + col_offset,
+                                *start_idx,
+                            ))
+                        } else {
+                            None
+                        }
+                    })
             })
             .ok_or_else(|| ExecutorError::JoinUsingColumnNotPresent {
                 column_name: col_name.to_string(),
             })?;
 
-        // Create equality condition with qualified column references
+        // Create equality condition with table-qualified column references
+        // For self-joins, we need to use a synthetic table name for the right side
+        // that matches what CombinedSchema::merge will create.
+        let right_table_name = if is_self_join {
+            // Use the same synthetic key format as CombinedSchema::merge
+            // Format: __selfjoin_right_{original_name}_{adjusted_start}
+            // adjusted_start = left_schema.total_columns + table_start_index (not column index!)
+            let adjusted_start = left_schema.total_columns + right_col.3;
+            format!(
+                "__selfjoin_right_{}_{}",
+                right_col.0.canonical(),
+                adjusted_start
+            )
+        } else {
+            right_col.0.to_string()
+        };
+
         let equality = vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef(
                 vibesql_ast::ColumnIdentifier::qualified(
@@ -1393,7 +1472,7 @@ fn generate_using_join_condition(
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::ColumnRef(
                 vibesql_ast::ColumnIdentifier::qualified(
-                    &right_col.0.to_string(),
+                    &right_table_name,
                     false,
                     &right_col.1,
                     false,
