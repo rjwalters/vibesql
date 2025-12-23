@@ -1263,6 +1263,39 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses sqlite_source_id() (SQLite internal function)"]
     }
 
+    # SQLite C API functions - not available in VibeSQL
+    # These are low-level SQLite library functions, not SQL
+    if {[regexp {sqlite3_prepare} $script]} {
+        return [list 1 "uses sqlite3_prepare (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_step} $script]} {
+        return [list 1 "uses sqlite3_step (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_finalize} $script]} {
+        return [list 1 "uses sqlite3_finalize (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_column_} $script]} {
+        return [list 1 "uses sqlite3_column_* (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_bind_} $script]} {
+        return [list 1 "uses sqlite3_bind_* (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_reset} $script]} {
+        return [list 1 "uses sqlite3_reset (SQLite C API)"]
+    }
+
+    # SQLite internal catalog tables
+    if {[regexp {sqlite_temp_master} $script]} {
+        return [list 1 "uses sqlite_temp_master (SQLite internal catalog)"]
+    }
+
+    # C API statement handles - these depend on sqlite3_prepare
+    # Even if a test doesn't call sqlite3_prepare itself, using $::STMT
+    # means it depends on a previous test that did
+    if {[regexp {\$?::STMT} $script]} {
+        return [list 1 "uses C API statement handle (depends on sqlite3_prepare)"]
+    }
+
     return [list 0 ""]
 }
 
