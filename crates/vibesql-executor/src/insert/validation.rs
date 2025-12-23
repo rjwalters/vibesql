@@ -171,6 +171,96 @@ pub fn coerce_value(
             }
         }
 
+        // VARCHAR/CHARACTER → Integer types (SQLite type affinity)
+        // Try to convert text to integer, otherwise keep as text
+        (SqlValue::Varchar(s) | SqlValue::Character(s), DataType::Integer) => {
+            let trimmed = s.trim();
+            if let Ok(i) = trimmed.parse::<i64>() {
+                Ok(SqlValue::Integer(i))
+            } else if let Ok(f) = trimmed.parse::<f64>() {
+                if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+                    Ok(SqlValue::Integer(f as i64))
+                } else {
+                    // Non-integer float stored as REAL
+                    Ok(SqlValue::Double(f))
+                }
+            } else {
+                // Can't convert - keep as text (SQLite behavior)
+                Ok(value)
+            }
+        }
+        (SqlValue::Varchar(s) | SqlValue::Character(s), DataType::Smallint) => {
+            let trimmed = s.trim();
+            if let Ok(i) = trimmed.parse::<i16>() {
+                Ok(SqlValue::Smallint(i))
+            } else if let Ok(f) = trimmed.parse::<f64>() {
+                if f.fract() == 0.0 && f >= i16::MIN as f64 && f <= i16::MAX as f64 {
+                    Ok(SqlValue::Smallint(f as i16))
+                } else {
+                    Ok(SqlValue::Double(f))
+                }
+            } else {
+                Ok(value)
+            }
+        }
+        (SqlValue::Varchar(s) | SqlValue::Character(s), DataType::Bigint) => {
+            let trimmed = s.trim();
+            if let Ok(i) = trimmed.parse::<i64>() {
+                Ok(SqlValue::Bigint(i))
+            } else if let Ok(f) = trimmed.parse::<f64>() {
+                if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+                    Ok(SqlValue::Bigint(f as i64))
+                } else {
+                    Ok(SqlValue::Double(f))
+                }
+            } else {
+                Ok(value)
+            }
+        }
+
+        // VARCHAR/CHARACTER → Float types (SQLite type affinity)
+        // Try to convert text to float, otherwise keep as text
+        (SqlValue::Varchar(s) | SqlValue::Character(s), DataType::Float { .. }) => {
+            let trimmed = s.trim();
+            if let Ok(f) = trimmed.parse::<f32>() {
+                Ok(SqlValue::Float(f))
+            } else {
+                Ok(value)
+            }
+        }
+        (SqlValue::Varchar(s) | SqlValue::Character(s), DataType::Real) => {
+            let trimmed = s.trim();
+            if let Ok(f) = trimmed.parse::<f32>() {
+                Ok(SqlValue::Real(f))
+            } else {
+                Ok(value)
+            }
+        }
+        (SqlValue::Varchar(s) | SqlValue::Character(s), DataType::DoublePrecision) => {
+            let trimmed = s.trim();
+            if let Ok(f) = trimmed.parse::<f64>() {
+                Ok(SqlValue::Double(f))
+            } else {
+                Ok(value)
+            }
+        }
+
+        // VARCHAR/CHARACTER → Numeric types (SQLite type affinity)
+        (SqlValue::Varchar(s) | SqlValue::Character(s), DataType::Numeric { .. }) => {
+            let trimmed = s.trim();
+            if let Ok(i) = trimmed.parse::<i64>() {
+                Ok(SqlValue::Integer(i))
+            } else if let Ok(f) = trimmed.parse::<f64>() {
+                if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+                    Ok(SqlValue::Integer(f as i64))
+                } else {
+                    Ok(SqlValue::Double(f))
+                }
+            } else {
+                Ok(value)
+            }
+        }
+
         // Integer → Float types (safe widening conversion)
         (SqlValue::Integer(i), DataType::Float { .. }) => Ok(SqlValue::Float(*i as f32)),
         (SqlValue::Integer(i), DataType::Real) => Ok(SqlValue::Real(*i as f32)),
@@ -205,6 +295,186 @@ pub fn coerce_value(
         // (which default to BLOB affinity) can store values of any type.
         // The value is stored as-is without conversion.
         (_, DataType::BinaryLargeObject) => Ok(value),
+
+        // UserDefined types: Apply SQLite's type affinity rules based on the type name
+        // See https://www.sqlite.org/datatype3.html#determination_of_column_affinity
+        //
+        // Type affinity is determined by checking substrings in the type name:
+        // 1. Contains "INT" → INTEGER affinity
+        // 2. Contains "CHAR", "CLOB", "TEXT" → TEXT affinity
+        // 3. Contains "BLOB" or no type specified → BLOB affinity (accept any)
+        // 4. Contains "REAL", "FLOA", "DOUB" → REAL affinity
+        // 5. Otherwise → NUMERIC affinity (try to convert text to number)
+        (_, DataType::UserDefined { type_name }) => {
+            let type_upper = type_name.to_uppercase();
+            let affinity = if type_upper.contains("INT") {
+                "INTEGER"
+            } else if type_upper.contains("CHAR")
+                || type_upper.contains("CLOB")
+                || type_upper.contains("TEXT")
+            {
+                "TEXT"
+            } else if type_upper.contains("BLOB") || type_upper.is_empty() {
+                "BLOB"
+            } else if type_upper.contains("REAL")
+                || type_upper.contains("FLOA")
+                || type_upper.contains("DOUB")
+            {
+                "REAL"
+            } else {
+                // Default: NUMERIC affinity (including NUM, NUMBER, etc.)
+                "NUMERIC"
+            };
+
+            match affinity {
+                "BLOB" => {
+                    // BLOB affinity: accept any value as-is
+                    Ok(value)
+                }
+                "TEXT" => {
+                    // TEXT affinity: convert to text representation
+                    match &value {
+                        SqlValue::Varchar(_) | SqlValue::Character(_) => Ok(value),
+                        SqlValue::Integer(i) => {
+                            Ok(SqlValue::Varchar(arcstr::ArcStr::from(i.to_string())))
+                        }
+                        SqlValue::Bigint(i) => {
+                            Ok(SqlValue::Varchar(arcstr::ArcStr::from(i.to_string())))
+                        }
+                        SqlValue::Smallint(i) => {
+                            Ok(SqlValue::Varchar(arcstr::ArcStr::from(i.to_string())))
+                        }
+                        SqlValue::Numeric(f) => {
+                            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
+                        }
+                        SqlValue::Double(f) => {
+                            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
+                        }
+                        SqlValue::Real(f) => {
+                            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
+                        }
+                        SqlValue::Float(f) => {
+                            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
+                        }
+                        _ => Ok(value), // Other types pass through
+                    }
+                }
+                "INTEGER" => {
+                    // INTEGER affinity: try to convert to integer
+                    match &value {
+                        SqlValue::Integer(_)
+                        | SqlValue::Bigint(_)
+                        | SqlValue::Smallint(_)
+                        | SqlValue::Unsigned(_) => Ok(value),
+                        SqlValue::Numeric(f) => {
+                            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                                Ok(SqlValue::Integer(*f as i64))
+                            } else {
+                                // Non-integer stays as-is (SQLite stores actual type)
+                                Ok(value)
+                            }
+                        }
+                        SqlValue::Double(f) => {
+                            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                                Ok(SqlValue::Integer(*f as i64))
+                            } else {
+                                Ok(value)
+                            }
+                        }
+                        SqlValue::Real(f) => {
+                            let f64_val = *f as f64;
+                            if f64_val.fract() == 0.0
+                                && f64_val >= i64::MIN as f64
+                                && f64_val <= i64::MAX as f64
+                            {
+                                Ok(SqlValue::Integer(f64_val as i64))
+                            } else {
+                                Ok(value)
+                            }
+                        }
+                        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                            // Try to parse as integer
+                            if let Ok(i) = s.trim().parse::<i64>() {
+                                Ok(SqlValue::Integer(i))
+                            } else if let Ok(f) = s.trim().parse::<f64>() {
+                                // Try as float, convert to int if whole number
+                                if f.fract() == 0.0
+                                    && f >= i64::MIN as f64
+                                    && f <= i64::MAX as f64
+                                {
+                                    Ok(SqlValue::Integer(f as i64))
+                                } else {
+                                    // Store as text if can't convert to integer
+                                    Ok(value)
+                                }
+                            } else {
+                                // Non-numeric text stays as text
+                                Ok(value)
+                            }
+                        }
+                        _ => Ok(value), // Other types pass through
+                    }
+                }
+                "REAL" => {
+                    // REAL affinity: convert to floating point
+                    match &value {
+                        SqlValue::Real(_) | SqlValue::Double(_) | SqlValue::Float(_) => Ok(value),
+                        SqlValue::Integer(i) => Ok(SqlValue::Double(*i as f64)),
+                        SqlValue::Bigint(i) => Ok(SqlValue::Double(*i as f64)),
+                        SqlValue::Smallint(i) => Ok(SqlValue::Double(*i as f64)),
+                        SqlValue::Numeric(f) => Ok(SqlValue::Double(*f)),
+                        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                            // Try to parse as float
+                            if let Ok(f) = s.trim().parse::<f64>() {
+                                Ok(SqlValue::Double(f))
+                            } else {
+                                // Non-numeric text stays as text
+                                Ok(value)
+                            }
+                        }
+                        _ => Ok(value),
+                    }
+                }
+                "NUMERIC" | _ => {
+                    // NUMERIC affinity: try integer first, then real, else keep as text
+                    // This is SQLite's behavior for types like NUM, NUMBER, etc.
+                    match &value {
+                        // Numeric types pass through
+                        SqlValue::Integer(_)
+                        | SqlValue::Bigint(_)
+                        | SqlValue::Smallint(_)
+                        | SqlValue::Numeric(_)
+                        | SqlValue::Double(_)
+                        | SqlValue::Real(_)
+                        | SqlValue::Float(_)
+                        | SqlValue::Unsigned(_) => Ok(value),
+                        // Text: try to convert to number
+                        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                            let trimmed = s.trim();
+                            // Try integer first
+                            if let Ok(i) = trimmed.parse::<i64>() {
+                                return Ok(SqlValue::Integer(i));
+                            }
+                            // Try float next
+                            if let Ok(f) = trimmed.parse::<f64>() {
+                                // SQLite converts to integer if it's a whole number
+                                if f.fract() == 0.0
+                                    && f >= i64::MIN as f64
+                                    && f <= i64::MAX as f64
+                                {
+                                    return Ok(SqlValue::Integer(f as i64));
+                                }
+                                return Ok(SqlValue::Double(f));
+                            }
+                            // Can't convert - keep as text (SQLite behavior)
+                            Ok(value)
+                        }
+                        // Other types pass through
+                        _ => Ok(value),
+                    }
+                }
+            }
+        }
 
         // SQLite type affinity: any value can be stored in TEXT columns by converting to string
         // This implements SQLite's behavior where TEXT affinity columns accept any value type

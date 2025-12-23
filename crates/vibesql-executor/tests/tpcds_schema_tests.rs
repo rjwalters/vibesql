@@ -143,10 +143,10 @@ fn test_web_site_date_columns() {
     assert_eq!(table.row_count(), 1);
 }
 
-/// Test that inserting INTEGER into DATE column fails with TypeMismatch.
-/// This documents the expected behavior that was broken before the fix.
+/// Test that inserting INTEGER into DATE column succeeds with SQLite type affinity.
+/// SQLite allows any value to be stored in any column - types are preferences, not constraints.
 #[test]
-fn test_integer_into_date_column_fails() {
+fn test_integer_into_date_column_sqlite_affinity() {
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_storage::{Database, Row};
     use vibesql_types::{DataType, SqlValue};
@@ -177,21 +177,17 @@ fn test_integer_into_date_column_fails() {
     ))
     .unwrap();
 
-    // Try to insert INTEGER into DATE column - this should fail
+    // Insert INTEGER into DATE column - SQLite affinity allows this
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Integer(19980101), // Wrong type - should be SqlValue::Date
+        SqlValue::Integer(19980101), // SQLite affinity: stored as-is
     ]);
 
+    // SQLite type affinity: this should succeed
     let result = db.insert_row("test_table", row);
-    assert!(result.is_err(), "Inserting INTEGER into DATE column should fail");
+    assert!(result.is_ok(), "SQLite type affinity should accept INTEGER in DATE column");
 
-    // Verify the error is TypeMismatch
-    let err = result.unwrap_err();
-    let err_string = format!("{:?}", err);
-    assert!(
-        err_string.contains("TypeMismatch") || err_string.contains("type mismatch"),
-        "Error should be TypeMismatch, got: {}",
-        err_string
-    );
+    // Verify the row was inserted
+    let table = db.get_table("test_table").unwrap();
+    assert_eq!(table.row_count(), 1);
 }
