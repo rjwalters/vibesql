@@ -52,7 +52,9 @@ pub(super) fn eval_scalar_function(
         "LOWER" => string::lower(args),
         "SUBSTRING" => string::substring(args),
         "SUBSTR" => string::substring(args), // Alias for SUBSTRING
-        // Note: TRIM is handled as a special expression in the parser (like POSITION)
+        "TRIM" => string::trim(args),
+        "LTRIM" => string::ltrim(args),
+        "RTRIM" => string::rtrim(args),
         "CHAR_LENGTH" | "CHARACTER_LENGTH" => string::char_length(args, name, character_unit),
         "OCTET_LENGTH" => string::octet_length(args),
         "CONCAT" => string::concat(args),
