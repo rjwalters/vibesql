@@ -14,8 +14,10 @@
 
 use std::fmt::Write;
 
+use std::collections::HashSet;
+
 use vibesql_ast::pretty_print::ToSql;
-use vibesql_ast::{ExplainFormat, ExplainStmt, Expression, SelectStmt, Statement};
+use vibesql_ast::{ExplainFormat, ExplainStmt, Expression, SelectItem, SelectStmt, Statement};
 use vibesql_storage::Database;
 
 use crate::{
@@ -324,12 +326,16 @@ impl ExplainExecutor {
     fn explain_select(stmt: &SelectStmt, database: &Database) -> Result<PlanNode, ExecutorError> {
         let mut root = PlanNode::new("Select");
 
+        // Extract columns needed by the SELECT list for covering index detection
+        let needed_columns = extract_select_columns(&stmt.select_list);
+
         // Analyze FROM clause
         if let Some(ref from_clause) = stmt.from {
             let scan_node = Self::explain_from_clause(
                 from_clause,
                 &stmt.where_clause,
                 &stmt.order_by,
+                &needed_columns,
                 database,
             )?;
             root.add_child(scan_node);
@@ -363,11 +369,19 @@ impl ExplainExecutor {
         from: &vibesql_ast::FromClause,
         where_clause: &Option<vibesql_ast::Expression>,
         order_by: &Option<Vec<vibesql_ast::OrderByItem>>,
+        needed_columns: &HashSet<String>,
         database: &Database,
     ) -> Result<PlanNode, ExecutorError> {
         match from {
             vibesql_ast::FromClause::Table { name, alias, .. } => {
-                Self::explain_table_scan(name, alias.as_deref(), where_clause, order_by, database)
+                Self::explain_table_scan(
+                    name,
+                    alias.as_deref(),
+                    where_clause,
+                    order_by,
+                    needed_columns,
+                    database,
+                )
             }
             vibesql_ast::FromClause::Join {
                 left,
@@ -402,11 +416,14 @@ impl ExplainExecutor {
                 }
 
                 // Add left child
-                let left_child = Self::explain_from_clause(left, where_clause, order_by, database)?;
+                let left_child =
+                    Self::explain_from_clause(left, where_clause, order_by, needed_columns, database)?;
                 join_node.add_child(left_child);
 
                 // Add right child (no WHERE pushdown for right side in simple case)
-                let right_child = Self::explain_from_clause(right, &None, &None, database)?;
+                let empty_cols = HashSet::new();
+                let right_child =
+                    Self::explain_from_clause(right, &None, &None, &empty_cols, database)?;
                 join_node.add_child(right_child);
 
                 Ok(join_node)
@@ -441,6 +458,7 @@ impl ExplainExecutor {
         alias: Option<&str>,
         where_clause: &Option<vibesql_ast::Expression>,
         order_by: &Option<Vec<vibesql_ast::OrderByItem>>,
+        needed_columns: &HashSet<String>,
         database: &Database,
     ) -> Result<PlanNode, ExecutorError> {
         // First check for regular index scan
@@ -488,9 +506,24 @@ impl ExplainExecutor {
 
             skip_node
         } else if let Some((index_name, sorted_cols)) = index_info {
-            // Determine if this is a primary key lookup
-            let scan_type =
-                if is_pk_lookup { ScanType::IntegerPrimaryKey } else { ScanType::Search };
+            // Check if this is a covering index (all needed columns are in the index)
+            // A covering index requires:
+            // 1. All SELECT columns are in the index
+            // 2. All WHERE clause columns are also in the index (or evaluable from index)
+            let mut all_needed_columns = needed_columns.clone();
+            if let Some(where_expr) = where_clause {
+                collect_column_refs(where_expr, &mut all_needed_columns);
+            }
+            let is_covering = is_covering_index(&index_name, &all_needed_columns, database);
+
+            // Determine scan type: PK lookup > Covering Index > Regular Search
+            let scan_type = if is_pk_lookup {
+                ScanType::IntegerPrimaryKey
+            } else if is_covering {
+                ScanType::CoveringIndex
+            } else {
+                ScanType::Search
+            };
 
             let mut idx_node = PlanNode::new("Index Scan")
                 .with_object(table_name)
@@ -599,10 +632,124 @@ fn expression_references_column(expr: &Expression, column: &str) -> bool {
     }
 }
 
+/// Extract column references from a SELECT list for covering index detection
+fn extract_select_columns(select_list: &[SelectItem]) -> HashSet<String> {
+    let mut columns = HashSet::new();
+    for item in select_list {
+        match item {
+            SelectItem::Wildcard { .. } => {
+                // Wildcard means all columns needed - can't be a covering index
+                // Return empty set with a special marker
+                return HashSet::new();
+            }
+            SelectItem::QualifiedWildcard { .. } => {
+                // table.* also means all columns from that table
+                return HashSet::new();
+            }
+            SelectItem::Expression { expr, .. } => {
+                collect_column_refs(expr, &mut columns);
+            }
+        }
+    }
+    columns
+}
+
+/// Recursively collect column references from an expression
+fn collect_column_refs(expr: &Expression, columns: &mut HashSet<String>) {
+    match expr {
+        Expression::ColumnRef(col_id) => {
+            columns.insert(col_id.column_canonical().to_lowercase());
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            collect_column_refs(left, columns);
+            collect_column_refs(right, columns);
+        }
+        Expression::UnaryOp { expr: inner, .. } => {
+            collect_column_refs(inner, columns);
+        }
+        Expression::Conjunction(exprs) | Expression::Disjunction(exprs) => {
+            for e in exprs {
+                collect_column_refs(e, columns);
+            }
+        }
+        Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
+            for arg in args {
+                collect_column_refs(arg, columns);
+            }
+        }
+        Expression::IsNull { expr: inner, .. } => {
+            collect_column_refs(inner, columns);
+        }
+        Expression::Between { expr, low, high, .. } => {
+            collect_column_refs(expr, columns);
+            collect_column_refs(low, columns);
+            collect_column_refs(high, columns);
+        }
+        Expression::InList { expr, values, .. } => {
+            collect_column_refs(expr, columns);
+            for v in values {
+                collect_column_refs(v, columns);
+            }
+        }
+        Expression::Case { operand, when_clauses, else_result, .. } => {
+            if let Some(op) = operand {
+                collect_column_refs(op, columns);
+            }
+            for case_when in when_clauses {
+                for cond in &case_when.conditions {
+                    collect_column_refs(cond, columns);
+                }
+                collect_column_refs(&case_when.result, columns);
+            }
+            if let Some(else_res) = else_result {
+                collect_column_refs(else_res, columns);
+            }
+        }
+        Expression::Cast { expr: inner, .. } => {
+            collect_column_refs(inner, columns);
+        }
+        Expression::ScalarSubquery(_)
+        | Expression::In { .. }
+        | Expression::Literal(_)
+        | Expression::Placeholder(_)
+        | Expression::NumberedPlaceholder(_)
+        | Expression::NamedPlaceholder(_)
+        | Expression::Wildcard => {}
+        _ => {}  // Handle any other variants
+    }
+}
+
+/// Check if all needed columns are covered by an index (covering index)
+fn is_covering_index(
+    index_name: &str,
+    needed_columns: &HashSet<String>,
+    database: &Database,
+) -> bool {
+    // If we need all columns (wildcard was used), not a covering index
+    if needed_columns.is_empty() {
+        return false;
+    }
+
+    let Some(index) = database.get_index(index_name) else {
+        return false;
+    };
+
+    // Get index columns
+    let index_columns: HashSet<String> = index
+        .columns
+        .iter()
+        .map(|c| c.expect_column_name().to_lowercase())
+        .collect();
+
+    // Check if all needed columns are in the index
+    needed_columns.iter().all(|col| index_columns.contains(col))
+}
+
 /// Extract index predicates from a WHERE clause for SQLite EQP format
 ///
 /// Returns a list of (column_name, operator) tuples for predicates that can
 /// use the index. The operator is one of "=", ">", "<", ">=", "<=".
+/// Predicates are sorted by their position in the index column order.
 fn extract_index_predicates(
     expr: &Expression,
     index_name: &str,
@@ -617,6 +764,13 @@ fn extract_index_predicates(
         .unwrap_or_default();
 
     extract_predicates_recursive(expr, &index_columns, &mut predicates);
+
+    // Sort predicates by their position in the index column order
+    predicates.sort_by_key(|(col, _)| {
+        let col_lower = col.to_lowercase();
+        index_columns.iter().position(|c| c == &col_lower).unwrap_or(usize::MAX)
+    });
+
     predicates
 }
 
