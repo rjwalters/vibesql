@@ -86,6 +86,17 @@ impl CreateIndexExecutor {
             .get_table(&qualified_table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(qualified_table_name.clone()))?;
 
+        // Check for expression indexes (not yet fully supported)
+        for index_col in &stmt.columns {
+            if index_col.is_expression() {
+                // Expression indexes are parsed but not yet fully executed
+                // Return an unsupported error instead of panicking
+                return Err(ExecutorError::UnsupportedFeature(
+                    "Expression indexes are not yet supported".to_string(),
+                ));
+            }
+        }
+
         // Validate that all indexed columns exist in the table
         for index_col in &stmt.columns {
             if table_schema.get_column(index_col.expect_column_name()).is_none() {
