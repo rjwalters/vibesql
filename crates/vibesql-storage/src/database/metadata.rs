@@ -146,11 +146,6 @@ impl Metadata {
     pub fn clear_sqlite_stat1(&mut self) {
         self.sqlite_stat1.clear();
     }
-
-    /// Check if sqlite_stat1 has any entries
-    pub fn sqlite_stat1_is_empty(&self) -> bool {
-        self.sqlite_stat1.is_empty()
-    }
 }
 
 impl Default for Metadata {
