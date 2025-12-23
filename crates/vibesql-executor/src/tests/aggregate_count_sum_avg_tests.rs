@@ -328,8 +328,8 @@ fn test_sum_with_nulls() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     // SUM ignores NULL values, so 100 + 200 = 300
-    // SQLite's SUM() returns REAL when NULL encountered, even if NULLs are skipped
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Double(300.0));
+    // SQLite's SUM() preserves INTEGER type for integer inputs (NULLs don't affect type)
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(300));
 }
 
 #[test]

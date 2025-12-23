@@ -146,34 +146,40 @@ impl AggregateAccumulator {
                 distinct,
                 seen,
             } => {
-                // Track non-integer values for type determination
-                // SQLite: If ANY non-integer value is encountered (NULL, TEXT, REAL, etc.),
-                // the result should be REAL, even if that value is skipped
-                if !matches!(
-                    value,
-                    vibesql_types::SqlValue::Integer(_)
-                        | vibesql_types::SqlValue::Bigint(_)
-                        | vibesql_types::SqlValue::Smallint(_)
-                ) {
-                    *has_non_integer = true;
+                // Skip NULL values - they don't affect sum or type
+                if value.is_null() {
+                    return;
                 }
 
-                // Fast path: Skip non-numeric values early
-                if value.is_null() || !is_numeric_value(value) {
-                    return;
+                // Try to coerce the value to a numeric type
+                // This handles TEXT values that contain integers/reals
+                let (coerced_value, is_integer) = match try_coerce_to_numeric(value) {
+                    Some((coerced, is_int)) => (coerced, is_int),
+                    None => {
+                        // Cannot coerce to numeric - skip this value
+                        // (non-numeric text like "abc" is treated as 0 and skipped)
+                        return;
+                    }
+                };
+
+                // Track non-integer values for type determination
+                // SQLite: If ANY REAL/FLOAT value is encountered, result should be REAL
+                // TEXT values that parse as integers are treated as integers
+                if !is_integer {
+                    *has_non_integer = true;
                 }
 
                 if *distinct {
                     // Only sum if we haven't seen this value before
-                    // Optimization: Check membership before cloning
+                    // For DISTINCT, use original value for deduplication
                     let seen_set = seen.as_mut().unwrap();
                     if !seen_set.contains(value) {
                         seen_set.insert(value.clone());
-                        *sum = add_sql_values(sum, value);
+                        *sum = add_sql_values(sum, &coerced_value);
                         *count += 1;
                     }
                 } else {
-                    *sum = add_sql_values(sum, value);
+                    *sum = add_sql_values(sum, &coerced_value);
                     *count += 1;
                 }
             }
@@ -716,6 +722,58 @@ fn is_numeric_value(value: &vibesql_types::SqlValue) -> bool {
             | vibesql_types::SqlValue::Real(_)
             | vibesql_types::SqlValue::Double(_)
     )
+}
+
+/// Try to coerce a SqlValue to a numeric value for SUM
+/// Returns Some((coerced_value, is_integer_type)) if coercion is possible
+/// Returns None if the value cannot be coerced to a number
+fn try_coerce_to_numeric(
+    value: &vibesql_types::SqlValue,
+) -> Option<(vibesql_types::SqlValue, bool)> {
+    match value {
+        // Already numeric types - return as-is (preserve original type)
+        vibesql_types::SqlValue::Integer(v) => {
+            Some((vibesql_types::SqlValue::Integer(*v), true))
+        }
+        vibesql_types::SqlValue::Bigint(v) => Some((vibesql_types::SqlValue::Bigint(*v), true)),
+        vibesql_types::SqlValue::Smallint(v) => {
+            Some((vibesql_types::SqlValue::Smallint(*v), true))
+        }
+        vibesql_types::SqlValue::Unsigned(v) => {
+            Some((vibesql_types::SqlValue::Integer(*v as i64), true))
+        }
+        vibesql_types::SqlValue::Float(v) => Some((vibesql_types::SqlValue::Float(*v), false)),
+        vibesql_types::SqlValue::Double(v) => Some((vibesql_types::SqlValue::Double(*v), false)),
+        vibesql_types::SqlValue::Numeric(v) => {
+            Some((vibesql_types::SqlValue::Numeric(*v), false))
+        }
+        vibesql_types::SqlValue::Real(v) => Some((vibesql_types::SqlValue::Real(*v), false)),
+
+        // Text types - try to parse as integer first, then as real
+        vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+            let trimmed = s.trim();
+            // Try to parse as integer first
+            if let Ok(i) = trimmed.parse::<i64>() {
+                Some((vibesql_types::SqlValue::Integer(i), true))
+            } else if let Ok(f) = trimmed.parse::<f64>() {
+                // Parsed as real - this is a non-integer type
+                Some((vibesql_types::SqlValue::Double(f), false))
+            } else {
+                // Cannot parse as number - SQLite treats this as 0 for SUM
+                // but it doesn't count as a value and doesn't affect type
+                None
+            }
+        }
+
+        // Boolean - treat as 0 or 1 (integer)
+        vibesql_types::SqlValue::Boolean(b) => {
+            Some((vibesql_types::SqlValue::Integer(if *b { 1 } else { 0 }), true))
+        }
+
+        // NULL and other types - cannot coerce
+        vibesql_types::SqlValue::Null => None,
+        _ => None,
+    }
 }
 
 /// Fast check if a value is comparable for MIN/MAX (optimization to avoid full match)
