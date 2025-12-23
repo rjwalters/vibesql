@@ -268,3 +268,88 @@ fn test_not_isnull_precedence() {
         _ => panic!("Expected UnaryOp(NOT), got {:?}", where_clause),
     }
 }
+
+/// Tests for SQLite "expr NOT NULL" postfix operator (without IS)
+/// "expr NOT NULL" is equivalent to "expr IS NOT NULL"
+#[test]
+fn test_not_null_without_is() {
+    // Parse: SELECT * FROM t WHERE col0 NOT NULL
+    let sql = "SELECT * FROM t WHERE col0 NOT NULL";
+    let stmt = Parser::parse_sql(sql).expect("Should parse");
+
+    let select = match stmt {
+        vibesql_ast::Statement::Select(s) => s,
+        _ => panic!("Expected SELECT statement"),
+    };
+
+    let where_clause = select.where_clause.expect("Should have WHERE clause");
+
+    // This should parse as: IsNull(col0, negated: true)
+    match &where_clause {
+        Expression::IsNull { expr, negated } => {
+            assert!(*negated, "NOT NULL should have negated=true (equivalent to IS NOT NULL)");
+
+            match &**expr {
+                Expression::ColumnRef(col_id) => {
+                    let table = col_id.table_canonical();
+                    let column = col_id.column_canonical();
+                    assert!(table.is_none());
+                    assert_eq!(column, "col0");
+                }
+                _ => panic!("Expected column reference, got {:?}", expr),
+            }
+        }
+        _ => panic!("Expected IsNull, got {:?}", where_clause),
+    }
+}
+
+/// Test NOT NULL in complex WHERE clause
+#[test]
+fn test_not_null_in_complex_where() {
+    // Parse: SELECT * FROM t WHERE a NOT NULL AND b NOT NULL
+    let sql = "SELECT * FROM t WHERE a NOT NULL AND b NOT NULL";
+    let stmt = Parser::parse_sql(sql).expect("Should parse");
+
+    let select = match stmt {
+        vibesql_ast::Statement::Select(s) => s,
+        _ => panic!("Expected SELECT statement"),
+    };
+
+    let where_clause = select.where_clause.expect("Should have WHERE clause");
+
+    // This should parse as: (a IS NOT NULL) AND (b IS NOT NULL)
+    match &where_clause {
+        Expression::BinaryOp { op, left, right } => {
+            assert_eq!(*op, vibesql_ast::BinaryOperator::And);
+
+            // Left should be IsNull(a, negated: true)
+            match &**left {
+                Expression::IsNull { expr, negated } => {
+                    assert!(*negated);
+                    match &**expr {
+                        Expression::ColumnRef(col_id) => {
+                            assert_eq!(col_id.column_canonical(), "a");
+                        }
+                        _ => panic!("Expected column reference"),
+                    }
+                }
+                _ => panic!("Expected IsNull on left"),
+            }
+
+            // Right should be IsNull(b, negated: true)
+            match &**right {
+                Expression::IsNull { expr, negated } => {
+                    assert!(*negated);
+                    match &**expr {
+                        Expression::ColumnRef(col_id) => {
+                            assert_eq!(col_id.column_canonical(), "b");
+                        }
+                        _ => panic!("Expected column reference"),
+                    }
+                }
+                _ => panic!("Expected IsNull on right"),
+            }
+        }
+        _ => panic!("Expected BinaryOp(AND), got {:?}", where_clause),
+    }
+}

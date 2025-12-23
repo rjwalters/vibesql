@@ -291,8 +291,12 @@ impl Parser {
                     pattern: Box::new(pattern),
                     negated: true,
                 });
+            } else if self.peek_keyword(Keyword::Null) {
+                // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS NOT NULL"
+                self.consume_keyword(Keyword::Null)?;
+                return Ok(vibesql_ast::Expression::IsNull { expr: Box::new(left), negated: true });
             } else {
-                // Not "NOT IN", "NOT BETWEEN", "NOT LIKE", or "NOT GLOB", restore position and continue
+                // Not "NOT IN", "NOT BETWEEN", "NOT LIKE", "NOT GLOB", or "NOT NULL", restore position and continue
                 // Note: NOT EXISTS is handled in parse_primary_expression()
                 self.position = saved_pos;
             }

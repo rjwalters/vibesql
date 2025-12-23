@@ -155,6 +155,11 @@ impl<'arena> ArenaParser<'arena> {
                     pattern: pattern_ref,
                     negated: true,
                 })));
+            } else if self.peek_keyword(Keyword::Null) {
+                // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS NOT NULL"
+                self.consume_keyword(Keyword::Null)?;
+                let left_ref = self.arena.alloc(left);
+                return Ok(Expression::IsNull { expr: left_ref, negated: true });
             } else {
                 self.position = saved_pos;
             }
