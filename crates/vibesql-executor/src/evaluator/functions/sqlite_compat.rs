@@ -888,6 +888,36 @@ pub(super) fn intreal(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     Ok(args[0].clone())
 }
 
+/// SQLITE_VERSION() - Return SQLite-compatible version string
+///
+/// Returns a version string for SQLite compatibility.
+/// VibeSQL emulates SQLite 3.46.0 behavior for maximum compatibility.
+pub(super) fn sqlite_version(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if !args.is_empty() {
+        return Err(ExecutorError::UnsupportedFeature(format!(
+            "SQLITE_VERSION takes no arguments, got {}",
+            args.len()
+        )));
+    }
+    // Return a version string indicating SQLite compatibility
+    // We use 3.46.0 as that's a recent stable version we target
+    Ok(SqlValue::Varchar("3.46.0".into()))
+}
+
+/// SQLITE_SOURCE_ID() - Return SQLite-compatible source ID string
+///
+/// Returns a source ID string for SQLite compatibility.
+pub(super) fn sqlite_source_id(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if !args.is_empty() {
+        return Err(ExecutorError::UnsupportedFeature(format!(
+            "SQLITE_SOURCE_ID takes no arguments, got {}",
+            args.len()
+        )));
+    }
+    // Return a fake source ID that looks like SQLite's format
+    Ok(SqlValue::Varchar("2024-05-23 13:25:27 vibesql".into()))
+}
+
 /// LIKE(pattern, string) - SQL LIKE pattern matching as a function
 ///
 /// Returns 1 if string matches pattern, 0 otherwise.
