@@ -160,9 +160,6 @@ pub(super) fn random(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 ///
 /// Returns a blob containing N bytes of pseudo-random data.
 /// SQLite returns an empty blob for negative or zero sizes.
-/// Note: VibeSQL doesn't have a native Blob type, so we return as a string
-/// using Latin-1 encoding (each byte maps to one character) to preserve
-/// the exact byte count.
 pub(super) fn randomblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
         return Err(ExecutorError::UnsupportedFeature(format!(
@@ -176,44 +173,44 @@ pub(super) fn randomblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Null => return Ok(SqlValue::Null),
         SqlValue::Integer(i) => {
             if *i <= 0 {
-                return Ok(SqlValue::Varchar("".into()));
+                return Ok(SqlValue::Blob(vec![]));
             }
             *i as usize
         }
         SqlValue::Bigint(i) => {
             if *i <= 0 {
-                return Ok(SqlValue::Varchar("".into()));
+                return Ok(SqlValue::Blob(vec![]));
             }
             *i as usize
         }
         SqlValue::Smallint(i) => {
             if *i <= 0 {
-                return Ok(SqlValue::Varchar("".into()));
+                return Ok(SqlValue::Blob(vec![]));
             }
             *i as usize
         }
         SqlValue::Unsigned(u) => *u as usize,
         SqlValue::Numeric(n) => {
             if *n <= 0.0 {
-                return Ok(SqlValue::Varchar("".into()));
+                return Ok(SqlValue::Blob(vec![]));
             }
             *n as usize
         }
         SqlValue::Real(r) => {
             if *r <= 0.0 {
-                return Ok(SqlValue::Varchar("".into()));
+                return Ok(SqlValue::Blob(vec![]));
             }
             *r as usize
         }
         SqlValue::Double(d) => {
             if *d <= 0.0 {
-                return Ok(SqlValue::Varchar("".into()));
+                return Ok(SqlValue::Blob(vec![]));
             }
             *d as usize
         }
         SqlValue::Float(f) => {
             if *f <= 0.0 {
-                return Ok(SqlValue::Varchar("".into()));
+                return Ok(SqlValue::Blob(vec![]));
             }
             *f as usize
         }
@@ -237,11 +234,7 @@ pub(super) fn randomblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     let mut rng = rand::rng();
     let bytes: Vec<u8> = (0..n).map(|_| rng.random()).collect();
 
-    // Convert bytes to string using Latin-1 encoding (each byte 0x00-0xFF maps
-    // to exactly one Unicode code point), preserving the exact byte count.
-    // This avoids UTF-8 validation issues that would corrupt the data.
-    let result: String = bytes.iter().map(|&b| char::from(b)).collect();
-    Ok(SqlValue::Varchar(result.into()))
+    Ok(SqlValue::Blob(bytes))
 }
 
 /// HEX(x) - Convert blob/string to hexadecimal
@@ -307,8 +300,6 @@ pub(super) fn hex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 ///
 /// Returns a blob containing the binary data represented by the hexadecimal string.
 /// Returns NULL if the input is not a valid hexadecimal string.
-/// Note: VibeSQL doesn't have a Blob type, so we return using Latin-1 encoding
-/// (each byte maps to one character) to preserve the exact byte count.
 pub(super) fn unhex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
         return Err(ExecutorError::UnsupportedFeature(format!(
@@ -348,16 +339,12 @@ pub(super) fn unhex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         bytes.push((high << 4) | low);
     }
 
-    // Convert bytes to string using Latin-1 encoding (each byte 0x00-0xFF maps
-    // to exactly one Unicode code point), preserving the exact byte count.
-    let result: String = bytes.iter().map(|&b| char::from(b)).collect();
-    Ok(SqlValue::Varchar(result.into()))
+    Ok(SqlValue::Blob(bytes))
 }
 
 /// ZEROBLOB(n) - Create a blob of n zero bytes
 ///
 /// Returns a blob consisting of n zero-valued bytes.
-/// Note: VibeSQL doesn't have a Blob type, so we return as a string of null characters.
 pub(super) fn zeroblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
         return Err(ExecutorError::UnsupportedFeature(format!(
@@ -392,9 +379,7 @@ pub(super) fn zeroblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         )));
     }
 
-    // Return as a string of null characters (since VibeSQL doesn't have Blob type)
-    let result = "\0".repeat(n);
-    Ok(SqlValue::Varchar(result.into()))
+    Ok(SqlValue::Blob(vec![0u8; n]))
 }
 
 /// UNICODE(x) - Return the Unicode code point of the first character
@@ -1000,27 +985,27 @@ mod tests {
 
     #[test]
     fn test_randomblob() {
-        // randomblob returns a string of N bytes (Latin-1 encoded, so char count = byte count)
+        // randomblob returns a Blob of N random bytes
         let result = randomblob(&[SqlValue::Integer(10)]).unwrap();
         match result {
-            SqlValue::Varchar(s) => {
-                assert_eq!(s.chars().count(), 10);
+            SqlValue::Blob(bytes) => {
+                assert_eq!(bytes.len(), 10);
             }
-            _ => panic!("Expected Varchar"),
+            _ => panic!("Expected Blob"),
         }
 
-        // randomblob(0) returns empty
+        // randomblob(0) returns empty blob
         let result = randomblob(&[SqlValue::Integer(0)]).unwrap();
         match result {
-            SqlValue::Varchar(s) => assert_eq!(s.len(), 0),
-            _ => panic!("Expected Varchar"),
+            SqlValue::Blob(bytes) => assert_eq!(bytes.len(), 0),
+            _ => panic!("Expected Blob"),
         }
 
         // SQLite returns empty blob for negative sizes
         let result = randomblob(&[SqlValue::Integer(-5)]).unwrap();
         match result {
-            SqlValue::Varchar(s) => assert_eq!(s.len(), 0),
-            _ => panic!("Expected Varchar"),
+            SqlValue::Blob(bytes) => assert_eq!(bytes.len(), 0),
+            _ => panic!("Expected Blob"),
         }
 
         // NULL returns NULL
@@ -1050,9 +1035,12 @@ mod tests {
 
     #[test]
     fn test_unhex() {
-        // Note: unhex returns Varchar since we don't have Blob type
+        // unhex returns a Blob
         let result = unhex(&[SqlValue::Varchar("616263".into())]).unwrap();
-        assert!(matches!(result, SqlValue::Varchar(_)));
+        match result {
+            SqlValue::Blob(bytes) => assert_eq!(bytes, vec![0x61, 0x62, 0x63]),
+            _ => panic!("Expected Blob"),
+        }
 
         // Odd length returns NULL
         assert_eq!(unhex(&[SqlValue::Varchar("abc".into())]).unwrap(), SqlValue::Null);
@@ -1062,16 +1050,16 @@ mod tests {
 
     #[test]
     fn test_zeroblob() {
-        // Note: zeroblob returns Varchar with null characters since we don't have Blob type
+        // zeroblob returns a Blob of zero bytes
         let result = zeroblob(&[SqlValue::Integer(4)]).unwrap();
         match result {
-            SqlValue::Varchar(s) => assert_eq!(s.len(), 4),
-            _ => panic!("Expected Varchar"),
+            SqlValue::Blob(bytes) => assert_eq!(bytes, vec![0, 0, 0, 0]),
+            _ => panic!("Expected Blob"),
         }
         let result = zeroblob(&[SqlValue::Integer(0)]).unwrap();
         match result {
-            SqlValue::Varchar(s) => assert_eq!(s.len(), 0),
-            _ => panic!("Expected Varchar"),
+            SqlValue::Blob(bytes) => assert_eq!(bytes.len(), 0),
+            _ => panic!("Expected Blob"),
         }
         assert_eq!(zeroblob(&[SqlValue::Null]).unwrap(), SqlValue::Null);
     }

@@ -192,7 +192,8 @@ fn test_length_basic() {
 #[test]
 fn test_length_multibyte() {
     let (evaluator, row) = create_test_evaluator();
-    // LENGTH returns byte count (unlike CHAR_LENGTH)
+    // SQLite: LENGTH() returns character count, not byte count
+    // Use OCTET_LENGTH() for byte count
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("LENGTH"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -201,8 +202,8 @@ fn test_length_multibyte() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    // "café" is 5 bytes in UTF-8
-    assert_eq!(result, vibesql_types::SqlValue::Integer(5));
+    // "café" has 4 characters (é is one character, 2 bytes in UTF-8)
+    assert_eq!(result, vibesql_types::SqlValue::Integer(4));
 }
 
 #[test]

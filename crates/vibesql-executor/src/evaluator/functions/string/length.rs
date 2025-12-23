@@ -68,7 +68,8 @@ pub(in crate::evaluator::functions) fn octet_length(
 
 /// LENGTH(str) - Return string length (SQLite compatible)
 /// SQLite's LENGTH() accepts any type, converting to string first.
-/// Returns byte count for strings, digit count for integers, etc.
+/// Returns character count for strings (not byte count), digit count for integers, etc.
+/// Use OCTET_LENGTH() for byte count.
 pub(in crate::evaluator::functions) fn length(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
@@ -81,7 +82,8 @@ pub(in crate::evaluator::functions) fn length(
     match &args[0] {
         vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
         vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
-            Ok(vibesql_types::SqlValue::Integer(s.len() as i64))
+            // Return character count, not byte count (SQLite behavior)
+            Ok(vibesql_types::SqlValue::Integer(s.chars().count() as i64))
         }
         // SQLite converts non-string types to string first
         vibesql_types::SqlValue::Integer(n) => {

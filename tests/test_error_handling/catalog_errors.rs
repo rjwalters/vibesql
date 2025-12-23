@@ -29,8 +29,8 @@ fn test_table_already_exists_error() {
 
         if let Err(ExecutorError::TableAlreadyExists(name)) = result {
             assert!(
-                name == "users" || name == "public.users",
-                "Expected users or public.users, got: {}",
+                name == "users" || name == "public.users" || name == "main.users",
+                "Expected users, public.users, or main.users, got: {}",
                 name
             );
             let error_msg = format!("{}", ExecutorError::TableAlreadyExists(name));
