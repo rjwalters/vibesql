@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use vibesql_ast::{Expression, FromClause};
 
 use super::{graph, predicates, utils};
+use crate::optimizer::is_constant_false_where;
 use crate::select::scan::bloom_context;
 use crate::{
     debug_output::{Category, DebugEvent, JsonValue},
@@ -56,6 +57,19 @@ where
     // Step 1: Flatten join tree to extract all tables
     let mut table_refs = Vec::new();
     graph::flatten_join_tree(from, &mut table_refs);
+
+    // Step 1.5: Early short-circuit for constant FALSE WHERE clause (#4669)
+    // If the WHERE clause is always FALSE (e.g., "NOT + 35 IS NOT NULL"),
+    // we can skip the expensive cross join entirely and return empty rows.
+    // This handles cases like: SELECT ... FROM tab0, tab0 AS cor0 WHERE NOT + 35 IS NOT NULL
+    // which would otherwise compute a 1M row cross join before filtering.
+    if let Some(where_expr) = where_clause {
+        if is_constant_false_where(where_expr) == Some(true) {
+            // Build schema from table definitions (no data scan needed)
+            let schema = utils::build_schema_from_table_refs(&table_refs, database, cte_results)?;
+            return Ok(FromResult::from_rows(schema, Vec::new()));
+        }
+    }
 
     // Step 2: Extract all join conditions with their types
     let mut join_conditions = Vec::new();
@@ -672,6 +686,17 @@ pub(crate) fn execute_with_semi_join_reordering<F>(
 where
     F: Fn(&vibesql_ast::SelectStmt) -> Result<SelectResult, ExecutorError> + Copy,
 {
+    // Early short-circuit for constant FALSE WHERE clause (#4669)
+    if let Some(where_expr) = where_clause {
+        if is_constant_false_where(where_expr) == Some(true) {
+            // Build schema from the FROM clause (no data scan needed)
+            let mut table_refs = Vec::new();
+            graph::flatten_join_tree(from, &mut table_refs);
+            let schema = utils::build_schema_from_table_refs(&table_refs, database, cte_results)?;
+            return Ok(FromResult::from_rows(schema, Vec::new()));
+        }
+    }
+
     // Extract the semi/anti join structure
     let (inner_from, derived_query, derived_alias, semi_join_type, semi_condition) = match from {
         FromClause::Join { left, right, join_type, condition, .. }

@@ -34,7 +34,43 @@ fn is_constant_expr(expr: &Expression) -> bool {
             is_constant_expr(left) && is_constant_expr(right)
         }
         Expression::Cast { expr: inner, .. } => is_constant_expr(inner),
+        // IS NULL / IS NOT NULL on constant is constant
+        Expression::IsNull { expr: inner, .. } => is_constant_expr(inner),
+        // IS TRUE / IS FALSE / IS UNKNOWN on constant is constant
+        Expression::IsTruthValue { expr: inner, .. } => is_constant_expr(inner),
+        // BETWEEN with all constant operands
+        Expression::Between { expr, low, high, .. } => {
+            is_constant_expr(expr) && is_constant_expr(low) && is_constant_expr(high)
+        }
         _ => false,
+    }
+}
+
+/// Check if a WHERE clause is definitely constant FALSE
+///
+/// This is used for early short-circuiting: if a WHERE clause evaluates to FALSE
+/// without needing any row data, we can skip expensive operations like cross joins.
+///
+/// Returns `Some(true)` if the expression is definitely always FALSE,
+/// `Some(false)` if it's definitely always TRUE,
+/// `None` if we can't determine (expression contains column references).
+pub fn is_constant_false_where(expr: &Expression) -> Option<bool> {
+    // Only analyze constant expressions (no column references)
+    if !is_constant_expr(expr) {
+        return None;
+    }
+
+    // Create a minimal evaluator with empty schema
+    use crate::schema::CombinedSchema;
+    let schema = CombinedSchema::empty();
+    let evaluator = CombinedExpressionEvaluator::new(&schema);
+
+    // Try to optimize (fold constants)
+    match optimize_expression(expr, &evaluator) {
+        Ok(Expression::Literal(SqlValue::Boolean(false))) => Some(true),  // Always FALSE
+        Ok(Expression::Literal(SqlValue::Null)) => Some(true),             // NULL is falsy in WHERE
+        Ok(Expression::Literal(SqlValue::Boolean(true))) => Some(false),  // Always TRUE
+        _ => None, // Couldn't determine
     }
 }
 
@@ -915,6 +951,70 @@ mod tests {
         assert!(
             matches!(result, WhereOptimization::AlwaysFalse),
             "Expected AlwaysFalse, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_is_constant_false_where_with_not_is_not_null() {
+        // NOT + 35 IS NOT NULL should evaluate to constant FALSE (#4669)
+        // This is the pattern that causes slow cross joins if not detected early
+        //
+        // Expression: NOT (+ 35 IS NOT NULL)
+        //   + 35 IS NOT NULL => TRUE (35 is not null)
+        //   NOT TRUE => FALSE
+        let expr = Expression::UnaryOp {
+            op: vibesql_ast::UnaryOperator::Not,
+            expr: Box::new(Expression::IsNull {
+                expr: Box::new(Expression::UnaryOp {
+                    op: vibesql_ast::UnaryOperator::Plus,
+                    expr: Box::new(Expression::Literal(SqlValue::Integer(35))),
+                }),
+                negated: true, // IS NOT NULL
+            }),
+        };
+
+        let result = is_constant_false_where(&expr);
+        assert_eq!(
+            result,
+            Some(true),
+            "Expected is_constant_false_where to return Some(true), got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_is_constant_false_where_with_column_ref() {
+        // x IS NOT NULL should return None (can't determine - depends on data)
+        let expr = Expression::IsNull {
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "x", false,
+            ))),
+            negated: true,
+        };
+
+        let result = is_constant_false_where(&expr);
+        assert_eq!(
+            result, None,
+            "Expected None for expression with column reference, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_is_constant_false_where_true() {
+        // 1 = 1 should return Some(false) (always TRUE, not FALSE)
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            op: vibesql_ast::BinaryOperator::Equal,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        };
+
+        let result = is_constant_false_where(&expr);
+        assert_eq!(
+            result,
+            Some(false),
+            "Expected Some(false) for always-true expression, got {:?}",
             result
         );
     }

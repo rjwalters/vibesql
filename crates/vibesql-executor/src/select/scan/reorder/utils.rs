@@ -455,3 +455,49 @@ pub(super) fn resolve_column_with_fallback(
 ) -> Option<String> {
     resolve_column_to_table(column, column_to_table)
 }
+
+/// Build a combined schema from table references without scanning data
+///
+/// This is used for early short-circuiting when WHERE is constant FALSE (#4669).
+/// We need the schema for correct result column names, but we don't need any data.
+pub(super) fn build_schema_from_table_refs(
+    table_refs: &[super::graph::TableRef],
+    database: &vibesql_storage::Database,
+    cte_results: &HashMap<String, CteResult>,
+) -> Result<CombinedSchema, crate::errors::ExecutorError> {
+    let mut result_schema: Option<CombinedSchema> = None;
+
+    for table_ref in table_refs {
+        let table_name = &table_ref.name;
+        let alias = table_ref.alias.as_ref().unwrap_or(table_name).clone();
+
+        // Check CTEs first (CteResult is a tuple: (TableSchema, Arc<Vec<Row>>))
+        if let Some((cte_schema, _)) = cte_results.get(&table_name.to_lowercase()) {
+            let schema = cte_schema.clone();
+            match result_schema.take() {
+                None => result_schema = Some(CombinedSchema::from_table(alias, schema)),
+                Some(existing) => {
+                    result_schema = Some(CombinedSchema::combine(existing, alias, schema))
+                }
+            }
+            continue;
+        }
+
+        // Get table schema from database
+        if let Some(table) = database.get_table(table_name) {
+            let schema = table.schema.clone();
+            match result_schema.take() {
+                None => result_schema = Some(CombinedSchema::from_table(alias, schema)),
+                Some(existing) => {
+                    result_schema = Some(CombinedSchema::combine(existing, alias, schema))
+                }
+            }
+        }
+    }
+
+    result_schema.ok_or_else(|| {
+        crate::errors::ExecutorError::UnsupportedFeature(
+            "No tables found in FROM clause".to_string(),
+        )
+    })
+}
