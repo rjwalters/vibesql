@@ -125,11 +125,17 @@ impl fmt::Display for SqlValue {
                 write!(f, "[{}]", formatted.join(", "))
             }
             SqlValue::Blob(b) => {
-                // Format blob as hex string (without x'' prefix for raw display)
-                for byte in b {
-                    write!(f, "{:02X}", byte)?;
+                // SQLite compatibility: Display BLOB as text if it contains valid UTF-8,
+                // otherwise display as hex string (without x'' prefix)
+                if let Ok(s) = std::str::from_utf8(b) {
+                    write!(f, "{}", s)
+                } else {
+                    // Not valid UTF-8, display as hex
+                    for byte in b {
+                        write!(f, "{:02X}", byte)?;
+                    }
+                    Ok(())
                 }
-                Ok(())
             }
             SqlValue::Null => write!(f, "NULL"),
         }
@@ -261,5 +267,45 @@ mod tests {
         assert_eq!(format_f32(-0.0f32), "0.0");
         // Result of 0.0 * -1.0 should be "0.0", not "-0.0"
         assert_eq!(format_f64(0.0 * -1.0), "0.0");
+    }
+
+    #[test]
+    fn test_blob_display_utf8() {
+        // SQLite compatibility: BLOBs containing valid UTF-8 display as text
+        // x'616263' = "abc"
+        assert_eq!(
+            format!("{}", SqlValue::Blob(vec![0x61, 0x62, 0x63])),
+            "abc"
+        );
+        // x'68617265' = "hare"
+        assert_eq!(
+            format!("{}", SqlValue::Blob(vec![0x68, 0x61, 0x72, 0x65])),
+            "hare"
+        );
+        // x'68656c6c6f' = "hello"
+        assert_eq!(
+            format!("{}", SqlValue::Blob(vec![0x68, 0x65, 0x6c, 0x6c, 0x6f])),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn test_blob_display_invalid_utf8() {
+        // Non-UTF8 bytes display as hex
+        assert_eq!(
+            format!("{}", SqlValue::Blob(vec![0xFF, 0xFE])),
+            "FFFE"
+        );
+        // Invalid UTF-8 sequence
+        assert_eq!(
+            format!("{}", SqlValue::Blob(vec![0x80, 0x81, 0x82])),
+            "808182"
+        );
+    }
+
+    #[test]
+    fn test_blob_display_empty() {
+        // Empty blob displays as empty string
+        assert_eq!(format!("{}", SqlValue::Blob(vec![])), "");
     }
 }
