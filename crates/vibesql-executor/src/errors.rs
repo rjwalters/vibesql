@@ -51,6 +51,9 @@ pub enum ExecutorError {
         right: vibesql_types::SqlValue,
     },
     DivisionByZero,
+    /// Integer overflow in arithmetic operation (SQLite-compatible error)
+    /// Format: "integer overflow"
+    IntegerOverflow,
     InvalidWhereClause(String),
     /// Wrong number of arguments to a function (SQLite-compatible error)
     WrongNumberOfArguments {
@@ -543,6 +546,10 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::DivisionByZero => {
                 write!(f, "{}", vibe_msg!("executor-division-by-zero"))
+            }
+            ExecutorError::IntegerOverflow => {
+                // SQLite-compatible error message format
+                write!(f, "integer overflow")
             }
             ExecutorError::InvalidWhereClause(msg) => {
                 write!(f, "{}", vibe_msg!("executor-invalid-where-clause", message = msg.as_str()))

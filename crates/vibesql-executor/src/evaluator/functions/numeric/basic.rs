@@ -24,9 +24,24 @@ pub fn abs(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     // Fast path for numeric types to preserve their original type
     match &args[0] {
         SqlValue::Null => return Ok(SqlValue::Null),
-        SqlValue::Integer(n) => return Ok(SqlValue::Integer(n.abs())),
-        SqlValue::Bigint(n) => return Ok(SqlValue::Bigint(n.abs())),
-        SqlValue::Smallint(n) => return Ok(SqlValue::Smallint(n.abs())),
+        SqlValue::Integer(n) => {
+            return n
+                .checked_abs()
+                .map(SqlValue::Integer)
+                .ok_or(ExecutorError::IntegerOverflow);
+        }
+        SqlValue::Bigint(n) => {
+            return n
+                .checked_abs()
+                .map(SqlValue::Bigint)
+                .ok_or(ExecutorError::IntegerOverflow);
+        }
+        SqlValue::Smallint(n) => {
+            return n
+                .checked_abs()
+                .map(SqlValue::Smallint)
+                .ok_or(ExecutorError::IntegerOverflow);
+        }
         SqlValue::Float(n) => return Ok(SqlValue::Float(n.abs())),
         SqlValue::Double(n) => return Ok(SqlValue::Double(n.abs())),
         SqlValue::Real(n) => return Ok(SqlValue::Real(n.abs())),

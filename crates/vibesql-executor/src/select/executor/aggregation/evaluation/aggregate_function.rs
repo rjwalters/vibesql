@@ -253,7 +253,7 @@ pub(super) fn evaluate(
             acc.accumulate_tuple(tuple_values);
         }
 
-        let result = acc.finalize();
+        let result = acc.finalize()?;
         executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
         return Ok(result);
     }
@@ -362,7 +362,7 @@ pub(super) fn evaluate(
                 acc.accumulate(&value);
             }
 
-            let result = acc.finalize();
+            let result = acc.finalize()?;
             executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
             return Ok(result);
         }
@@ -381,7 +381,7 @@ pub(super) fn evaluate(
             acc.accumulate(&value);
         }
 
-        let result = acc.finalize();
+        let result = acc.finalize()?;
         executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
         return Ok(result);
     }
@@ -436,7 +436,7 @@ pub(super) fn evaluate(
                 acc.accumulate(&value);
             }
 
-            let result = acc.finalize();
+            let result = acc.finalize()?;
             executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
             return Ok(result);
         }
@@ -454,7 +454,7 @@ pub(super) fn evaluate(
             acc.accumulate(&value);
         }
 
-        let result = acc.finalize();
+        let result = acc.finalize()?;
         executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
         return Ok(result);
     }
@@ -536,7 +536,7 @@ pub(super) fn evaluate(
         }
     }
 
-    let result = acc.finalize();
+    let result = acc.finalize()?;
     // Cache the result for reuse within this group (lazily initialized)
     executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
     Ok(result)
