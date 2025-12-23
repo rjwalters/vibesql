@@ -2,11 +2,24 @@
 //!
 //! ANALYZE computes or recomputes table and column statistics to improve query plan optimization.
 //! This forces statistics to be refreshed, which is useful after bulk data loads or schema changes.
+//!
+//! ## SQLite Compatibility
+//!
+//! VibeSQL supports the following ANALYZE syntax for SQLite compatibility:
+//!
+//! - `ANALYZE` - Analyzes all tables
+//! - `ANALYZE table_name` - Analyzes a specific table
+//! - `ANALYZE sqlite_master` - No-op for compatibility (prepares sqlite_stat1)
+//! - `ANALYZE sqlite_schema` - Same as sqlite_master
+//!
+//! Unlike SQLite, VibeSQL stores computed statistics internally rather than in sqlite_stat1.
+//! The sqlite_stat1 table is available for manual statistics override via INSERT statements.
 
 use vibesql_ast::AnalyzeStmt;
 use vibesql_storage::Database;
 
 use crate::errors::ExecutorError;
+use crate::sqlite_schema::is_sqlite_schema_table;
 
 /// Executor for ANALYZE statements
 pub struct AnalyzeExecutor;
@@ -29,6 +42,7 @@ impl AnalyzeExecutor {
     /// - `ANALYZE table_name`: Analyzes the specified table
     /// - `ANALYZE table_name (cols)`: Analyzes the specified table (column list is currently
     ///   advisory)
+    /// - `ANALYZE sqlite_master`: No-op for SQLite compatibility (statistics are ready)
     ///
     /// # Implementation Note
     ///
@@ -43,35 +57,65 @@ impl AnalyzeExecutor {
                 let count = table_names.len();
 
                 for table_name in &table_names {
-                    if let Some(table) = database.get_table_mut(table_name) {
-                        table.analyze();
-                    }
+                    Self::analyze_table_and_update_stats(database, table_name);
                 }
 
                 Ok(format!("ANALYZE completed - {} table(s) analyzed", count))
             }
             Some(table_name) => {
-                // ANALYZE with specific table
-                match database.get_table_mut(table_name) {
-                    Some(table) => {
-                        table.analyze();
-
-                        let message = if let Some(cols) = &stmt.columns {
-                            // Column list specified - note that we analyze all columns anyway
-                            format!(
-                                "ANALYZE completed - table '{}' analyzed ({} columns specified, all columns analyzed)",
-                                table_name,
-                                cols.len()
-                            )
-                        } else {
-                            format!("ANALYZE completed - table '{}' analyzed", table_name)
-                        };
-
-                        Ok(message)
-                    }
-                    None => Err(ExecutorError::TableNotFound(table_name.clone())),
+                // Special case: ANALYZE sqlite_master or sqlite_schema
+                // This is used in SQLite to rebuild sqlite_stat tables
+                // For VibeSQL, it's a no-op since sqlite_stat1 is virtual
+                if is_sqlite_schema_table(table_name) {
+                    return Ok(
+                        "ANALYZE sqlite_master completed - sqlite_stat1 ready for queries"
+                            .to_string(),
+                    );
                 }
+
+                // ANALYZE with specific table
+                if database.get_table(table_name).is_none() {
+                    return Err(ExecutorError::TableNotFound(table_name.clone()));
+                }
+
+                Self::analyze_table_and_update_stats(database, table_name);
+
+                let message = if let Some(cols) = &stmt.columns {
+                    // Column list specified - note that we analyze all columns anyway
+                    format!(
+                        "ANALYZE completed - table '{}' analyzed ({} columns specified, all columns analyzed)",
+                        table_name,
+                        cols.len()
+                    )
+                } else {
+                    format!("ANALYZE completed - table '{}' analyzed", table_name)
+                };
+
+                Ok(message)
             }
+        }
+    }
+
+    /// Analyze a table and update sqlite_stat1 with the computed statistics
+    fn analyze_table_and_update_stats(database: &mut Database, table_name: &str) {
+        // First, analyze the table to compute fresh statistics
+        if let Some(table) = database.get_table_mut(table_name) {
+            table.analyze();
+        }
+
+        // Get the computed statistics and update sqlite_stat1
+        // Note: We only populate sqlite_stat1 with table-level row counts
+        // Index statistics are computed on-demand in VibeSQL
+        if let Some(table) = database.get_table_mut(table_name) {
+            let stats = table.statistics();
+            let row_count = stats.row_count;
+
+            // Insert table-level statistics (idx = NULL means table stats)
+            database.insert_sqlite_stat1(
+                table_name.to_string(),
+                None,
+                row_count.to_string(),
+            );
         }
     }
 }

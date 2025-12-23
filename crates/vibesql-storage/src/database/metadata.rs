@@ -17,6 +17,10 @@ pub struct Metadata {
     /// Key: routine name (procedure or function)
     /// Value: cached procedure body
     routine_body_cache: HashMap<String, vibesql_catalog::ProcedureBody>,
+    /// Storage for sqlite_stat1 entries (SQLite compatibility)
+    /// Key: (table_name, index_name) where index_name is None for table-level stats
+    /// Value: stat string (space-separated statistics)
+    sqlite_stat1: HashMap<(String, Option<String>), String>,
 }
 
 impl Metadata {
@@ -52,7 +56,11 @@ impl Metadata {
         session_variables.insert("SHORT_COLUMN_NAMES".to_string(), SqlValue::Integer(1));
         session_variables.insert("FULL_COLUMN_NAMES".to_string(), SqlValue::Integer(0));
 
-        Metadata { session_variables, routine_body_cache: HashMap::new() }
+        Metadata {
+            session_variables,
+            routine_body_cache: HashMap::new(),
+            sqlite_stat1: HashMap::new(),
+        }
     }
 
     // ============================================================================
@@ -98,6 +106,50 @@ impl Metadata {
     /// Clear all cached procedure/function bodies
     pub fn clear_routine_cache(&mut self) {
         self.routine_body_cache.clear();
+    }
+
+    // ============================================================================
+    // SQLite stat1 Storage (SQLite Compatibility)
+    // ============================================================================
+
+    /// Insert a sqlite_stat1 entry
+    pub fn insert_sqlite_stat1(
+        &mut self,
+        table_name: String,
+        index_name: Option<String>,
+        stat: String,
+    ) {
+        self.sqlite_stat1.insert((table_name, index_name), stat);
+    }
+
+    /// Get a sqlite_stat1 entry
+    pub fn get_sqlite_stat1(
+        &self,
+        table_name: &str,
+        index_name: Option<&str>,
+    ) -> Option<&String> {
+        self.sqlite_stat1
+            .get(&(table_name.to_string(), index_name.map(|s| s.to_string())))
+    }
+
+    /// Get all sqlite_stat1 entries
+    pub fn get_all_sqlite_stat1(&self) -> &HashMap<(String, Option<String>), String> {
+        &self.sqlite_stat1
+    }
+
+    /// Delete a sqlite_stat1 entry
+    pub fn delete_sqlite_stat1(&mut self, table_name: &str, index_name: Option<&str>) {
+        self.sqlite_stat1.remove(&(table_name.to_string(), index_name.map(|s| s.to_string())));
+    }
+
+    /// Clear all sqlite_stat1 entries
+    pub fn clear_sqlite_stat1(&mut self) {
+        self.sqlite_stat1.clear();
+    }
+
+    /// Check if sqlite_stat1 has any entries
+    pub fn sqlite_stat1_is_empty(&self) -> bool {
+        self.sqlite_stat1.is_empty()
     }
 }
 

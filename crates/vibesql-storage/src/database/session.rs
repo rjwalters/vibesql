@@ -124,6 +124,53 @@ impl Database {
         );
     }
 
+    // ============================================================================
+    // SQLite stat1 Storage (SQLite Compatibility)
+    // ============================================================================
+
+    /// Insert a sqlite_stat1 entry
+    ///
+    /// This allows manual insertion of statistics for query optimizer tuning,
+    /// matching SQLite's behavior where users can INSERT INTO sqlite_stat1.
+    pub fn insert_sqlite_stat1(
+        &mut self,
+        table_name: String,
+        index_name: Option<String>,
+        stat: String,
+    ) {
+        self.metadata.insert_sqlite_stat1(table_name, index_name, stat);
+    }
+
+    /// Get a sqlite_stat1 entry
+    pub fn get_sqlite_stat1(
+        &self,
+        table_name: &str,
+        index_name: Option<&str>,
+    ) -> Option<&String> {
+        self.metadata.get_sqlite_stat1(table_name, index_name)
+    }
+
+    /// Get all sqlite_stat1 entries
+    pub fn get_all_sqlite_stat1(
+        &self,
+    ) -> &std::collections::HashMap<(String, Option<String>), String> {
+        self.metadata.get_all_sqlite_stat1()
+    }
+
+    /// Delete a sqlite_stat1 entry
+    pub fn delete_sqlite_stat1(&mut self, table_name: &str, index_name: Option<&str>) {
+        self.metadata.delete_sqlite_stat1(table_name, index_name);
+    }
+
+    /// Clear all sqlite_stat1 entries
+    pub fn clear_sqlite_stat1(&mut self) {
+        self.metadata.clear_sqlite_stat1();
+    }
+
+    // ============================================================================
+    // SQL Mode
+    // ============================================================================
+
     /// Set the SQL compatibility mode at runtime
     ///
     /// This allows changing the SQL dialect (MySQL, SQLite, etc.) during a session.

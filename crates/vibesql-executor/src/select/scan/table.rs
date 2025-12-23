@@ -31,6 +31,7 @@ use crate::{
     sqlite_schema::{
         execute_sqlite_schema_query, get_sqlite_schema_table_schema, is_sqlite_schema_table,
     },
+    sqlite_stat::{execute_sqlite_stat1_query, get_sqlite_stat1_table_schema, is_sqlite_stat_table},
 };
 use vibesql_catalog::TableIdentifier;
 
@@ -201,6 +202,23 @@ pub(crate) fn execute_table_scan(
 
         // Get the schema for sqlite_master
         let table_schema = get_sqlite_schema_table_schema();
+
+        let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+        // SQL:1999 E051-09: Apply column aliases if provided
+        let table_schema = apply_column_aliases(table_schema, column_aliases)?;
+        // Note: Keep schema name as original table name for column name generation
+        let schema = CombinedSchema::from_table(effective_name, table_schema);
+
+        return Ok(super::FromResult::from_rows(schema, result.rows));
+    }
+
+    // Check if it's sqlite_stat1/stat2/stat3/stat4 (SQLite compatibility)
+    if is_sqlite_stat_table(table_name) {
+        // Execute sqlite_stat1 query
+        let result = execute_sqlite_stat1_query(&database.catalog, database)?;
+
+        // Get the schema for sqlite_stat1
+        let table_schema = get_sqlite_stat1_table_schema();
 
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
         // SQL:1999 E051-09: Apply column aliases if provided
