@@ -142,11 +142,11 @@ fn execute_insert_internal(
 
             // Validate column count
             if select_result.columns.len() != target_column_info.len() {
-                // SQLite format: "table T has N columns but M values were supplied"
                 return Err(ExecutorError::InsertColumnCountMismatch {
                     table_name: table_name.to_string(),
                     expected: target_column_info.len(),
                     provided: select_result.columns.len(),
+                    has_explicit_columns: !stmt.columns.is_empty(),
                 });
             }
 
@@ -171,6 +171,7 @@ fn execute_insert_internal(
         &rows_to_insert,
         expected_value_count,
         table_name,
+        !stmt.columns.is_empty(),
     )?;
 
     // Estimate DML cost for query analysis and optimization decisions
@@ -831,6 +832,7 @@ fn execute_insert_on_view(
                     table_name: view_def.name.clone(),
                     expected: target_columns.len(),
                     provided: value_exprs.len(),
+                    has_explicit_columns: !stmt.columns.is_empty(),
                 });
             }
 

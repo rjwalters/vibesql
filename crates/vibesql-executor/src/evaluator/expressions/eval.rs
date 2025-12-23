@@ -766,9 +766,13 @@ impl ExpressionEvaluator<'_> {
             let qualifier_lower = qualifier.to_lowercase();
             let inner_name_lower = self.schema.name.to_lowercase();
 
-            // Check if qualifier matches inner schema
-            if qualifier_lower == inner_name_lower {
-                // Qualifier matches inner schema - search only there
+            // Check if qualifier matches the table alias (SQLite extension: UPDATE t1 AS xyz)
+            let alias_lower = self.table_alias.as_ref().map(|a| a.to_lowercase());
+            let matches_alias = alias_lower.as_ref().is_some_and(|a| a == &qualifier_lower);
+
+            // Check if qualifier matches inner schema or table alias
+            if qualifier_lower == inner_name_lower || matches_alias {
+                // Qualifier matches inner schema or alias - search only there
                 searched_tables.push(self.schema.name.clone());
                 if let Some(col_index) = self.schema.get_column_index(column) {
                     return row
@@ -794,6 +798,9 @@ impl ExpressionEvaluator<'_> {
                 } else {
                     // Qualifier doesn't match any known schema
                     let mut known_tables = vec![self.schema.name.clone()];
+                    if let Some(ref alias) = self.table_alias {
+                        known_tables.push(alias.clone());
+                    }
                     known_tables.push(outer_schema.name.clone());
 
                     return Err(ExecutorError::InvalidTableQualifier {
@@ -804,10 +811,14 @@ impl ExpressionEvaluator<'_> {
                 }
             } else {
                 // No outer schema and qualifier doesn't match inner schema
+                let mut known_tables = vec![self.schema.name.clone()];
+                if let Some(ref alias) = self.table_alias {
+                    known_tables.push(alias.clone());
+                }
                 return Err(ExecutorError::InvalidTableQualifier {
                     qualifier: qualifier.to_string(),
                     column: column.to_string(),
-                    available_tables: vec![self.schema.name.clone()],
+                    available_tables: known_tables,
                 });
             }
 

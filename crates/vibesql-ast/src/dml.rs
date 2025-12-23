@@ -92,6 +92,8 @@ pub struct UpdateStmt {
     /// Whether the table name was quoted (delimited) in the original SQL.
     /// Per SQL:1999, quoted identifiers are case-sensitive.
     pub quoted: bool,
+    /// Optional table alias (SQLite extension: UPDATE t1 AS xyz SET ...)
+    pub alias: Option<String>,
     pub assignments: Vec<Assignment>,
     pub where_clause: Option<WhereClause>,
     /// Optional conflict resolution clause (SQLite extension)

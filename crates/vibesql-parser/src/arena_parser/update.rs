@@ -52,6 +52,32 @@ impl<'arena> ArenaParser<'arena> {
             }
         };
 
+        // Parse optional alias: UPDATE t1 AS alias SET ... or UPDATE t1 alias SET ...
+        // SQLite extension for using table alias in UPDATE statements
+        let alias = if self.try_consume_keyword(Keyword::As) {
+            // AS keyword present, alias required
+            match self.peek() {
+                Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                    let alias_name = name.clone();
+                    self.advance();
+                    Some(self.intern(&alias_name))
+                }
+                _ => return Err(ParseError { message: "Expected alias after AS".to_string() }),
+            }
+        } else if !self.peek_keyword(Keyword::Set) {
+            // No AS keyword, but might have alias before SET
+            match self.peek() {
+                Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                    let alias_name = name.clone();
+                    self.advance();
+                    Some(self.intern(&alias_name))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+
         // Parse SET keyword
         self.consume_keyword(Keyword::Set)?;
 
@@ -84,7 +110,7 @@ impl<'arena> ArenaParser<'arena> {
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
 
-        let stmt = UpdateStmt { table_name, quoted, assignments, where_clause, conflict_clause };
+        let stmt = UpdateStmt { table_name, quoted, alias, assignments, where_clause, conflict_clause };
 
         Ok(self.arena.alloc(stmt))
     }

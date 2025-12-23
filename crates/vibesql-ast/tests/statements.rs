@@ -57,6 +57,7 @@ fn test_create_update_statement() {
     let stmt = Statement::Update(UpdateStmt {
         table_name: "users".to_string(),
         quoted: false,
+        alias: None,
         assignments: vec![Assignment {
             column: "name".to_string(),
             value: Expression::Literal(SqlValue::Varchar(StringValue::from("Bob"))),

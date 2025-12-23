@@ -61,6 +61,7 @@ fn test_update_where_scalar_subquery_equal() {
     // UPDATE employees SET salary = 55000 WHERE salary = (SELECT min_salary FROM config)
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
+        alias: None,
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
@@ -147,6 +148,7 @@ fn test_update_where_scalar_subquery_less_than() {
     // UPDATE employees SET bonus = 5000 WHERE salary < (SELECT AVG(salary) FROM employees)
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
+        alias: None,
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "bonus".to_string(),
@@ -224,8 +226,9 @@ fn test_update_where_subquery_returns_null() {
 
     // UPDATE employees SET salary = 60000 WHERE salary < (SELECT max_salary FROM config)
     let stmt = vibesql_ast::UpdateStmt {
-        quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
+        alias: None,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(60000)),
@@ -315,6 +318,7 @@ fn test_update_where_subquery_with_aggregate() {
     // UPDATE items SET discounted = TRUE WHERE price = (SELECT MAX(price) FROM items)
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
+        alias: None,
         table_name: "items".to_string(),
         assignments: vec![Assignment {
             column: "discounted".to_string(),
@@ -440,6 +444,7 @@ fn test_update_where_and_set_both_use_subqueries() {
     // dept_id FROM active_depts)
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
+        alias: None,
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),

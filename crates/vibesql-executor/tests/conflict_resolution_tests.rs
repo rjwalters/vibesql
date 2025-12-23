@@ -220,6 +220,7 @@ fn test_update_or_ignore_primary_key_conflict() {
     let stmt = UpdateStmt {
         table_name: "users".to_string(),
         quoted: false,
+        alias: None,
         assignments: vec![Assignment {
             column: "id".to_string(),
             value: Expression::Literal(SqlValue::Integer(2)),
@@ -264,6 +265,7 @@ fn test_update_or_ignore_unique_constraint_conflict() {
     let stmt = UpdateStmt {
         table_name: "users".to_string(),
         quoted: false,
+        alias: None,
         assignments: vec![Assignment {
             column: "email".to_string(),
             value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("bob@test.com"))),
@@ -298,6 +300,7 @@ fn test_update_or_ignore_no_conflict() {
     let stmt = UpdateStmt {
         table_name: "users".to_string(),
         quoted: false,
+        alias: None,
         assignments: vec![Assignment {
             column: "name".to_string(),
             value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice Updated"))),
@@ -338,6 +341,7 @@ fn test_update_or_replace_primary_key_conflict() {
     let stmt = UpdateStmt {
         table_name: "users".to_string(),
         quoted: false,
+        alias: None,
         assignments: vec![Assignment {
             column: "id".to_string(),
             value: Expression::Literal(SqlValue::Integer(2)),
@@ -379,6 +383,7 @@ fn test_update_or_replace_unique_constraint_conflict() {
     let stmt = UpdateStmt {
         table_name: "users".to_string(),
         quoted: false,
+        alias: None,
         assignments: vec![Assignment {
             column: "email".to_string(),
             value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("bob@test.com"))),
@@ -421,6 +426,7 @@ fn test_update_or_replace_no_conflict() {
     let stmt = UpdateStmt {
         table_name: "users".to_string(),
         quoted: false,
+        alias: None,
         assignments: vec![Assignment {
             column: "name".to_string(),
             value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice Updated"))),
@@ -487,6 +493,7 @@ fn test_update_or_ignore_not_null_violation() {
     let stmt = UpdateStmt {
         table_name: "users".to_string(),
         quoted: false,
+        alias: None,
         assignments: vec![Assignment {
             column: "email".to_string(),
             value: Expression::Literal(SqlValue::Null),
