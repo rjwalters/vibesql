@@ -327,8 +327,19 @@ impl UpdateExecutor {
             // Check if primary key is being updated
             let updates_pk = if let Some(ref pk_idx) = pk_indices {
                 stmt.assignments.iter().any(|a| {
-                    let col_index = schema.get_column_index(&a.column).unwrap();
-                    pk_idx.contains(&col_index)
+                    // Check if this is a rowid assignment
+                    let col_name_lower = a.column.to_lowercase();
+                    let is_rowid = col_name_lower == "rowid" || col_name_lower == "_rowid_" || col_name_lower == "oid";
+
+                    if is_rowid {
+                        // For INTEGER PRIMARY KEY tables, rowid IS the PK
+                        // For other tables, rowid is virtual and not in PK
+                        schema.rowid_alias_column.is_some()
+                    } else if let Some(col_index) = schema.get_column_index(&a.column) {
+                        pk_idx.contains(&col_index)
+                    } else {
+                        false
+                    }
                 })
             } else {
                 false
@@ -707,6 +718,13 @@ impl UpdateExecutor {
         let mut changed_columns = std::collections::HashSet::new();
 
         for assignment in &stmt.assignments {
+            // Check if this is a rowid assignment - fall back to normal path
+            let col_name_lower = assignment.column.to_lowercase();
+            let is_rowid = col_name_lower == "rowid" || col_name_lower == "_rowid_" || col_name_lower == "oid";
+            if is_rowid {
+                return Ok(None); // rowid update needs normal path for proper handling
+            }
+
             let col_index = schema.get_column_index(&assignment.column).ok_or_else(|| {
                 ExecutorError::ColumnNotFound {
                     column_name: assignment.column.clone(),
@@ -813,6 +831,13 @@ impl UpdateExecutor {
         let pk_indices = schema.get_primary_key_indices();
 
         for assignment in &stmt.assignments {
+            // Check if this is a rowid assignment - fall back to normal path
+            let col_name_lower = assignment.column.to_lowercase();
+            let is_rowid = col_name_lower == "rowid" || col_name_lower == "_rowid_" || col_name_lower == "oid";
+            if is_rowid {
+                return Ok(None); // rowid update needs normal path for proper handling
+            }
+
             // Check if value is a literal (no expression evaluation needed)
             let new_value = match &assignment.value {
                 vibesql_ast::Expression::Literal(val) => val.clone(),
@@ -1417,7 +1442,10 @@ fn validate_set_expressions(
 ) -> Result<(), ExecutorError> {
     for assignment in assignments {
         // Validate target column exists (LHS of assignment)
-        if schema.get_column_index(&assignment.column).is_none() {
+        // Special case: rowid is a virtual column that always exists (SQLite compatibility)
+        let col_name_lower = assignment.column.to_lowercase();
+        let is_rowid = col_name_lower == "rowid" || col_name_lower == "_rowid_" || col_name_lower == "oid";
+        if !is_rowid && schema.get_column_index(&assignment.column).is_none() {
             return Err(ExecutorError::NoSuchColumn { column_ref: assignment.column.clone() });
         }
 

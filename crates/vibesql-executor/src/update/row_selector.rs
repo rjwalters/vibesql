@@ -36,7 +36,12 @@ impl<'a> RowSelector<'a> {
                 if let Some(pk_index) = table.primary_key_index() {
                     if let Some(&row_index) = pk_index.get(&pk_values) {
                         // Found the row via index - single row to update
-                        return Ok(vec![(row_index, table.scan()[row_index].clone())]);
+                        // Clone and set row_id for ROWID pseudo-column support
+                        let mut cloned_row = table.scan()[row_index].clone();
+                        if cloned_row.row_id.is_none() {
+                            cloned_row.row_id = Some((row_index + 1) as u64);
+                        }
+                        return Ok(vec![(row_index, cloned_row)]);
                     } else {
                         // Primary key not found - no rows to update
                         return Ok(vec![]);
@@ -226,7 +231,12 @@ impl<'a> RowSelector<'a> {
             };
 
             if should_update {
-                candidate_rows.push((row_index, row.clone()));
+                // Clone the row and set row_id for ROWID pseudo-column support
+                let mut cloned_row = row.clone();
+                if cloned_row.row_id.is_none() {
+                    cloned_row.row_id = Some((row_index + 1) as u64);
+                }
+                candidate_rows.push((row_index, cloned_row));
             }
         }
 

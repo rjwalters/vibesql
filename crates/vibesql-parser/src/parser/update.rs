@@ -46,12 +46,17 @@ impl Parser {
         // Parse assignments
         let mut assignments = Vec::new();
         loop {
-            // Parse column name (support both regular and delimited identifiers)
+            // Parse column name (support regular, delimited identifiers, and rowid keyword)
             let column = match self.peek() {
                 Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
                     let c = col.clone();
                     self.advance();
                     c
+                }
+                // SQLite allows updating the virtual rowid column
+                Token::Keyword { keyword: Keyword::Rowid, .. } => {
+                    self.advance();
+                    "rowid".to_string()
                 }
                 _ => {
                     return Err(ParseError {
