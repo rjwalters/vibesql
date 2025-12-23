@@ -293,8 +293,42 @@ impl Parser {
                 });
             } else if self.peek_keyword(Keyword::Null) {
                 // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS NOT NULL"
+                // BUT: In column definition context, "DEFAULT expr NOT NULL" should parse NOT NULL
+                // as a column constraint, not as part of the expression.
+                //
+                // Heuristic: If the left expression is a simple literal and what follows NULL
+                // could be a column constraint context (`,` `)` or constraint keyword), then
+                // treat NOT NULL as a column constraint, not an operator.
+                // This handles: DEFAULT 'table' NOT NULL
+                // But allows: WHERE col NOT NULL (col is not a literal)
                 self.consume_keyword(Keyword::Null)?;
-                return Ok(vibesql_ast::Expression::IsNull { expr: Box::new(left), negated: true });
+
+                // Check if left is a literal (in which case NOT NULL as an operator is semantically odd)
+                let left_is_literal = matches!(&left,
+                    vibesql_ast::Expression::Literal(_)
+                );
+
+                // Check what comes after NULL
+                let next_could_be_column_constraint = match self.peek() {
+                    Token::Comma | Token::RParen => true,
+                    Token::Keyword { keyword: kw, .. } => matches!(kw,
+                        // Column constraint keywords that can follow NOT NULL
+                        Keyword::Check | Keyword::Unique | Keyword::Primary |
+                        Keyword::References | Keyword::Collate | Keyword::Default |
+                        Keyword::On | Keyword::Generated | Keyword::AutoIncrement | Keyword::Constraint
+                    ),
+                    Token::Semicolon | Token::Eof => false, // At end of query, treat as operator
+                    _ => false,
+                };
+
+                if left_is_literal && next_could_be_column_constraint {
+                    // Likely in column definition: DEFAULT 'value' NOT NULL
+                    // Restore position - NOT NULL should be parsed as column constraint
+                    self.position = saved_pos;
+                } else {
+                    // General case: expr NOT NULL is an operator
+                    return Ok(vibesql_ast::Expression::IsNull { expr: Box::new(left), negated: true });
+                }
             } else {
                 // Not "NOT IN", "NOT BETWEEN", "NOT LIKE", "NOT GLOB", or "NOT NULL", restore position and continue
                 // Note: NOT EXISTS is handled in parse_primary_expression()
