@@ -72,12 +72,13 @@ pub fn resolve_target_columns_with_rowid(
 pub fn validate_row_column_counts(
     rows: &[Vec<vibesql_ast::Expression>],
     expected_count: usize,
-    _table_name: &str,
+    table_name: &str,
 ) -> Result<(), ExecutorError> {
     for value_exprs in rows.iter() {
         if value_exprs.len() != expected_count {
-            // Match SQLite's error message format exactly: "N values for M columns"
+            // SQLite format: "table T has N columns but M values were supplied"
             return Err(ExecutorError::InsertColumnCountMismatch {
+                table_name: table_name.to_string(),
                 expected: expected_count,
                 provided: value_exprs.len(),
             });

@@ -142,8 +142,9 @@ fn execute_insert_internal(
 
             // Validate column count
             if select_result.columns.len() != target_column_info.len() {
-                // Match SQLite's error message format exactly
+                // SQLite format: "table T has N columns but M values were supplied"
                 return Err(ExecutorError::InsertColumnCountMismatch {
+                    table_name: table_name.to_string(),
                     expected: target_column_info.len(),
                     provided: select_result.columns.len(),
                 });
@@ -827,6 +828,7 @@ fn execute_insert_on_view(
             // Validate column count
             if value_exprs.len() != target_columns.len() {
                 return Err(ExecutorError::InsertColumnCountMismatch {
+                    table_name: view_def.name.clone(),
                     expected: target_columns.len(),
                     provided: value_exprs.len(),
                 });
