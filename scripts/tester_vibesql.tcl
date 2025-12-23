@@ -2138,6 +2138,9 @@ proc run_test_file {filename} {
         set TEMP_STORE $::TEMP_STORE
         set SQLITE_DEFAULT_AUTOVACUUM $::SQLITE_DEFAULT_AUTOVACUUM
         array set sqlite_options [array get ::sqlite_options]
+        # Initialize the default database connection (as SQLite's tester.tcl does)
+        # This ensures tests that use execsql without explicit sqlite3 db calls work correctly
+        sqlite3 db test.db
     }
     regsub {source \$testdir/tester\.tcl} $content $tester_vars content
 
