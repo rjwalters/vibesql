@@ -30,6 +30,7 @@ fn test_update_with_default_value() {
     // UPDATE users SET name = DEFAULT WHERE id = 1
     let stmt = UpdateStmt {
         quoted: false,
+        alias: None,
         table_name: "users".to_string(),
         assignments: vec![Assignment { column: "name".to_string(), value: Expression::Default }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -79,6 +80,7 @@ fn test_update_default_no_default_value_defined() {
     // UPDATE users SET name = DEFAULT WHERE id = 1
     let stmt = UpdateStmt {
         quoted: false,
+        alias: None,
         table_name: "users".to_string(),
         assignments: vec![Assignment { column: "name".to_string(), value: Expression::Default }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {

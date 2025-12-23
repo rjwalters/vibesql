@@ -1287,6 +1287,7 @@ pub fn transform_update<V: ExpressionMutVisitor>(visitor: &mut V, stmt: UpdateSt
     UpdateStmt {
         table_name: stmt.table_name,
         quoted: stmt.quoted,
+        alias: stmt.alias,
         assignments: stmt
             .assignments
             .into_iter()

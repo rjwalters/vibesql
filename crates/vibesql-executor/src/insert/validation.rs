@@ -73,14 +73,15 @@ pub fn validate_row_column_counts(
     rows: &[Vec<vibesql_ast::Expression>],
     expected_count: usize,
     table_name: &str,
+    has_explicit_columns: bool,
 ) -> Result<(), ExecutorError> {
     for value_exprs in rows.iter() {
         if value_exprs.len() != expected_count {
-            // SQLite format: "table T has N columns but M values were supplied"
             return Err(ExecutorError::InsertColumnCountMismatch {
                 table_name: table_name.to_string(),
                 expected: expected_count,
                 provided: value_exprs.len(),
+                has_explicit_columns,
             });
         }
     }

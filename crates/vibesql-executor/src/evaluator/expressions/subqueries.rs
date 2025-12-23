@@ -29,10 +29,14 @@ impl ExpressionEvaluator<'_> {
         let expr_val = self.eval(expr, row)?;
 
         // Convert TableSchema to CombinedSchema for outer context
-        let outer_combined = crate::schema::CombinedSchema::from_table(
-            self.schema.name.clone(),
-            self.schema.clone(),
-        );
+        // Use table_alias if set (for UPDATE t1 AS xyz), otherwise use schema name
+        let table_name_for_outer = self
+            .table_alias
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| self.schema.name.clone());
+        let outer_combined =
+            crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
         // Check if this is a non-correlated subquery that can be cached
         let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
@@ -153,10 +157,14 @@ impl ExpressionEvaluator<'_> {
         ))?;
 
         // Convert TableSchema to CombinedSchema for outer context
-        let outer_combined = crate::schema::CombinedSchema::from_table(
-            self.schema.name.clone(),
-            self.schema.clone(),
-        );
+        // Use table_alias if set (for UPDATE t1 AS xyz), otherwise use schema name
+        let table_name_for_outer = self
+            .table_alias
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| self.schema.name.clone());
+        let outer_combined =
+            crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
         // Check if this is a non-correlated subquery that can be cached
         let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
@@ -223,10 +231,14 @@ impl ExpressionEvaluator<'_> {
         ))?;
 
         // Convert TableSchema to CombinedSchema for outer context
-        let outer_combined = crate::schema::CombinedSchema::from_table(
-            self.schema.name.clone(),
-            self.schema.clone(),
-        );
+        // Use table_alias if set (for UPDATE t1 AS xyz), otherwise use schema name
+        let table_name_for_outer = self
+            .table_alias
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| self.schema.name.clone());
+        let outer_combined =
+            crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
         // Check if this is a non-correlated subquery that can be cached
         let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
@@ -298,10 +310,14 @@ impl ExpressionEvaluator<'_> {
         let left_val = self.eval(expr, row)?;
 
         // Convert TableSchema to CombinedSchema for outer context
-        let outer_combined = crate::schema::CombinedSchema::from_table(
-            self.schema.name.clone(),
-            self.schema.clone(),
-        );
+        // Use table_alias if set (for UPDATE t1 AS xyz), otherwise use schema name
+        let table_name_for_outer = self
+            .table_alias
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| self.schema.name.clone());
+        let outer_combined =
+            crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
         // Check if this is a non-correlated subquery that can be cached
         let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);

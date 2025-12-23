@@ -236,7 +236,7 @@ impl UpdateExecutor {
 
         // Step 3: Create expression evaluator with database reference for subquery support
         //         and optional procedural/trigger context for variable resolution
-        let evaluator = if let Some(ctx) = trigger_context {
+        let mut evaluator = if let Some(ctx) = trigger_context {
             // Trigger context takes precedence (trigger statements can't have procedural context)
             ExpressionEvaluator::with_trigger_context(schema, database, ctx)
         } else if let Some(ctx) = procedural_context {
@@ -244,6 +244,11 @@ impl UpdateExecutor {
         } else {
             ExpressionEvaluator::with_database(schema, database)
         };
+
+        // Set table alias if present (SQLite extension: UPDATE t1 AS xyz SET ...)
+        if let Some(ref alias) = stmt.alias {
+            evaluator.set_table_alias(alias.clone());
+        }
 
         // Step 3.5: Validate SET expressions BEFORE row selection
         // SQLite validates expressions at preparation time, not execution time.

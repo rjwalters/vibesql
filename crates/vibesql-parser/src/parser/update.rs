@@ -40,6 +40,26 @@ impl Parser {
         let table_name = table_ref.full_name();
         let quoted = table_ref.is_any_quoted();
 
+        // Parse optional alias: UPDATE t1 AS alias SET ... or UPDATE t1 alias SET ...
+        // SQLite extension for using table alias in UPDATE statements
+        let alias = if self.try_consume_keyword(Keyword::As) {
+            // AS keyword present, alias required
+            Some(self.parse_identifier()?)
+        } else if !self.peek_keyword(Keyword::Set) {
+            // No AS keyword, but might have alias before SET
+            // Check if current token is an identifier (not SET keyword)
+            match self.peek() {
+                Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                    let alias_name = name.clone();
+                    self.advance();
+                    Some(alias_name)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+
         // Parse SET keyword
         self.expect_keyword(Keyword::Set)?;
 
@@ -98,6 +118,7 @@ impl Parser {
         Ok(vibesql_ast::UpdateStmt {
             table_name,
             quoted,
+            alias,
             assignments,
             where_clause,
             conflict_clause,

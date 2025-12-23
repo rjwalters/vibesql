@@ -327,22 +327,21 @@ pub(crate) fn cast_value(
         // Cast to NUMERIC
         // SQLite NUMERIC affinity: return INTEGER if value is exact integer, REAL otherwise
         Numeric { .. } => {
+            // Short-circuit for integer types to avoid precision loss through f64
+            match value {
+                SqlValue::Integer(n) => return Ok(SqlValue::Integer(*n)),
+                SqlValue::Smallint(n) => return Ok(SqlValue::Integer(*n as i64)),
+                SqlValue::Bigint(n) => return Ok(SqlValue::Integer(*n)),
+                SqlValue::Unsigned(n) => return Ok(SqlValue::Integer(*n as i64)),
+                SqlValue::Boolean(b) => return Ok(SqlValue::Integer(if *b { 1 } else { 0 })),
+                _ => {}
+            }
+            // For non-integer types, convert through f64
             let float_val = match value {
                 SqlValue::Numeric(f) => *f,
-                SqlValue::Integer(n) => *n as f64,
-                SqlValue::Smallint(n) => *n as f64,
-                SqlValue::Bigint(n) => *n as f64,
-                SqlValue::Unsigned(n) => *n as f64,
                 SqlValue::Float(n) => *n as f64,
                 SqlValue::Real(n) => *n as f64,
                 SqlValue::Double(n) => *n,
-                SqlValue::Boolean(b) => {
-                    if *b {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
                 SqlValue::Varchar(s) | SqlValue::Character(s) => {
                     // SQLite: Permissive conversion - extract leading numeric portion
                     let (_, fval, _) = string_to_number(s);
@@ -435,6 +434,13 @@ pub(crate) fn cast_value(
                 SqlValue::Time(s) => arcstr::ArcStr::from(s.to_string().as_str()),
                 SqlValue::Timestamp(s) => arcstr::ArcStr::from(s.to_string().as_str()),
                 SqlValue::Character(s) => s.clone(),
+                SqlValue::Blob(bytes) => {
+                    // SQLite: CAST BLOB to TEXT interprets bytes as UTF-8
+                    match std::str::from_utf8(bytes) {
+                        Ok(s) => arcstr::ArcStr::from(s),
+                        Err(_) => arcstr::ArcStr::from(String::from_utf8_lossy(bytes).as_ref()),
+                    }
+                }
                 _ => arcstr::ArcStr::from(""), // SQLite: Default to empty string for unknown types
             };
 
@@ -543,6 +549,13 @@ pub(crate) fn cast_value(
                 SqlValue::Double(n) => arcstr::ArcStr::from(n.to_string().as_str()),
                 SqlValue::Numeric(n) => arcstr::ArcStr::from(n.to_string().as_str()),
                 SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "TRUE" } else { "FALSE" }),
+                SqlValue::Blob(bytes) => {
+                    // SQLite: CAST BLOB to TEXT interprets bytes as UTF-8
+                    match std::str::from_utf8(bytes) {
+                        Ok(s) => arcstr::ArcStr::from(s),
+                        Err(_) => arcstr::ArcStr::from(String::from_utf8_lossy(bytes).as_ref()),
+                    }
+                }
                 _ => arcstr::ArcStr::from(""),
             };
             // Truncate or pad to exact length
@@ -556,6 +569,30 @@ pub(crate) fn cast_value(
                 Ok(SqlValue::Character(string_val))
             }
         }
+
+        // Cast to BLOB
+        BinaryLargeObject => match value {
+            SqlValue::Blob(b) => Ok(SqlValue::Blob(b.clone())),
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                // SQLite: CAST TEXT to BLOB returns the text bytes
+                Ok(SqlValue::Blob(s.as_bytes().to_vec()))
+            }
+            SqlValue::Integer(n) => {
+                // SQLite: CAST integer to BLOB returns the string representation as bytes
+                Ok(SqlValue::Blob(n.to_string().into_bytes()))
+            }
+            SqlValue::Smallint(n) => Ok(SqlValue::Blob(n.to_string().into_bytes())),
+            SqlValue::Bigint(n) => Ok(SqlValue::Blob(n.to_string().into_bytes())),
+            SqlValue::Unsigned(n) => Ok(SqlValue::Blob(n.to_string().into_bytes())),
+            SqlValue::Float(n) => Ok(SqlValue::Blob(n.to_string().into_bytes())),
+            SqlValue::Real(n) => Ok(SqlValue::Blob(n.to_string().into_bytes())),
+            SqlValue::Double(n) => Ok(SqlValue::Blob(n.to_string().into_bytes())),
+            SqlValue::Numeric(n) => Ok(SqlValue::Blob(n.to_string().into_bytes())),
+            SqlValue::Boolean(b) => {
+                Ok(SqlValue::Blob(if *b { b"1".to_vec() } else { b"0".to_vec() }))
+            }
+            _ => Ok(SqlValue::Blob(vec![])), // SQLite: Default to empty blob
+        },
 
         // Unsupported target types
         _ => Err(ExecutorError::UnsupportedFeature(format!(

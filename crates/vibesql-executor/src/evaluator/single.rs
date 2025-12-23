@@ -32,6 +32,9 @@ pub struct ExpressionEvaluator<'a> {
     /// Row index for ROWID pseudo-column support (SQLite compatibility)
     /// When set, ROWID/_rowid_/oid column references will return this value
     pub(super) row_index: Option<u64>,
+    /// Table alias for UPDATE/DELETE statements (SQLite extension: UPDATE t1 AS xyz)
+    /// When set, column references qualified with this alias will resolve to the schema
+    pub(super) table_alias: Option<String>,
 }
 
 impl<'a> ExpressionEvaluator<'a> {
@@ -49,6 +52,7 @@ impl<'a> ExpressionEvaluator<'a> {
             enable_cse: super::caching::is_cse_enabled(),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             row_index: None,
+            table_alias: None,
         }
     }
 
@@ -70,6 +74,7 @@ impl<'a> ExpressionEvaluator<'a> {
             enable_cse: super::caching::is_cse_enabled(),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             row_index: None,
+            table_alias: None,
         }
     }
 
@@ -90,6 +95,7 @@ impl<'a> ExpressionEvaluator<'a> {
             enable_cse: super::caching::is_cse_enabled(),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             row_index: None,
+            table_alias: None,
         }
     }
 
@@ -111,6 +117,7 @@ impl<'a> ExpressionEvaluator<'a> {
             enable_cse: super::caching::is_cse_enabled(),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             row_index: None,
+            table_alias: None,
         }
     }
 
@@ -134,6 +141,7 @@ impl<'a> ExpressionEvaluator<'a> {
             enable_cse: super::caching::is_cse_enabled(),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             row_index: None,
+            table_alias: None,
         }
     }
 
@@ -156,6 +164,7 @@ impl<'a> ExpressionEvaluator<'a> {
             enable_cse: super::caching::is_cse_enabled(),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             row_index: None,
+            table_alias: None,
         }
     }
 
@@ -170,6 +179,14 @@ impl<'a> ExpressionEvaluator<'a> {
     /// Clear the row index (typically between row evaluations)
     pub fn clear_row_index(&mut self) {
         self.row_index = None;
+    }
+
+    /// Set the table alias for UPDATE/DELETE statements
+    ///
+    /// When set, column references qualified with this alias will resolve to the schema.
+    /// SQLite extension: UPDATE t1 AS xyz SET ... WHERE xyz.column = ...
+    pub fn set_table_alias(&mut self, alias: String) {
+        self.table_alias = Some(alias);
     }
 
     /// Evaluate a binary operation
@@ -256,6 +273,7 @@ impl<'a> ExpressionEvaluator<'a> {
             enable_cse: self.enable_cse,
             subquery_cache: self.subquery_cache.clone(),
             row_index: self.row_index,
+            table_alias: self.table_alias.clone(),
         };
         f(&evaluator)
     }
