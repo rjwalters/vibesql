@@ -184,7 +184,7 @@ fn test_update_column_not_found() {
 
     let result = UpdateExecutor::execute(&stmt, &mut db);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), ExecutorError::ColumnNotFound { .. }));
+    assert!(matches!(result.unwrap_err(), ExecutorError::NoSuchColumn { .. }));
 }
 
 #[test]
