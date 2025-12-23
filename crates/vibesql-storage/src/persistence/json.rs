@@ -375,10 +375,11 @@ fn table_to_json(table_name: &str, table: &Table) -> Result<JsonTable, StorageEr
 
     let columns = table.schema.columns.iter().map(column_to_json).collect();
 
+    // Only persist live (non-deleted) rows.
+    // Using scan_live() to skip rows marked as deleted in the deletion bitmap.
     let rows = table
-        .scan()
-        .iter()
-        .map(|row| {
+        .scan_live()
+        .map(|(_idx, row)| {
             let mut row_map = HashMap::new();
             for (i, value) in row.values.iter().enumerate() {
                 let col_name = &table.schema.columns[i].name;

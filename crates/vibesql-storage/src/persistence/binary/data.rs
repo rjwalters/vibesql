@@ -23,8 +23,10 @@ pub fn write_data<W: Write>(writer: &mut W, db: &Database) -> Result<(), Storage
             // Write row count
             write_u64(writer, table.row_count() as u64)?;
 
-            // Write each row
-            for row in table.scan() {
+            // Write each row (only live/non-deleted rows)
+            // Using scan_live() to skip rows marked as deleted in the deletion bitmap.
+            // This fixes a bug where deleted rows were being persisted to disk.
+            for (_idx, row) in table.scan_live() {
                 for value in &row.values {
                     write_sql_value(writer, value)?;
                 }

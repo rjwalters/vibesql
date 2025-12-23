@@ -122,11 +122,12 @@ impl Database {
                 writeln!(writer, ");")
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
-                // INSERT statements for data
+                // INSERT statements for data (only live/non-deleted rows)
+                // Using scan_live() to skip rows marked as deleted in the deletion bitmap.
                 if table.row_count() > 0 {
                     writeln!(writer)
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-                    for row in table.scan() {
+                    for (_idx, row) in table.scan_live() {
                         write!(writer, "INSERT INTO {} VALUES (", &table_name).map_err(|e| {
                             StorageError::NotImplemented(format!("Write error: {}", e))
                         })?;
