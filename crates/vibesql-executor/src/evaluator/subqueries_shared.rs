@@ -22,47 +22,57 @@ use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;
 
-/// Evaluate scalar subquery result - must return exactly one row and one column
+/// Evaluate scalar subquery result - returns first row's single column value
 ///
-/// ## SQL Semantics (SQL:1999 Section 7.9)
-/// - Must return exactly 1 row (error if multiple rows)
-/// - Must return exactly 1 column (error if multiple columns)
-/// - Returns NULL if subquery returns zero rows
+/// ## SQL Semantics
+///
+/// Standard SQL (SQL:1999 Section 7.9) requires scalar subqueries to return exactly
+/// one row and one column, erroring if multiple rows are returned.
+///
+/// However, SQLite takes a different approach: when a scalar subquery returns multiple
+/// rows, SQLite uses the first row's value (officially "undefined" behavior per SQLite
+/// docs, but consistently implemented). This is documented at:
+/// https://www.sqlite.org/lang_expr.html#scalar_subqueries
+///
+/// VibeSQL follows SQLite's behavior for compatibility with SQLite test suites and
+/// applications that rely on this behavior.
+///
+/// ## Behavior
+/// - Zero rows: Returns NULL
+/// - One row: Returns that row's single column value
+/// - Multiple rows: Returns the first row's single column value (SQLite compatibility)
+/// - Multiple columns: Returns error (both SQL standard and SQLite agree here)
 ///
 /// ## Parameters
 /// - `rows`: The result set from executing the subquery
 ///
 /// ## Returns
 /// - `Ok(SqlValue::Null)` if no rows returned
-/// - `Ok(value)` the single value if exactly one row returned
-/// - `Err(SubqueryReturnedMultipleRows)` if more than one row
+/// - `Ok(value)` the first row's single column value
 /// - `Err(SubqueryColumnCountMismatch)` if not exactly one column
 /// - `Err(ColumnIndexOutOfBounds)` if row doesn't have a value at index 0
 pub fn eval_scalar_subquery_core(rows: &[Row]) -> Result<SqlValue, ExecutorError> {
-    // SQL:1999 Section 7.9: Scalar subquery must return exactly 1 row
-    if rows.len() > 1 {
-        return Err(ExecutorError::SubqueryReturnedMultipleRows {
-            expected: 1,
-            actual: rows.len(),
-        });
+    // Return NULL if no rows (both SQL standard and SQLite agree)
+    if rows.is_empty() {
+        return Ok(SqlValue::Null);
     }
 
-    // SQL:1999 Section 7.9: Scalar subquery must return exactly 1 column
+    // SQL:1999 Section 7.9 and SQLite both require exactly 1 column
     // SQL standard (R-35033-20570): We must validate the actual column count AFTER
     // execution because wildcards like SELECT * expand to multiple columns at runtime.
-    if !rows.is_empty() && rows[0].values.len() != 1 {
+    if rows[0].values.len() != 1 {
         return Err(ExecutorError::SubqueryColumnCountMismatch {
             expected: 1,
             actual: rows[0].values.len(),
         });
     }
 
-    // Return the single value, or NULL if no rows
-    if rows.is_empty() {
-        Ok(SqlValue::Null)
-    } else {
-        rows[0].get(0).cloned().ok_or(ExecutorError::ColumnIndexOutOfBounds { index: 0 })
-    }
+    // SQLite compatibility: Take the first row's value when multiple rows are returned.
+    // This differs from SQL standard which would error, but matches SQLite's behavior.
+    // See: https://www.sqlite.org/lang_expr.html#scalar_subqueries
+    // "If the subquery returns more than one result row, the value is undefined."
+    // In practice, SQLite consistently returns the first row.
+    rows[0].get(0).cloned().ok_or(ExecutorError::ColumnIndexOutOfBounds { index: 0 })
 }
 
 /// Evaluate EXISTS predicate result
