@@ -36,6 +36,43 @@ impl<'a> ValueUpdater<'a> {
 
         // Apply each assignment
         for assignment in assignments {
+            // Check if this is a rowid assignment (SQLite compatibility)
+            let col_name_lower = assignment.column.to_lowercase();
+            let is_rowid = col_name_lower == "rowid" || col_name_lower == "_rowid_" || col_name_lower == "oid";
+
+            if is_rowid {
+                // Handle rowid update
+                // If the table has an INTEGER PRIMARY KEY (rowid alias), update that column
+                // Otherwise, update the row's internal row_id field
+                if let Some(ipk_col_idx) = self.schema.rowid_alias_column {
+                    // The INTEGER PRIMARY KEY column IS the rowid - update it
+                    let new_value = self.evaluator.eval(&assignment.value, original_row)?;
+                    new_row
+                        .set(ipk_col_idx, new_value)
+                        .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+                    changed_columns.insert(ipk_col_idx);
+                } else {
+                    // No INTEGER PRIMARY KEY - update the virtual rowid
+                    // Evaluate the new rowid value
+                    let new_value = self.evaluator.eval(&assignment.value, original_row)?;
+                    // Convert to u64 for row_id
+                    let new_rowid = match new_value {
+                        vibesql_types::SqlValue::Integer(i) => i as u64,
+                        vibesql_types::SqlValue::Bigint(i) => i as u64,
+                        other => {
+                            return Err(ExecutorError::UnsupportedExpression(format!(
+                                "ROWID must be an integer, got {:?}",
+                                other
+                            )));
+                        }
+                    };
+                    new_row.row_id = Some(new_rowid);
+                    // Note: We don't add anything to changed_columns since row_id
+                    // is not a real column. The storage layer will use the updated row_id.
+                }
+                continue;
+            }
+
             // Find column index
             // Use SQLite-compatible "no such column: X" error format
             let col_index = self.schema.get_column_index(&assignment.column).ok_or_else(|| {

@@ -96,15 +96,23 @@ impl<'arena> ArenaParser<'arena> {
         let mut assignments = BumpVec::new_in(self.arena);
 
         loop {
-            // Parse column name
-            let column = if let Token::Identifier(col) = self.peek() {
-                let col = col.clone();
-                self.advance();
-                self.intern(&col)
-            } else {
-                return Err(ParseError {
-                    message: "Expected column name in SET clause".to_string(),
-                });
+            // Parse column name (including rowid keyword for SQLite compatibility)
+            let column = match self.peek() {
+                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
+                    let col = col.clone();
+                    self.advance();
+                    self.intern(&col)
+                }
+                // SQLite allows updating the virtual rowid column
+                Token::Keyword { keyword: Keyword::Rowid, .. } => {
+                    self.advance();
+                    self.intern("rowid")
+                }
+                _ => {
+                    return Err(ParseError {
+                        message: "Expected column name in SET clause".to_string(),
+                    });
+                }
             };
 
             // Expect =
