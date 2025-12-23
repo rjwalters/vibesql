@@ -5,7 +5,10 @@ use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
 
 #[test]
-fn test_update_with_subquery_multiple_rows_error() {
+fn test_update_with_subquery_multiple_rows_uses_first() {
+    // SQLite-compatible behavior: When a scalar subquery returns multiple rows,
+    // use the first row's value instead of erroring.
+    // See: https://www.sqlite.org/lang_expr.html#scalar_subqueries
     let mut db = Database::new();
 
     // CREATE TABLE employees (id INT, salary INT)
@@ -31,7 +34,8 @@ fn test_update_with_subquery_multiple_rows_error() {
     db.insert_row("salaries", Row::new(vec![SqlValue::Integer(60000)])).unwrap();
     db.insert_row("salaries", Row::new(vec![SqlValue::Integer(70000)])).unwrap();
 
-    // UPDATE employees SET salary = (SELECT amount FROM salaries) -- ERROR: multiple rows
+    // UPDATE employees SET salary = (SELECT amount FROM salaries)
+    // SQLite uses the first row (60000)
     let subquery = Box::new(vibesql_ast::SelectStmt {
         with_clause: None,
 
@@ -71,13 +75,14 @@ fn test_update_with_subquery_multiple_rows_error() {
     };
 
     let result = UpdateExecutor::execute(&stmt, &mut db);
-    assert!(result.is_err());
-    match result.unwrap_err() {
-        ExecutorError::SubqueryReturnedMultipleRows { .. } => {
-            // Expected error
-        }
-        other => panic!("Expected SubqueryReturnedMultipleRows, got {:?}", other),
-    }
+    // SQLite-compatible: Should succeed and use the first value (60000)
+    assert!(result.is_ok(), "Should succeed with SQLite-compatible behavior");
+
+    // Verify the update was applied with the first value
+    let table = db.get_table("employees").unwrap();
+    let rows: Vec<&Row> = table.scan().iter().collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get(1).unwrap(), &SqlValue::Integer(60000));
 }
 
 #[test]

@@ -54,7 +54,10 @@ fn test_division_by_zero_error() {
 }
 
 #[test]
-fn test_subquery_returned_multiple_rows_error() {
+fn test_subquery_multiple_rows_returns_first() {
+    // SQLite-compatible behavior: When a scalar subquery returns multiple rows,
+    // return the first row's value instead of erroring.
+    // See: https://www.sqlite.org/lang_expr.html#scalar_subqueries
     let mut db = Database::new();
 
     // Create and populate table
@@ -71,23 +74,17 @@ fn test_subquery_returned_multiple_rows_error() {
         InsertExecutor::execute(&mut db, &insert_stmt).expect("Insert should succeed");
     }
 
-    // Scalar subquery returning multiple rows
+    // Scalar subquery returning multiple rows - should return the first value (1)
     let sql = "SELECT (SELECT id FROM items) AS single_value";
     let stmt = Parser::parse_sql(sql).expect("Failed to parse");
     if let Statement::Select(select_stmt) = stmt {
         let result = SelectExecutor::new(&db).execute(&select_stmt);
-        assert!(result.is_err(), "Should fail with SubqueryReturnedMultipleRows");
+        assert!(result.is_ok(), "Should succeed with SQLite-compatible behavior");
 
-        match result {
-            Err(ExecutorError::SubqueryReturnedMultipleRows { expected, actual }) => {
-                assert_eq!(expected, 1);
-                assert_eq!(actual, 2);
-                let error_msg =
-                    format!("{}", ExecutorError::SubqueryReturnedMultipleRows { expected, actual });
-                assert!(error_msg.contains("returned") && error_msg.contains("rows"));
-            }
-            other => panic!("Expected SubqueryReturnedMultipleRows error, got: {:?}", other),
-        }
+        let rows = result.unwrap();
+        assert_eq!(rows.len(), 1);
+        // First row's value should be 1 (the first id inserted)
+        assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Integer(1));
     }
 }
 

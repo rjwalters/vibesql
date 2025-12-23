@@ -1,14 +1,16 @@
 //! Scalar subquery error handling tests
 //!
-//! Tests for scalar subquery error cases and validation:
-//! - Multiple rows returned (cardinality violation)
-//! - Multiple columns returned (column count violation)
+//! Tests for scalar subquery behavior and validation:
+//! - Multiple rows returned: SQLite compatibility - returns first row (not an error)
+//! - Multiple columns returned: column count violation (still an error)
 
 use super::super::*;
 
 #[test]
-fn test_scalar_subquery_error_multiple_rows() {
-    // Test: Scalar subquery returns multiple rows - should error
+fn test_scalar_subquery_multiple_rows_returns_first() {
+    // Test: Scalar subquery returns multiple rows - SQLite-compatible behavior
+    // returns the first row's value instead of erroring
+    // See: https://www.sqlite.org/lang_expr.html#scalar_subqueries
     let mut db = vibesql_storage::Database::new();
 
     // Create employees table
@@ -63,7 +65,8 @@ fn test_scalar_subquery_error_multiple_rows() {
         offset: None,
     });
 
-    // Build main query: SELECT (subquery) FROM employees
+    // Build main query: SELECT (subquery) FROM employees LIMIT 1
+    // (LIMIT 1 because we only need to check one result)
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
         into_variables: None,
@@ -86,22 +89,18 @@ fn test_scalar_subquery_error_multiple_rows() {
         group_by: None,
         having: None,
         order_by: None,
-        limit: None,
+        limit: Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
         offset: None,
     };
 
     let executor = SelectExecutor::new(&db);
     let result = executor.execute(&stmt);
 
-    // Should error with SubqueryReturnedMultipleRows
-    assert!(result.is_err());
-    match result.unwrap_err() {
-        ExecutorError::SubqueryReturnedMultipleRows { expected, actual } => {
-            assert_eq!(expected, 1);
-            assert_eq!(actual, 2);
-        }
-        _ => panic!("Expected SubqueryReturnedMultipleRows error"),
-    }
+    // SQLite-compatible: Should succeed and return the first row's value (1)
+    assert!(result.is_ok(), "Should succeed with SQLite-compatible behavior");
+    let rows = result.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Integer(1));
 }
 
 #[test]
