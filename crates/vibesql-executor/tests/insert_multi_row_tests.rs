@@ -134,12 +134,15 @@ fn test_multi_row_insert_with_column_list() {
 }
 
 #[test]
-fn test_multi_row_insert_type_mismatch() {
+fn test_multi_row_insert_sqlite_type_affinity() {
+    // SQLite type affinity: any value can be stored in any column
+    // This implements SQLite's flexible typing where column types are
+    // preferences, not constraints.
     let mut db = vibesql_storage::Database::new();
     setup_test_table(&mut db);
 
     // INSERT INTO users VALUES (1, 'Alice'), ('not_a_number', 'Bob')
-    // Second row has type mismatch, should fail atomically
+    // Both rows should succeed - SQLite allows storing any type in any column
     let stmt = vibesql_ast::InsertStmt {
         with_clause: None,
         schema_name: None,
@@ -157,7 +160,7 @@ fn test_multi_row_insert_type_mismatch() {
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                     arcstr::ArcStr::from("not_a_number"),
-                )), /* Wrong type for id */
+                )), // Varchar in Integer column - allowed by SQLite affinity
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                     arcstr::ArcStr::from("Bob"),
                 )),
@@ -167,12 +170,14 @@ fn test_multi_row_insert_type_mismatch() {
         on_duplicate_key_update: None,
     };
 
+    // SQLite affinity: both rows should be inserted successfully
     let result = InsertExecutor::execute(&mut db, &stmt);
-    assert!(result.is_err());
+    assert!(result.is_ok(), "SQLite type affinity should accept any value type");
+    assert_eq!(result.unwrap(), 2);
 
-    // No rows should be inserted due to atomicity
+    // Both rows should be inserted
     let table = db.get_table("users").unwrap();
-    assert_eq!(table.row_count(), 0);
+    assert_eq!(table.row_count(), 2);
 }
 
 #[test]

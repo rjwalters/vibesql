@@ -146,11 +146,16 @@ fn test_insert_null_value() {
 }
 
 #[test]
-fn test_insert_type_mismatch() {
+fn test_insert_sqlite_type_affinity() {
+    // SQLite type affinity: any value can be stored in any column
+    // This implements SQLite's flexible typing where column types are
+    // preferences, not constraints. A Varchar value can be stored
+    // in an Integer column (it stays as Varchar, not converted).
     let mut db = vibesql_storage::Database::new();
     setup_test_table(&mut db);
 
     // INSERT INTO users VALUES ('not_a_number', 'Alice')
+    // This should succeed - SQLite allows storing any type in any column
     let stmt = vibesql_ast::InsertStmt {
         with_clause: None,
         schema_name: None,
@@ -170,9 +175,10 @@ fn test_insert_type_mismatch() {
         on_duplicate_key_update: None,
     };
 
+    // SQLite affinity: this should succeed
     let result = InsertExecutor::execute(&mut db, &stmt);
-    assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), ExecutorError::UnsupportedExpression(_)));
+    assert!(result.is_ok(), "SQLite type affinity should accept any value type");
+    assert_eq!(result.unwrap(), 1);
 }
 
 #[test]

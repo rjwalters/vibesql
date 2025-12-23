@@ -66,76 +66,33 @@ impl<'a> RowNormalizer<'a> {
     ) -> Result<(), StorageError> {
         match expected_type {
             // Exact numeric types
-            // SQLite type affinity: INTEGER columns can store REAL/NUMERIC values
-            // (value keeps its actual type, column type is just a preference)
+            // SQLite type affinity: INTEGER columns can store any value type.
+            // The column type is a preference, not a constraint. Values that couldn't
+            // be converted to the column type are stored in their original form.
             DataType::Integer => {
-                if !matches!(
-                    value,
-                    SqlValue::Integer(_) | SqlValue::Numeric(_) | SqlValue::Double(_) | SqlValue::Real(_) | SqlValue::Float(_)
-                ) {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "INTEGER".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
-                }
+                // Accept any value type (SQLite type affinity)
+                // INTEGER, NUMERIC, DOUBLE, REAL, FLOAT are numeric compatibles
+                // VARCHAR, CHARACTER are accepted as-is (couldn't convert in executor)
             }
             DataType::Smallint => {
-                if !matches!(
-                    value,
-                    SqlValue::Smallint(_) | SqlValue::Numeric(_) | SqlValue::Double(_) | SqlValue::Real(_) | SqlValue::Float(_)
-                ) {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "SMALLINT".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
-                }
+                // Accept any value type (SQLite type affinity)
             }
             DataType::Bigint => {
-                if !matches!(
-                    value,
-                    SqlValue::Bigint(_) | SqlValue::Numeric(_) | SqlValue::Double(_) | SqlValue::Real(_) | SqlValue::Float(_)
-                ) {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "BIGINT".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
-                }
+                // Accept any value type (SQLite type affinity)
             }
             DataType::Unsigned => {
-                if !matches!(value, SqlValue::Unsigned(_)) {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "UNSIGNED".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
-                }
+                // Accept any value type (SQLite type affinity)
             }
             DataType::Numeric { .. } | DataType::Decimal { .. } => {
-                if !matches!(value, SqlValue::Numeric(_)) {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "NUMERIC".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
-                }
+                // Accept any value type (SQLite type affinity)
+                // Values that couldn't be converted stay as text
             }
-            // Approximate numeric types
+            // Approximate numeric types - all accept any value (SQLite type affinity)
             DataType::Float { .. } => {
-                if !matches!(value, SqlValue::Float(_)) {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "FLOAT".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
-                }
+                // FLOAT affinity: accept any value type
             }
             DataType::Real => {
-                // REAL affinity: Accept and convert any numeric type to Real (f32)
-                // This implements SQLite's flexible type affinity where REAL columns
-                // accept INTEGER, REAL, DOUBLE, NUMERIC, etc. and convert to floating point
+                // REAL affinity: Accept any value type, convert numeric types to Real
                 match value {
                     SqlValue::Real(_) => {
                         // Already correct type
@@ -162,34 +119,19 @@ impl<'a> RowNormalizer<'a> {
                         *value = SqlValue::Real(*u as f32);
                     }
                     _ => {
-                        return Err(StorageError::TypeMismatch {
-                            column: column_name.to_string(),
-                            expected: "REAL".to_string(),
-                            actual: value.type_name().to_string(),
-                        });
+                        // SQLite affinity: keep non-numeric values as-is
                     }
                 }
             }
             DataType::DoublePrecision => {
-                if !matches!(value, SqlValue::Double(_)) {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "DOUBLE PRECISION".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
-                }
+                // DOUBLE PRECISION affinity: accept any value type
             }
-            // Character types
+            // Character types - SQLite type affinity allows any value
             DataType::Character { length } => {
                 if let SqlValue::Character(s) = value {
                     *s = Self::normalize_char_value(s, *length).into();
-                } else {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: format!("CHAR({})", length),
-                        actual: value.type_name().to_string(),
-                    });
                 }
+                // SQLite affinity: accept any value type
             }
             DataType::Varchar { max_length } => {
                 if let SqlValue::Varchar(s) = value {
@@ -199,16 +141,8 @@ impl<'a> RowNormalizer<'a> {
                             *s = s[..*max_len].into();
                         }
                     }
-                } else {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: format!(
-                            "VARCHAR({})",
-                            max_length.map(|l| l.to_string()).unwrap_or_else(|| "MAX".to_string())
-                        ),
-                        actual: value.type_name().to_string(),
-                    });
                 }
+                // SQLite affinity: accept any value type
             }
             DataType::Name => {
                 // NAME is VARCHAR(128) in SQL:1999
@@ -217,134 +151,74 @@ impl<'a> RowNormalizer<'a> {
                     if s.len() > 128 {
                         *s = s[..128].into();
                     }
-                } else {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "NAME".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
                 }
+                // SQLite affinity: accept any value type
             }
             DataType::CharacterLargeObject => {
-                // CLOB stored as Varchar
-                if !matches!(value, SqlValue::Varchar(_)) {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "CLOB".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
-                }
+                // CLOB: accept any value type (SQLite affinity)
             }
-            // Boolean
+            // Boolean - accept any value (SQLite affinity)
             DataType::Boolean => {
-                if !matches!(value, SqlValue::Boolean(_)) {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "BOOLEAN".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
-                }
+                // SQLite affinity: accept any value type
             }
-            // Date/Time types
+            // Date/Time types - SQLite affinity: accept any value
             DataType::Date => {
-                // Allow implicit conversion from VARCHAR to DATE
+                // Try implicit conversion from VARCHAR to DATE
                 match value {
                     SqlValue::Date(_) => {
                         // Already correct type
                     }
                     SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                        // Try to parse VARCHAR as DATE
-                        match s.parse::<vibesql_types::Date>() {
-                            Ok(date) => {
-                                *value = SqlValue::Date(date);
-                            }
-                            Err(_) => {
-                                return Err(StorageError::TypeMismatch {
-                                    column: column_name.to_string(),
-                                    expected: format!("DATE (cannot parse '{}')", s),
-                                    actual: value.type_name().to_string(),
-                                });
-                            }
+                        // Try to parse VARCHAR as DATE, keep as-is if fails
+                        if let Ok(date) = s.parse::<vibesql_types::Date>() {
+                            *value = SqlValue::Date(date);
                         }
+                        // SQLite affinity: keep non-parseable values as text
                     }
                     _ => {
-                        return Err(StorageError::TypeMismatch {
-                            column: column_name.to_string(),
-                            expected: "DATE".to_string(),
-                            actual: value.type_name().to_string(),
-                        });
+                        // SQLite affinity: accept any value type
                     }
                 }
             }
             DataType::Time { .. } => {
-                // Allow implicit conversion from VARCHAR to TIME
+                // Try implicit conversion from VARCHAR to TIME
                 match value {
                     SqlValue::Time(_) => {
                         // Already correct type
                     }
                     SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                        // Try to parse VARCHAR as TIME
-                        match s.parse::<vibesql_types::Time>() {
-                            Ok(time) => {
-                                *value = SqlValue::Time(time);
-                            }
-                            Err(_) => {
-                                return Err(StorageError::TypeMismatch {
-                                    column: column_name.to_string(),
-                                    expected: format!("TIME (cannot parse '{}')", s),
-                                    actual: value.type_name().to_string(),
-                                });
-                            }
+                        // Try to parse VARCHAR as TIME, keep as-is if fails
+                        if let Ok(time) = s.parse::<vibesql_types::Time>() {
+                            *value = SqlValue::Time(time);
                         }
+                        // SQLite affinity: keep non-parseable values as text
                     }
                     _ => {
-                        return Err(StorageError::TypeMismatch {
-                            column: column_name.to_string(),
-                            expected: "TIME".to_string(),
-                            actual: value.type_name().to_string(),
-                        });
+                        // SQLite affinity: accept any value type
                     }
                 }
             }
             DataType::Timestamp { .. } => {
-                // Allow implicit conversion from VARCHAR to TIMESTAMP
+                // Try implicit conversion from VARCHAR to TIMESTAMP
                 match value {
                     SqlValue::Timestamp(_) => {
                         // Already correct type
                     }
                     SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                        // Try to parse VARCHAR as TIMESTAMP
-                        match s.parse::<vibesql_types::Timestamp>() {
-                            Ok(ts) => {
-                                *value = SqlValue::Timestamp(ts);
-                            }
-                            Err(_) => {
-                                return Err(StorageError::TypeMismatch {
-                                    column: column_name.to_string(),
-                                    expected: format!("TIMESTAMP (cannot parse '{}')", s),
-                                    actual: value.type_name().to_string(),
-                                });
-                            }
+                        // Try to parse VARCHAR as TIMESTAMP, keep as-is if fails
+                        if let Ok(ts) = s.parse::<vibesql_types::Timestamp>() {
+                            *value = SqlValue::Timestamp(ts);
                         }
+                        // SQLite affinity: keep non-parseable values as text
                     }
                     _ => {
-                        return Err(StorageError::TypeMismatch {
-                            column: column_name.to_string(),
-                            expected: "TIMESTAMP".to_string(),
-                            actual: value.type_name().to_string(),
-                        });
+                        // SQLite affinity: accept any value type
                     }
                 }
             }
-            // Interval type
+            // Interval type - SQLite affinity: accept any value
             DataType::Interval { .. } => {
-                if !matches!(value, SqlValue::Interval(_)) {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "INTERVAL".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
-                }
+                // SQLite affinity: accept any value type
             }
             // Binary types - implements SQLite's BLOB affinity
             DataType::BinaryLargeObject => {
@@ -354,22 +228,7 @@ impl<'a> RowNormalizer<'a> {
                 // The value is stored as-is without conversion.
             }
             DataType::Bit { .. } => {
-                // BIT type: For now, accept Varchar or Integer as placeholder until proper BIT type
-                // is fully implemented VARCHAR can hold binary literals like
-                // b'1010', INTEGER can hold numeric values
-                if !matches!(
-                    value,
-                    SqlValue::Varchar(_)
-                        | SqlValue::Integer(_)
-                        | SqlValue::Bigint(_)
-                        | SqlValue::Unsigned(_)
-                ) {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "BIT".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
-                }
+                // BIT type: accept any value (SQLite affinity)
             }
             // User-defined types
             #[cfg_attr(not(debug_assertions), allow(unused_variables))]
@@ -404,7 +263,7 @@ impl<'a> RowNormalizer<'a> {
                     );
                 }
             }
-            // Vector type
+            // Vector type - check dimensions if it's a vector, otherwise accept any value
             DataType::Vector { dimensions } => {
                 if let SqlValue::Vector(v) = value {
                     if v.len() != *dimensions as usize {
@@ -414,13 +273,8 @@ impl<'a> RowNormalizer<'a> {
                             actual: format!("VECTOR({})", v.len()),
                         });
                     }
-                } else {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: format!("VECTOR({})", dimensions),
-                        actual: value.type_name().to_string(),
-                    });
                 }
+                // SQLite affinity: accept any value type
             }
             // NULL type
             DataType::Null => {
@@ -519,19 +373,27 @@ mod tests {
     }
 
     #[test]
-    fn test_type_mismatch() {
+    fn test_sqlite_type_affinity() {
+        // SQLite type affinity: any value can be stored in any column
+        // This implements SQLite's flexible typing where column types are
+        // preferences, not constraints. A Varchar value can be stored
+        // in an Integer column (it stays as Varchar, not converted).
         let schema = create_test_schema();
         let normalizer = RowNormalizer::new(&schema);
 
         let row = Row::from_vec(vec![
-            SqlValue::Varchar(arcstr::ArcStr::from("not_an_int")), // Wrong type for id
+            SqlValue::Varchar(arcstr::ArcStr::from("not_an_int")), // Varchar in Integer column
             SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
             SqlValue::Character(arcstr::ArcStr::from("ABC")),
         ]);
 
+        // SQLite affinity: this should succeed, storing the value as-is
         let result = normalizer.normalize_and_validate(row);
-        assert!(result.is_err());
-        assert!(matches!(result, Err(StorageError::TypeMismatch { .. })));
+        assert!(result.is_ok(), "SQLite type affinity should accept any value type");
+
+        // Verify the value was stored as-is (Varchar, not converted)
+        let normalized = result.unwrap();
+        assert!(matches!(normalized.values[0], SqlValue::Varchar(_)));
     }
 
     #[test]
