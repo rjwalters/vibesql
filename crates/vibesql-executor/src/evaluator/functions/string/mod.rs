@@ -27,7 +27,6 @@ pub(super) use length::{char_length, length, octet_length};
 pub(super) use search::{instr, locate, position};
 pub(super) use substring::{left, right, substring};
 pub(super) use transform::{replace, reverse};
+pub(super) use trim::{ltrim, rtrim, trim};
 
-// Note: trim and trim_advanced are not exported here because:
-// - trim is currently unused (reserved for future use)
-// - trim_advanced is exported directly from the trim module with pub(crate) visibility
+// Note: trim_advanced is exported directly from the trim module with pub(crate) visibility
