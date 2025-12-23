@@ -377,8 +377,14 @@ impl ExternalAggregate {
         for partition in &mut self.partitions {
             if !partition.spilled {
                 for (_, (key_values, accumulators)) in partition.groups.drain() {
-                    let agg_values: Vec<SqlValue> =
-                        accumulators.iter().map(|a| a.finalize()).collect();
+                    let agg_values: Vec<SqlValue> = accumulators
+                        .iter()
+                        .map(|a| {
+                            a.finalize().map_err(|e| {
+                                io::Error::new(io::ErrorKind::InvalidData, e.to_string())
+                            })
+                        })
+                        .collect::<io::Result<Vec<_>>>()?;
                     in_memory_results.push((key_values, agg_values));
                 }
             }
@@ -556,13 +562,17 @@ impl AggregateResultIterator {
         }
 
         // Finalize all groups
-        let results: Vec<_> = groups
-            .into_values()
-            .map(|(key_values, accumulators)| {
-                let agg_values: Vec<SqlValue> = accumulators.iter().map(|a| a.finalize()).collect();
-                (key_values, agg_values)
-            })
-            .collect();
+        let mut results = Vec::with_capacity(groups.len());
+        for (key_values, accumulators) in groups.into_values() {
+            let agg_values: Vec<SqlValue> = accumulators
+                .iter()
+                .map(|a| {
+                    a.finalize()
+                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+                })
+                .collect::<io::Result<Vec<_>>>()?;
+            results.push((key_values, agg_values));
+        }
 
         Ok(results)
     }

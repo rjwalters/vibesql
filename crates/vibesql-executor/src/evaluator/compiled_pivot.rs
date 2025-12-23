@@ -271,7 +271,7 @@ impl PivotAggregateGroup {
         // Finalize and build result map
         let mut results = HashMap::with_capacity(self.entries.len());
         for (entry, acc) in self.entries.iter().zip(accumulators.into_iter()) {
-            results.insert(entry.cache_key.clone(), acc.finalize());
+            results.insert(entry.cache_key.clone(), acc.finalize()?);
         }
 
         Ok(results)

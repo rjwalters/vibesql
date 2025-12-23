@@ -32,6 +32,8 @@ pub enum AggregateAccumulator {
         has_non_integer: bool,
         distinct: bool,
         seen: Option<HashSet<vibesql_types::SqlValue>>,
+        /// Set to true if integer overflow occurred during accumulation
+        overflow_error: bool,
     },
     Avg {
         sum: vibesql_types::SqlValue,
@@ -91,6 +93,7 @@ impl AggregateAccumulator {
                 has_non_integer: false,
                 distinct,
                 seen,
+                overflow_error: false,
             }),
             "AVG" => Ok(AggregateAccumulator::Avg {
                 sum: vibesql_types::SqlValue::Integer(0),
@@ -145,7 +148,13 @@ impl AggregateAccumulator {
                 ref mut has_non_integer,
                 distinct,
                 seen,
+                ref mut overflow_error,
             } => {
+                // If overflow already occurred, don't process more values
+                if *overflow_error {
+                    return;
+                }
+
                 // Track non-integer values for type determination
                 // SQLite: If ANY non-integer value is encountered (NULL, TEXT, REAL, etc.),
                 // the result should be REAL, even if that value is skipped
@@ -169,12 +178,32 @@ impl AggregateAccumulator {
                     let seen_set = seen.as_mut().unwrap();
                     if !seen_set.contains(value) {
                         seen_set.insert(value.clone());
-                        *sum = add_sql_values(sum, value);
-                        *count += 1;
+                        match add_sql_values(sum, value) {
+                            Ok(result) => {
+                                *sum = result;
+                                *count += 1;
+                            }
+                            Err(crate::errors::ExecutorError::IntegerOverflow) => {
+                                *overflow_error = true;
+                            }
+                            Err(_) => {
+                                // Other errors are treated as NULL (existing behavior)
+                            }
+                        }
                     }
                 } else {
-                    *sum = add_sql_values(sum, value);
-                    *count += 1;
+                    match add_sql_values(sum, value) {
+                        Ok(result) => {
+                            *sum = result;
+                            *count += 1;
+                        }
+                        Err(crate::errors::ExecutorError::IntegerOverflow) => {
+                            *overflow_error = true;
+                        }
+                        Err(_) => {
+                            // Other errors are treated as NULL (existing behavior)
+                        }
+                    }
                 }
             }
 
@@ -191,12 +220,18 @@ impl AggregateAccumulator {
                     let seen_set = seen.as_mut().unwrap();
                     if !seen_set.contains(value) {
                         seen_set.insert(value.clone());
-                        *sum = add_sql_values(sum, value);
-                        *count += 1;
+                        // For AVG, overflow in sum is rare since we divide anyway
+                        // Just use the result or skip on error
+                        if let Ok(result) = add_sql_values(sum, value) {
+                            *sum = result;
+                            *count += 1;
+                        }
                     }
                 } else {
-                    *sum = add_sql_values(sum, value);
-                    *count += 1;
+                    if let Ok(result) = add_sql_values(sum, value) {
+                        *sum = result;
+                        *count += 1;
+                    }
                 }
             }
 
@@ -348,16 +383,20 @@ impl AggregateAccumulator {
         }
     }
 
-    pub fn finalize(&self) -> vibesql_types::SqlValue {
+    pub fn finalize(&self) -> Result<vibesql_types::SqlValue, crate::errors::ExecutorError> {
         match self {
-            AggregateAccumulator::Count { count, .. } => vibesql_types::SqlValue::Integer(*count),
-            AggregateAccumulator::Sum { sum, count, has_non_integer, .. } => {
+            AggregateAccumulator::Count { count, .. } => Ok(vibesql_types::SqlValue::Integer(*count)),
+            AggregateAccumulator::Sum { sum, count, has_non_integer, overflow_error, .. } => {
+                // Check for overflow error first
+                if *overflow_error {
+                    return Err(crate::errors::ExecutorError::IntegerOverflow);
+                }
                 if *count == 0 {
-                    vibesql_types::SqlValue::Null
+                    Ok(vibesql_types::SqlValue::Null)
                 } else if *has_non_integer {
                     // Mixed types (saw NULL, TEXT, REAL, etc.) → return REAL
                     // Convert integer sum to REAL with .0 suffix
-                    match sum {
+                    Ok(match sum {
                         vibesql_types::SqlValue::Integer(v) => {
                             vibesql_types::SqlValue::Double(*v as f64)
                         }
@@ -368,40 +407,40 @@ impl AggregateAccumulator {
                             vibesql_types::SqlValue::Double(*v as f64)
                         }
                         _ => sum.clone(), // Already a floating-point type
-                    }
+                    })
                 } else {
                     // Pure integer inputs → preserve INTEGER type
-                    sum.clone()
+                    Ok(sum.clone())
                 }
             }
             AggregateAccumulator::Avg { sum, count, .. } => {
                 if *count == 0 {
-                    vibesql_types::SqlValue::Null
+                    Ok(vibesql_types::SqlValue::Null)
                 } else {
-                    divide_sql_value(sum, *count)
+                    Ok(divide_sql_value(sum, *count))
                 }
             }
             AggregateAccumulator::Min { value, .. } => {
-                value.clone().unwrap_or(vibesql_types::SqlValue::Null)
+                Ok(value.clone().unwrap_or(vibesql_types::SqlValue::Null))
             }
             AggregateAccumulator::Max { value, .. } => {
-                value.clone().unwrap_or(vibesql_types::SqlValue::Null)
+                Ok(value.clone().unwrap_or(vibesql_types::SqlValue::Null))
             }
             AggregateAccumulator::GroupConcat { values, separator, .. } => {
                 if values.is_empty() {
-                    vibesql_types::SqlValue::Null
+                    Ok(vibesql_types::SqlValue::Null)
                 } else {
-                    vibesql_types::SqlValue::Varchar(values.join(separator).into())
+                    Ok(vibesql_types::SqlValue::Varchar(values.join(separator).into()))
                 }
             }
             AggregateAccumulator::Total { sum, .. } => {
                 // TOTAL always returns a real number, even for empty set (returns 0.0)
-                vibesql_types::SqlValue::Numeric(*sum)
+                Ok(vibesql_types::SqlValue::Numeric(*sum))
             }
             AggregateAccumulator::JsonGroupArray { values, .. } => {
                 // Convert values to JSON array string
                 let json_array = sql_values_to_json_array(values);
-                vibesql_types::SqlValue::Varchar(json_array.into())
+                Ok(vibesql_types::SqlValue::Varchar(json_array.into()))
             }
         }
     }
@@ -455,6 +494,7 @@ impl AggregateAccumulator {
                     has_non_integer: h1,
                     distinct: d1,
                     seen: seen1,
+                    overflow_error: o1,
                 },
                 AggregateAccumulator::Sum {
                     sum: s2,
@@ -462,8 +502,18 @@ impl AggregateAccumulator {
                     has_non_integer: h2,
                     distinct: d2,
                     seen: seen2,
+                    overflow_error: o2,
                 },
             ) => {
+                // Propagate overflow error from either accumulator
+                if o2 {
+                    *o1 = true;
+                    return Ok(());
+                }
+                if *o1 {
+                    return Ok(());
+                }
+
                 if *d1 != d2 {
                     return Err(crate::errors::ExecutorError::UnsupportedExpression(
                         "Cannot combine SUM with different DISTINCT flags".into(),
@@ -478,15 +528,31 @@ impl AggregateAccumulator {
                     if let (Some(s1_set), Some(s2_set)) = (seen1, seen2) {
                         s1_set.extend(s2_set);
                         // Recalculate sum and count from merged set
-                        *s1 =
-                            s1_set.iter().fold(vibesql_types::SqlValue::Integer(0), |acc, val| {
-                                add_sql_values(&acc, val)
-                            });
+                        let mut new_sum = vibesql_types::SqlValue::Integer(0);
+                        for val in s1_set.iter() {
+                            match add_sql_values(&new_sum, val) {
+                                Ok(result) => new_sum = result,
+                                Err(crate::errors::ExecutorError::IntegerOverflow) => {
+                                    *o1 = true;
+                                    return Ok(());
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        *s1 = new_sum;
                         *c1 = s1_set.len() as i64;
                     }
                 } else {
-                    *s1 = add_sql_values(s1, &s2);
-                    *c1 += c2;
+                    match add_sql_values(s1, &s2) {
+                        Ok(result) => {
+                            *s1 = result;
+                            *c1 += c2;
+                        }
+                        Err(crate::errors::ExecutorError::IntegerOverflow) => {
+                            *o1 = true;
+                        }
+                        Err(_) => {}
+                    }
                 }
             }
 
@@ -506,15 +572,20 @@ impl AggregateAccumulator {
                     if let (Some(s1_set), Some(s2_set)) = (seen1, seen2) {
                         s1_set.extend(s2_set);
                         // Recalculate sum and count from merged set
-                        *s1 =
-                            s1_set.iter().fold(vibesql_types::SqlValue::Integer(0), |acc, val| {
-                                add_sql_values(&acc, val)
-                            });
+                        let mut new_sum = vibesql_types::SqlValue::Integer(0);
+                        for val in s1_set.iter() {
+                            if let Ok(result) = add_sql_values(&new_sum, val) {
+                                new_sum = result;
+                            }
+                        }
+                        *s1 = new_sum;
                         *c1 = s1_set.len() as i64;
                     }
                 } else {
-                    *s1 = add_sql_values(s1, &s2);
-                    *c1 += c2;
+                    if let Ok(result) = add_sql_values(s1, &s2) {
+                        *s1 = result;
+                        *c1 += c2;
+                    }
                 }
             }
 
@@ -671,22 +742,19 @@ impl AggregateAccumulator {
 fn add_sql_values(
     a: &vibesql_types::SqlValue,
     b: &vibesql_types::SqlValue,
-) -> vibesql_types::SqlValue {
+) -> Result<vibesql_types::SqlValue, crate::errors::ExecutorError> {
     // Use the proper arithmetic addition operator that preserves types
     // Integer + Integer → Integer, Float + anything → Float, etc.
     use vibesql_ast::BinaryOperator;
 
     use crate::evaluator::operators::OperatorRegistry;
 
-    match OperatorRegistry::eval_binary_op(
+    OperatorRegistry::eval_binary_op(
         a,
         &BinaryOperator::Plus,
         b,
         vibesql_types::SqlMode::default(),
-    ) {
-        Ok(result) => result,
-        Err(_) => vibesql_types::SqlValue::Null, // If addition fails, return NULL
-    }
+    )
 }
 
 /// Convert SqlValue to f64 for numeric operations
@@ -1040,7 +1108,7 @@ mod tests {
         acc.accumulate_tuple(vec![SqlValue::Integer(2), SqlValue::Integer(1)]);
         acc.accumulate_tuple(vec![SqlValue::Integer(1), SqlValue::Integer(1)]); // duplicate
 
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         assert_eq!(result, SqlValue::Integer(3)); // 3 unique tuples
     }
 
@@ -1054,7 +1122,7 @@ mod tests {
         acc.accumulate_tuple(vec![SqlValue::Null, SqlValue::Integer(1)]); // skipped
         acc.accumulate_tuple(vec![SqlValue::Integer(2), SqlValue::Integer(2)]);
 
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         assert_eq!(result, SqlValue::Integer(2)); // Only 2 valid tuples
     }
 
@@ -1066,6 +1134,7 @@ mod tests {
             has_non_integer: false,
             distinct: false,
             seen: None,
+            overflow_error: false,
         };
         let acc2 = AggregateAccumulator::Sum {
             sum: SqlValue::Integer(5),
@@ -1073,6 +1142,7 @@ mod tests {
             has_non_integer: false,
             distinct: false,
             seen: None,
+            overflow_error: false,
         };
 
         acc1.combine(acc2).unwrap();
@@ -1180,6 +1250,7 @@ mod tests {
             has_non_integer: false,
             distinct: false,
             seen: None,
+            overflow_error: false,
         };
 
         let result = acc1.combine(acc2);
@@ -1213,7 +1284,7 @@ mod tests {
         // Don't accumulate any values (empty set)
 
         // Finalize should return NULL
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         assert!(result.is_null(), "SUM over empty set should return NULL, got {:?}", result);
     }
 
@@ -1228,7 +1299,7 @@ mod tests {
         acc.accumulate(&SqlValue::Null);
 
         // Finalize should return NULL
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         assert!(result.is_null(), "SUM of all NULLs should return NULL, got {:?}", result);
     }
 
@@ -1243,7 +1314,7 @@ mod tests {
 
         // Finalize should return 0 (as Integer), not NULL
         // SQLite's SUM() preserves integer type for integer inputs
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         match result {
             SqlValue::Integer(0) => {} // OK - SUM preserves integer type
             _ => panic!("SUM of integers that sum to 0 should return Integer(0), got {:?}", result),
@@ -1258,7 +1329,7 @@ mod tests {
         acc.accumulate(&SqlValue::Varchar("b".into()));
         acc.accumulate(&SqlValue::Varchar("c".into()));
 
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         assert_eq!(result, SqlValue::Varchar("a,b,c".into()));
     }
 
@@ -1270,7 +1341,7 @@ mod tests {
         acc.accumulate(&SqlValue::Null);
         acc.accumulate(&SqlValue::Varchar("c".into()));
 
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         // NULL values should be skipped
         assert_eq!(result, SqlValue::Varchar("a,c".into()));
     }
@@ -1279,7 +1350,7 @@ mod tests {
     fn test_group_concat_empty() {
         let acc = AggregateAccumulator::new("GROUP_CONCAT", false).unwrap();
 
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         // Empty GROUP_CONCAT returns NULL
         assert!(result.is_null());
     }
@@ -1292,7 +1363,7 @@ mod tests {
         acc.accumulate(&SqlValue::Varchar("b".into()));
         acc.accumulate(&SqlValue::Varchar("a".into())); // Duplicate
 
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         // With DISTINCT, should only have "a,b"
         assert_eq!(result, SqlValue::Varchar("a,b".into()));
     }
@@ -1306,7 +1377,7 @@ mod tests {
         acc.accumulate(&SqlValue::Varchar("b".into()));
         acc.accumulate(&SqlValue::Varchar("c".into()));
 
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         assert_eq!(result, SqlValue::Varchar("a - b - c".into()));
     }
 
@@ -1318,7 +1389,7 @@ mod tests {
         acc.accumulate(&SqlValue::Varchar("b".into()));
         acc.accumulate(&SqlValue::Varchar("c".into()));
 
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         assert_eq!(result, SqlValue::Varchar("abc".into()));
     }
 
@@ -1330,7 +1401,7 @@ mod tests {
         acc.accumulate(&SqlValue::Integer(2));
         acc.accumulate(&SqlValue::Integer(3));
 
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         assert_eq!(result, SqlValue::Numeric(6.0));
     }
 
@@ -1339,7 +1410,7 @@ mod tests {
         // TOTAL returns 0.0 for empty set (unlike SUM which returns NULL)
         let acc = AggregateAccumulator::new("TOTAL", false).unwrap();
 
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         assert_eq!(result, SqlValue::Numeric(0.0));
     }
 
@@ -1351,7 +1422,7 @@ mod tests {
         acc.accumulate(&SqlValue::Null);
         acc.accumulate(&SqlValue::Integer(2));
 
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         // NULL values should be skipped
         assert_eq!(result, SqlValue::Numeric(3.0));
     }
@@ -1364,7 +1435,7 @@ mod tests {
         acc.accumulate(&SqlValue::Null);
         acc.accumulate(&SqlValue::Null);
 
-        let result = acc.finalize();
+        let result = acc.finalize().unwrap();
         assert_eq!(result, SqlValue::Numeric(0.0));
     }
 

@@ -23,7 +23,10 @@ impl Subtraction {
 
         // Fast path for integers (both modes)
         if let (Integer(a), Integer(b)) = (left, right) {
-            return Ok(Integer(a - b));
+            return a
+                .checked_sub(*b)
+                .map(Integer)
+                .ok_or(ExecutorError::IntegerOverflow);
         }
 
         // Date - Interval arithmetic
@@ -70,7 +73,10 @@ impl Subtraction {
 
         // Use helper for numeric type coercion
         match coerce_numeric_values(left, right, "-")? {
-            super::CoercedValues::ExactNumeric(a, b) => Ok(Integer(a - b)),
+            super::CoercedValues::ExactNumeric(a, b) => a
+                .checked_sub(b)
+                .map(Integer)
+                .ok_or(ExecutorError::IntegerOverflow),
             super::CoercedValues::ApproximateNumeric(a, b) => Ok(Float((a - b) as f32)),
             super::CoercedValues::Numeric(a, b) => Ok(Numeric(a - b)),
         }
