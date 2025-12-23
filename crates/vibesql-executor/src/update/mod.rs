@@ -245,6 +245,12 @@ impl UpdateExecutor {
             ExpressionEvaluator::with_database(schema, database)
         };
 
+        // Step 3.5: Validate SET expressions BEFORE row selection
+        // SQLite validates expressions at preparation time, not execution time.
+        // This ensures errors like "no such column: x" are raised even when
+        // no rows match the WHERE clause.
+        validate_set_expressions(schema, &stmt.assignments, database)?;
+
         // Step 4: Select rows to update using RowSelector
         let row_selector = RowSelector::new(schema, &evaluator);
         let candidate_rows = row_selector.select_rows(table, &stmt.where_clause)?;
@@ -1393,4 +1399,395 @@ fn resolve_cross_update_conflicts_for_replace(
     }
 
     indices_to_delete
+}
+
+/// Validate SET expressions at preparation time (before row selection).
+///
+/// SQLite validates expressions when preparing statements, not during execution.
+/// This ensures errors like "no such column: x" or "no such function: y" are
+/// raised even when no rows would match the WHERE clause.
+///
+/// This validation walks each assignment's value expression and checks that:
+/// - All column references exist in the table schema
+/// - All function calls refer to valid functions
+fn validate_set_expressions(
+    schema: &vibesql_catalog::TableSchema,
+    assignments: &[vibesql_ast::Assignment],
+    database: &Database,
+) -> Result<(), ExecutorError> {
+    for assignment in assignments {
+        // Validate target column exists (LHS of assignment)
+        if schema.get_column_index(&assignment.column).is_none() {
+            return Err(ExecutorError::NoSuchColumn { column_ref: assignment.column.clone() });
+        }
+
+        // Skip DEFAULT keyword - it's always valid in SET context
+        if matches!(assignment.value, Expression::Default) {
+            continue;
+        }
+
+        // Recursively validate the expression (RHS of assignment)
+        validate_expression(&assignment.value, schema, database)?;
+    }
+    Ok(())
+}
+
+/// Recursively validate an expression, checking column and function references.
+fn validate_expression(
+    expr: &Expression,
+    schema: &vibesql_catalog::TableSchema,
+    database: &Database,
+) -> Result<(), ExecutorError> {
+    match expr {
+        // Column reference - verify it exists in schema
+        Expression::ColumnRef(col_id) => {
+            let column_name = col_id.column_canonical();
+
+            // Check for ROWID pseudo-columns (always valid)
+            let column_lower = column_name.to_lowercase();
+            if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
+                // ROWID is always valid if there's no real column with that name
+                if schema.get_column_index(column_name).is_none() {
+                    return Ok(());
+                }
+            }
+
+            // Check if column exists in schema
+            if schema.get_column_index(column_name).is_none() {
+                return Err(ExecutorError::NoSuchColumn { column_ref: column_name.to_string() });
+            }
+            Ok(())
+        }
+
+        // Function call - verify the function exists
+        Expression::Function { name, args, character_unit } => {
+            // Validate the function name
+            let func_name = name.display();
+            validate_function_exists(&func_name, database)?;
+
+            // Recursively validate all arguments
+            for arg in args {
+                validate_expression(arg, schema, database)?;
+            }
+
+            // character_unit doesn't need validation
+            let _ = character_unit;
+            Ok(())
+        }
+
+        // Binary operations - validate both sides
+        Expression::BinaryOp { left, right, .. } => {
+            validate_expression(left, schema, database)?;
+            validate_expression(right, schema, database)?;
+            Ok(())
+        }
+
+        // Unary operations - validate the operand
+        Expression::UnaryOp { expr, .. } => validate_expression(expr, schema, database),
+
+        // CASE expression - validate all parts
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                validate_expression(op, schema, database)?;
+            }
+            for case_when in when_clauses {
+                for cond in &case_when.conditions {
+                    validate_expression(cond, schema, database)?;
+                }
+                validate_expression(&case_when.result, schema, database)?;
+            }
+            if let Some(else_expr) = else_result {
+                validate_expression(else_expr, schema, database)?;
+            }
+            Ok(())
+        }
+
+        // CAST expression
+        Expression::Cast { expr, .. } => validate_expression(expr, schema, database),
+
+        // BETWEEN expression
+        Expression::Between { expr, low, high, .. } => {
+            validate_expression(expr, schema, database)?;
+            validate_expression(low, schema, database)?;
+            validate_expression(high, schema, database)?;
+            Ok(())
+        }
+
+        // IN list
+        Expression::InList { expr, values, .. } => {
+            validate_expression(expr, schema, database)?;
+            for val in values {
+                validate_expression(val, schema, database)?;
+            }
+            Ok(())
+        }
+
+        // LIKE/GLOB
+        Expression::Like { expr, pattern, .. } | Expression::Glob { expr, pattern, .. } => {
+            validate_expression(expr, schema, database)?;
+            validate_expression(pattern, schema, database)?;
+            Ok(())
+        }
+
+        // IS NULL
+        Expression::IsNull { expr, .. } => validate_expression(expr, schema, database),
+
+        // Collate
+        Expression::Collate { expr, .. } => validate_expression(expr, schema, database),
+
+        // POSITION
+        Expression::Position { substring, string, .. } => {
+            validate_expression(substring, schema, database)?;
+            validate_expression(string, schema, database)?;
+            Ok(())
+        }
+
+        // TRIM
+        Expression::Trim { removal_char, string, .. } => {
+            if let Some(rc) = removal_char {
+                validate_expression(rc, schema, database)?;
+            }
+            validate_expression(string, schema, database)?;
+            Ok(())
+        }
+
+        // EXTRACT
+        Expression::Extract { expr, .. } => validate_expression(expr, schema, database),
+
+        // INTERVAL
+        Expression::Interval { value, .. } => validate_expression(value, schema, database),
+
+        // Conjunction/Disjunction
+        Expression::Conjunction(exprs) | Expression::Disjunction(exprs) => {
+            for e in exprs {
+                validate_expression(e, schema, database)?;
+            }
+            Ok(())
+        }
+
+        // Expressions that don't need validation (literals, special keywords, etc.)
+        Expression::Literal(_)
+        | Expression::Default
+        | Expression::CurrentDate
+        | Expression::CurrentTime { .. }
+        | Expression::CurrentTimestamp { .. }
+        | Expression::Wildcard => Ok(()),
+
+        // Subqueries - these have their own validation during execution
+        Expression::In { .. }
+        | Expression::ScalarSubquery(_)
+        | Expression::Exists { .. }
+        | Expression::QuantifiedComparison { .. } => Ok(()),
+
+        // Other expressions that we don't deeply validate at this stage
+        Expression::DuplicateKeyValue { .. }
+        | Expression::IsTruthValue { .. }
+        | Expression::IsDistinctFrom { .. }
+        | Expression::WindowFunction { .. }
+        | Expression::AggregateFunction { .. }
+        | Expression::NextValue { .. }
+        | Expression::MatchAgainst { .. }
+        | Expression::PseudoVariable { .. }
+        | Expression::SessionVariable { .. }
+        | Expression::Placeholder(_)
+        | Expression::NumberedPlaceholder(_)
+        | Expression::NamedPlaceholder(_)
+        | Expression::RowValueConstructor(_) => Ok(()),
+    }
+}
+
+/// Check if a function name refers to a valid function.
+fn validate_function_exists(name: &str, database: &Database) -> Result<(), ExecutorError> {
+    let name_upper = name.to_uppercase();
+
+    // Check built-in scalar functions
+    static BUILTIN_FUNCTIONS: &[&str] = &[
+        // Aggregate functions
+        "COUNT",
+        "SUM",
+        "AVG",
+        "MIN",
+        "MAX",
+        "TOTAL",
+        "GROUP_CONCAT",
+        // String functions
+        "LENGTH",
+        "SUBSTR",
+        "SUBSTRING",
+        "UPPER",
+        "LOWER",
+        "TRIM",
+        "LTRIM",
+        "RTRIM",
+        "REPLACE",
+        "INSTR",
+        "PRINTF",
+        "QUOTE",
+        "HEX",
+        "UNHEX",
+        "ZEROBLOB",
+        "CHAR",
+        "UNICODE",
+        "GLOB",
+        "LIKE",
+        "CONCAT",
+        "CONCAT_WS",
+        "REVERSE",
+        "LEFT",
+        "RIGHT",
+        "LPAD",
+        "RPAD",
+        "REPEAT",
+        "SPACE",
+        "SOUNDEX",
+        // Math functions
+        "ABS",
+        "ROUND",
+        "RANDOM",
+        "SIGN",
+        "CEIL",
+        "CEILING",
+        "FLOOR",
+        "TRUNC",
+        "MOD",
+        "POWER",
+        "SQRT",
+        "LOG",
+        "LOG10",
+        "LOG2",
+        "LN",
+        "EXP",
+        "SIN",
+        "COS",
+        "TAN",
+        "ASIN",
+        "ACOS",
+        "ATAN",
+        "ATAN2",
+        "DEGREES",
+        "RADIANS",
+        "PI",
+        // Type functions
+        "TYPEOF",
+        "CAST",
+        "COALESCE",
+        "IFNULL",
+        "NULLIF",
+        "IIF",
+        "CASE",
+        // Date/time functions
+        "DATE",
+        "TIME",
+        "DATETIME",
+        "JULIANDAY",
+        "STRFTIME",
+        "NOW",
+        "CURRENT_DATE",
+        "CURRENT_TIME",
+        "CURRENT_TIMESTAMP",
+        "UNIXEPOCH",
+        "TIMEDIFF",
+        "YEAR",
+        "MONTH",
+        "DAY",
+        "HOUR",
+        "MINUTE",
+        "SECOND",
+        "DAYOFWEEK",
+        "DAYOFYEAR",
+        "WEEKDAY",
+        "WEEK",
+        "QUARTER",
+        "EXTRACT",
+        "DATE_ADD",
+        "DATE_SUB",
+        "DATEDIFF",
+        "TIMESTAMPDIFF",
+        "ADDDATE",
+        "SUBDATE",
+        "MAKEDATE",
+        "MAKETIME",
+        "STR_TO_DATE",
+        "DATE_FORMAT",
+        "TIME_FORMAT",
+        "LAST_DAY",
+        "MONTHNAME",
+        "DAYNAME",
+        // SQLite-specific
+        "LAST_INSERT_ROWID",
+        "CHANGES",
+        "TOTAL_CHANGES",
+        "SQLITE_VERSION",
+        "SQLITE_SEARCH_COUNT",
+        "SQLITE_SEARCH_COUNT_RESET",
+        "INSTR",
+        "LIKELY",
+        "UNLIKELY",
+        "LOAD_EXTENSION",
+        "MAX",
+        "MIN", // Can be used as scalar functions too
+        // Encryption (if enabled)
+        "MD5",
+        "SHA1",
+        "SHA256",
+        "SHA384",
+        "SHA512",
+        // JSON functions
+        "JSON",
+        "JSON_ARRAY",
+        "JSON_OBJECT",
+        "JSON_EXTRACT",
+        "JSON_QUOTE",
+        "JSON_TYPE",
+        "JSON_VALID",
+        "JSON_ARRAY_LENGTH",
+        "JSON_PATCH",
+        "JSON_REMOVE",
+        "JSON_REPLACE",
+        "JSON_SET",
+        "JSON_INSERT",
+        "JSON_GROUP_ARRAY",
+        "JSON_GROUP_OBJECT",
+        "JSON_EACH",
+        "JSON_TREE",
+        // Window functions (also valid as regular aggregates in some contexts)
+        "ROW_NUMBER",
+        "RANK",
+        "DENSE_RANK",
+        "NTILE",
+        "LAG",
+        "LEAD",
+        "FIRST_VALUE",
+        "LAST_VALUE",
+        "NTH_VALUE",
+        "CUME_DIST",
+        "PERCENT_RANK",
+        // Misc
+        "ZEROBLOB",
+        "RANDOMBLOB",
+        "BLOB",
+        "OCTET_LENGTH",
+        "BIT_LENGTH",
+        "POSITION",
+        "OVERLAY",
+        "SIMILAR",
+        "ISNULL",
+        "NVL",
+        "DECODE",
+        "IF",
+        "FORMAT",
+        "VERSION",
+    ];
+
+    if BUILTIN_FUNCTIONS.contains(&name_upper.as_str()) {
+        return Ok(());
+    }
+
+    // Check user-defined functions in the database
+    if database.catalog.get_function(&name_upper).is_some() {
+        return Ok(());
+    }
+
+    // Function not found
+    Err(ExecutorError::NoSuchFunction { function_name: name.to_string() })
 }

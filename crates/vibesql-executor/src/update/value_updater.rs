@@ -10,7 +10,6 @@ use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator};
 pub struct ValueUpdater<'a> {
     schema: &'a vibesql_catalog::TableSchema,
     evaluator: &'a ExpressionEvaluator<'a>,
-    table_name: &'a str,
 }
 
 impl<'a> ValueUpdater<'a> {
@@ -18,9 +17,9 @@ impl<'a> ValueUpdater<'a> {
     pub fn new(
         schema: &'a vibesql_catalog::TableSchema,
         evaluator: &'a ExpressionEvaluator<'a>,
-        table_name: &'a str,
+        _table_name: &'a str, // Kept for API compatibility
     ) -> Self {
-        Self { schema, evaluator, table_name }
+        Self { schema, evaluator }
     }
 
     /// Apply assignments to a row
@@ -38,13 +37,9 @@ impl<'a> ValueUpdater<'a> {
         // Apply each assignment
         for assignment in assignments {
             // Find column index
+            // Use SQLite-compatible "no such column: X" error format
             let col_index = self.schema.get_column_index(&assignment.column).ok_or_else(|| {
-                ExecutorError::ColumnNotFound {
-                    column_name: assignment.column.clone(),
-                    table_name: self.table_name.to_string(),
-                    searched_tables: vec![self.table_name.to_string()],
-                    available_columns: self.schema.columns.iter().map(|c| c.name.clone()).collect(),
-                }
+                ExecutorError::NoSuchColumn { column_ref: assignment.column.clone() }
             })?;
 
             // Evaluate new value expression

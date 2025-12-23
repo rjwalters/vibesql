@@ -3,7 +3,10 @@ pub enum ExecutorError {
     TableNotFound(String),
     TableAlreadyExists(String),
     /// SQLite system table may not be modified (sqlite_master, sqlite_schema)
-    SqliteSystemTableReadOnly { table_name: String, operation: String },
+    SqliteSystemTableReadOnly {
+        table_name: String,
+        operation: String,
+    },
     ColumnNotFound {
         column_name: String,
         table_name: String,
@@ -307,6 +310,11 @@ pub enum ExecutorError {
     /// Format: "no such column: X" or "no such column: table.column"
     NoSuchColumn {
         column_ref: String,
+    },
+    /// No such function (SQLite-compatible error)
+    /// Format: "no such function: X"
+    NoSuchFunction {
+        function_name: String,
     },
     Other(String),
 }
@@ -1160,6 +1168,13 @@ impl std::fmt::Display for ExecutorError {
                     f,
                     "{}",
                     vibe_msg!("executor-no-such-column", column_ref = column_ref.as_str())
+                )
+            }
+            ExecutorError::NoSuchFunction { function_name } => {
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!("executor-no-such-function", function_name = function_name.as_str())
                 )
             }
             ExecutorError::Other(msg) => {
