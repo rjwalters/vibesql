@@ -171,3 +171,47 @@ fn test_parse_insert_all_defaults() {
         _ => panic!("Expected INSERT statement"),
     }
 }
+
+/// Test that INSERT statement can include rowid in column list (SQLite compatibility)
+#[test]
+fn test_parse_insert_with_rowid_column() {
+    let result = Parser::parse_sql("INSERT INTO t1 (rowid, a, b) VALUES (100, 1, 'hello');");
+    assert!(result.is_ok(), "Failed to parse INSERT with rowid: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Insert(insert) => {
+            assert_eq!(insert.table_name, "t1");
+            assert_eq!(insert.columns.len(), 3);
+            assert_eq!(insert.columns[0], "rowid");
+            assert_eq!(insert.columns[1], "a");
+            assert_eq!(insert.columns[2], "b");
+            match &insert.source {
+                vibesql_ast::InsertSource::Values(values) => {
+                    assert_eq!(values.len(), 1); // One row
+                    assert_eq!(values[0].len(), 3); // Three values
+                }
+                _ => panic!("Expected VALUES source"),
+            }
+        }
+        _ => panic!("Expected INSERT statement"),
+    }
+}
+
+/// Test that REPLACE statement can include rowid in column list (SQLite compatibility)
+#[test]
+fn test_parse_replace_with_rowid_column() {
+    let result = Parser::parse_sql("REPLACE INTO t1 (rowid, a) VALUES (100, 1);");
+    assert!(result.is_ok(), "Failed to parse REPLACE with rowid: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Insert(insert) => {
+            assert_eq!(insert.table_name, "t1");
+            assert_eq!(insert.columns.len(), 2);
+            assert_eq!(insert.columns[0], "rowid");
+            assert_eq!(insert.columns[1], "a");
+        }
+        _ => panic!("Expected INSERT statement"),
+    }
+}

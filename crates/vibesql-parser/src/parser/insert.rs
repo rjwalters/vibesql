@@ -47,10 +47,15 @@ impl Parser {
         let columns = if matches!(self.peek(), Token::LParen) {
             self.advance(); // consume (
             let cols = self.parse_comma_separated_list(|p| match p.peek() {
-                Token::Identifier(col) => {
+                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
                     let name = col.clone();
                     p.advance();
                     Ok(name)
+                }
+                // SQLite allows inserting into the virtual rowid column
+                Token::Keyword { keyword: Keyword::Rowid, .. } => {
+                    p.advance();
+                    Ok("rowid".to_string())
                 }
                 _ => Err(ParseError { message: "Expected column name".to_string() }),
             })?;
@@ -195,10 +200,15 @@ impl Parser {
         let columns = if matches!(self.peek(), Token::LParen) {
             self.advance(); // consume (
             let cols = self.parse_comma_separated_list(|p| match p.peek() {
-                Token::Identifier(col) => {
+                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
                     let name = col.clone();
                     p.advance();
                     Ok(name)
+                }
+                // SQLite allows inserting into the virtual rowid column
+                Token::Keyword { keyword: Keyword::Rowid, .. } => {
+                    p.advance();
+                    Ok("rowid".to_string())
                 }
                 _ => Err(ParseError { message: "Expected column name".to_string() }),
             })?;
@@ -311,22 +321,19 @@ impl Parser {
         // Parse column list (optional)
         let columns = if matches!(self.peek(), Token::LParen) {
             self.advance(); // consume (
-            let mut cols = Vec::new();
-            loop {
-                match self.peek() {
-                    Token::Identifier(col) => {
-                        cols.push(col.clone());
-                        self.advance();
-                    }
-                    _ => return Err(ParseError { message: "Expected column name".to_string() }),
+            let cols = self.parse_comma_separated_list(|p| match p.peek() {
+                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
+                    let name = col.clone();
+                    p.advance();
+                    Ok(name)
                 }
-
-                if matches!(self.peek(), Token::Comma) {
-                    self.advance();
-                } else {
-                    break;
+                // SQLite allows inserting into the virtual rowid column
+                Token::Keyword { keyword: Keyword::Rowid, .. } => {
+                    p.advance();
+                    Ok("rowid".to_string())
                 }
-            }
+                _ => Err(ParseError { message: "Expected column name".to_string() }),
+            })?;
             self.expect_token(Token::RParen)?;
             cols
         } else {
