@@ -3,7 +3,7 @@ use vibesql_storage::statistics::CostEstimator;
 
 use crate::{
     dml_cost::DmlOptimizer, errors::ExecutorError, privilege_checker::PrivilegeChecker,
-    sqlite_schema::is_sqlite_schema_table,
+    sqlite_schema::is_sqlite_schema_table, sqlite_stat::is_sqlite_stat1_table,
 };
 
 /// Execute an INSERT statement
@@ -55,6 +55,11 @@ fn execute_insert_internal(
             table_name: stmt.table_name.clone(),
             operation: "modified".to_string(),
         });
+    }
+
+    // Check if target is sqlite_stat1 (special writable statistics table)
+    if is_sqlite_stat1_table(&stmt.table_name) {
+        return execute_insert_sqlite_stat1(db, stmt);
     }
 
     // Check INSERT privilege on the table
@@ -887,4 +892,99 @@ fn build_view_schema(
         .collect();
 
     Ok(vibesql_catalog::TableSchema::new(view_def.name.clone(), columns))
+}
+
+/// Execute INSERT into sqlite_stat1 virtual table
+///
+/// This special handler allows users to manually insert statistics for query optimizer tuning,
+/// matching SQLite's behavior where sqlite_stat1 is writable.
+///
+/// sqlite_stat1 schema: (tbl TEXT, idx TEXT, stat TEXT)
+fn execute_insert_sqlite_stat1(
+    db: &mut vibesql_storage::Database,
+    stmt: &vibesql_ast::InsertStmt,
+) -> Result<usize, ExecutorError> {
+    use vibesql_ast::InsertSource;
+
+    // Get column indices for tbl, idx, stat
+    // Expected columns: tbl (required), idx (nullable), stat (required)
+    let columns = &stmt.columns;
+    let (tbl_idx, idx_idx, stat_idx) = if columns.is_empty() {
+        // Default order: tbl, idx, stat
+        (0usize, Some(1usize), 2usize)
+    } else {
+        // Find column positions
+        let tbl_idx = columns.iter().position(|c| c.eq_ignore_ascii_case("tbl"));
+        let idx_idx = columns.iter().position(|c| c.eq_ignore_ascii_case("idx"));
+        let stat_idx = columns.iter().position(|c| c.eq_ignore_ascii_case("stat"));
+
+        let tbl_idx = tbl_idx.ok_or_else(|| {
+            ExecutorError::Other("sqlite_stat1 INSERT requires 'tbl' column".to_string())
+        })?;
+        let stat_idx = stat_idx.ok_or_else(|| {
+            ExecutorError::Other("sqlite_stat1 INSERT requires 'stat' column".to_string())
+        })?;
+
+        (tbl_idx, idx_idx, stat_idx)
+    };
+
+    // Process VALUES clause
+    let values = match &stmt.source {
+        InsertSource::Values(v) => v,
+        InsertSource::Select(_) => {
+            return Err(ExecutorError::Other(
+                "INSERT INTO sqlite_stat1 ... SELECT is not supported".to_string(),
+            ));
+        }
+    };
+
+    let mut rows_inserted = 0;
+
+    for row in values {
+        // Extract tbl value
+        let tbl = extract_string_value(&row[tbl_idx]).ok_or_else(|| {
+            ExecutorError::Other(format!(
+                "sqlite_stat1.tbl must be TEXT, got {:?}",
+                row[tbl_idx]
+            ))
+        })?;
+
+        // Extract idx value (nullable)
+        let idx = if let Some(idx_pos) = idx_idx {
+            if idx_pos < row.len() {
+                extract_string_value(&row[idx_pos])
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Extract stat value
+        let stat = extract_string_value(&row[stat_idx]).ok_or_else(|| {
+            ExecutorError::Other(format!(
+                "sqlite_stat1.stat must be TEXT, got {:?}",
+                row[stat_idx]
+            ))
+        })?;
+
+        // Insert into database's sqlite_stat1 storage
+        db.insert_sqlite_stat1(tbl, idx, stat);
+        rows_inserted += 1;
+    }
+
+    Ok(rows_inserted)
+}
+
+/// Extract a string value from an expression (for sqlite_stat1 INSERT)
+fn extract_string_value(expr: &vibesql_ast::Expression) -> Option<String> {
+    use vibesql_ast::Expression;
+    use vibesql_types::SqlValue;
+
+    match expr {
+        Expression::Literal(SqlValue::Varchar(s)) => Some(s.to_string()),
+        Expression::Literal(SqlValue::Null) => None,
+        // Handle string literals that may not be wrapped in SqlValue
+        _ => None,
+    }
 }
