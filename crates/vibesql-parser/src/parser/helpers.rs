@@ -177,6 +177,8 @@ impl Parser {
     /// with their individual quoted flags preserved.
     pub(super) fn parse_table_ref(&mut self) -> Result<vibesql_ast::TableRef, ParseError> {
         // Parse first identifier and track if it was quoted
+        // SQLite compatibility: single-quoted strings can be used as identifiers
+        // in contexts where string literals don't make sense (e.g., table names)
         let (first_part, first_quoted) = match self.peek() {
             Token::Identifier(name) => {
                 let identifier = name.clone();
@@ -187,6 +189,12 @@ impl Parser {
                 let identifier = name.clone();
                 self.advance();
                 (identifier, true)
+            }
+            Token::String(name) => {
+                // SQLite quirk: single-quoted strings as identifiers
+                let identifier = name.clone();
+                self.advance();
+                (identifier, true) // Treat as quoted for case preservation
             }
             Token::Keyword { keyword, .. } => {
                 let identifier = keyword.to_string();
@@ -206,6 +214,12 @@ impl Parser {
                     (identifier, false)
                 }
                 Token::DelimitedIdentifier(name) => {
+                    let identifier = name.clone();
+                    self.advance();
+                    (identifier, true)
+                }
+                Token::String(name) => {
+                    // SQLite quirk: single-quoted strings as identifiers
                     let identifier = name.clone();
                     self.advance();
                     (identifier, true)

@@ -297,7 +297,8 @@ impl Parser {
 
                 Ok(result)
             }
-            Token::Identifier(_) | Token::DelimitedIdentifier(_) => {
+            // SQLite compatibility: single-quoted strings can be used as table names
+            Token::Identifier(_) | Token::DelimitedIdentifier(_) | Token::String(_) => {
                 let table = self.parse_table_ref()?;
 
                 // Check for optional alias
