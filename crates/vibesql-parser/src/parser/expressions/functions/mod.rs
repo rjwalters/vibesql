@@ -29,8 +29,8 @@ impl Parser {
                 }
                 name
             }
-            // Allow LEFT, RIGHT, REPLACE, SCHEMA, GROUPING, GROUPING_ID, GLOB, and LIKE keywords as function
-            // names. These are reserved keywords but can also be functions.
+            // Allow LEFT, RIGHT, REPLACE, SCHEMA, GROUPING, GROUPING_ID, GLOB, LIKE, and MATCH keywords
+            // as function names. These are reserved keywords but can also be functions.
             Token::Keyword { keyword: Keyword::Left, .. }
             | Token::Keyword { keyword: Keyword::Right, .. }
             | Token::Keyword { keyword: Keyword::Replace, .. }
@@ -38,7 +38,8 @@ impl Parser {
             | Token::Keyword { keyword: Keyword::Grouping, .. }
             | Token::Keyword { keyword: Keyword::GroupingId, .. }
             | Token::Keyword { keyword: Keyword::Glob, .. }
-            | Token::Keyword { keyword: Keyword::Like, .. } => {
+            | Token::Keyword { keyword: Keyword::Like, .. }
+            | Token::Keyword { keyword: Keyword::Match, .. } => {
                 // Peek ahead to see if this is followed by '('
                 // Don't consume the keyword unless we're sure it's a function
                 // SQL:1999 normalizes unquoted identifiers (including function names) to lowercase
@@ -51,6 +52,7 @@ impl Parser {
                     Token::Keyword { keyword: Keyword::GroupingId, .. } => "grouping_id",
                     Token::Keyword { keyword: Keyword::Glob, .. } => "glob",
                     Token::Keyword { keyword: Keyword::Like, .. } => "like",
+                    Token::Keyword { keyword: Keyword::Match, .. } => "match",
                     _ => unreachable!(),
                 };
 
