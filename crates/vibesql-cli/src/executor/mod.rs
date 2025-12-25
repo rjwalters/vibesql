@@ -258,21 +258,26 @@ impl SqlExecutor {
             vibesql_ast::Statement::Explain(explain_stmt) => {
                 match vibesql_executor::ExplainExecutor::execute(&explain_stmt, &self.db) {
                     Ok(explain_result) => {
-                        // Format output based on format and query_plan flags
-                        let output = if explain_stmt.query_plan {
+                        if explain_stmt.query_plan {
                             // SQLite-compatible EXPLAIN QUERY PLAN format
-                            explain_result.to_sqlite_eqp()
-                        } else {
-                            match explain_stmt.format {
-                                vibesql_ast::ExplainFormat::Text => explain_result.to_text(),
-                                vibesql_ast::ExplainFormat::Json => explain_result.to_json(),
+                            let output = explain_result.to_sqlite_eqp();
+                            result.columns = vec!["QUERY PLAN".to_string()];
+                            // Split output into rows for better display
+                            for line in output.lines() {
+                                result.rows.push(vec![Some(line.to_string())]);
                             }
-                        };
-                        // Return as a single row with the plan output
-                        result.columns = vec!["QUERY PLAN".to_string()];
-                        // Split output into rows for better display
-                        for line in output.lines() {
-                            result.rows.push(vec![Some(line.to_string())]);
+                        } else {
+                            // SQLite-compatible EXPLAIN format (VM bytecode style)
+                            let vm_output = explain_result.to_sqlite_vm();
+                            result.columns = vibesql_executor::SqliteVmOutput::column_names()
+                                .iter()
+                                .map(|s| s.to_string())
+                                .collect();
+                            for row in vm_output.to_rows() {
+                                result
+                                    .rows
+                                    .push(row.into_iter().map(Some).collect());
+                            }
                         }
                         result.row_count = result.rows.len();
                     }

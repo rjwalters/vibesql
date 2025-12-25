@@ -71,7 +71,7 @@ pub use domain_ddl::DomainExecutor;
 pub use drop_table::DropTableExecutor;
 pub use errors::ExecutorError;
 pub use evaluator::{clear_in_subquery_cache, ExpressionEvaluator};
-pub use explain::{ExplainExecutor, ExplainResult, PlanNode};
+pub use explain::{ExplainExecutor, ExplainResult, PlanNode, SqliteVmOutput, VmInstruction};
 pub use grant::GrantExecutor;
 pub use index_ddl::{
     AnalyzeExecutor, CreateIndexExecutor, DropIndexExecutor, IndexExecutor, ReindexExecutor,
