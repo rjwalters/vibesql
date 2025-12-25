@@ -7,15 +7,30 @@ use crate::{
 };
 
 /// Evaluate scalar subqueries and EXISTS expressions in aggregate context
+///
+/// This function handles SQLite's behavior where correlated subqueries in aggregate
+/// SELECT lists use the row that corresponds to the aggregate result. For example,
+/// in `SELECT max(a), (SELECT d FROM t2 WHERE a=c) FROM t1`, the subquery uses
+/// `a` from the row where `a` has its maximum value, not just the first row.
+///
+/// See issue #4683 for details.
 pub(super) fn evaluate_scalar(
-    _executor: &SelectExecutor,
+    executor: &SelectExecutor,
     expr: &vibesql_ast::Expression,
     group_rows: &[vibesql_storage::Row],
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
-    // Use first row from group as context for subquery evaluation
-    if let Some(first_row) = group_rows.first() {
-        evaluator.eval(expr, first_row)
+    // Use the representative row for aggregate-context subquery evaluation (issue #4683)
+    // The representative row is the row that corresponds to MAX/MIN aggregate result.
+    // If no representative row was set (no MAX/MIN aggregate), fall back to first row.
+    let representative_row = if let Some(idx) = executor.get_aggregate_representative_row() {
+        group_rows.get(idx)
+    } else {
+        group_rows.first()
+    };
+
+    if let Some(row) = representative_row {
+        evaluator.eval(expr, row)
     } else {
         Ok(vibesql_types::SqlValue::Null)
     }
