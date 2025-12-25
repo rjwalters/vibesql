@@ -368,9 +368,11 @@ pub fn assert_not_null_violation(result: Result<usize, ExecutorError>, column: &
 }
 
 /// Asserts that an error is a PRIMARY KEY constraint violation
+/// Note: SQLite reports PRIMARY KEY violations as "UNIQUE constraint failed"
 #[allow(dead_code)]
 pub fn assert_primary_key_violation(result: Result<usize, ExecutorError>) {
-    assert_constraint_violation(result, &["PRIMARY KEY"]);
+    // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
+    assert_constraint_violation(result, &["UNIQUE constraint failed"]);
 }
 
 /// Asserts that an error is a UNIQUE constraint violation
