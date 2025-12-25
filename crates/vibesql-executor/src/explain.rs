@@ -167,6 +167,281 @@ impl ExplainResult {
 
         output
     }
+
+    /// Format the plan as SQLite-compatible EXPLAIN output (VM bytecode style)
+    ///
+    /// This produces output mimicking SQLite's VDBE bytecode format:
+    /// ```text
+    /// addr  opcode         p1    p2    p3    p4             p5  comment
+    /// ----  -------------  ----  ----  ----  -------------  --  -------------
+    /// 0     Init           0     8     0                    0   Start at 8
+    /// 1     OpenRead       0     2     0     2              0   root=2 iDb=0; t1
+    /// ...
+    /// ```
+    ///
+    /// Note: This is a synthetic representation since VibeSQL doesn't use SQLite's VM.
+    /// The opcodes are generated to approximate what SQLite would produce.
+    pub fn to_sqlite_vm(&self) -> SqliteVmOutput {
+        let mut instructions = Vec::new();
+        let mut addr = 0;
+
+        // Collect scan nodes to determine table access patterns
+        let scan_nodes = collect_scan_nodes(&self.plan);
+
+        // Generate Init instruction (always first)
+        // p2 will be updated to point to Transaction after we know total instructions
+        let init_addr = addr;
+        instructions.push(VmInstruction {
+            addr,
+            opcode: "Init".to_string(),
+            p1: 0,
+            p2: 0, // Will be patched later
+            p3: 0,
+            p4: String::new(),
+            p5: 0,
+            comment: "Start at ?".to_string(),
+        });
+        addr += 1;
+
+        // Generate OpenRead for each table
+        let mut cursor = 0;
+        let mut table_cursors = std::collections::HashMap::new();
+
+        for node in &scan_nodes {
+            if let Some(ref table_name) = node.object {
+                if !table_cursors.contains_key(table_name) {
+                    let root_page = 2 + cursor; // Synthetic root page
+                    instructions.push(VmInstruction {
+                        addr,
+                        opcode: "OpenRead".to_string(),
+                        p1: cursor,
+                        p2: root_page,
+                        p3: 0,
+                        p4: "2".to_string(), // Number of columns (synthetic)
+                        p5: 0,
+                        comment: format!("root={} iDb=0; {}", root_page, table_name),
+                    });
+                    table_cursors.insert(table_name.clone(), cursor);
+                    cursor += 1;
+                    addr += 1;
+                }
+            }
+        }
+
+        // Generate seek/scan instructions based on scan type
+        let result_row_addr = addr + scan_nodes.len() * 2 + 1;
+        let halt_addr = result_row_addr + 1;
+
+        for node in &scan_nodes {
+            if let Some(ref table_name) = node.object {
+                let cursor_id = *table_cursors.get(table_name).unwrap_or(&0);
+
+                match node.scan_type.as_ref() {
+                    Some(ScanType::Search) | Some(ScanType::CoveringIndex) => {
+                        // Index seek
+                        instructions.push(VmInstruction {
+                            addr,
+                            opcode: "SeekGE".to_string(),
+                            p1: cursor_id,
+                            p2: halt_addr as i32,
+                            p3: 1,
+                            p4: String::new(),
+                            p5: 0,
+                            comment: format!("key=r[1]; {}", table_name),
+                        });
+                        addr += 1;
+                    }
+                    Some(ScanType::IntegerPrimaryKey) => {
+                        // Primary key lookup
+                        instructions.push(VmInstruction {
+                            addr,
+                            opcode: "SeekRowid".to_string(),
+                            p1: cursor_id,
+                            p2: halt_addr as i32,
+                            p3: 1,
+                            p4: String::new(),
+                            p5: 0,
+                            comment: format!("pk; {}", table_name),
+                        });
+                        addr += 1;
+                    }
+                    Some(ScanType::Scan) | None => {
+                        // Full table scan - use Rewind
+                        instructions.push(VmInstruction {
+                            addr,
+                            opcode: "Rewind".to_string(),
+                            p1: cursor_id,
+                            p2: halt_addr as i32,
+                            p3: 0,
+                            p4: String::new(),
+                            p5: 0,
+                            comment: table_name.clone(),
+                        });
+                        addr += 1;
+                    }
+                }
+            }
+        }
+
+        // Generate Column and ResultRow instructions
+        let mut register = 1;
+        for (i, node) in scan_nodes.iter().enumerate() {
+            if let Some(ref table_name) = node.object {
+                let cursor_id = *table_cursors.get(table_name).unwrap_or(&0);
+                // Column instruction for each output column
+                instructions.push(VmInstruction {
+                    addr,
+                    opcode: "Column".to_string(),
+                    p1: cursor_id,
+                    p2: i as i32, // Column index
+                    p3: register,
+                    p4: String::new(),
+                    p5: 0,
+                    comment: format!("r[{}]=cursor {} column {}", register, cursor_id, i),
+                });
+                register += 1;
+                addr += 1;
+            }
+        }
+
+        // ResultRow instruction
+        instructions.push(VmInstruction {
+            addr,
+            opcode: "ResultRow".to_string(),
+            p1: 1,
+            p2: register - 1,
+            p3: 0,
+            p4: String::new(),
+            p5: 0,
+            comment: format!("output=r[1..{}]", register - 1),
+        });
+        addr += 1;
+
+        // Next/Goto for each scan
+        for node in &scan_nodes {
+            if let Some(ref table_name) = node.object {
+                let cursor_id = *table_cursors.get(table_name).unwrap_or(&0);
+                let seek_addr = scan_nodes
+                    .iter()
+                    .position(|n| n.object.as_ref() == Some(table_name))
+                    .map(|pos| 1 + table_cursors.len() + pos)
+                    .unwrap_or(1);
+
+                instructions.push(VmInstruction {
+                    addr,
+                    opcode: "Next".to_string(),
+                    p1: cursor_id,
+                    p2: seek_addr as i32,
+                    p3: 0,
+                    p4: String::new(),
+                    p5: 0,
+                    comment: table_name.clone(),
+                });
+                addr += 1;
+            }
+        }
+
+        // Halt instruction
+        instructions.push(VmInstruction {
+            addr,
+            opcode: "Halt".to_string(),
+            p1: 0,
+            p2: 0,
+            p3: 0,
+            p4: String::new(),
+            p5: 0,
+            comment: String::new(),
+        });
+        addr += 1;
+
+        // Transaction instruction (usually near the end in SQLite)
+        let transaction_addr = addr;
+        instructions.push(VmInstruction {
+            addr,
+            opcode: "Transaction".to_string(),
+            p1: 0,
+            p2: 0,
+            p3: 1,
+            p4: "0".to_string(),
+            p5: 1,
+            comment: "usesStmtJournal=0".to_string(),
+        });
+        addr += 1;
+
+        // Goto to first instruction after Init
+        instructions.push(VmInstruction {
+            addr,
+            opcode: "Goto".to_string(),
+            p1: 0,
+            p2: 1,
+            p3: 0,
+            p4: String::new(),
+            p5: 0,
+            comment: String::new(),
+        });
+
+        // Patch Init instruction to jump to Transaction
+        if let Some(init) = instructions.get_mut(init_addr) {
+            init.p2 = transaction_addr as i32;
+            init.comment = format!("Start at {}", transaction_addr);
+        }
+
+        SqliteVmOutput { instructions }
+    }
+}
+
+/// Represents a single SQLite VM instruction for EXPLAIN output
+#[derive(Debug, Clone)]
+pub struct VmInstruction {
+    /// Instruction address (sequential)
+    pub addr: usize,
+    /// Opcode name (e.g., "OpenRead", "SeekGE", "Column")
+    pub opcode: String,
+    /// First integer parameter
+    pub p1: i32,
+    /// Second integer parameter
+    pub p2: i32,
+    /// Third integer parameter
+    pub p3: i32,
+    /// String parameter
+    pub p4: String,
+    /// Fifth integer parameter (flags)
+    pub p5: i32,
+    /// Human-readable comment
+    pub comment: String,
+}
+
+/// SQLite VM EXPLAIN output
+#[derive(Debug)]
+pub struct SqliteVmOutput {
+    /// List of VM instructions
+    pub instructions: Vec<VmInstruction>,
+}
+
+impl SqliteVmOutput {
+    /// Get the column names for SQLite EXPLAIN output
+    pub fn column_names() -> Vec<&'static str> {
+        vec!["addr", "opcode", "p1", "p2", "p3", "p4", "p5", "comment"]
+    }
+
+    /// Convert to rows for display
+    pub fn to_rows(&self) -> Vec<Vec<String>> {
+        self.instructions
+            .iter()
+            .map(|inst| {
+                vec![
+                    inst.addr.to_string(),
+                    inst.opcode.clone(),
+                    inst.p1.to_string(),
+                    inst.p2.to_string(),
+                    inst.p3.to_string(),
+                    inst.p4.clone(),
+                    inst.p5.to_string(),
+                    inst.comment.clone(),
+                ]
+            })
+            .collect()
+    }
 }
 
 /// Collect all scan/search nodes from the plan tree for SQLite EQP output

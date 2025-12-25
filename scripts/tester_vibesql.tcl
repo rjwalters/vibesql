@@ -805,7 +805,8 @@ proc execsql {sql {db ""}} {
 
     # Handle EXPLAIN for uses_op_count test helper
     # SQLite's uses_op_count runs EXPLAIN and looks for "Count" opcode
-    # We intercept EXPLAIN queries and synthesize output with "Count" when appropriate
+    # We only intercept simple COUNT(*) queries to synthesize "Count" opcode
+    # All other EXPLAIN queries run normally with SQLite-compatible VM output
     # NOTE: Do NOT intercept EXPLAIN QUERY PLAN - let those execute normally for EQP tests
     set sql_trim [string trim $sql]
     if {[regexp -nocase {^EXPLAIN\s+(?!QUERY\s+PLAN)(.+)$} $sql_trim -> inner_sql]} {
@@ -822,11 +823,10 @@ proc execsql {sql {db ""}} {
 
         if {$has_count_star && !$has_count_column && !$has_where && !$has_arith && !$has_subquery && !$has_view && !$has_multiple} {
             # This is a simple count(*) or count() - return synthetic EXPLAIN with "Count"
+            # This is needed for uses_op_count test helper compatibility
             return {Count VirtualMachine Start Stop}
-        } else {
-            # Return EXPLAIN output without "Count"
-            return {SeekGe Column ResultRow}
         }
+        # Other EXPLAIN queries fall through to run normally with SQLite-compatible VM output
     }
 
     # Handle transaction batching
