@@ -70,6 +70,18 @@ pub const MAX_QUERY_EXECUTION_SECONDS: u64 = 300;
 /// Should be higher than MAX_ROWS_PROCESSED to avoid false positives
 pub const MAX_LOOP_ITERATIONS: usize = 50_000_000;
 
+/// Maximum number of iterations for recursive CTEs
+///
+/// SQLite's default is 1000, but it can be increased via sqlite3_limit().
+/// We use a much higher default (1 million) because:
+/// 1. Our recursive CTE implementation is iterative, not stack-recursive
+/// 2. Many legitimate use cases need more than 1000 iterations (e.g., date ranges)
+/// 3. Memory limits already protect against truly runaway queries
+/// 4. This matches SQLite's practical behavior where the limit is configurable
+///
+/// The limit still catches truly infinite loops while allowing legitimate deep recursion.
+pub const MAX_RECURSIVE_CTE_ITERATIONS: usize = 1_000_000;
+
 /// Maximum memory usage per query execution
 ///
 /// This prevents:

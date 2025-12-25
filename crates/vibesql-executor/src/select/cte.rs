@@ -198,8 +198,7 @@ where
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
     M: Fn(usize) -> Result<(), ExecutorError>,
 {
-    // Maximum recursion depth (SQLite default is 1000)
-    const MAX_RECURSION_DEPTH: usize = 1000;
+    use crate::limits::MAX_RECURSIVE_CTE_ITERATIONS;
 
     // Validate that recursive CTE uses UNION ALL
     let set_op = cte.query.set_operation.as_ref().ok_or_else(|| {
@@ -276,7 +275,7 @@ where
 
     // Step 2: Iterative evaluation
     let mut depth = 0;
-    while !working_table.is_empty() && depth < MAX_RECURSION_DEPTH {
+    while !working_table.is_empty() && depth < MAX_RECURSIVE_CTE_ITERATIONS {
         depth += 1;
 
         // Make working table available as this CTE for recursive reference
@@ -330,10 +329,10 @@ where
     }
 
     // Check if we hit max recursion depth
-    if depth >= MAX_RECURSION_DEPTH {
+    if depth >= MAX_RECURSIVE_CTE_ITERATIONS {
         return Err(ExecutorError::UnsupportedFeature(format!(
-            "Recursive CTE '{}' exceeded maximum recursion depth of {}",
-            cte.name, MAX_RECURSION_DEPTH
+            "Recursive CTE '{}' exceeded maximum iteration limit of {}",
+            cte.name, MAX_RECURSIVE_CTE_ITERATIONS
         )));
     }
 
