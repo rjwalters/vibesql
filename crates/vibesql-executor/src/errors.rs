@@ -75,6 +75,12 @@ pub enum ExecutorError {
     MisuseOfAliasedAggregate {
         alias_name: String,
     },
+    /// Misuse of window function (SQLite-compatible error)
+    /// e.g., window function in WHERE, GROUP BY, or HAVING clause
+    /// Format: "misuse of window function X()"
+    MisuseOfWindowFunction {
+        function_name: String,
+    },
     UnsupportedExpression(String),
     UnsupportedFeature(String),
     StorageError(String),
@@ -573,6 +579,10 @@ impl std::fmt::Display for ExecutorError {
             ExecutorError::MisuseOfAliasedAggregate { alias_name } => {
                 // SQLite-compatible error message format
                 write!(f, "misuse of aliased aggregate {}", alias_name)
+            }
+            ExecutorError::MisuseOfWindowFunction { function_name } => {
+                // SQLite-compatible error message format
+                write!(f, "misuse of window function {}()", function_name)
             }
             ExecutorError::UnsupportedExpression(msg) => {
                 write!(
