@@ -362,7 +362,19 @@ impl SelectExecutor<'_> {
         };
 
         // Derive column names from the SELECT list (with table prefix for display)
-        let columns = self.derive_column_names(&stmt.select_list, from_result.as_ref())?;
+        // Issue #4696: For VALUES statements, select_list is empty - derive from VALUES rows
+        let columns = if stmt.select_list.is_empty() {
+            if let Some(values_rows) = &stmt.values {
+                // Generate column names: column1, column2, etc.
+                let num_cols = values_rows.first().map(|r| r.len()).unwrap_or(0);
+                (1..=num_cols).map(|i| format!("column{}", i)).collect()
+            } else {
+                // Empty select_list and no VALUES - return empty columns
+                Vec::new()
+            }
+        } else {
+            self.derive_column_names(&stmt.select_list, from_result.as_ref())?
+        };
 
         // Execute the query to get rows
         let rows = self.execute(stmt)?;
@@ -432,7 +444,19 @@ impl SelectExecutor<'_> {
         };
 
         // Derive column names from the SELECT list (without table prefix)
-        let columns = self.derive_simple_column_names(&stmt.select_list, from_result.as_ref())?;
+        // Issue #4696: For VALUES statements, select_list is empty - derive from VALUES rows
+        let columns = if stmt.select_list.is_empty() {
+            if let Some(values_rows) = &stmt.values {
+                // Generate column names: column1, column2, etc.
+                let num_cols = values_rows.first().map(|r| r.len()).unwrap_or(0);
+                (1..=num_cols).map(|i| format!("column{}", i)).collect()
+            } else {
+                // Empty select_list and no VALUES - return empty columns
+                Vec::new()
+            }
+        } else {
+            self.derive_simple_column_names(&stmt.select_list, from_result.as_ref())?
+        };
 
         // Execute the query to get rows
         let rows = self.execute(stmt)?;
@@ -675,6 +699,12 @@ impl SelectExecutor<'_> {
                 Some(self.database),
             )?;
             let mut results = from_result.into_rows();
+
+            // Issue #4696: If there's a set_operation, don't apply ORDER BY or LIMIT/OFFSET here
+            // Let the caller handle them after set operations are processed
+            if stmt.set_operation.is_some() {
+                return Ok(results);
+            }
 
             // Apply ORDER BY if specified
             if let Some(order_by) = &stmt.order_by {
