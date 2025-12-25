@@ -217,15 +217,10 @@ impl IndexManager {
                         match index_data {
                             IndexData::InMemory { data, .. } => {
                                 if data.contains_key(&key_values) {
-                                    let column_names: Vec<String> = metadata
-                                        .columns
-                                        .iter()
-                                        .map(|c| c.expect_column_name().to_string())
-                                        .collect();
+                                    // SQLite format for explicit UNIQUE INDEX violations
                                     return Err(StorageError::UniqueConstraintViolation(format!(
-                                        "UNIQUE constraint '{}' violated: duplicate key value for ({})",
-                                        index_name,
-                                        column_names.join(", ")
+                                        "UNIQUE constraint failed: index '{}'",
+                                        index_name
                                     )));
                                 }
                             }
@@ -234,15 +229,10 @@ impl IndexManager {
                                 let guard = acquire_btree_lock(btree)?;
                                 if let Ok(row_ids) = guard.lookup(&key_values) {
                                     if !row_ids.is_empty() {
-                                        let column_names: Vec<String> = metadata
-                                            .columns
-                                            .iter()
-                                            .map(|c| c.expect_column_name().to_string())
-                                            .collect();
+                                        // SQLite format for explicit UNIQUE INDEX violations
                                         return Err(StorageError::UniqueConstraintViolation(format!(
-                                            "UNIQUE constraint '{}' violated: duplicate key value for ({})",
-                                            index_name,
-                                            column_names.join(", ")
+                                            "UNIQUE constraint failed: index '{}'",
+                                            index_name
                                         )));
                                     }
                                 }
