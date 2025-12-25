@@ -91,6 +91,38 @@ impl ExpressionEvaluator<'_> {
         }
     }
 
+    /// Check if an expression is a string literal (VARCHAR or CHAR).
+    pub(super) fn is_string_literal(&self, expr: &vibesql_ast::Expression) -> bool {
+        match expr {
+            vibesql_ast::Expression::Literal(val) => {
+                matches!(val, SqlValue::Varchar(_) | SqlValue::Character(_))
+            }
+            _ => false,
+        }
+    }
+
+    /// Try to convert a string SqlValue to a numeric SqlValue.
+    /// Returns the original value if the string doesn't look like a number.
+    /// This implements SQLite's NUMERIC affinity coercion rules.
+    fn try_coerce_string_to_numeric(val: &SqlValue) -> SqlValue {
+        match val {
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                let trimmed = s.trim();
+                // Try parsing as integer first
+                if let Ok(n) = trimmed.parse::<i64>() {
+                    return SqlValue::Integer(n);
+                }
+                // Try parsing as float (use Double for higher precision)
+                if let Ok(n) = trimmed.parse::<f64>() {
+                    return SqlValue::Double(n);
+                }
+                // Not a number - return original value
+                val.clone()
+            }
+            _ => val.clone(),
+        }
+    }
+
     /// Apply SQLite affinity rules for comparisons.
     ///
     /// When comparing a TEXT-affinity column to an INTEGER literal, SQLite:
@@ -140,6 +172,29 @@ impl ExpressionEvaluator<'_> {
                 _ => left_val,
             };
             return (left_as_text, right_val);
+        }
+
+        // Case 3: Left is NUMERIC/INTEGER/REAL column, right is string literal
+        // Try to convert the string literal to a number for numeric comparison
+        // Per SQLite: NUMERIC affinity tries to convert strings to numbers if possible
+        let is_left_numeric_affinity = matches!(
+            left_affinity,
+            Some(TypeAffinity::Numeric) | Some(TypeAffinity::Integer) | Some(TypeAffinity::Real)
+        );
+        if is_left_numeric_affinity && self.is_string_literal(right_expr) {
+            let right_coerced = Self::try_coerce_string_to_numeric(&right_val);
+            return (left_val, right_coerced);
+        }
+
+        // Case 4: Right is NUMERIC/INTEGER/REAL column, left is string literal
+        // Try to convert the string literal to a number for numeric comparison
+        let is_right_numeric_affinity = matches!(
+            right_affinity,
+            Some(TypeAffinity::Numeric) | Some(TypeAffinity::Integer) | Some(TypeAffinity::Real)
+        );
+        if is_right_numeric_affinity && self.is_string_literal(left_expr) {
+            let left_coerced = Self::try_coerce_string_to_numeric(&left_val);
+            return (left_coerced, right_val);
         }
 
         // No affinity conversion needed - use original values

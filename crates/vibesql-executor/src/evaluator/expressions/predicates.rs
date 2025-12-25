@@ -566,8 +566,16 @@ impl ExpressionEvaluator<'_> {
                     continue;
                 }
 
-                let eq_result =
-                    self.eval_binary_op(&expr_val, &vibesql_ast::BinaryOperator::Equal, &value)?;
+                // Apply SQLite type affinity rules for IN comparisons
+                // e.g., NUMERIC column compared to '2' should coerce '2' to 2
+                let (expr_coerced, value_coerced) =
+                    self.apply_affinity_for_comparison(expr, expr_val.clone(), value_expr, value);
+
+                let eq_result = self.eval_binary_op(
+                    &expr_coerced,
+                    &vibesql_ast::BinaryOperator::Equal,
+                    &value_coerced,
+                )?;
 
                 if matches!(eq_result, vibesql_types::SqlValue::Boolean(true)) {
                     return Ok(vibesql_types::SqlValue::Boolean(!negated));
@@ -582,18 +590,25 @@ impl ExpressionEvaluator<'_> {
         } else {
             // HashSet optimization for larger lists
             // Evaluate each IN list value once (instead of per row) and collect into HashSet
-            // Then use eval_binary_op for comparison to preserve SQL type coercion
+            // Apply affinity coercion before adding to the HashSet
             let mut value_set = std::collections::HashSet::new();
             let mut found_null = false;
 
-            // Evaluate all values once and build the HashSet
+            // Evaluate all values once, apply affinity, and build the HashSet
             for value_expr in values {
                 let value = self.eval(value_expr, row)?;
 
                 if matches!(value, vibesql_types::SqlValue::Null) {
                     found_null = true;
                 } else {
-                    value_set.insert(value);
+                    // Apply SQLite type affinity rules for IN comparisons
+                    let (_, value_coerced) = self.apply_affinity_for_comparison(
+                        expr,
+                        expr_val.clone(),
+                        value_expr,
+                        value,
+                    );
+                    value_set.insert(value_coerced);
                 }
             }
 

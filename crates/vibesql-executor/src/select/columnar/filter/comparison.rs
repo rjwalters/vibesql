@@ -55,6 +55,33 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
         }
     }
 
+    // Try to coerce a string value to a number (for SQLite NUMERIC affinity)
+    fn string_to_f64(v: &SqlValue) -> Option<f64> {
+        match v {
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.trim().parse().ok(),
+            _ => None,
+        }
+    }
+
+    // Check if value is numeric type
+    fn is_numeric(v: &SqlValue) -> bool {
+        matches!(
+            v,
+            SqlValue::Integer(_)
+                | SqlValue::Bigint(_)
+                | SqlValue::Smallint(_)
+                | SqlValue::Float(_)
+                | SqlValue::Double(_)
+                | SqlValue::Numeric(_)
+                | SqlValue::Real(_)
+        )
+    }
+
+    // Check if value is string type
+    fn is_string(v: &SqlValue) -> bool {
+        matches!(v, SqlValue::Varchar(_) | SqlValue::Character(_))
+    }
+
     CompareResult::Ordering(match (a, b) {
         // Same-type comparisons (fast path)
         (SqlValue::Integer(a), SqlValue::Integer(b)) => a.cmp(b),
@@ -96,21 +123,50 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
 
         // Mixed numeric types: coerce to f64 with epsilon comparison for floats
         _ => {
+            // First try direct numeric comparison
             if let (Some(a_f64), Some(b_f64)) = (to_f64(a), to_f64(b)) {
                 // Use epsilon comparison for floating point values to handle precision issues
                 // This is especially important for Float(0.07) vs Numeric(0.07) comparisons
                 const EPSILON: f64 = 1e-9;
                 if (a_f64 - b_f64).abs() < EPSILON {
-                    Ordering::Equal
+                    return CompareResult::Ordering(Ordering::Equal);
                 } else if a_f64 < b_f64 {
-                    Ordering::Less
+                    return CompareResult::Ordering(Ordering::Less);
                 } else {
-                    Ordering::Greater
+                    return CompareResult::Ordering(Ordering::Greater);
                 }
-            } else {
-                // Non-numeric mixed types: fall back to Equal (will fail predicate appropriately)
-                Ordering::Equal
             }
+
+            // SQLite type affinity: numeric vs string comparisons
+            // If one side is numeric and other is string that looks like a number,
+            // try to coerce the string to a number and compare
+            if is_numeric(a) && is_string(b) {
+                if let (Some(a_f64), Some(b_f64)) = (to_f64(a), string_to_f64(b)) {
+                    const EPSILON: f64 = 1e-9;
+                    if (a_f64 - b_f64).abs() < EPSILON {
+                        return CompareResult::Ordering(Ordering::Equal);
+                    } else if a_f64 < b_f64 {
+                        return CompareResult::Ordering(Ordering::Less);
+                    } else {
+                        return CompareResult::Ordering(Ordering::Greater);
+                    }
+                }
+            } else if is_string(a) && is_numeric(b) {
+                if let (Some(a_f64), Some(b_f64)) = (string_to_f64(a), to_f64(b)) {
+                    const EPSILON: f64 = 1e-9;
+                    if (a_f64 - b_f64).abs() < EPSILON {
+                        return CompareResult::Ordering(Ordering::Equal);
+                    } else if a_f64 < b_f64 {
+                        return CompareResult::Ordering(Ordering::Less);
+                    } else {
+                        return CompareResult::Ordering(Ordering::Greater);
+                    }
+                }
+            }
+
+            // Non-comparable types: use SQLite type ordering (INTEGER < REAL < TEXT < BLOB)
+            // For equality checks, this will correctly fail (different types)
+            Ordering::Equal
         }
     })
 }
@@ -133,6 +189,40 @@ pub(crate) fn parse_date_string(s: &str) -> Option<Date> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Test for issue #4684: Integer column vs String literal comparison
+    /// SQLite should coerce string '2' to number 2 when comparing with numeric column
+    #[test]
+    fn test_integer_vs_string_comparison() {
+        // Integer(2) should equal Varchar("2") after coercion
+        let col_value = SqlValue::Integer(2);
+        let pred_value = SqlValue::Varchar(arcstr::ArcStr::from("2"));
+
+        let result = compare_values(&col_value, &pred_value);
+        assert_eq!(
+            result,
+            CompareResult::Ordering(std::cmp::Ordering::Equal),
+            "Integer(2) should == Varchar('2')"
+        );
+
+        // Integer(2) should be greater than Varchar("1")
+        let pred_value_1 = SqlValue::Varchar(arcstr::ArcStr::from("1"));
+        let result_gt = compare_values(&col_value, &pred_value_1);
+        assert_eq!(
+            result_gt,
+            CompareResult::Ordering(std::cmp::Ordering::Greater),
+            "Integer(2) should > Varchar('1')"
+        );
+
+        // Integer(2) should be less than Varchar("3")
+        let pred_value_3 = SqlValue::Varchar(arcstr::ArcStr::from("3"));
+        let result_lt = compare_values(&col_value, &pred_value_3);
+        assert_eq!(
+            result_lt,
+            CompareResult::Ordering(std::cmp::Ordering::Less),
+            "Integer(2) should < Varchar('3')"
+        );
+    }
 
     /// Test for issue #3360: Float column vs Integer literal comparison
     /// in the columnar filter path
