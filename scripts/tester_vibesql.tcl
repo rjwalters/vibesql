@@ -400,19 +400,56 @@ proc translate_error_to_sqlite {vibesql_error} {
 # Searching inner-to-outer would incorrectly pick up local variables with the same name.
 proc substitute_tcl_vars {sql} {
     # Quick check: if no $ or : variables, return immediately
-    # Match both $var, ${var}, and :var patterns
-    if {![regexp {\$[a-zA-Z_\{]} $sql] && ![regexp {:[a-zA-Z_]} $sql]} {
+    # Match both $var, ${var}, $::var, and :var patterns
+    if {![regexp {\$[a-zA-Z_\{:]} $sql] && ![regexp {:[a-zA-Z_]} $sql]} {
         return $sql
     }
 
     # Get the maximum stack depth to search
     set max_level [info level]
 
-    # Find all variable references: $var, ${var}, and :var patterns
+    # Find all variable references: $var, ${var}, $::var, and :var patterns
     # We'll process each one individually for proper SQL quoting
     set result $sql
 
-    # First handle $var patterns
+    # First handle $::varname patterns (explicit global namespace references)
+    # These must be processed BEFORE regular $var patterns to avoid partial matches
+    # Pattern matches: $::varname where varname starts with letter/underscore
+    set global_var_pattern {\$::([a-zA-Z_][a-zA-Z0-9_]*)}
+
+    set prev_result ""
+    while {$result ne $prev_result} {
+        set prev_result $result
+
+        # Find the first $::variable reference
+        if {![regexp $global_var_pattern $result match varname]} {
+            break
+        }
+
+        # Look up the variable in global scope ONLY (that's what :: means)
+        set found 0
+        set value ""
+
+        if {[catch {set value [uplevel #0 [list set $varname]]}] == 0} {
+            set found 1
+        }
+
+        if {!$found} {
+            # Variable not found in global scope - leave it as-is (will cause error)
+            break
+        }
+
+        # Format the value as a SQL literal
+        set sql_value [format_sql_value $value]
+
+        # Replace the first occurrence of this variable reference
+        set result [string replace $result \
+            [string first $match $result] \
+            [expr {[string first $match $result] + [string length $match] - 1}] \
+            $sql_value]
+    }
+
+    # Now handle regular $var patterns
     # Pattern to match TCL variable references in SQL
     # Matches: $varname or ${varname}
     # Note: We need to be careful not to match things like $1 (positional params)
@@ -2305,8 +2342,12 @@ proc run_test_file {filename} {
     }
     regsub {source \$testdir/tester\.tcl} $content $tester_vars content
 
-    # Execute the modified content
-    if {[catch {eval $content} err]} {
+    # Execute the modified content at GLOBAL level
+    # This is critical: tests often set variables at file scope and reference them
+    # with $::varname (explicit global namespace). Using 'eval' inside this proc
+    # would make those variables local to run_test_file, not global.
+    # 'uplevel #0' ensures the test file runs in the global scope.
+    if {[catch {uplevel #0 $content} err]} {
         puts "Error running test: $err"
         puts "Error info: $::errorInfo"
         exit 1
