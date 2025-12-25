@@ -395,9 +395,10 @@ proc translate_error_to_sqlite {vibesql_error} {
 # This is critical for braced SQL strings like {INSERT INTO t VALUES($x, $msg)}
 # where TCL doesn't perform substitution and we must do it manually with proper SQL quoting.
 #
-# IMPORTANT: We search from outermost (global) level inward because user variables
-# are typically defined at the test file level, not in intermediate procedures.
-# Searching inner-to-outer would incorrectly pick up local variables with the same name.
+# The search order is INNERMOST to OUTERMOST (caller's scope first), which matches
+# how TCL normally resolves variables. This ensures loop variables like $i in
+# "for {set i 1} {$i<10} {incr i}" are found in the loop's scope, not a stale
+# global value from a previous loop.
 proc substitute_tcl_vars {sql} {
     # Quick check: if no $ or : variables, return immediately
     # Match both $var, ${var}, $::var, and :var patterns
@@ -470,25 +471,26 @@ proc substitute_tcl_vars {sql} {
             set varname [string range $varname 1 end-1]
         }
 
-        # Try to get the variable value - search from OUTERMOST level inward
-        # This is critical: user variables are defined at the test file level (outer),
-        # while intermediate levels may have local variables with conflicting names
-        # (e.g., 'name' parameter in do_test procedure)
+        # Try to get the variable value - search from INNERMOST level outward
+        # This ensures loop variables are found in their defining scope, not
+        # stale global values from previous loop iterations.
+        # Search order: level 1 (direct caller) -> level 2 -> ... -> max_level -> global
         set found 0
         set value ""
 
-        # First try global scope (level #0)
-        if {[catch {set value [uplevel #0 [list set $varname]]}] == 0} {
-            set found 1
+        # Search from innermost (level 1) to outermost (max_level)
+        # Level 1 is the immediate caller of this proc
+        for {set level 1} {$level <= $max_level} {incr level} {
+            if {[catch {set value [uplevel $level [list set $varname]]}] == 0} {
+                set found 1
+                break
+            }
         }
 
-        # If not global, search from outermost to innermost stack level
+        # If not found in call stack, try global scope as last resort
         if {!$found} {
-            for {set level $max_level} {$level >= 1} {incr level -1} {
-                if {[catch {set value [uplevel $level [list set $varname]]}] == 0} {
-                    set found 1
-                    break
-                }
+            if {[catch {set value [uplevel #0 [list set $varname]]}] == 0} {
+                set found 1
             }
         }
 
@@ -523,22 +525,22 @@ proc substitute_tcl_vars {sql} {
             break
         }
 
-        # Try to get the variable value - search from OUTERMOST level inward
+        # Try to get the variable value - search from INNERMOST level outward
         set found 0
         set value ""
 
-        # First try global scope (level #0)
-        if {[catch {set value [uplevel #0 [list set $varname]]}] == 0} {
-            set found 1
+        # Search from innermost (level 1) to outermost (max_level)
+        for {set level 1} {$level <= $max_level} {incr level} {
+            if {[catch {set value [uplevel $level [list set $varname]]}] == 0} {
+                set found 1
+                break
+            }
         }
 
-        # If not global, search from outermost to innermost stack level
+        # If not found in call stack, try global scope as last resort
         if {!$found} {
-            for {set level $max_level} {$level >= 1} {incr level -1} {
-                if {[catch {set value [uplevel $level [list set $varname]]}] == 0} {
-                    set found 1
-                    break
-                }
+            if {[catch {set value [uplevel #0 [list set $varname]]}] == 0} {
+                set found 1
             }
         }
 
@@ -869,10 +871,19 @@ proc execsql {sql {db ""}} {
     # Handle transaction batching
     # Since vibesql doesn't persist transaction state across process invocations,
     # we must batch all SQL from BEGIN to COMMIT and execute it in one process.
-    # Count BEGIN, COMMIT, ROLLBACK to track transaction state changes in this SQL
-    # Note: TCL uses \m and \M for word boundaries (not \b like PCRE)
-    set begin_count [regexp -all -nocase {\mBEGIN\M} $sql]
-    set end_count [expr {[regexp -all -nocase {\mCOMMIT\M} $sql] + [regexp -all -nocase {\mROLLBACK\M} $sql]}]
+    #
+    # IMPORTANT: Only match actual transaction statements, not:
+    # - 'BEGIN' inside string literals (e.g., SELECT 'BEGIN-'||x)
+    # - CREATE TRIGGER ... BEGIN ... END (trigger body syntax)
+    # - BEGIN inside comments
+    #
+    # Transaction BEGIN patterns:
+    # - "BEGIN" or "BEGIN;" at statement start
+    # - "BEGIN TRANSACTION", "BEGIN DEFERRED", "BEGIN IMMEDIATE", "BEGIN EXCLUSIVE"
+    # Match these patterns preceded by statement boundary (start of string, ;, or newline)
+    set begin_count [regexp -all -nocase {(?:^|;|\n)\s*BEGIN\s*(?:TRANSACTION|DEFERRED|IMMEDIATE|EXCLUSIVE|;|\s*$)} $sql]
+    set end_count [expr {[regexp -all -nocase {(?:^|;|\n)\s*COMMIT\s*(?:;|\s*$)} $sql] + \
+                         [regexp -all -nocase {(?:^|;|\n)\s*ROLLBACK\s*(?:;|\s*$)} $sql]}]
     set net_begin [expr {$begin_count - $end_count}]
 
     if {$net_begin > 0} {
