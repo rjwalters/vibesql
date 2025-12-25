@@ -308,12 +308,12 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "division by zero"
     }
 
-    # Constraint violations - try to extract column name for SQLite-compatible format
-    # VibeSQL: "UNIQUE constraint violated: duplicate value for (a)" -> "UNIQUE constraint failed: t.a"
-    if {[regexp -nocase {UNIQUE constraint.*duplicate value for \(([^)]+)\)} $error_msg -> col_name]} {
-        # We don't have table name in the error, so just use the column
-        return "UNIQUE constraint failed: $col_name"
+    # Constraint violations - VibeSQL now outputs SQLite-compatible format directly
+    # Format: "UNIQUE constraint failed: table.column" or "UNIQUE constraint failed: table.col1, table.col2"
+    if {[regexp -nocase {UNIQUE constraint failed: (.+)$} $error_msg -> col_spec]} {
+        return "UNIQUE constraint failed: $col_spec"
     }
+    # Fallback for any other UNIQUE/PK constraint format
     if {[regexp -nocase {UNIQUE constraint|duplicate.*primary key|PRIMARY KEY constraint} $error_msg]} {
         return "UNIQUE constraint failed"
     }
@@ -1283,6 +1283,48 @@ proc uses_sqlite_internals {script} {
     if {[regexp {sqlite3_reset} $script]} {
         return [list 1 "uses sqlite3_reset (SQLite C API)"]
     }
+    if {[regexp {sqlite3_errmsg\s*\(} $script]} {
+        return [list 1 "uses sqlite3_errmsg() (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_errcode\s*\(} $script]} {
+        return [list 1 "uses sqlite3_errcode() (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_changes\s*\(} $script]} {
+        return [list 1 "uses sqlite3_changes() (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_total_changes\s*\(} $script]} {
+        return [list 1 "uses sqlite3_total_changes() (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_blob_} $script]} {
+        return [list 1 "uses sqlite3_blob_* (SQLite blob API)"]
+    }
+    if {[regexp {sqlite3_backup_} $script]} {
+        return [list 1 "uses sqlite3_backup_* (SQLite backup API)"]
+    }
+    if {[regexp {sqlite3_wal_} $script]} {
+        return [list 1 "uses sqlite3_wal_* (SQLite WAL API)"]
+    }
+    if {[regexp {sqlite3_create_function} $script]} {
+        return [list 1 "uses sqlite3_create_function (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_create_collation} $script]} {
+        return [list 1 "uses sqlite3_create_collation (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_interrupt} $script]} {
+        return [list 1 "uses sqlite3_interrupt (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_memory_} $script]} {
+        return [list 1 "uses sqlite3_memory_* (SQLite memory API)"]
+    }
+    if {[regexp {sqlite3_db_status\s*\(} $script]} {
+        return [list 1 "uses sqlite3_db_status() (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_stmt_status\s*\(} $script]} {
+        return [list 1 "uses sqlite3_stmt_status() (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_status\s*\(} $script]} {
+        return [list 1 "uses sqlite3_status() (SQLite C API)"]
+    }
 
     # SQLite internal catalog tables
     if {[regexp {sqlite_temp_master} $script]} {
@@ -1294,6 +1336,85 @@ proc uses_sqlite_internals {script} {
     # means it depends on a previous test that did
     if {[regexp {\$?::STMT} $script]} {
         return [list 1 "uses C API statement handle (depends on sqlite3_prepare)"]
+    }
+
+    # SQLite test harness functions - registered at C level, not available in VibeSQL
+    # These are custom functions used by SQLite's test suite that we can't implement
+    if {[regexp {test_destructor\s*\(} $script]} {
+        return [list 1 "uses test_destructor() (SQLite test function)"]
+    }
+    if {[regexp {test_destructor16\s*\(} $script]} {
+        return [list 1 "uses test_destructor16() (SQLite test function)"]
+    }
+    if {[regexp {test_destructor_count\s*\(} $script]} {
+        return [list 1 "uses test_destructor_count() (SQLite test function)"]
+    }
+    if {[regexp {test_auxdata\s*\(} $script]} {
+        return [list 1 "uses test_auxdata() (SQLite test function)"]
+    }
+    if {[regexp {test_error\s*\(} $script]} {
+        return [list 1 "uses test_error() (SQLite test function)"]
+    }
+    if {[regexp {\btestfunc\s*\(} $script]} {
+        return [list 1 "uses testfunc() (SQLite test function)"]
+    }
+    if {[regexp {test_decode\s*\(} $script]} {
+        return [list 1 "uses test_decode() (SQLite test function)"]
+    }
+    if {[regexp {test_function\s*\(} $script]} {
+        return [list 1 "uses test_function() (SQLite test function)"]
+    }
+    if {[regexp {test_frombind\s*\(} $script]} {
+        return [list 1 "uses test_frombind() (SQLite test function)"]
+    }
+    if {[regexp {test_eval\s*\(} $script]} {
+        return [list 1 "uses test_eval() (SQLite test function)"]
+    }
+    if {[regexp {test_setsubtype\s*\(} $script]} {
+        return [list 1 "uses test_setsubtype() (SQLite test function)"]
+    }
+    if {[regexp {test_getsubtype\s*\(} $script]} {
+        return [list 1 "uses test_getsubtype() (SQLite test function)"]
+    }
+    if {[regexp {test_zeroblob\s*\(} $script]} {
+        return [list 1 "uses test_zeroblob() (SQLite test function)"]
+    }
+    if {[regexp {test_control\s*\(} $script]} {
+        return [list 1 "uses test_control() (SQLite test function)"]
+    }
+    if {[regexp {sqlite_register_test_function} $script]} {
+        return [list 1 "uses sqlite_register_test_function (SQLite test harness)"]
+    }
+    if {[regexp {autoinstall_test_funcs} $script]} {
+        return [list 1 "uses autoinstall_test_funcs (SQLite test harness)"]
+    }
+
+    # SQLite compile-time option functions
+    if {[regexp {sqlite_compileoption_used\s*\(} $script]} {
+        return [list 1 "uses sqlite_compileoption_used() (SQLite internal)"]
+    }
+    if {[regexp {sqlite_compileoption_get\s*\(} $script]} {
+        return [list 1 "uses sqlite_compileoption_get() (SQLite internal)"]
+    }
+    if {[regexp {sqlite_options\s*\(} $script]} {
+        return [list 1 "uses sqlite_options() (SQLite internal)"]
+    }
+
+    # SQLite internal functions
+    if {[regexp {sqlite_offset\s*\(} $script]} {
+        return [list 1 "uses sqlite_offset() (SQLite internal)"]
+    }
+    if {[regexp {sqlite_rename_table\s*\(} $script]} {
+        return [list 1 "uses sqlite_rename_table() (SQLite internal)"]
+    }
+    if {[regexp {sqlite_rename_column\s*\(} $script]} {
+        return [list 1 "uses sqlite_rename_column() (SQLite internal)"]
+    }
+    if {[regexp {sqlite_dbpage\s*\(} $script]} {
+        return [list 1 "uses sqlite_dbpage() (SQLite internal)"]
+    }
+    if {[regexp {sqlite_exec\s*\(} $script]} {
+        return [list 1 "uses sqlite_exec() (SQLite internal)"]
     }
 
     return [list 0 ""]
