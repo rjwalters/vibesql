@@ -216,3 +216,66 @@ fn test_parse_create_fulltext_index_in_create_table() {
         panic!("Expected CreateTable statement");
     }
 }
+
+// ========================================================================
+// match() as a Regular Function Tests (Issue #4693)
+// ========================================================================
+
+/// Issue #4693: `match(a, b)` should be parsed as a regular function call,
+/// not as a MATCH...AGAINST full-text search expression.
+#[test]
+fn test_match_as_function_call() {
+    // This was failing with: "near 'FROM': syntax error"
+    // because the parser treated MATCH as the start of MATCH...AGAINST
+    let result = Parser::parse_sql("SELECT match(a, b) FROM t1 WHERE 0;");
+    assert!(result.is_ok(), "match() as function should parse: {:?}", result);
+
+    let stmt = result.unwrap();
+    if let vibesql_ast::Statement::Select(select) = stmt {
+        assert_eq!(select.select_list.len(), 1);
+        if let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] {
+            if let vibesql_ast::Expression::Function { name, args, .. } = expr {
+                assert_eq!(name.canonical(), "match");
+                assert_eq!(args.len(), 2);
+            } else {
+                panic!("Expected Function expression, got {:?}", expr);
+            }
+        } else {
+            panic!("Expected Expression SelectItem");
+        }
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+#[test]
+fn test_match_as_function_with_single_arg() {
+    let result = Parser::parse_sql("SELECT match(x) FROM t;");
+    assert!(result.is_ok(), "match(x) should parse: {:?}", result);
+}
+
+#[test]
+fn test_match_as_function_in_where() {
+    let result = Parser::parse_sql("SELECT * FROM t WHERE match(a, b) = 1;");
+    assert!(result.is_ok(), "match() in WHERE should parse: {:?}", result);
+}
+
+#[test]
+fn test_match_against_still_works() {
+    // Ensure we haven't broken MATCH...AGAINST syntax
+    let result =
+        Parser::parse_sql("SELECT * FROM articles WHERE MATCH(title) AGAINST ('search');");
+    assert!(result.is_ok(), "MATCH...AGAINST should still work: {:?}", result);
+
+    let stmt = result.unwrap();
+    if let vibesql_ast::Statement::Select(select) = stmt {
+        if let Some(vibesql_ast::Expression::MatchAgainst { columns, .. }) = &select.where_clause {
+            assert_eq!(columns.len(), 1);
+            assert_eq!(columns[0], "title");
+        } else {
+            panic!("Expected MatchAgainst in WHERE clause");
+        }
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}

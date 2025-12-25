@@ -327,6 +327,11 @@ impl Parser {
             Ok(Some(vibesql_ast::Expression::NextValue { sequence_name }))
         } else if self.peek_keyword(Keyword::Match) {
             // MATCH...AGAINST full-text search
+            // We need to look ahead to check if AGAINST follows the parenthesized expression.
+            // If not, this is a regular function call like match(a, b), not FTS syntax.
+            if !self.is_match_against_expression() {
+                return Ok(None);
+            }
             self.advance(); // consume MATCH
             self.expect_token(Token::LParen)?;
 
@@ -502,5 +507,38 @@ impl Parser {
         } else {
             Ok(first_unit)
         }
+    }
+
+    /// Check if the current MATCH keyword is part of a MATCH...AGAINST expression.
+    /// Returns true if AGAINST keyword follows after the parenthesized column list.
+    /// This allows `match(a, b)` to be parsed as a regular function call.
+    fn is_match_against_expression(&self) -> bool {
+        // We're at MATCH keyword. Look ahead to find the closing paren
+        // and check if AGAINST follows.
+        let mut pos = self.position + 1; // skip MATCH
+
+        // Expect LParen
+        if pos >= self.tokens.len() || !matches!(self.tokens[pos], Token::LParen) {
+            return false;
+        }
+        pos += 1;
+
+        // Skip past the parenthesized content (handling nested parens)
+        let mut depth = 1;
+        while pos < self.tokens.len() && depth > 0 {
+            match &self.tokens[pos] {
+                Token::LParen => depth += 1,
+                Token::RParen => depth -= 1,
+                _ => {}
+            }
+            pos += 1;
+        }
+
+        // Check if AGAINST follows
+        pos < self.tokens.len()
+            && matches!(
+                &self.tokens[pos],
+                Token::Keyword { keyword: Keyword::Against, .. }
+            )
     }
 }
