@@ -197,9 +197,10 @@ where
         _ => {} // Fall through to regular comparison logic
     }
 
-    // SQLite affinity rules: TEXT values are always greater than INTEGER/REAL
-    // NULL < INTEGER < REAL < TEXT < BLOB (type ordering)
-    // When comparing incompatible types, use type order rather than throwing errors
+    // SQLite affinity rules:
+    // 1. If a string looks like a number, try to coerce it and compare numerically
+    // 2. Otherwise, TEXT values are always greater than INTEGER/REAL
+    //    NULL < INTEGER < REAL < TEXT < BLOB (type ordering)
     let is_string = |v: &SqlValue| matches!(v, Varchar(_) | Character(_));
     let is_numeric = |v: &SqlValue| {
         matches!(
@@ -208,23 +209,40 @@ where
         )
     };
 
-    // String compared to numeric: String is always greater
+    // Helper to try parsing a string as a number
+    let try_parse_as_f64 = |v: &SqlValue| -> Option<f64> {
+        match v {
+            Varchar(s) | Character(s) => s.trim().parse().ok(),
+            _ => None,
+        }
+    };
+
+    // SQLite type affinity: try to coerce string to number for numeric comparison
+    // String compared to numeric: try to parse string first
     if is_string(left) && is_numeric(right) {
-        // "string" compared to number: string > number in type order
-        // For "string < number": false (string is greater)
-        // For "string > number": true
-        // For "string = number": false
-        // We use Greater ordering since TEXT > INTEGER/REAL
+        // Try to parse the string as a number
+        if let Some(left_f64) = try_parse_as_f64(left) {
+            // String parsed as number - compare numerically
+            let right_f64 = to_f64(right)?;
+            return Ok(Boolean(predicate(
+                left_f64.partial_cmp(&right_f64).unwrap_or(std::cmp::Ordering::Equal),
+            )));
+        }
+        // String is not a number - use type ordering: TEXT > INTEGER/REAL
         return Ok(Boolean(predicate(std::cmp::Ordering::Greater)));
     }
 
-    // Numeric compared to string: Numeric is always less
+    // Numeric compared to string: try to parse string first
     if is_numeric(left) && is_string(right) {
-        // number compared to "string": number < string in type order
-        // For "number < string": true
-        // For "number > string": false
-        // For "number = string": false
-        // We use Less ordering since INTEGER/REAL < TEXT
+        // Try to parse the string as a number
+        if let Some(right_f64) = try_parse_as_f64(right) {
+            // String parsed as number - compare numerically
+            let left_f64 = to_f64(left)?;
+            return Ok(Boolean(predicate(
+                left_f64.partial_cmp(&right_f64).unwrap_or(std::cmp::Ordering::Equal),
+            )));
+        }
+        // String is not a number - use type ordering: INTEGER/REAL < TEXT
         return Ok(Boolean(predicate(std::cmp::Ordering::Less)));
     }
 

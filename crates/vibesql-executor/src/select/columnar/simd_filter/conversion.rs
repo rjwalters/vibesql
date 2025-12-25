@@ -12,6 +12,16 @@ pub fn is_string_value(value: &SqlValue) -> bool {
     matches!(value, SqlValue::Character(_) | SqlValue::Varchar(_))
 }
 
+/// Try to parse a string SqlValue as a floating point number.
+/// Returns None if the value is not a string or the string is not a valid number.
+/// This implements SQLite's NUMERIC affinity coercion for string values.
+pub fn try_parse_string_as_f64(value: &SqlValue) -> Option<f64> {
+    match value {
+        SqlValue::Character(s) | SqlValue::Varchar(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
 /// Convert SqlValue to f64 for numeric comparisons
 pub fn value_to_f64(value: &SqlValue) -> Option<f64> {
     match value {
