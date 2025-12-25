@@ -941,7 +941,8 @@ proc execsql {sql {db ""}} {
 
 proc parse_raw_result {output} {
     # Parse VibeSQL raw format output into TCL list
-    # Raw format is pipe-separated values, one row per line (like SQLite list mode)
+    # Raw format uses ASCII 31 (Unit Separator) between values, one row per line
+    # We use ASCII 31 instead of pipe because pipe can appear in SQL values
     # NULL values are already empty strings, string 'NULL' stays as "NULL"
     # This matches SQLite TCL interface behavior for NULL representation
     set data {}
@@ -987,11 +988,11 @@ proc parse_raw_result {output} {
             continue
         }
 
-        # Split by pipe and add each value to the result
-        # In raw format, values are pipe-separated on each line
+        # Split by Unit Separator (ASCII 31) and add each value to the result
+        # VibeSQL uses ASCII 31 as delimiter because pipe can appear in SQL values
         # Empty values represent NULL - use null_string if set
         set null_rep [expr {[info exists ::null_string] && $::null_string ne "" ? $::null_string : ""}]
-        foreach val [split $line "|"] {
+        foreach val [split $line "\x1f"] {
             if {$val eq ""} {
                 lappend data $null_rep
             } else {
@@ -1442,6 +1443,17 @@ proc uses_sqlite_internals {script} {
     }
     if {[regexp {legacy_count[[:space:]]*\(} $script]} {
         return [list 1 "uses legacy_count() (SQLite test function)"]
+    }
+    if {[regexp {testdirectonly[[:space:]]*\(} $script]} {
+        return [list 1 "uses testdirectonly() (SQLite test function)"]
+    }
+    if {[regexp {test_isolation[[:space:]]*\(} $script]} {
+        return [list 1 "uses test_isolation() (SQLite test function)"]
+    }
+
+    # SQLite test function registration via db func command
+    if {[regexp {db\s+func\s+\w+} $script]} {
+        return [list 1 "uses db func (custom function registration)"]
     }
 
     # SQLite compile-time option functions
