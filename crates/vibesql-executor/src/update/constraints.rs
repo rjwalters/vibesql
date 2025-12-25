@@ -168,9 +168,14 @@ impl<'a> ConstraintValidator<'a> {
                     if new_pk_values != original_pk_values {
                         let pk_col_names: Vec<String> =
                             self.schema.primary_key.as_ref().unwrap().clone();
+                        // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
+                        let qualified_cols: Vec<String> = pk_col_names
+                            .iter()
+                            .map(|col| format!("{}.{}", self.schema.name, col))
+                            .collect();
                         return Err(ExecutorError::ConstraintViolation(format!(
-                            "PRIMARY KEY constraint violated: duplicate key value for ({})",
-                            pk_col_names.join(", ")
+                            "UNIQUE constraint failed: {}",
+                            qualified_cols.join(", ")
                         )));
                     }
                 }
@@ -189,9 +194,14 @@ impl<'a> ConstraintValidator<'a> {
                     if new_pk_values.iter().zip(other_pk_values).all(|(a, b)| *a == *b) {
                         let pk_col_names: Vec<String> =
                             self.schema.primary_key.as_ref().unwrap().clone();
+                        // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
+                        let qualified_cols: Vec<String> = pk_col_names
+                            .iter()
+                            .map(|col| format!("{}.{}", self.schema.name, col))
+                            .collect();
                         return Err(ExecutorError::ConstraintViolation(format!(
-                            "PRIMARY KEY constraint violated: duplicate key value for ({})",
-                            pk_col_names.join(", ")
+                            "UNIQUE constraint failed: {}",
+                            qualified_cols.join(", ")
                         )));
                     }
                 }
@@ -235,9 +245,14 @@ impl<'a> ConstraintValidator<'a> {
                     if new_unique_values != original_unique_values {
                         let unique_col_names: Vec<String> =
                             self.schema.unique_constraints[constraint_idx].clone();
+                        // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
+                        let qualified_cols: Vec<String> = unique_col_names
+                            .iter()
+                            .map(|col| format!("{}.{}", self.schema.name, col))
+                            .collect();
                         return Err(ExecutorError::ConstraintViolation(format!(
-                            "UNIQUE constraint violated: duplicate value for ({})",
-                            unique_col_names.join(", ")
+                            "UNIQUE constraint failed: {}",
+                            qualified_cols.join(", ")
                         )));
                     }
                 }
@@ -261,9 +276,14 @@ impl<'a> ConstraintValidator<'a> {
                     if new_unique_values.iter().zip(other_unique_values).all(|(a, b)| *a == *b) {
                         let unique_col_names: Vec<String> =
                             self.schema.unique_constraints[constraint_idx].clone();
+                        // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
+                        let qualified_cols: Vec<String> = unique_col_names
+                            .iter()
+                            .map(|col| format!("{}.{}", self.schema.name, col))
+                            .collect();
                         return Err(ExecutorError::ConstraintViolation(format!(
-                            "UNIQUE constraint violated: duplicate value for ({})",
-                            unique_col_names.join(", ")
+                            "UNIQUE constraint failed: {}",
+                            qualified_cols.join(", ")
                         )));
                     }
                 }

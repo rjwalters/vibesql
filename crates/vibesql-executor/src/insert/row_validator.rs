@@ -173,9 +173,14 @@ impl<'a> RowValidator<'a> {
             // Check for duplicates within the batch
             if self.batch_pk_values.contains(new_pk_values) {
                 let pk_col_names: Vec<String> = self.schema.primary_key.as_ref().unwrap().clone();
+                // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
+                let qualified_cols: Vec<String> = pk_col_names
+                    .iter()
+                    .map(|col| format!("{}.{}", self.table_name, col))
+                    .collect();
                 return Err(ExecutorError::ConstraintViolation(format!(
-                    "PRIMARY KEY constraint violated: duplicate key value for ({})",
-                    pk_col_names.join(", ")
+                    "UNIQUE constraint failed: {}",
+                    qualified_cols.join(", ")
                 )));
             }
 
@@ -189,9 +194,14 @@ impl<'a> RowValidator<'a> {
                 if pk_index.contains_key(new_pk_values) {
                     let pk_col_names: Vec<String> =
                         self.schema.primary_key.as_ref().unwrap().clone();
+                    // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
+                    let qualified_cols: Vec<String> = pk_col_names
+                        .iter()
+                        .map(|col| format!("{}.{}", self.table_name, col))
+                        .collect();
                     return Err(ExecutorError::ConstraintViolation(format!(
-                        "PRIMARY KEY constraint violated: duplicate key value for ({})",
-                        pk_col_names.join(", ")
+                        "UNIQUE constraint failed: {}",
+                        qualified_cols.join(", ")
                     )));
                 }
             }
@@ -218,9 +228,14 @@ impl<'a> RowValidator<'a> {
             if self.batch_unique_values[constraint_idx].contains(new_unique_values) {
                 let unique_col_names: Vec<String> =
                     self.schema.unique_constraints[constraint_idx].clone();
+                // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
+                let qualified_cols: Vec<String> = unique_col_names
+                    .iter()
+                    .map(|col| format!("{}.{}", self.table_name, col))
+                    .collect();
                 return Err(ExecutorError::ConstraintViolation(format!(
-                    "UNIQUE constraint violated: duplicate value for ({})",
-                    unique_col_names.join(", ")
+                    "UNIQUE constraint failed: {}",
+                    qualified_cols.join(", ")
                 )));
             }
 
@@ -235,9 +250,14 @@ impl<'a> RowValidator<'a> {
                 if unique_index.contains_key(new_unique_values) {
                     let unique_col_names: Vec<String> =
                         self.schema.unique_constraints[constraint_idx].clone();
+                    // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
+                    let qualified_cols: Vec<String> = unique_col_names
+                        .iter()
+                        .map(|col| format!("{}.{}", self.table_name, col))
+                        .collect();
                     return Err(ExecutorError::ConstraintViolation(format!(
-                        "UNIQUE constraint violated: duplicate value for ({})",
-                        unique_col_names.join(", ")
+                        "UNIQUE constraint failed: {}",
+                        qualified_cols.join(", ")
                     )));
                 }
             } else {
@@ -257,9 +277,14 @@ impl<'a> RowValidator<'a> {
                     if new_unique_values == &existing_unique_values {
                         let unique_col_names: Vec<String> =
                             self.schema.unique_constraints[constraint_idx].clone();
+                        // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
+                        let qualified_cols: Vec<String> = unique_col_names
+                            .iter()
+                            .map(|col| format!("{}.{}", self.table_name, col))
+                            .collect();
                         return Err(ExecutorError::ConstraintViolation(format!(
-                            "UNIQUE constraint violated: duplicate value for ({})",
-                            unique_col_names.join(", ")
+                            "UNIQUE constraint failed: {}",
+                            qualified_cols.join(", ")
                         )));
                     }
                 }

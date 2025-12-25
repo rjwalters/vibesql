@@ -40,8 +40,13 @@ fn test_alter_table_add_primary_key_single_column() {
     assert!(result.contains("PRIMARY KEY"));
 
     // Verify duplicate insert fails
+    // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
     let err = exec_sql(&mut db, "INSERT INTO users VALUES (1, 'Charlie')").unwrap_err();
-    assert!(err.contains("PRIMARY KEY") || err.contains("duplicate"));
+    assert!(
+        err.contains("PRIMARY KEY")
+            || err.contains("duplicate")
+            || err.contains("UNIQUE constraint")
+    );
 }
 
 #[test]
@@ -59,8 +64,13 @@ fn test_alter_table_add_primary_key_composite() {
     assert!(result.contains("PRIMARY KEY"));
 
     // Verify duplicate insert fails
+    // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
     let err = exec_sql(&mut db, "INSERT INTO order_items VALUES (1, 100, 10)").unwrap_err();
-    assert!(err.contains("PRIMARY KEY") || err.contains("duplicate"));
+    assert!(
+        err.contains("PRIMARY KEY")
+            || err.contains("duplicate")
+            || err.contains("UNIQUE constraint")
+    );
 
     // Verify partial matches are allowed
     exec_sql(&mut db, "INSERT INTO order_items VALUES (2, 101, 7)").unwrap();
