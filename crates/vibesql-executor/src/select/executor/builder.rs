@@ -49,6 +49,12 @@ pub struct SelectExecutor<'a> {
     /// Detected once per query, executed once per group
     /// Stores results directly in aggregate_cache
     pub(super) pivot_group: RefCell<Option<PivotAggregateGroup>>,
+    /// Index of the "representative row" for aggregate context subqueries.
+    /// When evaluating correlated subqueries in aggregate SELECT lists, SQLite uses
+    /// the row that corresponds to the aggregate result (e.g., the row where the column
+    /// has its MAX value for MAX(col)). This field stores that row's index.
+    /// See issue #4683 for details.
+    pub(super) aggregate_representative_row_idx: RefCell<Option<usize>>,
 }
 
 impl<'a> SelectExecutor<'a> {
@@ -75,6 +81,7 @@ impl<'a> SelectExecutor<'a> {
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
             pivot_group: RefCell::new(None),
+            aggregate_representative_row_idx: RefCell::new(None),
         }
     }
 
@@ -107,6 +114,7 @@ impl<'a> SelectExecutor<'a> {
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
             pivot_group: RefCell::new(None),
+            aggregate_representative_row_idx: RefCell::new(None),
         }
     }
 
@@ -127,6 +135,7 @@ impl<'a> SelectExecutor<'a> {
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
             pivot_group: RefCell::new(None),
+            aggregate_representative_row_idx: RefCell::new(None),
         }
     }
 
@@ -166,6 +175,7 @@ impl<'a> SelectExecutor<'a> {
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
             pivot_group: RefCell::new(None),
+            aggregate_representative_row_idx: RefCell::new(None),
         }
     }
 
@@ -188,6 +198,7 @@ impl<'a> SelectExecutor<'a> {
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
             pivot_group: RefCell::new(None),
+            aggregate_representative_row_idx: RefCell::new(None),
         }
     }
 
@@ -212,6 +223,7 @@ impl<'a> SelectExecutor<'a> {
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
             pivot_group: RefCell::new(None),
+            aggregate_representative_row_idx: RefCell::new(None),
         }
     }
 
@@ -238,6 +250,7 @@ impl<'a> SelectExecutor<'a> {
             aggregate_cache: OnceCell::new(),
             arena: OnceCell::new(),
             pivot_group: RefCell::new(None),
+            aggregate_representative_row_idx: RefCell::new(None),
         }
     }
 
@@ -361,6 +374,9 @@ impl<'a> SelectExecutor<'a> {
 
         // Clear pivot group
         *self.pivot_group.borrow_mut() = None;
+
+        // Clear representative row index
+        *self.aggregate_representative_row_idx.borrow_mut() = None;
     }
 
     /// Set the pivot aggregate group for this query
@@ -397,5 +413,101 @@ impl<'a> SelectExecutor<'a> {
     /// Check if a pivot group is set for this query
     pub(super) fn has_pivot_group(&self) -> bool {
         self.pivot_group.borrow().is_some()
+    }
+
+    /// Set the representative row index for aggregate context subquery evaluation.
+    ///
+    /// This is used to implement SQLite's behavior where correlated subqueries in
+    /// aggregate SELECT lists use the row that corresponds to the aggregate result.
+    /// For example, in `SELECT max(a), (SELECT d FROM t2 WHERE a=c) FROM t1`,
+    /// the subquery uses `a` from the row where `a` has its maximum value.
+    ///
+    /// # Arguments
+    /// * `idx` - The index of the representative row in the current group's rows
+    pub(super) fn set_aggregate_representative_row(&self, idx: Option<usize>) {
+        *self.aggregate_representative_row_idx.borrow_mut() = idx;
+    }
+
+    /// Get the representative row index for aggregate context subquery evaluation.
+    /// Returns None if no representative row has been set.
+    pub(super) fn get_aggregate_representative_row(&self) -> Option<usize> {
+        *self.aggregate_representative_row_idx.borrow()
+    }
+
+    /// Find the representative row based on aggregates in the SELECT list.
+    ///
+    /// For MAX(col) aggregates, returns the index of the row where col has its maximum value.
+    /// For MIN(col) aggregates, returns the index of the row where col has its minimum value.
+    /// For other aggregates or no aggregates, returns None (fallback to first row behavior).
+    ///
+    /// This implements SQLite's behavior where bare column references in aggregate queries
+    /// use values from the row that contributed to the aggregate result.
+    ///
+    /// # Arguments
+    /// * `select_list` - The expanded SELECT list to scan for aggregates
+    /// * `group_rows` - The rows in the current group
+    /// * `evaluator` - Expression evaluator for computing column values
+    pub(super) fn find_representative_row_index(
+        &self,
+        select_list: &[vibesql_ast::SelectItem],
+        group_rows: &[vibesql_storage::Row],
+        evaluator: &crate::evaluator::CombinedExpressionEvaluator,
+    ) -> Option<usize> {
+        use crate::select::grouping::compare_sql_values;
+        use vibesql_types::SqlValue;
+
+        if group_rows.is_empty() {
+            return None;
+        }
+
+        // Scan SELECT list for MAX or MIN aggregates on a column
+        for item in select_list {
+            if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                if let vibesql_ast::Expression::AggregateFunction { name, args, .. } = expr {
+                    let name_upper = name.to_uppercase();
+
+                    // We only care about MAX/MIN aggregates on columns
+                    if (name_upper == "MAX" || name_upper == "MIN") && args.len() == 1 {
+                        // Find the row where the column has its max/min value
+                        let mut best_idx = 0;
+                        let mut best_val: Option<SqlValue> = None;
+
+                        for (idx, row) in group_rows.iter().enumerate() {
+                            if let Ok(val) = evaluator.eval(&args[0], row) {
+                                // Skip NULL values
+                                if matches!(val, SqlValue::Null) {
+                                    continue;
+                                }
+
+                                let is_better = match &best_val {
+                                    None => true,
+                                    Some(best) => {
+                                        let cmp = compare_sql_values(&val, best);
+                                        if name_upper == "MAX" {
+                                            cmp == std::cmp::Ordering::Greater
+                                        } else {
+                                            cmp == std::cmp::Ordering::Less
+                                        }
+                                    }
+                                };
+
+                                if is_better {
+                                    best_idx = idx;
+                                    best_val = Some(val);
+                                }
+                            }
+                        }
+
+                        // If we found a non-NULL value, use that row
+                        if best_val.is_some() {
+                            return Some(best_idx);
+                        }
+                    }
+                }
+            }
+        }
+
+        // No suitable aggregate found, return None (will fall back to first row)
+        None
     }
 }

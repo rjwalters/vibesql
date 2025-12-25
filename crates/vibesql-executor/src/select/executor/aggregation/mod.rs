@@ -337,6 +337,12 @@ impl SelectExecutor<'_> {
                     // Check timeout during aggregation
                     self.check_timeout()?;
 
+                    // Find the representative row for aggregate-context subquery evaluation (issue #4683)
+                    // SQLite uses the row corresponding to MAX/MIN aggregate for correlated subqueries
+                    let representative_row_idx =
+                        self.find_representative_row_index(&expanded_select_list, &group_rows, &evaluator);
+                    self.set_aggregate_representative_row(representative_row_idx);
+
                     // Compute aggregates for this group
                     let mut aggregate_results = Vec::new();
                     for item in &expanded_select_list {
@@ -463,6 +469,12 @@ impl SelectExecutor<'_> {
 
                 // Check timeout during aggregation
                 self.check_timeout()?;
+
+                // Find the representative row for aggregate-context subquery evaluation (issue #4683)
+                // SQLite uses the row corresponding to MAX/MIN aggregate for correlated subqueries
+                let representative_row_idx =
+                    self.find_representative_row_index(&expanded_select_list, &group_rows, &evaluator);
+                self.set_aggregate_representative_row(representative_row_idx);
 
                 // Compute aggregates for this group
                 let mut aggregate_results = Vec::new();
