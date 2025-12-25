@@ -1340,46 +1340,47 @@ proc uses_sqlite_internals {script} {
 
     # SQLite test harness functions - registered at C level, not available in VibeSQL
     # These are custom functions used by SQLite's test suite that we can't implement
-    if {[regexp {test_destructor\s*\(} $script]} {
+    # Note: Use [[:space:]] instead of \s to match across newlines in SQL
+    if {[regexp {test_destructor[[:space:]]*\(} $script]} {
         return [list 1 "uses test_destructor() (SQLite test function)"]
     }
-    if {[regexp {test_destructor16\s*\(} $script]} {
+    if {[regexp {test_destructor16[[:space:]]*\(} $script]} {
         return [list 1 "uses test_destructor16() (SQLite test function)"]
     }
-    if {[regexp {test_destructor_count\s*\(} $script]} {
+    if {[regexp {test_destructor_count[[:space:]]*\(} $script]} {
         return [list 1 "uses test_destructor_count() (SQLite test function)"]
     }
-    if {[regexp {test_auxdata\s*\(} $script]} {
+    if {[regexp {test_auxdata[[:space:]]*\(} $script]} {
         return [list 1 "uses test_auxdata() (SQLite test function)"]
     }
-    if {[regexp {test_error\s*\(} $script]} {
+    if {[regexp {test_error[[:space:]]*\(} $script]} {
         return [list 1 "uses test_error() (SQLite test function)"]
     }
-    if {[regexp {\btestfunc\s*\(} $script]} {
+    if {[regexp {(?:^|[^a-zA-Z0-9_])testfunc[[:space:]]*\(} $script]} {
         return [list 1 "uses testfunc() (SQLite test function)"]
     }
-    if {[regexp {test_decode\s*\(} $script]} {
+    if {[regexp {test_decode[[:space:]]*\(} $script]} {
         return [list 1 "uses test_decode() (SQLite test function)"]
     }
-    if {[regexp {test_function\s*\(} $script]} {
+    if {[regexp {test_function[[:space:]]*\(} $script]} {
         return [list 1 "uses test_function() (SQLite test function)"]
     }
-    if {[regexp {test_frombind\s*\(} $script]} {
+    if {[regexp {test_frombind[[:space:]]*\(} $script]} {
         return [list 1 "uses test_frombind() (SQLite test function)"]
     }
-    if {[regexp {test_eval\s*\(} $script]} {
+    if {[regexp {test_eval[[:space:]]*\(} $script]} {
         return [list 1 "uses test_eval() (SQLite test function)"]
     }
-    if {[regexp {test_setsubtype\s*\(} $script]} {
+    if {[regexp {test_setsubtype[[:space:]]*\(} $script]} {
         return [list 1 "uses test_setsubtype() (SQLite test function)"]
     }
-    if {[regexp {test_getsubtype\s*\(} $script]} {
+    if {[regexp {test_getsubtype[[:space:]]*\(} $script]} {
         return [list 1 "uses test_getsubtype() (SQLite test function)"]
     }
-    if {[regexp {test_zeroblob\s*\(} $script]} {
+    if {[regexp {test_zeroblob[[:space:]]*\(} $script]} {
         return [list 1 "uses test_zeroblob() (SQLite test function)"]
     }
-    if {[regexp {test_control\s*\(} $script]} {
+    if {[regexp {test_control[[:space:]]*\(} $script]} {
         return [list 1 "uses test_control() (SQLite test function)"]
     }
     if {[regexp {sqlite_register_test_function} $script]} {
@@ -1387,6 +1388,12 @@ proc uses_sqlite_internals {script} {
     }
     if {[regexp {autoinstall_test_funcs} $script]} {
         return [list 1 "uses autoinstall_test_funcs (SQLite test harness)"]
+    }
+    if {[regexp {nullx_[[:space:]]*\(} $script]} {
+        return [list 1 "uses nullx_() (SQLite test function)"]
+    }
+    if {[regexp {legacy_count[[:space:]]*\(} $script]} {
+        return [list 1 "uses legacy_count() (SQLite test function)"]
     }
 
     # SQLite compile-time option functions
