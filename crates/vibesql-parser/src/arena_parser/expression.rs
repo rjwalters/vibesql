@@ -1167,7 +1167,17 @@ impl<'arena> ArenaParser<'arena> {
                 }
                 Ok(vibesql_types::DataType::Varchar { max_length: None })
             }
-            "TEXT" => Ok(vibesql_types::DataType::Varchar { max_length: None }),
+            "TEXT" => {
+                // SQLite allows TEXT(n) for compatibility but ignores the size
+                if self.try_consume(&Token::LParen) {
+                    // Parse and ignore the size parameter
+                    if let Token::Number(_) = self.peek() {
+                        self.advance();
+                    }
+                    self.expect_token(Token::RParen)?;
+                }
+                Ok(vibesql_types::DataType::Varchar { max_length: None })
+            }
             "DATE" => Ok(vibesql_types::DataType::Date),
             "TIME" => Ok(vibesql_types::DataType::Time { with_timezone: false }),
             "TIMESTAMP" => Ok(vibesql_types::DataType::Timestamp { with_timezone: false }),

@@ -211,7 +211,9 @@ impl<'arena> ArenaParser<'arena> {
                 let stmt = self.parse_begin_statement()?;
                 Ok(Statement::BeginTransaction(stmt))
             }
-            Token::Keyword { keyword: Keyword::Commit, .. } => {
+            Token::Keyword { keyword: Keyword::Commit, .. }
+            | Token::Keyword { keyword: Keyword::End, .. } => {
+                // END is a SQLite alias for COMMIT in transaction context
                 let stmt = self.parse_commit_statement()?;
                 Ok(Statement::Commit(stmt))
             }
