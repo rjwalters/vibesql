@@ -519,7 +519,10 @@ impl Parser {
     ///
     /// The `validate_end_tokens` parameter controls whether to validate that no
     /// unexpected tokens follow the statement.
-    fn parse_values_statement_internal(
+    ///
+    /// This is used by INSERT parser to handle compound VALUES statements like:
+    /// `INSERT INTO t VALUES(1) UNION VALUES(2)`
+    pub(crate) fn parse_values_statement_internal(
         &mut self,
         allow_order_limit: bool,
         validate_end_tokens: bool,

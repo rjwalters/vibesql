@@ -66,25 +66,30 @@ impl Parser {
         };
 
         // Parse source: VALUES or SELECT
+        // Use parse_values_statement_internal to handle compound VALUES like:
+        // INSERT INTO t VALUES(1) UNION VALUES(2)
         let source = if self.peek_keyword(Keyword::Values) {
-            // Parse VALUES
-            self.expect_keyword(Keyword::Values)?;
+            // Parse VALUES using the full statement parser to handle compound operators
+            // allow_order_limit=false: INSERT VALUES doesn't support ORDER BY/LIMIT
+            // validate_end_tokens=false: INSERT has additional tokens after VALUES
+            let values_stmt = self.parse_values_statement_internal(false, false)?;
 
-            // Parse value lists
-            let mut values = Vec::new();
-            loop {
-                self.expect_token(Token::LParen)?;
-                let row = self.parse_comma_separated_list(|p| p.parse_expression())?;
-                self.expect_token(Token::RParen)?;
-                values.push(row);
-
-                if matches!(self.peek(), Token::Comma) {
-                    self.advance();
-                } else {
-                    break;
+            // If there's a set operation (UNION/INTERSECT/EXCEPT), use Select source
+            // Otherwise, extract the values directly for the Values source
+            if values_stmt.set_operation.is_some() {
+                vibesql_ast::InsertSource::Select(Box::new(values_stmt))
+            } else {
+                // Extract values from the SelectStmt
+                // values_stmt.values should be Some for a pure VALUES statement
+                match values_stmt.values {
+                    Some(values) => vibesql_ast::InsertSource::Values(values),
+                    None => {
+                        return Err(ParseError {
+                            message: "Internal error: VALUES statement missing values".to_string(),
+                        })
+                    }
                 }
             }
-            vibesql_ast::InsertSource::Values(values)
         } else if self.peek_keyword(Keyword::Select) || self.peek_keyword(Keyword::With) {
             // Parse SELECT
             let select_stmt = self.parse_select_statement()?;
@@ -220,23 +225,25 @@ impl Parser {
 
         // Parse source: VALUES or SELECT
         // Note: The CTE is already parsed, so the SELECT here should NOT start with WITH
+        // Use parse_values_statement_internal to handle compound VALUES like:
+        // WITH cte AS (...) INSERT INTO t VALUES(1) UNION VALUES(2)
         let source = if self.peek_keyword(Keyword::Values) {
-            self.expect_keyword(Keyword::Values)?;
+            // Parse VALUES using the full statement parser to handle compound operators
+            let values_stmt = self.parse_values_statement_internal(false, false)?;
 
-            let mut values = Vec::new();
-            loop {
-                self.expect_token(Token::LParen)?;
-                let row = self.parse_comma_separated_list(|p| p.parse_expression())?;
-                self.expect_token(Token::RParen)?;
-                values.push(row);
-
-                if matches!(self.peek(), Token::Comma) {
-                    self.advance();
-                } else {
-                    break;
+            // If there's a set operation (UNION/INTERSECT/EXCEPT), use Select source
+            if values_stmt.set_operation.is_some() {
+                vibesql_ast::InsertSource::Select(Box::new(values_stmt))
+            } else {
+                match values_stmt.values {
+                    Some(values) => vibesql_ast::InsertSource::Values(values),
+                    None => {
+                        return Err(ParseError {
+                            message: "Internal error: VALUES statement missing values".to_string(),
+                        })
+                    }
                 }
             }
-            vibesql_ast::InsertSource::Values(values)
         } else if self.peek_keyword(Keyword::Select) {
             // Parse SELECT without consuming WITH (already parsed)
             let select_stmt = self.parse_select_statement()?;
@@ -341,24 +348,25 @@ impl Parser {
         };
 
         // Parse source: VALUES or SELECT
+        // Use parse_values_statement_internal to handle compound VALUES like:
+        // REPLACE INTO t VALUES(1) UNION VALUES(2)
         let source = if self.peek_keyword(Keyword::Values) {
-            self.expect_keyword(Keyword::Values)?;
+            // Parse VALUES using the full statement parser to handle compound operators
+            let values_stmt = self.parse_values_statement_internal(false, false)?;
 
-            // Parse value lists
-            let mut values = Vec::new();
-            loop {
-                self.expect_token(Token::LParen)?;
-                let row = self.parse_comma_separated_list(|p| p.parse_expression())?;
-                self.expect_token(Token::RParen)?;
-                values.push(row);
-
-                if matches!(self.peek(), Token::Comma) {
-                    self.advance();
-                } else {
-                    break;
+            // If there's a set operation (UNION/INTERSECT/EXCEPT), use Select source
+            if values_stmt.set_operation.is_some() {
+                vibesql_ast::InsertSource::Select(Box::new(values_stmt))
+            } else {
+                match values_stmt.values {
+                    Some(values) => vibesql_ast::InsertSource::Values(values),
+                    None => {
+                        return Err(ParseError {
+                            message: "Internal error: VALUES statement missing values".to_string(),
+                        })
+                    }
                 }
             }
-            vibesql_ast::InsertSource::Values(values)
         } else if self.peek_keyword(Keyword::Select) || self.peek_keyword(Keyword::With) {
             let select_stmt = self.parse_select_statement()?;
             vibesql_ast::InsertSource::Select(Box::new(select_stmt))
