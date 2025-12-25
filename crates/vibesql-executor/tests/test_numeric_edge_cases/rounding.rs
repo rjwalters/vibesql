@@ -32,13 +32,14 @@ fn test_round_with_null_precision() {
 
 #[test]
 fn test_round_negative_precision() {
+    // SQLite clamps negative precision to 0, so round(x, -1) == round(x, 0)
     let (evaluator, row) = create_test_evaluator();
     assert_function_returns_double(
         &evaluator,
         &row,
         "ROUND",
         vec![SqlValue::Double(123.456), SqlValue::Integer(-1)],
-        120.0,
+        123.0, // SQLite returns 123.0, not 120.0 (negative precision is clamped to 0)
         0.001,
     );
 }
@@ -123,13 +124,14 @@ fn test_round_numeric_with_precision() {
 
 #[test]
 fn test_round_numeric_negative_precision() {
+    // SQLite clamps negative precision to 0, so round(x, -1) == round(x, 0)
     let (evaluator, row) = create_test_evaluator();
     let expr =
         create_function_expr("ROUND", vec![SqlValue::Numeric(123.456), SqlValue::Integer(-1)]);
     let result = evaluator.eval(&expr, &row).unwrap();
     match result {
         SqlValue::Double(n) => {
-            assert!((n - 120.0).abs() < 0.001, "Expected 120.0, got {}", n);
+            assert!((n - 123.0).abs() < 0.001, "Expected 123.0, got {}", n); // SQLite clamps -1 to 0
         }
         _ => panic!("Expected Double result (SQLite REAL), got {:?}", result),
     }

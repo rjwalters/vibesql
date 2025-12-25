@@ -10,7 +10,10 @@ use crate::evaluator::functions::coercion::{coerce_to_integer, coerce_to_number}
 /// ROUND(x [, precision]) - Round to nearest integer or decimal places
 /// SQL:1999 Section 6.27: Numeric value functions
 ///
-/// SQLite compatibility: Automatically coerces string types to numbers.
+/// SQLite compatibility:
+/// - Automatically coerces string types to numbers.
+/// - Precision is clamped to [0, 30] range (values > 30 become 30, values < 0 become 0).
+/// - Uses string formatting for non-zero precision to avoid floating-point precision loss.
 pub fn round(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.is_empty() || args.len() > 2 {
         return Err(ExecutorError::UnsupportedFeature(format!(
@@ -20,51 +23,73 @@ pub fn round(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     }
 
     let value = &args[0];
+    // SQLite clamps precision to [0, 30] range
+    // This also handles i64 overflow cases (e.g., 4294967297 becomes 30)
     let precision = if args.len() == 2 {
         match coerce_to_integer(&args[1]) {
-            Some(p) => p as i32,
+            Some(p) => {
+                if p > 30 {
+                    30usize
+                } else if p < 0 {
+                    0usize
+                } else {
+                    p as usize
+                }
+            }
             None => return Ok(SqlValue::Null),
         }
     } else {
-        0
+        0usize
+    };
+
+    // Get the numeric value to round
+    let num = match value {
+        SqlValue::Null => return Ok(SqlValue::Null),
+        SqlValue::Integer(n) => *n as f64,
+        SqlValue::Float(f) => *f as f64,
+        SqlValue::Double(f) => *f,
+        SqlValue::Real(f) => *f as f64,
+        SqlValue::Numeric(n) => *n,
+        _ => {
+            // Slow path: coerce other types (like strings) to numbers
+            match coerce_to_number(value) {
+                None => return Ok(SqlValue::Null),
+                Some(n) => n,
+            }
+        }
     };
 
     // SQLite always returns REAL from round(), regardless of input type
     // This ensures whole numbers display with ".0" suffix (e.g., "2.0" not "2")
-    match value {
-        SqlValue::Null => return Ok(SqlValue::Null),
-        SqlValue::Integer(n) => {
-            // Convert integer to double for SQLite-compatible output
-            let n = *n as f64;
-            let multiplier = 10_f64.powi(precision);
-            return Ok(SqlValue::Double((n * multiplier).round() / multiplier));
-        }
-        SqlValue::Float(f) => {
-            let multiplier = 10_f64.powi(precision);
-            return Ok(SqlValue::Double(((*f as f64) * multiplier).round() / multiplier));
-        }
-        SqlValue::Double(f) => {
-            let multiplier = 10_f64.powi(precision);
-            return Ok(SqlValue::Double((f * multiplier).round() / multiplier));
-        }
-        SqlValue::Real(f) => {
-            let multiplier = 10_f64.powi(precision);
-            return Ok(SqlValue::Double(((*f as f64) * multiplier).round() / multiplier));
-        }
-        SqlValue::Numeric(n) => {
-            let multiplier = 10_f64.powi(precision);
-            return Ok(SqlValue::Double((n * multiplier).round() / multiplier));
-        }
-        _ => {}
+    let result = round_with_precision(num, precision);
+    Ok(SqlValue::Double(result))
+}
+
+/// Rounds a floating-point number to the specified precision using SQLite's algorithm.
+///
+/// For precision == 0, uses direct integer conversion for efficiency.
+/// For precision > 0, uses string formatting to avoid floating-point precision loss.
+/// This matches SQLite's implementation which uses printf("%!.*f", n, r) internally.
+fn round_with_precision(value: f64, precision: usize) -> f64 {
+    // SQLite's special case: if value is outside i64 range, it has no fractional part
+    // to round (this is an optimization from SQLite's source)
+    const MAX_ROUNDABLE: f64 = 4503599627370496.0; // 2^52
+    if value < -MAX_ROUNDABLE || value > MAX_ROUNDABLE {
+        return value;
     }
 
-    // Slow path: coerce other types (like strings) to numbers
-    match coerce_to_number(value) {
-        None => Ok(SqlValue::Null),
-        Some(n) => {
-            let multiplier = 10_f64.powi(precision);
-            Ok(SqlValue::Double((n * multiplier).round() / multiplier))
+    if precision == 0 {
+        // Direct rounding for precision 0 (more efficient)
+        if value < 0.0 {
+            (value - 0.5) as i64 as f64
+        } else {
+            (value + 0.5) as i64 as f64
         }
+    } else {
+        // Use string formatting to avoid precision loss
+        // This matches SQLite's approach: sqlite3_mprintf("%!.*f", n, r)
+        let formatted = format!("{:.prec$}", value, prec = precision);
+        formatted.parse::<f64>().unwrap_or(value)
     }
 }
 
