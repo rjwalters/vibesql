@@ -443,7 +443,26 @@ impl Parser {
             }
             "TEXT" => {
                 // TEXT is SQLite-style unlimited VARCHAR
+                // SQLite allows TEXT(n) for compatibility but ignores the size
                 // Maps to VARCHAR without length constraint (unlimited)
+                if matches!(self.peek(), Token::LParen) {
+                    self.advance(); // consume (
+                    // Parse and ignore the size parameter (SQLite compatibility)
+                    match self.peek() {
+                        Token::Number(n) => {
+                            let _ = n.parse::<usize>().map_err(|_| ParseError {
+                                message: "Invalid TEXT size".to_string(),
+                            })?;
+                            self.advance();
+                        }
+                        _ => {
+                            return Err(ParseError {
+                                message: "Expected size after TEXT(".to_string(),
+                            })
+                        }
+                    }
+                    self.expect_token(Token::RParen)?;
+                }
                 Ok(vibesql_types::DataType::Varchar { max_length: None })
             }
             "BINARY" | "VARBINARY" => {

@@ -90,12 +90,18 @@ fn parse_durability_hint(
     }
 }
 
-/// Parse COMMIT statement
+/// Parse COMMIT or END statement (END is SQLite alias for COMMIT)
 pub(super) fn parse_commit_statement(
     parser: &mut super::Parser,
 ) -> Result<vibesql_ast::CommitStmt, ParseError> {
-    // Consume COMMIT
-    parser.consume_keyword(Keyword::Commit)?;
+    // Consume COMMIT or END (SQLite uses END as alias for COMMIT)
+    if parser.peek_keyword(Keyword::Commit) {
+        parser.consume_keyword(Keyword::Commit)?;
+    } else if parser.peek_keyword(Keyword::End) {
+        parser.consume_keyword(Keyword::End)?;
+    } else {
+        return Err(ParseError { message: "Expected COMMIT or END".to_string() });
+    }
 
     Ok(vibesql_ast::CommitStmt)
 }

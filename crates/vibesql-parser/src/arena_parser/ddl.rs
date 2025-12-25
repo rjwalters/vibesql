@@ -74,9 +74,16 @@ impl<'arena> ArenaParser<'arena> {
         }
     }
 
-    /// Parse COMMIT statement.
+    /// Parse COMMIT or END statement (END is SQLite alias for COMMIT).
     pub(crate) fn parse_commit_statement(&mut self) -> Result<CommitStmt, ParseError> {
-        self.consume_keyword(Keyword::Commit)?;
+        // Consume COMMIT or END (SQLite uses END as alias for COMMIT)
+        if self.peek_keyword(Keyword::Commit) {
+            self.consume_keyword(Keyword::Commit)?;
+        } else if self.peek_keyword(Keyword::End) {
+            self.consume_keyword(Keyword::End)?;
+        } else {
+            return Err(ParseError { message: "Expected COMMIT or END".to_string() });
+        }
         Ok(CommitStmt)
     }
 

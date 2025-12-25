@@ -318,7 +318,9 @@ impl Parser {
                 let begin_stmt = self.parse_begin_statement()?;
                 Ok(vibesql_ast::Statement::BeginTransaction(begin_stmt))
             }
-            Token::Keyword { keyword: Keyword::Commit, .. } => {
+            Token::Keyword { keyword: Keyword::Commit, .. }
+            | Token::Keyword { keyword: Keyword::End, .. } => {
+                // END is a SQLite alias for COMMIT in transaction context
                 let commit_stmt = self.parse_commit_statement()?;
                 Ok(vibesql_ast::Statement::Commit(commit_stmt))
             }
