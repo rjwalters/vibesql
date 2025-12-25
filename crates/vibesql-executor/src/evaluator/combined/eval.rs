@@ -774,9 +774,14 @@ impl CombinedExpressionEvaluator<'_> {
                         )))
                     }
                 } else {
-                    Err(ExecutorError::UnsupportedExpression(
-                        "Window functions require window mapping context".to_string(),
-                    ))
+                    // Extract function name for SQLite-compatible error message
+                    // Window functions in WHERE, GROUP BY, or HAVING clauses are misuse
+                    let function_name = match function {
+                        vibesql_ast::WindowFunctionSpec::Aggregate { name, .. }
+                        | vibesql_ast::WindowFunctionSpec::Ranking { name, .. }
+                        | vibesql_ast::WindowFunctionSpec::Value { name, .. } => name.to_string(),
+                    };
+                    Err(ExecutorError::MisuseOfWindowFunction { function_name })
                 }
             }
 

@@ -546,9 +546,16 @@ impl ExpressionEvaluator<'_> {
                 Ok(SqlValue::Boolean(final_result))
             }
 
-            vibesql_ast::Expression::WindowFunction { .. } => Err(ExecutorError::UnsupportedExpression(
-                "Window functions should be evaluated separately".to_string(),
-            )),
+            vibesql_ast::Expression::WindowFunction { function, .. } => {
+                // Extract function name for SQLite-compatible error message
+                // Window functions in WHERE, GROUP BY, or HAVING clauses are misuse
+                let function_name = match function {
+                    vibesql_ast::WindowFunctionSpec::Aggregate { name, .. }
+                    | vibesql_ast::WindowFunctionSpec::Ranking { name, .. }
+                    | vibesql_ast::WindowFunctionSpec::Value { name, .. } => name.to_string(),
+                };
+                Err(ExecutorError::MisuseOfWindowFunction { function_name })
+            }
 
             vibesql_ast::Expression::AggregateFunction { name, .. } => {
                 // SQLite-compatible error message for aggregate misuse in execution context
