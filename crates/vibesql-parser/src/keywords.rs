@@ -377,7 +377,10 @@ impl Keyword {
             Keyword::M |
             // NULLS is only contextual in ORDER BY (NULLS FIRST/LAST)
             // Can be used as identifier for table/column/CTE names
-            Keyword::Nulls
+            Keyword::Nulls |
+            // SQLite schema keywords: TEMP/TEMPORARY are valid schema names
+            // Allows three-part qualified names like temp.t1.column
+            Keyword::Temp | Keyword::Temporary
         )
     }
 }
