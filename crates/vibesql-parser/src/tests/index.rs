@@ -394,3 +394,161 @@ fn test_create_index_expression_complex() {
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }
 }
+
+// ============================================================================
+// Expression Indexes Without Outer Parentheses (Issue #4715)
+// ============================================================================
+// SQLite allows expression indexes without the outer parentheses, e.g.:
+// CREATE INDEX idx ON t(abs(b)) -- instead of ((abs(b)))
+// This should NOT be confused with prefix length syntax: name(10)
+
+#[test]
+fn test_create_index_expression_function_no_parens() {
+    // SQLite-style: abs(b) without extra outer parens
+    // This was previously misinterpreted as column "abs" with prefix length "b"
+    let sql = "CREATE INDEX t1b ON t1(abs(b))";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.index_name, "t1b");
+            assert_eq!(stmt.table_name, "t1");
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(stmt.columns[0].is_expression(), "Expected expression index, got column");
+            assert_eq!(stmt.columns[0].direction(), vibesql_ast::OrderDirection::Asc);
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_unique_index_expression_no_parens() {
+    // Test case from issue #4715
+    let sql = "CREATE UNIQUE INDEX t1b ON t1(abs(b))";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            match &stmt.index_type {
+                vibesql_ast::IndexType::BTree { unique } => {
+                    assert!(*unique, "Expected unique=true");
+                }
+                other => panic!("Expected BTree index, got: {:?}", other),
+            }
+            assert!(stmt.columns[0].is_expression());
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_expression_lower_no_parens() {
+    // Common case: lower() function for case-insensitive index
+    let sql = "CREATE INDEX idx_lower ON users(lower(email))";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(stmt.columns[0].is_expression());
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_expression_with_desc_no_parens() {
+    // Expression index with DESC, no outer parens
+    let sql = "CREATE INDEX idx ON t(abs(x) DESC)";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(stmt.columns[0].is_expression());
+            assert_eq!(stmt.columns[0].direction(), vibesql_ast::OrderDirection::Desc);
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_mixed_expression_no_parens_and_columns() {
+    // Mix of expression (no outer parens) and regular columns
+    let sql = "CREATE INDEX idx ON t(a, lower(b), c DESC)";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 3);
+
+            // First: column 'a'
+            assert!(!stmt.columns[0].is_expression());
+            assert_eq!(stmt.columns[0].expect_column_name(), "a");
+
+            // Second: expression lower(b)
+            assert!(stmt.columns[1].is_expression());
+
+            // Third: column 'c' DESC
+            assert!(!stmt.columns[2].is_expression());
+            assert_eq!(stmt.columns[2].expect_column_name(), "c");
+            assert_eq!(stmt.columns[2].direction(), vibesql_ast::OrderDirection::Desc);
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_prefix_length_still_works() {
+    // Ensure prefix length syntax still works: column_name(integer)
+    let sql = "CREATE INDEX idx ON users(name(10))";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(!stmt.columns[0].is_expression());
+            assert_eq!(stmt.columns[0].expect_column_name(), "name");
+            assert_eq!(stmt.columns[0].prefix_length(), Some(10));
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_multi_arg_function_no_parens() {
+    // Multi-argument function
+    let sql = "CREATE INDEX idx ON t(substr(name, 1, 3))";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(stmt.columns[0].is_expression());
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_nested_function_no_parens() {
+    // Nested function calls
+    let sql = "CREATE INDEX idx ON t(lower(trim(name)))";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(stmt.columns[0].is_expression());
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
