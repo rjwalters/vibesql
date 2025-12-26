@@ -180,4 +180,108 @@ mod tests {
             SqlValue::Boolean(false)
         );
     }
+
+    // SQLite type ordering tests: TEXT > INTEGER/REAL
+    // Per SQLite docs: "An INTEGER or REAL value is less than any TEXT or BLOB value."
+
+    #[test]
+    fn test_text_greater_than_integer() {
+        // '10' > 10 = true (TEXT > INTEGER in SQLite type ordering)
+        assert_eq!(
+            greater_than(
+                &SqlValue::Varchar(arcstr::ArcStr::from("10")),
+                &SqlValue::Integer(10)
+            )
+            .unwrap(),
+            SqlValue::Boolean(true)
+        );
+        // 10 < '10' = true (INTEGER < TEXT)
+        assert_eq!(
+            less_than(
+                &SqlValue::Integer(10),
+                &SqlValue::Varchar(arcstr::ArcStr::from("10"))
+            )
+            .unwrap(),
+            SqlValue::Boolean(true)
+        );
+    }
+
+    #[test]
+    fn test_text_greater_than_real() {
+        // '10' > 10.0 = true (TEXT > REAL in SQLite type ordering)
+        assert_eq!(
+            greater_than(
+                &SqlValue::Varchar(arcstr::ArcStr::from("10")),
+                &SqlValue::Double(10.0)
+            )
+            .unwrap(),
+            SqlValue::Boolean(true)
+        );
+        // 10.0 < '10' = true (REAL < TEXT)
+        assert_eq!(
+            less_than(
+                &SqlValue::Double(10.0),
+                &SqlValue::Varchar(arcstr::ArcStr::from("10"))
+            )
+            .unwrap(),
+            SqlValue::Boolean(true)
+        );
+    }
+
+    #[test]
+    fn test_text_not_less_than_numeric() {
+        // '10' < 10 = false (TEXT is never less than INTEGER)
+        assert_eq!(
+            less_than(
+                &SqlValue::Varchar(arcstr::ArcStr::from("10")),
+                &SqlValue::Integer(10)
+            )
+            .unwrap(),
+            SqlValue::Boolean(false)
+        );
+        // 10 > '10' = false (INTEGER is never greater than TEXT)
+        assert_eq!(
+            greater_than(
+                &SqlValue::Integer(10),
+                &SqlValue::Varchar(arcstr::ArcStr::from("10"))
+            )
+            .unwrap(),
+            SqlValue::Boolean(false)
+        );
+    }
+
+    #[test]
+    fn test_text_ordering_with_all_numeric_types() {
+        let text_val = SqlValue::Varchar(arcstr::ArcStr::from("test"));
+
+        // TEXT is greater than all numeric types
+        assert_eq!(
+            greater_than(&text_val, &SqlValue::Integer(100)).unwrap(),
+            SqlValue::Boolean(true)
+        );
+        assert_eq!(
+            greater_than(&text_val, &SqlValue::Smallint(100)).unwrap(),
+            SqlValue::Boolean(true)
+        );
+        assert_eq!(
+            greater_than(&text_val, &SqlValue::Bigint(100)).unwrap(),
+            SqlValue::Boolean(true)
+        );
+        assert_eq!(
+            greater_than(&text_val, &SqlValue::Float(100.0)).unwrap(),
+            SqlValue::Boolean(true)
+        );
+        assert_eq!(
+            greater_than(&text_val, &SqlValue::Real(100.0)).unwrap(),
+            SqlValue::Boolean(true)
+        );
+        assert_eq!(
+            greater_than(&text_val, &SqlValue::Double(100.0)).unwrap(),
+            SqlValue::Boolean(true)
+        );
+        assert_eq!(
+            greater_than(&text_val, &SqlValue::Numeric(100.0)).unwrap(),
+            SqlValue::Boolean(true)
+        );
+    }
 }
