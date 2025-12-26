@@ -507,9 +507,18 @@ impl<'arena> ArenaParser<'arena> {
         }
 
         // Function call or identifier
-        if let Token::Identifier(name) = self.peek() {
-            let name = name.clone();
+        // Extract identifier from token (handles both regular identifiers and keywords-as-identifiers)
+        let first_ident = match self.peek() {
+            Token::Identifier(name) => Some((name.clone(), false)),
+            Token::DelimitedIdentifier(name) => Some((name.clone(), true)),
+            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                // Keywords like TEMP, YEAR, MONTH, etc. can be used as identifiers
+                Some((kw.to_string().to_lowercase(), false))
+            }
+            _ => None,
+        };
 
+        if let Some((name, first_quoted)) = first_ident {
             // Check if it's a function call
             if matches!(self.tokens.get(self.position + 1), Some(Token::LParen)) {
                 return self.parse_function_call(&name);
@@ -521,24 +530,43 @@ impl<'arena> ArenaParser<'arena> {
 
             // Check for qualified name (table.column or schema.table.column)
             if self.try_consume(&Token::Symbol('.')) {
-                if let Token::Identifier(second) = self.peek() {
-                    let second = second.clone();
+                // Second part: identifier or any keyword (keywords allowed after .)
+                let second_ident = match self.peek() {
+                    Token::Identifier(id) => Some((id.clone(), false)),
+                    Token::DelimitedIdentifier(id) => Some((id.clone(), true)),
+                    Token::Keyword { keyword: kw, .. } => {
+                        // Any keyword can be used as table/column name when qualified
+                        Some((kw.to_string().to_lowercase(), false))
+                    }
+                    _ => None,
+                };
+
+                if let Some((second, second_quoted)) = second_ident {
                     self.advance();
                     let second_sym = self.intern(&second);
 
                     // Check for three-part name (schema.table.column)
                     if self.try_consume(&Token::Symbol('.')) {
-                        if let Token::Identifier(third) = self.peek() {
-                            let third = third.clone();
+                        // Third part: identifier or any keyword
+                        let third_ident = match self.peek() {
+                            Token::Identifier(id) => Some((id.clone(), false)),
+                            Token::DelimitedIdentifier(id) => Some((id.clone(), true)),
+                            Token::Keyword { keyword: kw, .. } => {
+                                Some((kw.to_string().to_lowercase(), false))
+                            }
+                            _ => None,
+                        };
+
+                        if let Some((third, third_quoted)) = third_ident {
                             self.advance();
                             let third_sym = self.intern(&third);
                             return Ok(Expression::ColumnRef {
                                 schema: Some(name_sym),
                                 table: Some(second_sym),
                                 column: third_sym,
-                                schema_quoted: false,
-                                table_quoted: false,
-                                column_quoted: false,
+                                schema_quoted: first_quoted,
+                                table_quoted: second_quoted,
+                                column_quoted: third_quoted,
                             });
                         } else if matches!(self.peek(), Token::Symbol('*')) {
                             // schema.table.* - not supported, treat as error
@@ -553,8 +581,8 @@ impl<'arena> ArenaParser<'arena> {
                         table: Some(name_sym),
                         column: second_sym,
                         schema_quoted: false,
-                        table_quoted: false,
-                        column_quoted: false,
+                        table_quoted: first_quoted,
+                        column_quoted: second_quoted,
                     });
                 } else if matches!(self.peek(), Token::Symbol('*')) {
                     self.advance();
@@ -568,7 +596,7 @@ impl<'arena> ArenaParser<'arena> {
                 column: name_sym,
                 schema_quoted: false,
                 table_quoted: false,
-                column_quoted: false,
+                column_quoted: first_quoted,
             });
         }
 
