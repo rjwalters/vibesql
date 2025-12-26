@@ -54,6 +54,11 @@ impl SelectExecutor<'_> {
         // Uses "misuse of aggregate function X()" format to match SQLite's resolve.c
         super::validation::validate_no_nested_aggregates(&stmt.select_list)?;
 
+        // Validate join table limit (issue #4711)
+        // SQLite enforces a limit of 64 tables in a single join
+        // This catches queries like SELECT * FROM t, t, t, ... (65+ times)
+        super::validation::validate_join_table_limit(stmt)?;
+
         #[cfg(feature = "profile-q6")]
         let execute_start = std::time::Instant::now();
 

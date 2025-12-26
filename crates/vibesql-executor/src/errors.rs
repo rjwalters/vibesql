@@ -151,6 +151,12 @@ pub enum ExecutorError {
         used_bytes: usize,
         max_bytes: usize,
     },
+    /// Join exceeded maximum number of tables (SQLite-compatible error)
+    /// Format: "at most 64 tables in a join"
+    JoinTableLimitExceeded {
+        table_count: usize,
+        max_tables: usize,
+    },
     /// Variable not found in procedural context (with available variables)
     VariableNotFound {
         variable_name: String,
@@ -737,6 +743,10 @@ impl std::fmt::Display for ExecutorError {
                         max_gb = max_gb.as_str()
                     )
                 )
+            }
+            ExecutorError::JoinTableLimitExceeded { max_tables, .. } => {
+                // SQLite-compatible error message: "at most 64 tables in a join"
+                write!(f, "at most {} tables in a join", max_tables)
             }
             ExecutorError::VariableNotFound { variable_name, available_variables } => {
                 if available_variables.is_empty() {

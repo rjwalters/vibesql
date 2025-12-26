@@ -82,6 +82,15 @@ pub const MAX_LOOP_ITERATIONS: usize = 50_000_000;
 /// The limit still catches truly infinite loops while allowing legitimate deep recursion.
 pub const MAX_RECURSIVE_CTE_ITERATIONS: usize = 1_000_000;
 
+/// Maximum number of tables in a single join operation
+///
+/// SQLite uses 64 for SQLITE_LIMIT_COMPOUND_SELECT-like join limits
+/// This prevents exponential cost from very large multi-table joins
+/// and catches queries that would likely be impractical anyway.
+///
+/// Error message: "at most 64 tables in a join"
+pub const MAX_TABLES_IN_JOIN: usize = 64;
+
 /// Maximum memory usage per query execution
 ///
 /// This prevents:
