@@ -422,52 +422,88 @@ impl Parser {
 
                 columns.push(vibesql_ast::IndexColumn::new_expression(expr, direction));
             } else {
+                // Save position before parsing identifier - we may need to backtrack
+                // if this turns out to be an expression like abs(b) rather than a column name
+                let saved_position = self.position;
+
                 // Parse column name (use parse_alias_name to allow SQLite-style single-quoted
                 // identifiers)
                 // SQLite allows: CREATE INDEX i1xy ON t1(`x`,'y' ASC); -- 'y' is a column name
                 let column_name = self.parse_alias_name()?;
 
                 // Check for optional prefix length: column_name(length)
+                // BUT: if the token after ( is not a number, this is likely a function call
+                // like abs(b), not a prefix length like name(10). In that case, backtrack
+                // and parse as an expression.
                 let prefix_length = if self.peek() == &Token::LParen {
-                    self.advance(); // consume LParen
+                    // Peek ahead to check if this is a prefix length (number) or function args
+                    if matches!(self.peek_at_offset(1), Token::Number(_)) {
+                        self.advance(); // consume LParen
 
-                    // Parse the integer length
-                    let length = match self.peek() {
-                        Token::Number(n) => {
-                            let value = n.parse::<i64>().map_err(|_| ParseError {
-                                message: "Invalid integer for column prefix length".to_string(),
-                            })?;
+                        // Parse the integer length
+                        let length = match self.peek() {
+                            Token::Number(n) => {
+                                let value = n.parse::<i64>().map_err(|_| ParseError {
+                                    message: "Invalid integer for column prefix length".to_string(),
+                                })?;
+                                self.advance();
+
+                                // Validate prefix length range (MySQL compatibility)
+                                if value < 1 {
+                                    return Err(ParseError {
+                                        message: format!(
+                                            "Key part '{}' length cannot be 0",
+                                            column_name
+                                        ),
+                                    });
+                                }
+                                // MySQL InnoDB limit: 3072 bytes for index prefix length
+                                if value > 3072 {
+                                    return Err(ParseError {
+                                        message:
+                                            "Specified key was too long; max key length is 3072 bytes"
+                                                .to_string(),
+                                    });
+                                }
+
+                                value
+                            }
+                            _ => {
+                                return Err(ParseError {
+                                    message: "Expected integer for column prefix length"
+                                        .to_string(),
+                                })
+                            }
+                        };
+
+                        self.expect_token(Token::RParen)?;
+                        Some(length as u64)
+                    } else {
+                        // Not a prefix length - this is a function call like abs(b)
+                        // Backtrack and parse as an expression
+                        self.position = saved_position;
+                        let expr = self.parse_expression()?;
+
+                        // Check for optional ASC/DESC
+                        let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
                             self.advance();
+                            vibesql_ast::OrderDirection::Asc
+                        } else if self.peek_keyword(crate::keywords::Keyword::Desc) {
+                            self.advance();
+                            vibesql_ast::OrderDirection::Desc
+                        } else {
+                            vibesql_ast::OrderDirection::Asc
+                        };
 
-                            // Validate prefix length range (MySQL compatibility)
-                            if value < 1 {
-                                return Err(ParseError {
-                                    message: format!(
-                                        "Key part '{}' length cannot be 0",
-                                        column_name
-                                    ),
-                                });
-                            }
-                            // MySQL InnoDB limit: 3072 bytes for index prefix length
-                            if value > 3072 {
-                                return Err(ParseError {
-                                    message:
-                                        "Specified key was too long; max key length is 3072 bytes"
-                                            .to_string(),
-                                });
-                            }
+                        columns.push(vibesql_ast::IndexColumn::new_expression(expr, direction));
 
-                            value
+                        if self.peek() == &Token::Comma {
+                            self.advance(); // consume comma
+                        } else {
+                            break;
                         }
-                        _ => {
-                            return Err(ParseError {
-                                message: "Expected integer for column prefix length".to_string(),
-                            })
-                        }
-                    };
-
-                    self.expect_token(Token::RParen)?;
-                    Some(length as u64)
+                        continue;
+                    }
                 } else {
                     None
                 };
@@ -476,7 +512,7 @@ impl Parser {
                 // Syntax: column_name COLLATE collation_name
                 if self.peek_keyword(crate::keywords::Keyword::Collate) {
                     self.advance(); // consume COLLATE
-                    // Parse collation name (e.g., NOCASE, BINARY, RTRIM)
+                                    // Parse collation name (e.g., NOCASE, BINARY, RTRIM)
                     let _collation = self.parse_identifier()?;
                     // Note: We parse and ignore the collation for now
                     // Full collation support would require storing it in IndexColumn
