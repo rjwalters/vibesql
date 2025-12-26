@@ -374,32 +374,40 @@ fn generate_natural_join_condition(
 
     // Get all column names from left schema (normalized to lowercase for case-insensitive
     // comparison)
-    let mut left_columns: HashMap<String, Vec<(String, String)>> = HashMap::new(); // lowercase_name -> [(table, actual_name)]
+    // Store: lowercase_name -> [(table, actual_name, collation)]
+    let mut left_columns: HashMap<String, Vec<(String, String, Option<String>)>> = HashMap::new();
     for (table_name, (_table_idx, table_schema)) in &left_schema.table_schemas {
         for col in &table_schema.columns {
             let lowercase_name = col.name.to_lowercase();
-            left_columns
-                .entry(lowercase_name)
-                .or_default()
-                .push((table_name.to_string(), col.name.clone()));
+            left_columns.entry(lowercase_name).or_default().push((
+                table_name.to_string(),
+                col.name.clone(),
+                col.collation.clone(),
+            ));
         }
     }
 
     // Find common column names from right schema
-    // Store: (left_table, left_col, right_table, right_col, right_table_start_idx)
-    let mut common_columns: Vec<(String, String, String, String, usize)> = Vec::new();
+    // Store: (left_table, left_col, right_table, right_col, right_table_start_idx, collation)
+    // Collation is taken from the left column (left takes precedence per SQLite semantics),
+    // falling back to the right column's collation if the left has none.
+    let mut common_columns: Vec<(String, String, String, String, usize, Option<String>)> =
+        Vec::new();
     for (table_name, (table_idx, table_schema)) in &right_schema.table_schemas {
         for col in &table_schema.columns {
             let lowercase_name = col.name.to_lowercase();
             if let Some(left_occurrences) = left_columns.get(&lowercase_name) {
                 // Found a common column
-                for (left_table, left_col) in left_occurrences {
+                for (left_table, left_col, left_collation) in left_occurrences {
+                    // Use left column's collation if present, otherwise use right column's
+                    let collation = left_collation.clone().or_else(|| col.collation.clone());
                     common_columns.push((
                         left_table.clone(),
                         left_col.clone(),
                         table_name.to_string(),
                         col.name.clone(),
                         *table_idx,
+                        collation,
                     ));
                 }
             }
@@ -413,7 +421,9 @@ fn generate_natural_join_condition(
 
     // Build the join condition as an AND chain of equalities
     let mut condition: Option<vibesql_ast::Expression> = None;
-    for (left_table, left_col, right_table, right_col, right_table_start) in common_columns {
+    for (left_table, left_col, right_table, right_col, right_table_start, collation) in
+        common_columns
+    {
         // For self-joins, use synthetic table name for right side that matches
         // what CombinedSchema::merge will create
         let right_table_ref = if is_self_join {
@@ -427,14 +437,26 @@ fn generate_natural_join_condition(
             right_table
         };
 
+        // Build right column expression, applying COLLATE if the column has a collation
+        // defined. This ensures NATURAL JOIN respects column-level COLLATE declarations.
+        let right_col_expr = vibesql_ast::Expression::ColumnRef(
+            vibesql_ast::ColumnIdentifier::qualified(&right_table_ref, false, &right_col, false),
+        );
+        let right_col_with_collate = if let Some(ref coll) = collation {
+            vibesql_ast::Expression::Collate {
+                expr: Box::new(right_col_expr),
+                collation: coll.clone(),
+            }
+        } else {
+            right_col_expr
+        };
+
         let equality = vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef(
                 vibesql_ast::ColumnIdentifier::qualified(&left_table, false, &left_col, false),
             )),
             op: vibesql_ast::BinaryOperator::Equal,
-            right: Box::new(vibesql_ast::Expression::ColumnRef(
-                vibesql_ast::ColumnIdentifier::qualified(&right_table_ref, false, &right_col, false),
-            )),
+            right: Box::new(right_col_with_collate),
         };
 
         condition = Some(match condition {
@@ -1395,7 +1417,7 @@ fn generate_using_join_condition(
     for col_name in columns {
         let col_lower = col_name.to_lowercase();
 
-        // Find column in left schema (case-insensitive) - also get absolute index
+        // Find column in left schema (case-insensitive) - also get absolute index and collation
         let left_col = left_schema
             .table_schemas
             .iter()
@@ -1406,7 +1428,12 @@ fn generate_using_join_condition(
                     .enumerate()
                     .find_map(|(col_offset, col)| {
                         if col.name.to_lowercase() == col_lower {
-                            Some((table_name.clone(), col.name.clone(), start_idx + col_offset))
+                            Some((
+                                table_name.clone(),
+                                col.name.clone(),
+                                start_idx + col_offset,
+                                col.collation.clone(),
+                            ))
                         } else {
                             None
                         }
@@ -1416,7 +1443,7 @@ fn generate_using_join_condition(
                 column_name: col_name.to_string(),
             })?;
 
-        // Find column in right schema (case-insensitive) - get absolute index and table start
+        // Find column in right schema (case-insensitive) - get absolute index, table start, collation
         let right_col = right_schema
             .table_schemas
             .iter()
@@ -1427,12 +1454,13 @@ fn generate_using_join_condition(
                     .enumerate()
                     .find_map(|(col_offset, col)| {
                         if col.name.to_lowercase() == col_lower {
-                            // Return: (table_name, col_name, absolute_col_idx, table_start_idx)
+                            // Return: (table_name, col_name, absolute_col_idx, table_start_idx, collation)
                             Some((
                                 table_name.clone(),
                                 col.name.clone(),
                                 start_idx + col_offset,
                                 *start_idx,
+                                col.collation.clone(),
                             ))
                         } else {
                             None
@@ -1442,6 +1470,9 @@ fn generate_using_join_condition(
             .ok_or_else(|| ExecutorError::JoinUsingColumnNotPresent {
                 column_name: col_name.to_string(),
             })?;
+
+        // Use left column's collation if present, otherwise use right column's
+        let collation = left_col.3.clone().or(right_col.4.clone());
 
         // Create equality condition with table-qualified column references
         // For self-joins, we need to use a synthetic table name for the right side
@@ -1460,6 +1491,20 @@ fn generate_using_join_condition(
             right_col.0.to_string()
         };
 
+        // Build right column expression, applying COLLATE if the column has a collation
+        // defined. This ensures USING clause joins respect column-level COLLATE declarations.
+        let right_col_expr = vibesql_ast::Expression::ColumnRef(
+            vibesql_ast::ColumnIdentifier::qualified(&right_table_name, false, &right_col.1, false),
+        );
+        let right_col_with_collate = if let Some(ref coll) = collation {
+            vibesql_ast::Expression::Collate {
+                expr: Box::new(right_col_expr),
+                collation: coll.clone(),
+            }
+        } else {
+            right_col_expr
+        };
+
         let equality = vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef(
                 vibesql_ast::ColumnIdentifier::qualified(
@@ -1470,14 +1515,7 @@ fn generate_using_join_condition(
                 ),
             )),
             op: vibesql_ast::BinaryOperator::Equal,
-            right: Box::new(vibesql_ast::Expression::ColumnRef(
-                vibesql_ast::ColumnIdentifier::qualified(
-                    &right_table_name,
-                    false,
-                    &right_col.1,
-                    false,
-                ),
-            )),
+            right: Box::new(right_col_with_collate),
         };
 
         condition = Some(match condition {
