@@ -303,6 +303,132 @@ fn test_not_null_without_is() {
     }
 }
 
+/// Test chained NOTNULL operators (issue #4713)
+/// SQLite allows: `x NOTNULL NOTNULL` → `(x IS NOT NULL) IS NOT NULL`
+#[test]
+fn test_chained_notnull_operators() {
+    // Parse: SELECT 1 NOTNULL NOTNULL
+    let sql = "SELECT 1 NOTNULL NOTNULL";
+    let stmt = Parser::parse_sql(sql).expect("Should parse");
+
+    let select = match stmt {
+        vibesql_ast::Statement::Select(s) => s,
+        _ => panic!("Expected SELECT statement"),
+    };
+
+    let expr = &select.select_list[0];
+    match expr {
+        vibesql_ast::SelectItem::Expression { expr, .. } => {
+            // Should be: IsNull(IsNull(1, negated: true), negated: true)
+            // i.e., (1 IS NOT NULL) IS NOT NULL
+            match expr {
+                Expression::IsNull { expr: inner, negated: outer_negated } => {
+                    assert!(*outer_negated, "Outer NOTNULL should have negated=true");
+
+                    match inner.as_ref() {
+                        Expression::IsNull { expr: innermost, negated: inner_negated } => {
+                            assert!(*inner_negated, "Inner NOTNULL should have negated=true");
+
+                            match innermost.as_ref() {
+                                Expression::Literal(vibesql_types::SqlValue::Integer(1)) => {
+                                    // Correct!
+                                }
+                                _ => panic!("Expected literal 1, got {:?}", innermost),
+                            }
+                        }
+                        _ => panic!("Expected inner IsNull, got {:?}", inner),
+                    }
+                }
+                _ => panic!("Expected IsNull, got {:?}", expr),
+            }
+        }
+        _ => panic!("Expected Expression column"),
+    }
+}
+
+/// Test chained ISNULL operators
+#[test]
+fn test_chained_isnull_operators() {
+    // Parse: SELECT 1 ISNULL ISNULL
+    let sql = "SELECT 1 ISNULL ISNULL";
+    let stmt = Parser::parse_sql(sql).expect("Should parse");
+
+    let select = match stmt {
+        vibesql_ast::Statement::Select(s) => s,
+        _ => panic!("Expected SELECT statement"),
+    };
+
+    let expr = &select.select_list[0];
+    match expr {
+        vibesql_ast::SelectItem::Expression { expr, .. } => {
+            // Should be: IsNull(IsNull(1, negated: false), negated: false)
+            match expr {
+                Expression::IsNull { expr: inner, negated: outer_negated } => {
+                    assert!(!*outer_negated, "Outer ISNULL should have negated=false");
+
+                    match inner.as_ref() {
+                        Expression::IsNull { expr: innermost, negated: inner_negated } => {
+                            assert!(!*inner_negated, "Inner ISNULL should have negated=false");
+
+                            match innermost.as_ref() {
+                                Expression::Literal(vibesql_types::SqlValue::Integer(1)) => {
+                                    // Correct!
+                                }
+                                _ => panic!("Expected literal 1, got {:?}", innermost),
+                            }
+                        }
+                        _ => panic!("Expected inner IsNull, got {:?}", inner),
+                    }
+                }
+                _ => panic!("Expected IsNull, got {:?}", expr),
+            }
+        }
+        _ => panic!("Expected Expression column"),
+    }
+}
+
+/// Test mixed NOTNULL and ISNULL chaining
+#[test]
+fn test_mixed_notnull_isnull_chaining() {
+    // Parse: SELECT 1 NOTNULL ISNULL
+    let sql = "SELECT 1 NOTNULL ISNULL";
+    let stmt = Parser::parse_sql(sql).expect("Should parse");
+
+    let select = match stmt {
+        vibesql_ast::Statement::Select(s) => s,
+        _ => panic!("Expected SELECT statement"),
+    };
+
+    let expr = &select.select_list[0];
+    match expr {
+        vibesql_ast::SelectItem::Expression { expr, .. } => {
+            // Should be: IsNull(IsNull(1, negated: true), negated: false)
+            // i.e., (1 IS NOT NULL) IS NULL
+            match expr {
+                Expression::IsNull { expr: inner, negated: outer_negated } => {
+                    assert!(!*outer_negated, "Outer ISNULL should have negated=false");
+
+                    match inner.as_ref() {
+                        Expression::IsNull { expr: innermost, negated: inner_negated } => {
+                            assert!(*inner_negated, "Inner NOTNULL should have negated=true");
+
+                            match innermost.as_ref() {
+                                Expression::Literal(vibesql_types::SqlValue::Integer(1)) => {
+                                    // Correct!
+                                }
+                                _ => panic!("Expected literal 1, got {:?}", innermost),
+                            }
+                        }
+                        _ => panic!("Expected inner IsNull, got {:?}", inner),
+                    }
+                }
+                _ => panic!("Expected IsNull, got {:?}", expr),
+            }
+        }
+        _ => panic!("Expected Expression column"),
+    }
+}
+
 /// Test NOT NULL in complex WHERE clause
 #[test]
 fn test_not_null_in_complex_where() {
