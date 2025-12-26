@@ -882,7 +882,8 @@ proc execsql {sql {db ""}} {
     # - "BEGIN TRANSACTION", "BEGIN DEFERRED", "BEGIN IMMEDIATE", "BEGIN EXCLUSIVE"
     # Match these patterns preceded by statement boundary (start of string, ;, or newline)
     set begin_count [regexp -all -nocase {(?:^|;|\n)\s*BEGIN\s*(?:TRANSACTION|DEFERRED|IMMEDIATE|EXCLUSIVE|;|\s*$)} $sql]
-    set end_count [expr {[regexp -all -nocase {(?:^|;|\n)\s*COMMIT\s*(?:;|\s*$)} $sql] + \
+    # END and END TRANSACTION are SQLite synonyms for COMMIT
+    set end_count [expr {[regexp -all -nocase {(?:^|;|\n)\s*(?:COMMIT|END)(?:\s+TRANSACTION)?\s*(?:;|\s*$)} $sql] + \
                          [regexp -all -nocase {(?:^|;|\n)\s*ROLLBACK\s*(?:;|\s*$)} $sql]}]
     set net_begin [expr {$begin_count - $end_count}]
 
