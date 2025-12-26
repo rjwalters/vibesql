@@ -39,7 +39,8 @@
 use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
 
 use super::helpers::{
-    is_self_join, is_simple_single_table_self_join, rewrite_column_refs_with_alias,
+    get_outer_table_name, is_self_join, is_simple_single_table_self_join,
+    rewrite_column_refs_with_alias,
 };
 
 /// Result of converting an IN subquery to a join
@@ -142,24 +143,32 @@ pub(super) fn try_convert_in_to_join(
             );
         }
 
-        // FIX for issue #4493: Don't qualify the outer expression!
+        // FIX for issue #4709: For simple self-joins, qualify the outer expression
+        // with the outer table name to avoid ambiguity.
         //
-        // The original code tried to qualify the outer expression (left side of IN)
-        // with the subquery's table name to handle self-joins. But this breaks when:
-        // 1. The outer query has multiple tables (FROM t2, t1)
-        // 2. The column belongs to a different table than the subquery references
+        // When we have:
+        //   SELECT * FROM t1 WHERE w IN (SELECT rowid FROM t1)
         //
-        // Example that FAILS with qualification:
+        // After transformation:
+        //   SELECT * FROM t1 SEMI JOIN t1 AS __subquery_t1 ON w = __subquery_t1.rowid
+        //
+        // The unqualified 'w' is ambiguous because both t1 and __subquery_t1 have column 'w'.
+        // We need to qualify it as 't1.w'.
+        //
+        // However, for multi-table outer queries (FIX for issue #4493), we still leave
+        // the expression unqualified:
         //   SELECT x FROM t2, t1 WHERE x IN (SELECT c FROM t1 WHERE ...)
-        //   - Outer 'x' is from t2, not t1
-        //   - Qualifying as 't1.x' causes "column not found" error
         //
-        // Let SQL's normal resolution handle it. The join condition will be:
-        //   t2.x = __subquery_t1.c  (resolved at runtime based on available columns)
-        //
-        // For true self-joins like `SELECT * FROM t1 WHERE id IN (SELECT id FROM t1)`,
-        // the runtime resolution will correctly pick up t1.id for the outer reference.
-        let qualified_expr = expr.clone();
+        // Here 'x' might be from t2, and qualifying as 't1.x' would be wrong.
+        // The is_simple_single_table_self_join check above already filters out these cases.
+        let qualified_expr =
+            if let Some(outer_table) = get_outer_table_name(from) {
+                // Simple self-join: qualify outer expression with outer table name
+                rewrite_column_refs_with_alias(expr, &outer_table, &outer_table)
+            } else {
+                // Complex FROM clause: let SQL resolution handle it
+                expr.clone()
+            };
 
         // Use the table alias (if present) for matching column references, not just the table name
         // This is critical for Q21 where the subquery uses an alias like "l2" or "l3"

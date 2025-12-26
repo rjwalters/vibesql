@@ -75,6 +75,24 @@ pub(super) fn is_simple_single_table_self_join(
     }
 }
 
+/// Get the effective table name from a simple single-table FROM clause.
+///
+/// Returns the alias if present, otherwise the table name.
+/// Returns None if the FROM clause is not a simple single table.
+///
+/// This is used to qualify outer expressions in self-joins to avoid ambiguity
+/// when the same table appears on both sides of the join.
+pub(super) fn get_outer_table_name(from: &FromClause) -> Option<String> {
+    match from {
+        FromClause::Table { name, alias, .. } => {
+            // Return alias if present, otherwise table name
+            Some(alias.clone().unwrap_or_else(|| name.clone()))
+        }
+        // For non-simple FROM clauses, we can't determine a single table name
+        _ => None,
+    }
+}
+
 /// Rewrite column references in an expression to use a new table qualifier
 pub(super) fn rewrite_column_refs_with_alias(
     expr: &Expression,
