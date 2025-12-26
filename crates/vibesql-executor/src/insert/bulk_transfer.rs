@@ -181,13 +181,15 @@ fn execute_bulk_transfer(
         src_table.scan().iter().map(|row| row.values.clone()).collect::<Vec<_>>()
     };
 
-    let mut inserted_count = 0;
     let mut pk_values_seen = Vec::new();
     let mut unique_values_seen = if !dest_schema.get_unique_constraint_indices().is_empty() {
         vec![Vec::new(); dest_schema.get_unique_constraint_indices().len()]
     } else {
         Vec::new()
     };
+
+    // Collect all validated rows for batch insert
+    let mut validated_rows: Vec<vibesql_storage::Row> = Vec::with_capacity(source_rows.len());
 
     for row_values in source_rows {
         // Validate only the constraints that differ between schemas
@@ -245,17 +247,21 @@ fn execute_bulk_transfer(
             }
         }
 
-        // Insert row directly without re-validation of type and NOT NULL
-        // (already validated by schema compatibility check)
-        // IMPORTANT: Use db.insert_row() to ensure indexes are updated!
-        let row = vibesql_storage::Row::new(row_values);
-        db.insert_row(dest_table, row)
-            .map_err(|e| ExecutorError::UnsupportedExpression(format!("Storage error: {}", e)))?;
-        inserted_count += 1;
+        // Collect validated row for batch insert
+        validated_rows.push(vibesql_storage::Row::new(row_values));
     }
 
+    // Batch insert all rows at once (much faster than row-by-row)
+    // This reduces WAL operations, index rebuilds, and cache invalidations
+    let inserted_count = if !validated_rows.is_empty() {
+        db.insert_rows_batch(dest_table, validated_rows)
+            .map_err(|e| ExecutorError::UnsupportedExpression(format!("Storage error: {}", e)))?
+    } else {
+        0
+    };
+
     // Invalidate the database-level columnar cache since table data changed.
-    // Note: The table-level cache is already invalidated by insert_row().
+    // Note: The table-level cache is already invalidated by insert_rows_batch().
     // Both invalidations are necessary because they manage separate caches:
     // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
     // - Database-level cache: used by Database::get_columnar() for cached access
