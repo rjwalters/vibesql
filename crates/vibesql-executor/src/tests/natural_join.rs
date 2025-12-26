@@ -202,6 +202,224 @@ fn test_natural_join_with_on_clause_error() {
     assert!(err.to_string().contains("NATURAL") || err.to_string().contains("ON"));
 }
 
+// Issue #4708: NATURAL JOIN should respect column COLLATE declarations
+#[test]
+fn test_natural_join_respects_collation() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Create people table with case-insensitive NAME column
+    let mut name_col = vibesql_catalog::ColumnSchema::new(
+        "NAME".to_string(),
+        vibesql_types::DataType::Varchar { max_length: Some(50) },
+        false,
+    );
+    name_col.collation = Some("NOCASE".to_string());
+    let people_schema = vibesql_catalog::TableSchema::new(
+        "PEOPLE".to_string(),
+        vec![name_col],
+    );
+    db.create_table(people_schema).unwrap();
+
+    // Create greetings table with case-insensitive NAME column
+    let mut greeting_name_col = vibesql_catalog::ColumnSchema::new(
+        "NAME".to_string(),
+        vibesql_types::DataType::Varchar { max_length: Some(50) },
+        false,
+    );
+    greeting_name_col.collation = Some("NOCASE".to_string());
+    let greeting_col = vibesql_catalog::ColumnSchema::new(
+        "GREETING".to_string(),
+        vibesql_types::DataType::Varchar { max_length: Some(100) },
+        false,
+    );
+    let greetings_schema = vibesql_catalog::TableSchema::new(
+        "GREETINGS".to_string(),
+        vec![greeting_name_col, greeting_col],
+    );
+    db.create_table(greetings_schema).unwrap();
+
+    // Insert data - 'Alice' in people, 'ALICE' in greetings
+    db.insert_row(
+        "people",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+        ]),
+    )
+    .unwrap();
+
+    db.insert_row(
+        "greetings",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("ALICE")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello, ALICE!")),
+        ]),
+    )
+    .unwrap();
+
+    // Execute NATURAL JOIN query - should match 'Alice' with 'ALICE' due to NOCASE collation
+    let executor = SelectExecutor::new(&db);
+    let stmt = vibesql_ast::SelectStmt {
+        into_table: None,
+        into_variables: None,
+        with_clause: None,
+        set_operation: None,
+        values: None,
+        distinct: false,
+        select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
+        from: Some(vibesql_ast::FromClause::Join {
+            left: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
+                name: "people".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
+                name: "greetings".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
+            join_type: vibesql_ast::JoinType::Inner,
+            condition: None,
+            using_columns: None,
+            natural: true, // NATURAL JOIN
+        }),
+        where_clause: None,
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+    };
+    let result = executor.execute(&stmt).unwrap();
+
+    // Should return 1 row - 'Alice' matches 'ALICE' with NOCASE collation
+    assert_eq!(
+        result.len(),
+        1,
+        "NATURAL JOIN should match 'Alice' with 'ALICE' using NOCASE collation"
+    );
+
+    // Verify the row contains the expected values
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))
+    );
+    assert_eq!(
+        result[0].values[1],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello, ALICE!"))
+    );
+}
+
+// Issue #4708: USING clause should also respect column COLLATE declarations
+#[test]
+fn test_using_join_respects_collation() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Create people table with case-insensitive NAME column
+    let mut name_col = vibesql_catalog::ColumnSchema::new(
+        "NAME".to_string(),
+        vibesql_types::DataType::Varchar { max_length: Some(50) },
+        false,
+    );
+    name_col.collation = Some("NOCASE".to_string());
+    let people_schema = vibesql_catalog::TableSchema::new(
+        "PEOPLE".to_string(),
+        vec![name_col],
+    );
+    db.create_table(people_schema).unwrap();
+
+    // Create greetings table with case-insensitive NAME column
+    let mut greeting_name_col = vibesql_catalog::ColumnSchema::new(
+        "NAME".to_string(),
+        vibesql_types::DataType::Varchar { max_length: Some(50) },
+        false,
+    );
+    greeting_name_col.collation = Some("NOCASE".to_string());
+    let greeting_col = vibesql_catalog::ColumnSchema::new(
+        "GREETING".to_string(),
+        vibesql_types::DataType::Varchar { max_length: Some(100) },
+        false,
+    );
+    let greetings_schema = vibesql_catalog::TableSchema::new(
+        "GREETINGS".to_string(),
+        vec![greeting_name_col, greeting_col],
+    );
+    db.create_table(greetings_schema).unwrap();
+
+    // Insert data - 'bob' in people, 'BOB' in greetings
+    db.insert_row(
+        "people",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("bob")),
+        ]),
+    )
+    .unwrap();
+
+    db.insert_row(
+        "greetings",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("BOB")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello, BOB!")),
+        ]),
+    )
+    .unwrap();
+
+    // Execute JOIN USING query - should match 'bob' with 'BOB' due to NOCASE collation
+    let executor = SelectExecutor::new(&db);
+    let stmt = vibesql_ast::SelectStmt {
+        into_table: None,
+        into_variables: None,
+        with_clause: None,
+        set_operation: None,
+        values: None,
+        distinct: false,
+        select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
+        from: Some(vibesql_ast::FromClause::Join {
+            left: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
+                name: "people".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
+                name: "greetings".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
+            join_type: vibesql_ast::JoinType::Inner,
+            condition: None,
+            using_columns: Some(vec!["NAME".to_string()]), // USING (NAME)
+            natural: false,
+        }),
+        where_clause: None,
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+    };
+    let result = executor.execute(&stmt).unwrap();
+
+    // Should return 1 row - 'bob' matches 'BOB' with NOCASE collation
+    assert_eq!(
+        result.len(),
+        1,
+        "JOIN USING should match 'bob' with 'BOB' using NOCASE collation"
+    );
+
+    // Verify the row contains the expected values
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("bob"))
+    );
+    assert_eq!(
+        result[0].values[1],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello, BOB!"))
+    );
+}
+
 // TODO: Add more comprehensive tests for:
 // - NATURAL JOIN with no common columns (should behave like CROSS JOIN)
 // - NATURAL LEFT JOIN
