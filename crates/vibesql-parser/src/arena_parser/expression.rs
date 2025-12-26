@@ -354,14 +354,19 @@ impl<'arena> ArenaParser<'arena> {
 
         // SQLite compatibility: ISNULL and NOTNULL as postfix operators
         // These are equivalent to IS NULL and IS NOT NULL respectively
-        if self.peek_keyword(Keyword::Isnull) {
-            self.consume_keyword(Keyword::Isnull)?;
-            let left_ref = self.arena.alloc(left);
-            left = Expression::IsNull { expr: left_ref, negated: false };
-        } else if self.peek_keyword(Keyword::Notnull) {
-            self.consume_keyword(Keyword::Notnull)?;
-            let left_ref = self.arena.alloc(left);
-            left = Expression::IsNull { expr: left_ref, negated: true };
+        // Loop to support chaining: `x NOTNULL NOTNULL` → `(x IS NOT NULL) IS NOT NULL`
+        loop {
+            if self.peek_keyword(Keyword::Isnull) {
+                self.consume_keyword(Keyword::Isnull)?;
+                let left_ref = self.arena.alloc(left);
+                left = Expression::IsNull { expr: left_ref, negated: false };
+            } else if self.peek_keyword(Keyword::Notnull) {
+                self.consume_keyword(Keyword::Notnull)?;
+                let left_ref = self.arena.alloc(left);
+                left = Expression::IsNull { expr: left_ref, negated: true };
+            } else {
+                break;
+            }
         }
 
         Ok(left)
