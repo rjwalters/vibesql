@@ -36,6 +36,11 @@ set ::pragma_full_column_names 0   ;# Default: OFF
 set ::pragma_short_column_names 1  ;# Default: ON
 set ::pragma_case_sensitive_like 0 ;# Default: OFF (case-insensitive LIKE)
 
+# DQS (Double-Quoted Strings) mode tracking
+# When enabled, double-quoted strings are treated as string literals instead of identifiers
+# This emulates SQLite's deprecated DQS_DML mode (SQLITE_DBCONFIG_DQS_DML)
+set ::dqs_dml_mode 0  ;# Default: OFF (double quotes are identifiers)
+
 # SQLite configuration variables (used by tests)
 set ::AUTOVACUUM 0       ;# Auto-vacuum not supported
 set ::TEMP_STORE 0       ;# Temp storage in file
@@ -590,6 +595,91 @@ proc format_sql_value {value} {
     return "'$escaped'"
 }
 
+# Convert double-quoted strings to single-quoted strings for DQS mode
+# This emulates SQLite's deprecated DQS_DML mode where double-quoted strings
+# are treated as string literals instead of identifiers.
+#
+# The conversion is SQL-aware:
+# - Replaces "string" with 'string' in VALUES, SET, WHERE clauses
+# - Escapes any embedded single quotes: "it's" -> 'it''s'
+# - Preserves double quotes that are part of identifiers (column names after AS)
+# - Handles escaped double quotes within strings: "he said ""hi""" -> 'he said "hi"'
+proc convert_dqs_to_single_quotes {sql} {
+    # Build result string by parsing through the SQL
+    set result ""
+    set len [string length $sql]
+    set i 0
+
+    while {$i < $len} {
+        set char [string index $sql $i]
+
+        if {$char eq "'"} {
+            # Single-quoted string - copy as-is including the content
+            append result $char
+            incr i
+            while {$i < $len} {
+                set c [string index $sql $i]
+                append result $c
+                incr i
+                if {$c eq "'"} {
+                    # Check for escaped quote ''
+                    if {$i < $len && [string index $sql $i] eq "'"} {
+                        append result "'"
+                        incr i
+                    } else {
+                        break
+                    }
+                }
+            }
+        } elseif {$char eq "\""} {
+            # Double-quoted string - convert to single-quoted string
+            # Extract the content between quotes
+            incr i
+            set content ""
+            while {$i < $len} {
+                set c [string index $sql $i]
+                if {$c eq "\""} {
+                    # Check for escaped double quote ""
+                    if {[expr {$i + 1}] < $len && [string index $sql [expr {$i + 1}]] eq "\""} {
+                        # Escaped double quote - add single double quote to content
+                        append content "\""
+                        incr i 2
+                    } else {
+                        # End of string
+                        incr i
+                        break
+                    }
+                } else {
+                    append content $c
+                    incr i
+                }
+            }
+            # Convert to single-quoted string
+            # Escape any single quotes in the content by doubling them
+            set escaped_content [string map {' ''} $content]
+            append result "'$escaped_content'"
+        } elseif {$char eq "-" && [expr {$i + 1}] < $len && [string index $sql [expr {$i + 1}]] eq "-"} {
+            # SQL comment -- skip to end of line
+            append result $char
+            incr i
+            while {$i < $len} {
+                set c [string index $sql $i]
+                append result $c
+                incr i
+                if {$c eq "\n"} {
+                    break
+                }
+            }
+        } else {
+            # Regular character - copy as-is
+            append result $char
+            incr i
+        }
+    }
+
+    return $result
+}
+
 # Build PRAGMA prefix to prepend to SQL for consistent session state
 proc build_pragma_prefix {} {
     set prefix ""
@@ -777,6 +867,12 @@ proc execsql {sql {db ""}} {
     # SQLite's TCL interface binds $variable to TCL variables of the same name.
     # We use stack-walking substitution to find variables in outer scopes (for loops, etc.)
     set sql [substitute_tcl_vars $sql]
+
+    # Apply DQS (Double-Quoted Strings) mode conversion if enabled
+    # When DQS mode is on, double-quoted strings are treated as string literals
+    if {$::dqs_dml_mode} {
+        set sql [convert_dqs_to_single_quotes $sql]
+    }
 
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
@@ -1159,6 +1255,11 @@ proc execsql_with_headers {sql {db ""}} {
     # We use stack-walking substitution to find variables in outer scopes (for loops, etc.)
     set sql [substitute_tcl_vars $sql]
 
+    # Apply DQS (Double-Quoted Strings) mode conversion if enabled
+    if {$::dqs_dml_mode} {
+        set sql [convert_dqs_to_single_quotes $sql]
+    }
+
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
 
@@ -1193,6 +1294,11 @@ proc execsql2 {sql {db ""}} {
     # Substitute TCL variables in the SQL string (emulate SQLite's parameter binding)
     # We use stack-walking substitution to find variables in outer scopes (for loops, etc.)
     set sql [substitute_tcl_vars $sql]
+
+    # Apply DQS (Double-Quoted Strings) mode conversion if enabled
+    if {$::dqs_dml_mode} {
+        set sql [convert_dqs_to_single_quotes $sql]
+    }
 
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
@@ -1897,6 +2003,7 @@ proc sqlite3 {db args} {
     set ::pragma_full_column_names 0
     set ::pragma_short_column_names 1
     set ::pragma_case_sensitive_like 0
+    set ::dqs_dml_mode 0  ;# Reset DQS mode for new database
 
     # Create db command alias - if name is not "db" (which already exists)
     # create an alias to the global db proc
@@ -2170,8 +2277,26 @@ proc permutation {} {
 }
 
 proc sqlite3_db_config {args} {
-    # SQLite database configuration - ignore
+    # SQLite database configuration
     # This is used to set/get various database configuration options
+    # We specifically handle SQLITE_DBCONFIG_DQS_DML for double-quoted string mode
+    #
+    # Usage: sqlite3_db_config db SQLITE_DBCONFIG_DQS_DML value
+    # When value is 1: double-quoted strings are treated as string literals
+    # When value is 0: double-quoted strings are treated as identifiers (default)
+
+    # Check if this is a DQS_DML configuration
+    if {[llength $args] >= 3} {
+        set config_name [lindex $args 1]
+        set config_value [lindex $args 2]
+
+        if {$config_name eq "SQLITE_DBCONFIG_DQS_DML"} {
+            set ::dqs_dml_mode $config_value
+            return 0
+        }
+    }
+
+    # Other configurations - ignore
     return 0
 }
 
