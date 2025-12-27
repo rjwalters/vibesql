@@ -1391,6 +1391,17 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses sqlite_sort_count (sort operation counter)"]
     }
 
+    # SQLite sort tracking helper functions
+    # These tests use helper functions that call "db status sort" or "sqlite_sort_count"
+    # to verify ORDER BY optimization (index vs explicit sort). The helpers append
+    # "sort" or "nosort" to results based on internal counters we don't implement.
+    if {[regexp {(?:^|[^a-zA-Z0-9_])cksort\s*\{} $script]} {
+        return [list 1 "uses cksort (sort optimization tracking helper)"]
+    }
+    if {[regexp {(?:^|[^a-zA-Z0-9_])queryplan\s*\{} $script]} {
+        return [list 1 "uses queryplan (sort/index optimization tracking helper)"]
+    }
+
     # Note: Tests using the "count" helper append sqlite_search_count to results.
     # We handle this via is_search_count_mismatch in do_test, which passes tests
     # where only the trailing search count differs (SQL correctness verified).
