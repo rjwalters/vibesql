@@ -432,3 +432,85 @@ fn test_having_outer_alias_in_correlated_subquery() {
         _ => panic!("Expected SELECT"),
     }
 }
+
+/// Test correlated subquery in HAVING with outer aggregate EXPRESSION (not alias).
+/// This is issue #4731 - when the inner subquery references an outer aggregate
+/// using the expression directly (e.g., avg(a.y)) rather than an alias.
+#[test]
+fn test_having_outer_aggregate_expression_in_correlated_subquery() {
+    use vibesql_parser::Parser;
+    use vibesql_types::SqlValue;
+
+    use crate::{create_table::CreateTableExecutor, insert::InsertExecutor, select::SelectExecutor};
+
+    let mut db = vibesql_storage::Database::new();
+
+    // Create test table (same setup as SQLite's subquery-3.4.1)
+    let create_sql = "CREATE TABLE t34(x INTEGER, y INTEGER)";
+    let stmt = Parser::parse_sql(create_sql).unwrap();
+    match stmt {
+        Statement::CreateTable(create_stmt) => {
+            CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
+        }
+        _ => panic!("Expected CREATE TABLE"),
+    }
+
+    // Insert data: x=106 has avg(y)=4.5, x=107 has avg(y)=4.0
+    for (x, y) in [(106, 4), (107, 3), (106, 5), (107, 5)] {
+        let insert_sql = format!("INSERT INTO t34 VALUES ({}, {})", x, y);
+        let stmt = Parser::parse_sql(&insert_sql).unwrap();
+        match stmt {
+            Statement::Insert(insert_stmt) => {
+                InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
+            }
+            _ => panic!("Expected INSERT"),
+        }
+    }
+
+    // Query uses avg(a.y) EXPRESSION (not alias) in inner subquery HAVING
+    // Expected: Only x=107 (avg=4.0) qualifies because no other group has avg < 4.0
+    let query = r#"
+        SELECT a.x, avg(a.y)
+        FROM t34 AS a
+        GROUP BY a.x
+        HAVING NOT EXISTS(
+            SELECT b.x, avg(b.y)
+            FROM t34 AS b
+            GROUP BY b.x
+            HAVING avg(a.y) > avg(b.y)
+        )
+    "#;
+
+    let stmt = Parser::parse_sql(query).unwrap();
+    match stmt {
+        Statement::Select(select_stmt) => {
+            let executor = SelectExecutor::new(&db);
+            let result = executor.execute(&select_stmt);
+
+            assert!(result.is_ok(), "Query should succeed: {:?}", result.err());
+            let rows = result.unwrap();
+
+            // Only x=107 should be returned
+            assert_eq!(
+                rows.len(),
+                1,
+                "Only the group with the minimum average should be returned"
+            );
+
+            let x_value = match &rows[0].values[0] {
+                SqlValue::Integer(v) => *v,
+                _ => panic!("Expected integer for x"),
+            };
+            assert_eq!(x_value, 107, "x=107 has the minimum average (4.0)");
+
+            let avg_value = match &rows[0].values[1] {
+                SqlValue::Real(v) => *v as f64,
+                SqlValue::Integer(v) => *v as f64,
+                SqlValue::Double(v) => *v,
+                other => panic!("Expected number for avg(y), got {:?}", other),
+            };
+            assert!((avg_value - 4.0).abs() < 0.001, "avg(y) should be 4.0");
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}

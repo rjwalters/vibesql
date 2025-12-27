@@ -166,7 +166,11 @@ fn resolve_having_aliases_with_schema(
 /// This is necessary for correlated subqueries that reference outer aliases
 /// in their HAVING clauses (issue #4676).
 ///
-/// Example:
+/// Additionally, this resolves aggregate expressions (like avg(a.y)) that reference
+/// outer columns. When an aggregate in a subquery matches an outer aggregate expression,
+/// it is replaced with the computed value (issue #4731).
+///
+/// Example with alias:
 /// ```sql
 /// SELECT a.x, avg(a.y) AS avg1 FROM t AS a GROUP BY a.x
 /// HAVING NOT EXISTS(
@@ -175,12 +179,23 @@ fn resolve_having_aliases_with_schema(
 /// )
 /// ```
 /// Here `avg1` in the inner HAVING is resolved to its computed value (e.g., 2.5).
+///
+/// Example with aggregate expression:
+/// ```sql
+/// SELECT a.x, avg(a.y) FROM t AS a GROUP BY a.x
+/// HAVING NOT EXISTS(
+///   SELECT b.x, avg(b.y) FROM t AS b GROUP BY b.x
+///   HAVING avg(a.y) > avg(b.y)  -- avg(a.y) matches outer aggregate
+/// )
+/// ```
+/// Here `avg(a.y)` in the inner HAVING is recognized as an outer aggregate and replaced.
 pub fn resolve_having_aliases_with_values(
     having_expr: &Expression,
     select_list: &[vibesql_ast::SelectItem],
     group_by_exprs: &[Expression],
     schema_columns: &std::collections::HashSet<String>,
     alias_values: &std::collections::HashMap<String, vibesql_types::SqlValue>,
+    expr_values: &[(Expression, vibesql_types::SqlValue)],
 ) -> Expression {
     resolve_having_aliases_with_values_inner(
         having_expr,
@@ -188,6 +203,7 @@ pub fn resolve_having_aliases_with_values(
         group_by_exprs,
         Some(schema_columns),
         alias_values,
+        expr_values,
     )
 }
 
@@ -424,6 +440,7 @@ fn resolve_having_aliases_with_values_inner(
     group_by_exprs: &[Expression],
     schema_columns: Option<&std::collections::HashSet<String>>,
     alias_values: &std::collections::HashMap<String, vibesql_types::SqlValue>,
+    expr_values: &[(Expression, vibesql_types::SqlValue)],
 ) -> Expression {
     match having_expr {
         // Check if this column reference matches a SELECT list alias
@@ -466,6 +483,7 @@ fn resolve_having_aliases_with_values_inner(
                 group_by_exprs,
                 schema_columns,
                 alias_values,
+                expr_values,
             )),
             op: *op,
             right: Box::new(resolve_having_aliases_with_values_inner(
@@ -474,6 +492,7 @@ fn resolve_having_aliases_with_values_inner(
                 group_by_exprs,
                 schema_columns,
                 alias_values,
+                expr_values,
             )),
         },
 
@@ -486,6 +505,7 @@ fn resolve_having_aliases_with_values_inner(
                 group_by_exprs,
                 schema_columns,
                 alias_values,
+                expr_values,
             )),
         },
 
@@ -501,6 +521,7 @@ fn resolve_having_aliases_with_values_inner(
                         group_by_exprs,
                         schema_columns,
                         alias_values,
+                        expr_values,
                     )
                 })
                 .collect(),
@@ -521,6 +542,7 @@ fn resolve_having_aliases_with_values_inner(
                             group_by_exprs,
                             schema_columns,
                             alias_values,
+                            expr_values,
                         )
                     })
                     .collect(),
@@ -532,6 +554,7 @@ fn resolve_having_aliases_with_values_inner(
                         group_by_exprs,
                         schema_columns,
                         alias_values,
+                        expr_values,
                     ))
                 }),
             }
@@ -546,6 +569,7 @@ fn resolve_having_aliases_with_values_inner(
                     group_by_exprs,
                     schema_columns,
                     alias_values,
+                    expr_values,
                 ))
             });
             let resolved_when_clauses = when_clauses
@@ -561,6 +585,7 @@ fn resolve_having_aliases_with_values_inner(
                                 group_by_exprs,
                                 schema_columns,
                                 alias_values,
+                                expr_values,
                             )
                         })
                         .collect(),
@@ -570,6 +595,7 @@ fn resolve_having_aliases_with_values_inner(
                         group_by_exprs,
                         schema_columns,
                         alias_values,
+                        expr_values,
                     ),
                 })
                 .collect();
@@ -580,6 +606,7 @@ fn resolve_having_aliases_with_values_inner(
                     group_by_exprs,
                     schema_columns,
                     alias_values,
+                    expr_values,
                 ))
             });
             Expression::Case {
@@ -600,6 +627,7 @@ fn resolve_having_aliases_with_values_inner(
                         group_by_exprs,
                         schema_columns,
                         alias_values,
+                        expr_values,
                     )
                 })
                 .collect(),
@@ -614,6 +642,7 @@ fn resolve_having_aliases_with_values_inner(
                         group_by_exprs,
                         schema_columns,
                         alias_values,
+                        expr_values,
                     )
                 })
                 .collect(),
@@ -627,6 +656,7 @@ fn resolve_having_aliases_with_values_inner(
                 group_by_exprs,
                 schema_columns,
                 alias_values,
+                expr_values,
             )),
             low: Box::new(resolve_having_aliases_with_values_inner(
                 low,
@@ -634,6 +664,7 @@ fn resolve_having_aliases_with_values_inner(
                 group_by_exprs,
                 schema_columns,
                 alias_values,
+                expr_values,
             )),
             high: Box::new(resolve_having_aliases_with_values_inner(
                 high,
@@ -641,6 +672,7 @@ fn resolve_having_aliases_with_values_inner(
                 group_by_exprs,
                 schema_columns,
                 alias_values,
+                expr_values,
             )),
             negated: *negated,
             symmetric: *symmetric,
@@ -653,13 +685,15 @@ fn resolve_having_aliases_with_values_inner(
                 group_by_exprs,
                 schema_columns,
                 alias_values,
+                expr_values,
             )),
             negated: *negated,
         },
 
         // Handle EXISTS subquery - traverse into the subquery and resolve outer aliases
         Expression::Exists { subquery, negated } => {
-            let resolved_subquery = resolve_outer_aliases_in_subquery(subquery, alias_values);
+            let resolved_subquery =
+                resolve_outer_aliases_in_subquery(subquery, alias_values, expr_values);
             Expression::Exists { subquery: Box::new(resolved_subquery), negated: *negated }
         }
 
@@ -671,8 +705,10 @@ fn resolve_having_aliases_with_values_inner(
                 group_by_exprs,
                 schema_columns,
                 alias_values,
+                expr_values,
             );
-            let resolved_subquery = resolve_outer_aliases_in_subquery(subquery, alias_values);
+            let resolved_subquery =
+                resolve_outer_aliases_in_subquery(subquery, alias_values, expr_values);
             Expression::In {
                 expr: Box::new(resolved_expr),
                 subquery: Box::new(resolved_subquery),
@@ -682,7 +718,8 @@ fn resolve_having_aliases_with_values_inner(
 
         // Handle scalar subquery - resolve outer aliases in subquery
         Expression::ScalarSubquery(subquery) => {
-            let resolved_subquery = resolve_outer_aliases_in_subquery(subquery, alias_values);
+            let resolved_subquery =
+                resolve_outer_aliases_in_subquery(subquery, alias_values, expr_values);
             Expression::ScalarSubquery(Box::new(resolved_subquery))
         }
 
@@ -694,8 +731,10 @@ fn resolve_having_aliases_with_values_inner(
                 group_by_exprs,
                 schema_columns,
                 alias_values,
+                expr_values,
             );
-            let resolved_subquery = resolve_outer_aliases_in_subquery(subquery, alias_values);
+            let resolved_subquery =
+                resolve_outer_aliases_in_subquery(subquery, alias_values, expr_values);
             Expression::QuantifiedComparison {
                 expr: Box::new(resolved_expr),
                 op: *op,
@@ -709,23 +748,22 @@ fn resolve_having_aliases_with_values_inner(
     }
 }
 
-/// Resolve outer alias references in a subquery by replacing them with literal values.
-/// This enables correlated subqueries to access outer SELECT aliases.
+/// Resolve outer alias and expression references in a subquery by replacing them with literal values.
+/// This enables correlated subqueries to access outer SELECT aliases and aggregate expressions.
 fn resolve_outer_aliases_in_subquery(
     subquery: &vibesql_ast::SelectStmt,
     alias_values: &std::collections::HashMap<String, vibesql_types::SqlValue>,
+    expr_values: &[(Expression, vibesql_types::SqlValue)],
 ) -> vibesql_ast::SelectStmt {
-    // Create a clone and resolve aliases in the HAVING clause
-    let resolved_having = subquery
-        .having
-        .as_ref()
-        .map(|having_expr| resolve_outer_alias_refs_to_literals(having_expr, alias_values));
+    // Create a clone and resolve aliases/expressions in the HAVING clause
+    let resolved_having = subquery.having.as_ref().map(|having_expr| {
+        resolve_outer_alias_refs_to_literals(having_expr, alias_values, expr_values)
+    });
 
     // Also resolve in WHERE clause (for correlated subqueries that reference outer aliases there)
-    let resolved_where = subquery
-        .where_clause
-        .as_ref()
-        .map(|where_expr| resolve_outer_alias_refs_to_literals(where_expr, alias_values));
+    let resolved_where = subquery.where_clause.as_ref().map(|where_expr| {
+        resolve_outer_alias_refs_to_literals(where_expr, alias_values, expr_values)
+    });
 
     // Build the resolved subquery
     vibesql_ast::SelectStmt {
@@ -746,11 +784,13 @@ fn resolve_outer_aliases_in_subquery(
     }
 }
 
-/// Replace unqualified column references that match outer aliases with literal values.
-/// This is the core transformation that makes outer SELECT aliases accessible in subqueries.
+/// Replace unqualified column references and aggregate expressions that match outer values with literals.
+/// This is the core transformation that makes outer SELECT aliases and aggregate expressions
+/// accessible in subqueries (issue #4676, #4731).
 fn resolve_outer_alias_refs_to_literals(
     expr: &Expression,
     alias_values: &std::collections::HashMap<String, vibesql_types::SqlValue>,
+    expr_values: &[(Expression, vibesql_types::SqlValue)],
 ) -> Expression {
     match expr {
         // Check if this unqualified column reference matches an outer alias
@@ -771,129 +811,178 @@ fn resolve_outer_alias_refs_to_literals(
 
         // Recursively process compound expressions
         Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
-            left: Box::new(resolve_outer_alias_refs_to_literals(left, alias_values)),
+            left: Box::new(resolve_outer_alias_refs_to_literals(left, alias_values, expr_values)),
             op: *op,
-            right: Box::new(resolve_outer_alias_refs_to_literals(right, alias_values)),
+            right: Box::new(resolve_outer_alias_refs_to_literals(right, alias_values, expr_values)),
         },
 
         Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
             op: *op,
-            expr: Box::new(resolve_outer_alias_refs_to_literals(inner, alias_values)),
+            expr: Box::new(resolve_outer_alias_refs_to_literals(inner, alias_values, expr_values)),
         },
 
-        Expression::Function { name, args, character_unit } => Expression::Function {
-            name: name.clone(),
-            args: args
-                .iter()
-                .map(|a| resolve_outer_alias_refs_to_literals(a, alias_values))
-                .collect(),
-            character_unit: character_unit.clone(),
-        },
+        Expression::Function { name, args, character_unit } => {
+            // Check if this function expression matches an outer expression
+            for (outer_expr, value) in expr_values {
+                if expr == outer_expr {
+                    return Expression::Literal(value.clone());
+                }
+            }
+            Expression::Function {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|a| resolve_outer_alias_refs_to_literals(a, alias_values, expr_values))
+                    .collect(),
+                character_unit: character_unit.clone(),
+            }
+        }
 
+        // Check if this aggregate function matches an outer aggregate expression (issue #4731)
+        // This handles cases like: HAVING avg(a.y) > avg(b.y) where avg(a.y) refers to outer aggregate
         Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
+            // First check if this entire aggregate matches an outer aggregate expression
+            for (outer_expr, value) in expr_values {
+                if expr == outer_expr {
+                    // Found a matching outer aggregate - replace with literal value
+                    return Expression::Literal(value.clone());
+                }
+            }
+            // No match - recursively process arguments
             Expression::AggregateFunction {
                 name: name.clone(),
                 distinct: *distinct,
                 args: args
                     .iter()
-                    .map(|a| resolve_outer_alias_refs_to_literals(a, alias_values))
+                    .map(|a| resolve_outer_alias_refs_to_literals(a, alias_values, expr_values))
                     .collect(),
                 order_by: order_by.clone(),
-                filter: filter
-                    .as_ref()
-                    .map(|f| Box::new(resolve_outer_alias_refs_to_literals(f, alias_values))),
+                filter: filter.as_ref().map(|f| {
+                    Box::new(resolve_outer_alias_refs_to_literals(f, alias_values, expr_values))
+                }),
             }
         }
 
         Expression::Case { operand, when_clauses, else_result } => Expression::Case {
-            operand: operand
-                .as_ref()
-                .map(|o| Box::new(resolve_outer_alias_refs_to_literals(o, alias_values))),
+            operand: operand.as_ref().map(|o| {
+                Box::new(resolve_outer_alias_refs_to_literals(o, alias_values, expr_values))
+            }),
             when_clauses: when_clauses
                 .iter()
                 .map(|wc| vibesql_ast::CaseWhen {
                     conditions: wc
                         .conditions
                         .iter()
-                        .map(|c| resolve_outer_alias_refs_to_literals(c, alias_values))
+                        .map(|c| resolve_outer_alias_refs_to_literals(c, alias_values, expr_values))
                         .collect(),
-                    result: resolve_outer_alias_refs_to_literals(&wc.result, alias_values),
+                    result: resolve_outer_alias_refs_to_literals(
+                        &wc.result,
+                        alias_values,
+                        expr_values,
+                    ),
                 })
                 .collect(),
-            else_result: else_result
-                .as_ref()
-                .map(|e| Box::new(resolve_outer_alias_refs_to_literals(e, alias_values))),
+            else_result: else_result.as_ref().map(|e| {
+                Box::new(resolve_outer_alias_refs_to_literals(e, alias_values, expr_values))
+            }),
         },
 
         Expression::Conjunction(terms) => Expression::Conjunction(
-            terms.iter().map(|t| resolve_outer_alias_refs_to_literals(t, alias_values)).collect(),
+            terms
+                .iter()
+                .map(|t| resolve_outer_alias_refs_to_literals(t, alias_values, expr_values))
+                .collect(),
         ),
 
         Expression::Disjunction(terms) => Expression::Disjunction(
-            terms.iter().map(|t| resolve_outer_alias_refs_to_literals(t, alias_values)).collect(),
+            terms
+                .iter()
+                .map(|t| resolve_outer_alias_refs_to_literals(t, alias_values, expr_values))
+                .collect(),
         ),
 
         Expression::Between { expr, low, high, negated, symmetric } => Expression::Between {
-            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
-            low: Box::new(resolve_outer_alias_refs_to_literals(low, alias_values)),
-            high: Box::new(resolve_outer_alias_refs_to_literals(high, alias_values)),
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values, expr_values)),
+            low: Box::new(resolve_outer_alias_refs_to_literals(low, alias_values, expr_values)),
+            high: Box::new(resolve_outer_alias_refs_to_literals(high, alias_values, expr_values)),
             negated: *negated,
             symmetric: *symmetric,
         },
 
         Expression::IsNull { expr, negated } => Expression::IsNull {
-            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values, expr_values)),
             negated: *negated,
         },
 
         Expression::InList { expr, values, negated } => Expression::InList {
-            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values, expr_values)),
             values: values
                 .iter()
-                .map(|v| resolve_outer_alias_refs_to_literals(v, alias_values))
+                .map(|v| resolve_outer_alias_refs_to_literals(v, alias_values, expr_values))
                 .collect(),
             negated: *negated,
         },
 
         Expression::Like { expr, pattern, negated } => Expression::Like {
-            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
-            pattern: Box::new(resolve_outer_alias_refs_to_literals(pattern, alias_values)),
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values, expr_values)),
+            pattern: Box::new(resolve_outer_alias_refs_to_literals(
+                pattern,
+                alias_values,
+                expr_values,
+            )),
             negated: *negated,
         },
 
         Expression::Glob { expr, pattern, negated } => Expression::Glob {
-            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
-            pattern: Box::new(resolve_outer_alias_refs_to_literals(pattern, alias_values)),
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values, expr_values)),
+            pattern: Box::new(resolve_outer_alias_refs_to_literals(
+                pattern,
+                alias_values,
+                expr_values,
+            )),
             negated: *negated,
         },
 
         Expression::Cast { expr, data_type } => Expression::Cast {
-            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values, expr_values)),
             data_type: data_type.clone(),
         },
 
         // Nested subqueries - recursively resolve in their clauses
         Expression::Exists { subquery, negated } => {
-            let resolved_subquery = resolve_outer_aliases_in_subquery(subquery, alias_values);
+            let resolved_subquery =
+                resolve_outer_aliases_in_subquery(subquery, alias_values, expr_values);
             Expression::Exists { subquery: Box::new(resolved_subquery), negated: *negated }
         }
 
         Expression::In { expr, subquery, negated } => Expression::In {
-            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
-            subquery: Box::new(resolve_outer_aliases_in_subquery(subquery, alias_values)),
+            expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values, expr_values)),
+            subquery: Box::new(resolve_outer_aliases_in_subquery(
+                subquery,
+                alias_values,
+                expr_values,
+            )),
             negated: *negated,
         },
 
         Expression::ScalarSubquery(subquery) => Expression::ScalarSubquery(Box::new(
-            resolve_outer_aliases_in_subquery(subquery, alias_values),
+            resolve_outer_aliases_in_subquery(subquery, alias_values, expr_values),
         )),
 
         Expression::QuantifiedComparison { expr, op, quantifier, subquery } => {
             Expression::QuantifiedComparison {
-                expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values)),
+                expr: Box::new(resolve_outer_alias_refs_to_literals(
+                    expr,
+                    alias_values,
+                    expr_values,
+                )),
                 op: *op,
                 quantifier: quantifier.clone(),
-                subquery: Box::new(resolve_outer_aliases_in_subquery(subquery, alias_values)),
+                subquery: Box::new(resolve_outer_aliases_in_subquery(
+                    subquery,
+                    alias_values,
+                    expr_values,
+                )),
             }
         }
 
