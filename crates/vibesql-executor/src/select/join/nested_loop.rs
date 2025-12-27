@@ -50,9 +50,7 @@ fn check_cross_join_size_limit(left_count: usize, right_count: usize) -> Result<
 /// - Integer(0) -> false
 /// - Integer(non-zero) -> true
 /// - Other types -> error
-fn eval_join_condition_to_bool(
-    value: vibesql_types::SqlValue,
-) -> Result<bool, ExecutorError> {
+fn eval_join_condition_to_bool(value: vibesql_types::SqlValue) -> Result<bool, ExecutorError> {
     match value {
         vibesql_types::SqlValue::Boolean(b) => Ok(b),
         vibesql_types::SqlValue::Null => Ok(false),
@@ -989,6 +987,10 @@ pub(super) fn nested_loop_semi_join(
     let left_slice = left.as_slice();
     let right_slice = right.as_slice();
 
+    // Get table names for ROWID tracking (issue #4716)
+    let left_table_names = left.schema.table_names();
+    let right_table_names = right.schema.table_names();
+
     let mut result_rows = Vec::new();
     let mut iterations = 0;
 
@@ -1003,7 +1005,13 @@ pub(super) fn nested_loop_semi_join(
                 timeout_ctx.check()?;
             }
 
-            let combined_row = combine_rows(left_row, right_row);
+            // Use combine_for_join for proper ROWID tracking (issue #4716)
+            let combined_row = vibesql_storage::Row::combine_for_join(
+                left_row,
+                right_row,
+                &left_table_names,
+                &right_table_names,
+            );
 
             // Check join condition
             let matches = match condition {
@@ -1085,6 +1093,10 @@ pub(super) fn nested_loop_anti_join(
     let left_slice = left.as_slice();
     let right_slice = right.as_slice();
 
+    // Get table names for ROWID tracking (issue #4716)
+    let left_table_names = left.schema.table_names();
+    let right_table_names = right.schema.table_names();
+
     let mut result_rows = Vec::new();
     let mut iterations = 0;
 
@@ -1099,7 +1111,13 @@ pub(super) fn nested_loop_anti_join(
                 timeout_ctx.check()?;
             }
 
-            let combined_row = combine_rows(left_row, right_row);
+            // Use combine_for_join for proper ROWID tracking (issue #4716)
+            let combined_row = vibesql_storage::Row::combine_for_join(
+                left_row,
+                right_row,
+                &left_table_names,
+                &right_table_names,
+            );
 
             // Check join condition
             let matches = match condition {
