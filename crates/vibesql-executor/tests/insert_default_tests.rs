@@ -203,6 +203,128 @@ fn test_insert_default_no_default_value_defined() {
 }
 
 // ============================================================================
+// INSERT DEFAULT VALUES Tests
+// ============================================================================
+
+/// Test INSERT INTO table DEFAULT VALUES syntax
+/// This inserts a single row with all columns using their default values
+#[test]
+fn test_insert_default_values_syntax() {
+    let mut db = vibesql_storage::Database::new();
+
+    // CREATE TABLE test_defaults (id INTEGER DEFAULT 42, name TEXT DEFAULT 'default_name', value REAL)
+    let mut id_column = vibesql_catalog::ColumnSchema::new(
+        "id".to_string(),
+        vibesql_types::DataType::Integer,
+        true,
+    );
+    id_column.default_value =
+        Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(42)));
+
+    let mut name_column = vibesql_catalog::ColumnSchema::new(
+        "name".to_string(),
+        vibesql_types::DataType::Varchar { max_length: None },
+        true,
+    );
+    name_column.default_value = Some(vibesql_ast::Expression::Literal(
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("default_name")),
+    ));
+
+    let value_column = vibesql_catalog::ColumnSchema::new(
+        "value".to_string(),
+        vibesql_types::DataType::Real,
+        true, // nullable, no default
+    );
+
+    let schema = vibesql_catalog::TableSchema::new(
+        "test_defaults".to_string(),
+        vec![id_column, name_column, value_column],
+    );
+    db.create_table(schema).unwrap();
+
+    // INSERT INTO test_defaults DEFAULT VALUES
+    let stmt = vibesql_ast::InsertStmt {
+        with_clause: None,
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
+        table_name: "test_defaults".to_string(),
+        columns: vec![], // No column list
+        source: vibesql_ast::InsertSource::DefaultValues,
+        conflict_clause: None,
+        on_duplicate_key_update: None,
+    };
+
+    let rows = InsertExecutor::execute(&mut db, &stmt).unwrap();
+    assert_eq!(rows, 1);
+
+    // Verify: id=42 (default), name='default_name' (default), value=NULL (no default)
+    let table = db.get_table("test_defaults").unwrap();
+    let row = &table.scan()[0];
+    assert_eq!(row.get(0), Some(&vibesql_types::SqlValue::Integer(42)));
+    assert_eq!(
+        row.get(1),
+        Some(&vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("default_name")))
+    );
+    assert_eq!(row.get(2), Some(&vibesql_types::SqlValue::Null));
+}
+
+/// Test INSERT DEFAULT VALUES with INTEGER PRIMARY KEY (auto-increment)
+#[test]
+fn test_insert_default_values_with_integer_primary_key() {
+    let mut db = vibesql_storage::Database::new();
+
+    // CREATE TABLE autoincrement_test (id INTEGER PRIMARY KEY, name TEXT DEFAULT 'test')
+    let mut name_column = vibesql_catalog::ColumnSchema::new(
+        "name".to_string(),
+        vibesql_types::DataType::Varchar { max_length: None },
+        true,
+    );
+    name_column.default_value = Some(vibesql_ast::Expression::Literal(
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("test")),
+    ));
+
+    let schema = vibesql_catalog::TableSchema::with_primary_key(
+        "autoincrement_test".to_string(),
+        vec![
+            vibesql_catalog::ColumnSchema::new(
+                "id".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            name_column,
+        ],
+        vec!["id".to_string()],
+    );
+    db.create_table(schema).unwrap();
+
+    // INSERT INTO autoincrement_test DEFAULT VALUES (3 times)
+    for _ in 0..3 {
+        let stmt = vibesql_ast::InsertStmt {
+            with_clause: None,
+            schema_name: None,
+            schema_quoted: false,
+            table_quoted: false,
+            table_name: "autoincrement_test".to_string(),
+            columns: vec![],
+            source: vibesql_ast::InsertSource::DefaultValues,
+            conflict_clause: None,
+            on_duplicate_key_update: None,
+        };
+        InsertExecutor::execute(&mut db, &stmt).unwrap();
+    }
+
+    // Verify: 3 rows with auto-incremented IDs (1, 2, 3)
+    let table = db.get_table("autoincrement_test").unwrap();
+    assert_eq!(table.row_count(), 3);
+
+    let rows = table.scan();
+    assert_eq!(rows[0].get(0), Some(&vibesql_types::SqlValue::Integer(1)));
+    assert_eq!(rows[1].get(0), Some(&vibesql_types::SqlValue::Integer(2)));
+    assert_eq!(rows[2].get(0), Some(&vibesql_types::SqlValue::Integer(3)));
+}
+
+// ============================================================================
 // INTEGER PRIMARY KEY NULL Auto-Generation Tests (SQLite Semantics)
 // ============================================================================
 

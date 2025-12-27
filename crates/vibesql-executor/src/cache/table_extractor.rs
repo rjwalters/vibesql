@@ -234,6 +234,9 @@ pub fn extract_tables_from_statement(stmt: &vibesql_ast::Statement) -> HashSet<S
                     let select_tables = extract_tables_from_select(select);
                     tables.extend(select_tables);
                 }
+                vibesql_ast::InsertSource::DefaultValues => {
+                    // No expressions to extract from DEFAULT VALUES
+                }
             }
 
             tables

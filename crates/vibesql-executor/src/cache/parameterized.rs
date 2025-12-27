@@ -171,6 +171,9 @@ impl LiteralExtractor {
                     vibesql_ast::InsertSource::Select(select) => {
                         Self::extract_from_select(select, literals);
                     }
+                    vibesql_ast::InsertSource::DefaultValues => {
+                        // No literals to extract for DEFAULT VALUES
+                    }
                 }
             }
             Statement::Update(update) => {

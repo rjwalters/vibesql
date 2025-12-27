@@ -21,6 +21,9 @@ pub enum InsertSource<'arena> {
     Values(BumpVec<'arena, BumpVec<'arena, Expression<'arena>>>),
     /// INSERT ... SELECT ...
     Select(&'arena SelectStmt<'arena>),
+    /// INSERT ... DEFAULT VALUES
+    /// Inserts a single row using default values for all columns.
+    DefaultValues,
 }
 
 /// Conflict resolution strategy for INSERT and UPDATE statements (SQLite extension)

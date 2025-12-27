@@ -173,6 +173,9 @@ fn bind_insert_mut(stmt: &mut InsertStmt, params: &[SqlValue]) {
             }
         }
         InsertSource::Select(select) => bind_select_mut(select, params),
+        InsertSource::DefaultValues => {
+            // No parameters to bind for DEFAULT VALUES
+        }
     }
 
     if let Some(updates) = &mut stmt.on_duplicate_key_update {
@@ -562,6 +565,9 @@ fn bind_insert_named_mut(stmt: &mut InsertStmt, params: &HashMap<String, SqlValu
             }
         }
         InsertSource::Select(select) => bind_select_named_mut(select, params),
+        InsertSource::DefaultValues => {
+            // No parameters to bind for DEFAULT VALUES
+        }
     }
 
     if let Some(updates) = &mut stmt.on_duplicate_key_update {

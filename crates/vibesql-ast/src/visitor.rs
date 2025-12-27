@@ -1037,6 +1037,9 @@ fn walk_insert<V: ExpressionVisitor>(visitor: &mut V, stmt: &InsertStmt) {
             }
         }
         InsertSource::Select(select) => walk_select(visitor, select),
+        InsertSource::DefaultValues => {
+            // No expressions to visit for DEFAULT VALUES
+        }
     }
 
     if let Some(updates) = &stmt.on_duplicate_key_update {
@@ -1268,6 +1271,7 @@ pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertSt
             InsertSource::Select(select) => {
                 InsertSource::Select(Box::new(transform_select(visitor, *select)))
             }
+            InsertSource::DefaultValues => InsertSource::DefaultValues,
         },
         conflict_clause: stmt.conflict_clause,
         on_duplicate_key_update: stmt.on_duplicate_key_update.map(|updates| {

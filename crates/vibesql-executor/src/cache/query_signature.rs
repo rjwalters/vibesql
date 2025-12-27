@@ -93,6 +93,9 @@ impl QuerySignature {
                         "SELECT".hash(hasher);
                         Self::hash_select(select, hasher);
                     }
+                    vibesql_ast::InsertSource::DefaultValues => {
+                        "DEFAULT_VALUES".hash(hasher);
+                    }
                 }
             }
             Statement::Update(update) => {

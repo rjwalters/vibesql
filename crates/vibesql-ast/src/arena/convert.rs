@@ -628,6 +628,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             arena_dml::InsertSource::Select(query) => {
                 InsertSource::Select(Box::new(self.convert_select(query)))
             }
+            arena_dml::InsertSource::DefaultValues => InsertSource::DefaultValues,
         }
     }
 

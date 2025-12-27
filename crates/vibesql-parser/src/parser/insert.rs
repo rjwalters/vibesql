@@ -65,10 +65,15 @@ impl Parser {
             Vec::new() // No columns specified
         };
 
-        // Parse source: VALUES or SELECT
+        // Parse source: VALUES, SELECT, or DEFAULT VALUES
         // Use parse_values_statement_internal to handle compound VALUES like:
         // INSERT INTO t VALUES(1) UNION VALUES(2)
-        let source = if self.peek_keyword(Keyword::Values) {
+        let source = if self.peek_keyword(Keyword::Default) {
+            // INSERT ... DEFAULT VALUES
+            self.advance(); // consume DEFAULT
+            self.expect_keyword(Keyword::Values)?;
+            vibesql_ast::InsertSource::DefaultValues
+        } else if self.peek_keyword(Keyword::Values) {
             // Parse VALUES using the full statement parser to handle compound operators
             // allow_order_limit=false: INSERT VALUES doesn't support ORDER BY/LIMIT
             // validate_end_tokens=false: INSERT has additional tokens after VALUES
@@ -223,11 +228,16 @@ impl Parser {
             Vec::new()
         };
 
-        // Parse source: VALUES or SELECT
+        // Parse source: VALUES, SELECT, or DEFAULT VALUES
         // Note: The CTE is already parsed, so the SELECT here should NOT start with WITH
         // Use parse_values_statement_internal to handle compound VALUES like:
         // WITH cte AS (...) INSERT INTO t VALUES(1) UNION VALUES(2)
-        let source = if self.peek_keyword(Keyword::Values) {
+        let source = if self.peek_keyword(Keyword::Default) {
+            // INSERT ... DEFAULT VALUES
+            self.advance(); // consume DEFAULT
+            self.expect_keyword(Keyword::Values)?;
+            vibesql_ast::InsertSource::DefaultValues
+        } else if self.peek_keyword(Keyword::Values) {
             // Parse VALUES using the full statement parser to handle compound operators
             let values_stmt = self.parse_values_statement_internal(false, false)?;
 
@@ -347,10 +357,15 @@ impl Parser {
             Vec::new()
         };
 
-        // Parse source: VALUES or SELECT
+        // Parse source: VALUES, SELECT, or DEFAULT VALUES
         // Use parse_values_statement_internal to handle compound VALUES like:
         // REPLACE INTO t VALUES(1) UNION VALUES(2)
-        let source = if self.peek_keyword(Keyword::Values) {
+        let source = if self.peek_keyword(Keyword::Default) {
+            // REPLACE ... DEFAULT VALUES
+            self.advance(); // consume DEFAULT
+            self.expect_keyword(Keyword::Values)?;
+            vibesql_ast::InsertSource::DefaultValues
+        } else if self.peek_keyword(Keyword::Values) {
             // Parse VALUES using the full statement parser to handle compound operators
             let values_stmt = self.parse_values_statement_internal(false, false)?;
 

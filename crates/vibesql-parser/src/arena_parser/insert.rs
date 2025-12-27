@@ -105,8 +105,12 @@ impl<'arena> ArenaParser<'arena> {
             BumpVec::new_in(self.arena)
         };
 
-        // Parse source: VALUES or SELECT
-        let source = if self.try_consume_keyword(Keyword::Values) {
+        // Parse source: VALUES, SELECT, or DEFAULT VALUES
+        let source = if self.try_consume_keyword(Keyword::Default) {
+            // INSERT ... DEFAULT VALUES
+            self.consume_keyword(Keyword::Values)?;
+            InsertSource::DefaultValues
+        } else if self.try_consume_keyword(Keyword::Values) {
             // Parse VALUES clause
             let values = self.parse_values_clause()?;
             InsertSource::Values(values)
@@ -167,8 +171,12 @@ impl<'arena> ArenaParser<'arena> {
             BumpVec::new_in(self.arena)
         };
 
-        // Parse source: VALUES or SELECT
-        let source = if self.try_consume_keyword(Keyword::Values) {
+        // Parse source: VALUES, SELECT, or DEFAULT VALUES
+        let source = if self.try_consume_keyword(Keyword::Default) {
+            // REPLACE ... DEFAULT VALUES
+            self.consume_keyword(Keyword::Values)?;
+            InsertSource::DefaultValues
+        } else if self.try_consume_keyword(Keyword::Values) {
             let values = self.parse_values_clause()?;
             InsertSource::Values(values)
         } else if self.peek_keyword(Keyword::Select) || self.peek_keyword(Keyword::With) {

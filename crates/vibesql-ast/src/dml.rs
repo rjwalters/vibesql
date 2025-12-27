@@ -15,6 +15,9 @@ pub enum InsertSource {
     Values(Vec<Vec<Expression>>),
     /// INSERT ... SELECT ...
     Select(Box<SelectStmt>),
+    /// INSERT ... DEFAULT VALUES
+    /// Inserts a single row using default values for all columns.
+    DefaultValues,
 }
 
 /// Conflict resolution strategy for INSERT and UPDATE statements (SQLite extension)

@@ -112,6 +112,13 @@ fn execute_insert_internal(
             // For VALUES, we already have the rows as expressions
             values.clone()
         }
+        vibesql_ast::InsertSource::DefaultValues => {
+            // For DEFAULT VALUES, insert a single row with DEFAULT for all columns
+            // The number of expressions must match target_column_info.len()
+            // Each Expression::Default will be evaluated to the column's default value
+            let default_row = vec![vibesql_ast::Expression::Default; target_column_info.len()];
+            vec![default_row]
+        }
         vibesql_ast::InsertSource::Select(select_stmt) => {
             // Try bulk transfer optimization first (Phase 1-3)
             // This provides 10-50x performance improvement for compatible schemas
@@ -778,6 +785,13 @@ fn execute_insert_on_view(
     // Get the rows to insert based on the source
     let rows_to_insert = match &stmt.source {
         vibesql_ast::InsertSource::Values(values) => values.clone(),
+        vibesql_ast::InsertSource::DefaultValues => {
+            // For DEFAULT VALUES on a view, create a single row with DEFAULT for all target columns
+            let target_col_count =
+                if stmt.columns.is_empty() { view_schema.columns.len() } else { stmt.columns.len() };
+            let default_row = vec![vibesql_ast::Expression::Default; target_col_count];
+            vec![default_row]
+        }
         vibesql_ast::InsertSource::Select(select_stmt) => {
             // Execute SELECT and convert to expressions
             let select_executor = crate::SelectExecutor::new(db);
@@ -934,6 +948,11 @@ fn execute_insert_sqlite_stat1(
         InsertSource::Select(_) => {
             return Err(ExecutorError::Other(
                 "INSERT INTO sqlite_stat1 ... SELECT is not supported".to_string(),
+            ));
+        }
+        InsertSource::DefaultValues => {
+            return Err(ExecutorError::Other(
+                "INSERT INTO sqlite_stat1 DEFAULT VALUES is not supported".to_string(),
             ));
         }
     };
