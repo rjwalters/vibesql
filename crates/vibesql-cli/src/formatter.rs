@@ -196,10 +196,13 @@ impl ResultFormatter {
     }
 
     /// Print results in raw format for SQLite TCL test compatibility.
-    /// - Pipe-separated values within each row (like SQLite's list mode)
+    /// - ASCII 31 (Unit Separator) between values within each row
     /// - One row per line
     /// - NULL values output as empty strings
     /// - No headers, no borders, no row count
+    ///
+    /// We use ASCII 31 instead of pipe because pipe can appear in SQL string values.
+    /// The TCL shim (scripts/tester_vibesql.tcl) expects this delimiter.
     fn print_raw(&self, result: &QueryResult) {
         for row in &result.rows {
             let values: Vec<&str> = row
@@ -210,7 +213,7 @@ impl ResultFormatter {
                     val.as_ref().map(|s| s.as_str()).unwrap_or("")
                 })
                 .collect();
-            println!("{}", values.join("|"));
+            println!("{}", values.join("\x1f"));
         }
     }
 }
