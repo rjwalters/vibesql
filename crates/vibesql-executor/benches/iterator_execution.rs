@@ -30,6 +30,7 @@ fn setup_large_table(db: &mut Database, row_count: usize) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             vibesql_catalog::ColumnSchema {
                 name: "VALUE".to_string(),
@@ -37,6 +38,7 @@ fn setup_large_table(db: &mut Database, row_count: usize) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             vibesql_catalog::ColumnSchema {
                 name: "AMOUNT".to_string(),
@@ -44,6 +46,7 @@ fn setup_large_table(db: &mut Database, row_count: usize) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );

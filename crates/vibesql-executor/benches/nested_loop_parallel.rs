@@ -88,6 +88,7 @@ fn setup_range_join_tables(db: &mut Database, products: usize, promotions: usize
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "PRICE".to_string(),
@@ -95,6 +96,7 @@ fn setup_range_join_tables(db: &mut Database, products: usize, promotions: usize
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "CATEGORY".to_string(),
@@ -102,6 +104,7 @@ fn setup_range_join_tables(db: &mut Database, products: usize, promotions: usize
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );
@@ -117,6 +120,7 @@ fn setup_range_join_tables(db: &mut Database, products: usize, promotions: usize
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "MIN_PRICE".to_string(),
@@ -124,6 +128,7 @@ fn setup_range_join_tables(db: &mut Database, products: usize, promotions: usize
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "MAX_PRICE".to_string(),
@@ -131,6 +136,7 @@ fn setup_range_join_tables(db: &mut Database, products: usize, promotions: usize
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "DISCOUNT".to_string(),
@@ -138,6 +144,7 @@ fn setup_range_join_tables(db: &mut Database, products: usize, promotions: usize
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );
@@ -179,6 +186,7 @@ fn setup_cross_join_tables(db: &mut Database, left_rows: usize, right_rows: usiz
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
@@ -186,6 +194,7 @@ fn setup_cross_join_tables(db: &mut Database, left_rows: usize, right_rows: usiz
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );
@@ -201,6 +210,7 @@ fn setup_cross_join_tables(db: &mut Database, left_rows: usize, right_rows: usiz
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "FACTOR".to_string(),
@@ -208,6 +218,7 @@ fn setup_cross_join_tables(db: &mut Database, left_rows: usize, right_rows: usiz
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );

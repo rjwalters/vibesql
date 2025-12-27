@@ -41,6 +41,7 @@ fn setup_sort_table(db: &mut Database, row_count: usize, include_nulls: bool) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             vibesql_catalog::ColumnSchema {
                 name: "CATEGORY".to_string(),
@@ -48,6 +49,7 @@ fn setup_sort_table(db: &mut Database, row_count: usize, include_nulls: bool) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             vibesql_catalog::ColumnSchema {
                 name: "VALUE".to_string(),
@@ -55,6 +57,7 @@ fn setup_sort_table(db: &mut Database, row_count: usize, include_nulls: bool) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             vibesql_catalog::ColumnSchema {
                 name: "NAME".to_string(),
@@ -62,6 +65,7 @@ fn setup_sort_table(db: &mut Database, row_count: usize, include_nulls: bool) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );
@@ -101,6 +105,7 @@ fn setup_presorted_table(db: &mut Database, row_count: usize, table_name: &str) 
             nullable: false,
             default_value: None,
             generated_expr: None,
+            collation: None,
         }],
     );
     db.create_table(schema).unwrap();
@@ -121,6 +126,7 @@ fn setup_reverse_sorted_table(db: &mut Database, row_count: usize, table_name: &
             nullable: false,
             default_value: None,
             generated_expr: None,
+            collation: None,
         }],
     );
     db.create_table(schema).unwrap();

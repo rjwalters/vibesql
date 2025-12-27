@@ -121,6 +121,7 @@ fn create_filter_database(row_count: usize) -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "CATEGORY".to_string(),
@@ -128,6 +129,7 @@ fn create_filter_database(row_count: usize) -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
@@ -135,6 +137,7 @@ fn create_filter_database(row_count: usize) -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "FLAG".to_string(),
@@ -142,6 +145,7 @@ fn create_filter_database(row_count: usize) -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );

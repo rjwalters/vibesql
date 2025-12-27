@@ -47,6 +47,7 @@ fn setup_join_tables(db: &mut Database, left_rows: usize, right_rows: usize) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             vibesql_catalog::ColumnSchema {
                 name: "NAME".to_string(),
@@ -54,6 +55,7 @@ fn setup_join_tables(db: &mut Database, left_rows: usize, right_rows: usize) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );
@@ -69,6 +71,7 @@ fn setup_join_tables(db: &mut Database, left_rows: usize, right_rows: usize) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             vibesql_catalog::ColumnSchema {
                 name: "CUSTOMER_ID".to_string(),
@@ -76,6 +79,7 @@ fn setup_join_tables(db: &mut Database, left_rows: usize, right_rows: usize) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             vibesql_catalog::ColumnSchema {
                 name: "AMOUNT".to_string(),
@@ -83,6 +87,7 @@ fn setup_join_tables(db: &mut Database, left_rows: usize, right_rows: usize) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );

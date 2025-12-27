@@ -90,6 +90,7 @@ fn create_groupby_database(row_count: usize, num_groups: usize) -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "GROUP_KEY".to_string(),
@@ -97,6 +98,7 @@ fn create_groupby_database(row_count: usize, num_groups: usize) -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
@@ -104,6 +106,7 @@ fn create_groupby_database(row_count: usize, num_groups: usize) -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );

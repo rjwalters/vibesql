@@ -94,6 +94,7 @@ fn create_join_database(probe_count: usize, build_size: usize) -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
@@ -101,6 +102,7 @@ fn create_join_database(probe_count: usize, build_size: usize) -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );
@@ -121,6 +123,7 @@ fn create_join_database(probe_count: usize, build_size: usize) -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "BUILD_ID".to_string(),
@@ -128,6 +131,7 @@ fn create_join_database(probe_count: usize, build_size: usize) -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "DATA".to_string(),
@@ -135,6 +139,7 @@ fn create_join_database(probe_count: usize, build_size: usize) -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );

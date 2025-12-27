@@ -124,12 +124,13 @@ fn bind_expression(expr: &Expression, params: &[SqlValue]) -> Expression {
             args: args.iter().map(|a| bind_expression(a, params)).collect(),
             character_unit: character_unit.clone(),
         },
-        Expression::AggregateFunction { name, distinct, args, order_by } => {
+        Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
             Expression::AggregateFunction {
                 name: name.clone(),
                 distinct: *distinct,
                 args: args.iter().map(|a| bind_expression(a, params)).collect(),
                 order_by: order_by.clone(),
+                filter: filter.clone(),
             }
         }
         // Pass through expressions that don't contain placeholders
@@ -183,6 +184,7 @@ fn bind_update(stmt: &UpdateStmt, params: &[SqlValue]) -> UpdateStmt {
     UpdateStmt {
         table_name: stmt.table_name.clone(),
         quoted: false,
+        alias: stmt.alias.clone(),
         assignments: stmt
             .assignments
             .iter()
@@ -192,6 +194,7 @@ fn bind_update(stmt: &UpdateStmt, params: &[SqlValue]) -> UpdateStmt {
             })
             .collect(),
         where_clause: bind_where_clause(&stmt.where_clause, params),
+        conflict_clause: stmt.conflict_clause.clone(),
     }
 }
 

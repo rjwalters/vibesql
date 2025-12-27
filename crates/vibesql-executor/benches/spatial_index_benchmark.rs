@@ -48,6 +48,7 @@ fn create_test_db_with_10k_polygons() -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "BOUNDARY".to_string(),
@@ -55,6 +56,7 @@ fn create_test_db_with_10k_polygons() -> Database {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );
@@ -100,6 +102,7 @@ fn create_test_db_with_100k_polygons() -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "BOUNDARY".to_string(),
@@ -107,6 +110,7 @@ fn create_test_db_with_100k_polygons() -> Database {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );
@@ -152,6 +156,7 @@ fn create_test_db_with_10k_points() -> Database {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "LOCATION".to_string(),
@@ -159,6 +164,7 @@ fn create_test_db_with_10k_points() -> Database {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );

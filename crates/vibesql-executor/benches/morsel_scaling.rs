@@ -257,6 +257,7 @@ fn create_skewed_database(row_count: usize, skew_ratio: f64) -> VibeDB {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "CATEGORY".to_string(),
@@ -264,6 +265,7 @@ fn create_skewed_database(row_count: usize, skew_ratio: f64) -> VibeDB {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
@@ -271,6 +273,7 @@ fn create_skewed_database(row_count: usize, skew_ratio: f64) -> VibeDB {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
             ColumnSchema {
                 name: "PADDING".to_string(),
@@ -278,6 +281,7 @@ fn create_skewed_database(row_count: usize, skew_ratio: f64) -> VibeDB {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+            collation: None,
             },
         ],
     );

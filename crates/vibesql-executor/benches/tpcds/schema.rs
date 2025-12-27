@@ -527,6 +527,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_date_id".to_string(),
@@ -534,6 +535,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_date".to_string(),
@@ -541,6 +543,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_month_seq".to_string(),
@@ -548,6 +551,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_week_seq".to_string(),
@@ -555,6 +559,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_quarter_seq".to_string(),
@@ -562,6 +567,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_year".to_string(),
@@ -569,6 +575,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_dow".to_string(),
@@ -576,6 +583,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_moy".to_string(),
@@ -583,6 +591,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_dom".to_string(),
@@ -590,6 +599,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_qoy".to_string(),
@@ -597,6 +607,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_fy_year".to_string(),
@@ -604,6 +615,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_fy_quarter_seq".to_string(),
@@ -611,6 +623,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_fy_week_seq".to_string(),
@@ -618,6 +631,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_day_name".to_string(),
@@ -625,6 +639,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_quarter_name".to_string(),
@@ -632,6 +647,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_holiday".to_string(),
@@ -639,6 +655,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_weekend".to_string(),
@@ -646,6 +663,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_following_holiday".to_string(),
@@ -653,6 +671,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_first_dom".to_string(),
@@ -660,6 +679,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_last_dom".to_string(),
@@ -667,6 +687,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_same_day_ly".to_string(),
@@ -674,6 +695,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_same_day_lq".to_string(),
@@ -681,6 +703,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_current_day".to_string(),
@@ -688,6 +711,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_current_week".to_string(),
@@ -695,6 +719,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_current_month".to_string(),
@@ -702,6 +727,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_current_quarter".to_string(),
@@ -709,6 +735,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "d_current_year".to_string(),
@@ -716,6 +743,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -731,6 +759,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "t_time_id".to_string(),
@@ -738,6 +767,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "t_time".to_string(),
@@ -745,6 +775,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "t_hour".to_string(),
@@ -752,6 +783,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "t_minute".to_string(),
@@ -759,6 +791,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "t_second".to_string(),
@@ -766,6 +799,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "t_am_pm".to_string(),
@@ -773,6 +807,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "t_shift".to_string(),
@@ -780,6 +815,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "t_sub_shift".to_string(),
@@ -787,6 +823,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "t_meal_time".to_string(),
@@ -794,6 +831,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -809,6 +847,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_item_id".to_string(),
@@ -816,6 +855,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_rec_start_date".to_string(),
@@ -823,6 +863,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_rec_end_date".to_string(),
@@ -830,6 +871,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_item_desc".to_string(),
@@ -837,6 +879,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_current_price".to_string(),
@@ -844,6 +887,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_wholesale_cost".to_string(),
@@ -851,6 +895,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_brand_id".to_string(),
@@ -858,6 +903,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_brand".to_string(),
@@ -865,6 +911,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_class_id".to_string(),
@@ -872,6 +919,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_class".to_string(),
@@ -879,6 +927,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_category_id".to_string(),
@@ -886,6 +935,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_category".to_string(),
@@ -893,6 +943,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_manufact_id".to_string(),
@@ -900,6 +951,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_manufact".to_string(),
@@ -907,6 +959,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_size".to_string(),
@@ -914,6 +967,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_formulation".to_string(),
@@ -921,6 +975,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_color".to_string(),
@@ -928,6 +983,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_units".to_string(),
@@ -935,6 +991,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_container".to_string(),
@@ -942,6 +999,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_manager_id".to_string(),
@@ -949,6 +1007,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "i_product_name".to_string(),
@@ -956,6 +1015,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -971,6 +1031,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ca_address_id".to_string(),
@@ -978,6 +1039,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ca_street_number".to_string(),
@@ -985,6 +1047,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ca_street_name".to_string(),
@@ -992,6 +1055,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ca_street_type".to_string(),
@@ -999,6 +1063,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ca_suite_number".to_string(),
@@ -1006,6 +1071,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ca_city".to_string(),
@@ -1013,6 +1079,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ca_county".to_string(),
@@ -1020,6 +1087,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ca_state".to_string(),
@@ -1027,6 +1095,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ca_zip".to_string(),
@@ -1034,6 +1103,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ca_country".to_string(),
@@ -1041,6 +1111,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ca_gmt_offset".to_string(),
@@ -1048,6 +1119,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ca_location_type".to_string(),
@@ -1055,6 +1127,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -1070,6 +1143,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_customer_id".to_string(),
@@ -1077,6 +1151,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_current_cdemo_sk".to_string(),
@@ -1084,6 +1159,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_current_hdemo_sk".to_string(),
@@ -1091,6 +1167,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_current_addr_sk".to_string(),
@@ -1098,6 +1175,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_first_shipto_date_sk".to_string(),
@@ -1105,6 +1183,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_first_sales_date_sk".to_string(),
@@ -1112,6 +1191,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_salutation".to_string(),
@@ -1119,6 +1199,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_first_name".to_string(),
@@ -1126,6 +1207,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_last_name".to_string(),
@@ -1133,6 +1215,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_preferred_cust_flag".to_string(),
@@ -1140,6 +1223,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_birth_day".to_string(),
@@ -1147,6 +1231,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_birth_month".to_string(),
@@ -1154,6 +1239,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_birth_year".to_string(),
@@ -1161,6 +1247,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_birth_country".to_string(),
@@ -1168,6 +1255,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_login".to_string(),
@@ -1175,6 +1263,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_email_address".to_string(),
@@ -1182,6 +1271,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "c_last_review_date_sk".to_string(),
@@ -1189,6 +1279,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -1204,6 +1295,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_store_id".to_string(),
@@ -1211,6 +1303,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_rec_start_date".to_string(),
@@ -1218,6 +1311,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_rec_end_date".to_string(),
@@ -1225,6 +1319,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_closed_date_sk".to_string(),
@@ -1232,6 +1327,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_store_name".to_string(),
@@ -1239,6 +1335,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_number_employees".to_string(),
@@ -1246,6 +1343,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_floor_space".to_string(),
@@ -1253,6 +1351,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_hours".to_string(),
@@ -1260,6 +1359,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_manager".to_string(),
@@ -1267,6 +1367,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_market_id".to_string(),
@@ -1274,6 +1375,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_geography_class".to_string(),
@@ -1281,6 +1383,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_market_desc".to_string(),
@@ -1288,6 +1391,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_market_manager".to_string(),
@@ -1295,6 +1399,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_division_id".to_string(),
@@ -1302,6 +1407,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_division_name".to_string(),
@@ -1309,6 +1415,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_company_id".to_string(),
@@ -1316,6 +1423,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_company_name".to_string(),
@@ -1323,6 +1431,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_street_number".to_string(),
@@ -1330,6 +1439,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_street_name".to_string(),
@@ -1337,6 +1447,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_street_type".to_string(),
@@ -1344,6 +1455,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_suite_number".to_string(),
@@ -1351,6 +1463,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_city".to_string(),
@@ -1358,6 +1471,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_county".to_string(),
@@ -1365,6 +1479,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_state".to_string(),
@@ -1372,6 +1487,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_zip".to_string(),
@@ -1379,6 +1495,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_country".to_string(),
@@ -1386,6 +1503,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_gmt_offset".to_string(),
@@ -1393,6 +1511,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "s_tax_percentage".to_string(),
@@ -1400,6 +1519,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -1415,6 +1535,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_sold_time_sk".to_string(),
@@ -1422,6 +1543,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_item_sk".to_string(),
@@ -1429,6 +1551,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_customer_sk".to_string(),
@@ -1436,6 +1559,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_cdemo_sk".to_string(),
@@ -1443,6 +1567,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_hdemo_sk".to_string(),
@@ -1450,6 +1575,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_addr_sk".to_string(),
@@ -1457,6 +1583,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_store_sk".to_string(),
@@ -1464,6 +1591,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_promo_sk".to_string(),
@@ -1471,6 +1599,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_ticket_number".to_string(),
@@ -1478,6 +1607,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_quantity".to_string(),
@@ -1485,6 +1615,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_wholesale_cost".to_string(),
@@ -1492,6 +1623,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_list_price".to_string(),
@@ -1499,6 +1631,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_sales_price".to_string(),
@@ -1506,6 +1639,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_ext_discount_amt".to_string(),
@@ -1513,6 +1647,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_ext_sales_price".to_string(),
@@ -1520,6 +1655,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_ext_wholesale_cost".to_string(),
@@ -1527,6 +1663,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_ext_list_price".to_string(),
@@ -1534,6 +1671,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_ext_tax".to_string(),
@@ -1541,6 +1679,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_coupon_amt".to_string(),
@@ -1548,6 +1687,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_net_paid".to_string(),
@@ -1555,6 +1695,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_net_paid_inc_tax".to_string(),
@@ -1562,6 +1703,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ss_net_profit".to_string(),
@@ -1569,6 +1711,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -1588,6 +1731,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_promo_id".to_string(),
@@ -1595,6 +1739,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_start_date_sk".to_string(),
@@ -1602,6 +1747,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_end_date_sk".to_string(),
@@ -1609,6 +1755,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_item_sk".to_string(),
@@ -1616,6 +1763,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_cost".to_string(),
@@ -1623,6 +1771,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_response_target".to_string(),
@@ -1630,6 +1779,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_promo_name".to_string(),
@@ -1637,6 +1787,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_channel_dmail".to_string(),
@@ -1644,6 +1795,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_channel_email".to_string(),
@@ -1651,6 +1803,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_channel_catalog".to_string(),
@@ -1658,6 +1811,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_channel_tv".to_string(),
@@ -1665,6 +1819,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_channel_radio".to_string(),
@@ -1672,6 +1827,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_channel_press".to_string(),
@@ -1679,6 +1835,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_channel_event".to_string(),
@@ -1686,6 +1843,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_channel_demo".to_string(),
@@ -1693,6 +1851,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_channel_details".to_string(),
@@ -1700,6 +1859,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_purpose".to_string(),
@@ -1707,6 +1867,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "p_discount_active".to_string(),
@@ -1714,6 +1875,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -1729,6 +1891,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "w_warehouse_id".to_string(),
@@ -1736,6 +1899,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "w_warehouse_name".to_string(),
@@ -1743,6 +1907,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "w_warehouse_sq_ft".to_string(),
@@ -1750,6 +1915,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "w_street_number".to_string(),
@@ -1757,6 +1923,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "w_street_name".to_string(),
@@ -1764,6 +1931,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "w_street_type".to_string(),
@@ -1771,6 +1939,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "w_suite_number".to_string(),
@@ -1778,6 +1947,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "w_city".to_string(),
@@ -1785,6 +1955,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "w_county".to_string(),
@@ -1792,6 +1963,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "w_state".to_string(),
@@ -1799,6 +1971,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "w_zip".to_string(),
@@ -1806,6 +1979,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "w_country".to_string(),
@@ -1813,6 +1987,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "w_gmt_offset".to_string(),
@@ -1820,6 +1995,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -1835,6 +2011,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sm_ship_mode_id".to_string(),
@@ -1842,6 +2019,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sm_type".to_string(),
@@ -1849,6 +2027,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sm_code".to_string(),
@@ -1856,6 +2035,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sm_carrier".to_string(),
@@ -1863,6 +2043,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sm_contract".to_string(),
@@ -1870,6 +2051,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -1885,6 +2067,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "r_reason_id".to_string(),
@@ -1892,6 +2075,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "r_reason_desc".to_string(),
@@ -1899,6 +2083,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -1914,6 +2099,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_return_time_sk".to_string(),
@@ -1921,6 +2107,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_item_sk".to_string(),
@@ -1928,6 +2115,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_customer_sk".to_string(),
@@ -1935,6 +2123,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_cdemo_sk".to_string(),
@@ -1942,6 +2131,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_hdemo_sk".to_string(),
@@ -1949,6 +2139,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_addr_sk".to_string(),
@@ -1956,6 +2147,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_store_sk".to_string(),
@@ -1963,6 +2155,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_reason_sk".to_string(),
@@ -1970,6 +2163,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_ticket_number".to_string(),
@@ -1977,6 +2171,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_return_quantity".to_string(),
@@ -1984,6 +2179,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_return_amt".to_string(),
@@ -1991,6 +2187,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_return_tax".to_string(),
@@ -1998,6 +2195,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_return_amt_inc_tax".to_string(),
@@ -2005,6 +2203,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_fee".to_string(),
@@ -2012,6 +2211,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_return_ship_cost".to_string(),
@@ -2019,6 +2219,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_refunded_cash".to_string(),
@@ -2026,6 +2227,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_reversed_charge".to_string(),
@@ -2033,6 +2235,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_store_credit".to_string(),
@@ -2040,6 +2243,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "sr_net_loss".to_string(),
@@ -2047,6 +2251,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -2066,6 +2271,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cp_catalog_page_id".to_string(),
@@ -2073,6 +2279,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cp_start_date_sk".to_string(),
@@ -2080,6 +2287,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cp_end_date_sk".to_string(),
@@ -2087,6 +2295,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cp_department".to_string(),
@@ -2094,6 +2303,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cp_catalog_number".to_string(),
@@ -2101,6 +2311,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cp_catalog_page_number".to_string(),
@@ -2108,6 +2319,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cp_description".to_string(),
@@ -2115,6 +2327,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cp_type".to_string(),
@@ -2122,6 +2335,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -2137,6 +2351,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wp_web_page_id".to_string(),
@@ -2144,6 +2359,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wp_rec_start_date_sk".to_string(),
@@ -2151,6 +2367,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wp_rec_end_date_sk".to_string(),
@@ -2158,6 +2375,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wp_creation_date_sk".to_string(),
@@ -2165,6 +2383,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wp_access_date_sk".to_string(),
@@ -2172,6 +2391,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wp_autogen_flag".to_string(),
@@ -2179,6 +2399,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wp_customer_sk".to_string(),
@@ -2186,6 +2407,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wp_url".to_string(),
@@ -2193,6 +2415,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wp_type".to_string(),
@@ -2200,6 +2423,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wp_char_count".to_string(),
@@ -2207,6 +2431,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wp_link_count".to_string(),
@@ -2214,6 +2439,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wp_image_count".to_string(),
@@ -2221,6 +2447,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wp_max_ad_count".to_string(),
@@ -2228,6 +2455,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -2243,6 +2471,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_site_id".to_string(),
@@ -2250,6 +2479,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_rec_start_date_sk".to_string(),
@@ -2257,6 +2487,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_rec_end_date_sk".to_string(),
@@ -2264,6 +2495,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_name".to_string(),
@@ -2271,6 +2503,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_open_date_sk".to_string(),
@@ -2278,6 +2511,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_close_date_sk".to_string(),
@@ -2285,6 +2519,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_class".to_string(),
@@ -2292,6 +2527,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_manager".to_string(),
@@ -2299,6 +2535,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_mkt_id".to_string(),
@@ -2306,6 +2543,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_mkt_class".to_string(),
@@ -2313,6 +2551,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_mkt_desc".to_string(),
@@ -2320,6 +2559,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_market_manager".to_string(),
@@ -2327,6 +2567,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_company_id".to_string(),
@@ -2334,6 +2575,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_company_name".to_string(),
@@ -2341,6 +2583,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_street_number".to_string(),
@@ -2348,6 +2591,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_street_name".to_string(),
@@ -2355,6 +2599,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_street_type".to_string(),
@@ -2362,6 +2607,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_suite_number".to_string(),
@@ -2369,6 +2615,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_city".to_string(),
@@ -2376,6 +2623,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_county".to_string(),
@@ -2383,6 +2631,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_state".to_string(),
@@ -2390,6 +2639,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_zip".to_string(),
@@ -2397,6 +2647,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_country".to_string(),
@@ -2404,6 +2655,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_gmt_offset".to_string(),
@@ -2411,6 +2663,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "web_tax_percentage".to_string(),
@@ -2418,6 +2671,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -2433,6 +2687,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_sold_time_sk".to_string(),
@@ -2440,6 +2695,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_ship_date_sk".to_string(),
@@ -2447,6 +2703,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_bill_customer_sk".to_string(),
@@ -2454,6 +2711,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_bill_cdemo_sk".to_string(),
@@ -2461,6 +2719,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_bill_hdemo_sk".to_string(),
@@ -2468,6 +2727,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_bill_addr_sk".to_string(),
@@ -2475,6 +2735,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_ship_customer_sk".to_string(),
@@ -2482,6 +2743,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_ship_cdemo_sk".to_string(),
@@ -2489,6 +2751,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_ship_hdemo_sk".to_string(),
@@ -2496,6 +2759,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_ship_addr_sk".to_string(),
@@ -2503,6 +2767,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_call_center_sk".to_string(),
@@ -2510,6 +2775,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_catalog_page_sk".to_string(),
@@ -2517,6 +2783,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_ship_mode_sk".to_string(),
@@ -2524,6 +2791,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_warehouse_sk".to_string(),
@@ -2531,6 +2799,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_item_sk".to_string(),
@@ -2538,6 +2807,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_promo_sk".to_string(),
@@ -2545,6 +2815,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_order_number".to_string(),
@@ -2552,6 +2823,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_quantity".to_string(),
@@ -2559,6 +2831,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_wholesale_cost".to_string(),
@@ -2566,6 +2839,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_list_price".to_string(),
@@ -2573,6 +2847,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_sales_price".to_string(),
@@ -2580,6 +2855,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_ext_discount_amt".to_string(),
@@ -2587,6 +2863,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_ext_sales_price".to_string(),
@@ -2594,6 +2871,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_ext_wholesale_cost".to_string(),
@@ -2601,6 +2879,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_ext_list_price".to_string(),
@@ -2608,6 +2887,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_ext_tax".to_string(),
@@ -2615,6 +2895,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_coupon_amt".to_string(),
@@ -2622,6 +2903,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_ext_ship_cost".to_string(),
@@ -2629,6 +2911,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_net_paid".to_string(),
@@ -2636,6 +2919,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_net_paid_inc_tax".to_string(),
@@ -2643,6 +2927,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_net_paid_inc_ship".to_string(),
@@ -2650,6 +2935,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_net_paid_inc_ship_tax".to_string(),
@@ -2657,6 +2943,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cs_net_profit".to_string(),
@@ -2664,6 +2951,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -2679,6 +2967,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_returned_time_sk".to_string(),
@@ -2686,6 +2975,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_item_sk".to_string(),
@@ -2693,6 +2983,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_refunded_customer_sk".to_string(),
@@ -2700,6 +2991,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_refunded_cdemo_sk".to_string(),
@@ -2707,6 +2999,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_refunded_hdemo_sk".to_string(),
@@ -2714,6 +3007,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_refunded_addr_sk".to_string(),
@@ -2721,6 +3015,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_returning_customer_sk".to_string(),
@@ -2728,6 +3023,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_returning_cdemo_sk".to_string(),
@@ -2735,6 +3031,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_returning_hdemo_sk".to_string(),
@@ -2742,6 +3039,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_returning_addr_sk".to_string(),
@@ -2749,6 +3047,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_call_center_sk".to_string(),
@@ -2756,6 +3055,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_catalog_page_sk".to_string(),
@@ -2763,6 +3063,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_ship_mode_sk".to_string(),
@@ -2770,6 +3071,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_warehouse_sk".to_string(),
@@ -2777,6 +3079,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_reason_sk".to_string(),
@@ -2784,6 +3087,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_order_number".to_string(),
@@ -2791,6 +3095,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_return_quantity".to_string(),
@@ -2798,6 +3103,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_return_amount".to_string(),
@@ -2805,6 +3111,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_return_tax".to_string(),
@@ -2812,6 +3119,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_return_amt_inc_tax".to_string(),
@@ -2819,6 +3127,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_fee".to_string(),
@@ -2826,6 +3135,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_return_ship_cost".to_string(),
@@ -2833,6 +3143,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_refunded_cash".to_string(),
@@ -2840,6 +3151,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_reversed_charge".to_string(),
@@ -2847,6 +3159,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_store_credit".to_string(),
@@ -2854,6 +3167,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cr_net_loss".to_string(),
@@ -2861,6 +3175,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -2876,6 +3191,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_sold_time_sk".to_string(),
@@ -2883,6 +3199,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_ship_date_sk".to_string(),
@@ -2890,6 +3207,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_item_sk".to_string(),
@@ -2897,6 +3215,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_bill_customer_sk".to_string(),
@@ -2904,6 +3223,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_bill_cdemo_sk".to_string(),
@@ -2911,6 +3231,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_bill_hdemo_sk".to_string(),
@@ -2918,6 +3239,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_bill_addr_sk".to_string(),
@@ -2925,6 +3247,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_ship_customer_sk".to_string(),
@@ -2932,6 +3255,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_ship_cdemo_sk".to_string(),
@@ -2939,6 +3263,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_ship_hdemo_sk".to_string(),
@@ -2946,6 +3271,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_ship_addr_sk".to_string(),
@@ -2953,6 +3279,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_web_page_sk".to_string(),
@@ -2960,6 +3287,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_web_site_sk".to_string(),
@@ -2967,6 +3295,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_ship_mode_sk".to_string(),
@@ -2974,6 +3303,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_warehouse_sk".to_string(),
@@ -2981,6 +3311,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_promo_sk".to_string(),
@@ -2988,6 +3319,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_order_number".to_string(),
@@ -2995,6 +3327,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_quantity".to_string(),
@@ -3002,6 +3335,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_wholesale_cost".to_string(),
@@ -3009,6 +3343,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_list_price".to_string(),
@@ -3016,6 +3351,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_sales_price".to_string(),
@@ -3023,6 +3359,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_ext_discount_amt".to_string(),
@@ -3030,6 +3367,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_ext_sales_price".to_string(),
@@ -3037,6 +3375,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_ext_wholesale_cost".to_string(),
@@ -3044,6 +3383,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_ext_list_price".to_string(),
@@ -3051,6 +3391,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_ext_tax".to_string(),
@@ -3058,6 +3399,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_coupon_amt".to_string(),
@@ -3065,6 +3407,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_ext_ship_cost".to_string(),
@@ -3072,6 +3415,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_net_paid".to_string(),
@@ -3079,6 +3423,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_net_paid_inc_tax".to_string(),
@@ -3086,6 +3431,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_net_paid_inc_ship".to_string(),
@@ -3093,6 +3439,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_net_paid_inc_ship_tax".to_string(),
@@ -3100,6 +3447,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ws_net_profit".to_string(),
@@ -3107,6 +3455,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -3122,6 +3471,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_returned_time_sk".to_string(),
@@ -3129,6 +3479,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_item_sk".to_string(),
@@ -3136,6 +3487,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_refunded_customer_sk".to_string(),
@@ -3143,6 +3495,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_refunded_cdemo_sk".to_string(),
@@ -3150,6 +3503,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_refunded_hdemo_sk".to_string(),
@@ -3157,6 +3511,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_refunded_addr_sk".to_string(),
@@ -3164,6 +3519,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_returning_customer_sk".to_string(),
@@ -3171,6 +3527,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_returning_cdemo_sk".to_string(),
@@ -3178,6 +3535,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_returning_hdemo_sk".to_string(),
@@ -3185,6 +3543,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_returning_addr_sk".to_string(),
@@ -3192,6 +3551,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_web_page_sk".to_string(),
@@ -3199,6 +3559,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_reason_sk".to_string(),
@@ -3206,6 +3567,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_order_number".to_string(),
@@ -3213,6 +3575,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_return_quantity".to_string(),
@@ -3220,6 +3583,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_return_amt".to_string(),
@@ -3227,6 +3591,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_return_tax".to_string(),
@@ -3234,6 +3599,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_return_amt_inc_tax".to_string(),
@@ -3241,6 +3607,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_fee".to_string(),
@@ -3248,6 +3615,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_return_ship_cost".to_string(),
@@ -3255,6 +3623,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_refunded_cash".to_string(),
@@ -3262,6 +3631,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_reversed_charge".to_string(),
@@ -3269,6 +3639,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_account_credit".to_string(),
@@ -3276,6 +3647,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "wr_net_loss".to_string(),
@@ -3283,6 +3655,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -3298,6 +3671,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cd_gender".to_string(),
@@ -3305,6 +3679,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cd_marital_status".to_string(),
@@ -3312,6 +3687,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cd_education_status".to_string(),
@@ -3319,6 +3695,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cd_purchase_estimate".to_string(),
@@ -3326,6 +3703,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cd_credit_rating".to_string(),
@@ -3333,6 +3711,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cd_dep_count".to_string(),
@@ -3340,6 +3719,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cd_dep_employed_count".to_string(),
@@ -3347,6 +3727,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cd_dep_college_count".to_string(),
@@ -3354,6 +3735,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -3369,6 +3751,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "hd_income_band_sk".to_string(),
@@ -3376,6 +3759,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "hd_buy_potential".to_string(),
@@ -3383,6 +3767,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "hd_dep_count".to_string(),
@@ -3390,6 +3775,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "hd_vehicle_count".to_string(),
@@ -3397,6 +3783,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -3412,6 +3799,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ib_lower_bound".to_string(),
@@ -3419,6 +3807,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "ib_upper_bound".to_string(),
@@ -3426,6 +3815,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -3441,6 +3831,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_call_center_id".to_string(),
@@ -3448,6 +3839,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_rec_start_date".to_string(),
@@ -3455,6 +3847,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_rec_end_date".to_string(),
@@ -3462,6 +3855,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_closed_date_sk".to_string(),
@@ -3469,6 +3863,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_open_date_sk".to_string(),
@@ -3476,6 +3871,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_name".to_string(),
@@ -3483,6 +3879,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_class".to_string(),
@@ -3490,6 +3887,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_employees".to_string(),
@@ -3497,6 +3895,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_sq_ft".to_string(),
@@ -3504,6 +3903,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_hours".to_string(),
@@ -3511,6 +3911,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_manager".to_string(),
@@ -3518,6 +3919,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_mkt_id".to_string(),
@@ -3525,6 +3927,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_mkt_class".to_string(),
@@ -3532,6 +3935,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_mkt_desc".to_string(),
@@ -3539,6 +3943,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_market_manager".to_string(),
@@ -3546,6 +3951,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_division".to_string(),
@@ -3553,6 +3959,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_division_name".to_string(),
@@ -3560,6 +3967,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_company".to_string(),
@@ -3567,6 +3975,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_company_name".to_string(),
@@ -3574,6 +3983,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_street_number".to_string(),
@@ -3581,6 +3991,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_street_name".to_string(),
@@ -3588,6 +3999,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_street_type".to_string(),
@@ -3595,6 +4007,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_suite_number".to_string(),
@@ -3602,6 +4015,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_city".to_string(),
@@ -3609,6 +4023,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_county".to_string(),
@@ -3616,6 +4031,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_state".to_string(),
@@ -3623,6 +4039,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_zip".to_string(),
@@ -3630,6 +4047,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_country".to_string(),
@@ -3637,6 +4055,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_gmt_offset".to_string(),
@@ -3644,6 +4063,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "cc_tax_percentage".to_string(),
@@ -3651,6 +4071,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
@@ -3666,6 +4087,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "inv_item_sk".to_string(),
@@ -3673,6 +4095,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "inv_warehouse_sk".to_string(),
@@ -3680,6 +4103,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
             ColumnSchema {
                 name: "inv_quantity_on_hand".to_string(),
@@ -3687,6 +4111,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                collation: None,
             },
         ],
     ))
