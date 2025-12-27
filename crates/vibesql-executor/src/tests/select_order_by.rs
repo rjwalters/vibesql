@@ -315,3 +315,244 @@ fn test_order_by_with_join_issue_4552() {
     assert_eq!(result[1].values[2], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("b")));
     assert_eq!(result[2].values[2], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("c")));
 }
+
+/// Test ORDER BY is preserved in derived tables (issue #4734)
+/// When a derived table has ORDER BY, the order should be preserved
+/// in the outer query if the outer query has no conflicting ORDER BY.
+#[test]
+fn test_order_by_preserved_in_derived_table_issue_4734() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Create table with insertion order different from sorted order
+    let schema = vibesql_catalog::TableSchema::new(
+        "t1".to_string(),
+        vec![
+            vibesql_catalog::ColumnSchema::new(
+                "a".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "b".to_string(),
+                vibesql_types::DataType::Varchar { max_length: None },
+                false,
+            ),
+        ],
+    );
+    db.create_table(schema).unwrap();
+
+    // Insert in non-sorted order: 3, 1, 2
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(3),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("three")),
+        ]),
+    )
+    .unwrap();
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("one")),
+        ]),
+    )
+    .unwrap();
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("two")),
+        ]),
+    )
+    .unwrap();
+
+    let executor = SelectExecutor::new(&db);
+
+    // Query: SELECT * FROM (SELECT * FROM t1 ORDER BY a) AS derived
+    // The ORDER BY inside the derived table should be preserved
+    let inner_query = Box::new(vibesql_ast::SelectStmt {
+        into_table: None,
+        into_variables: None,
+        with_clause: None,
+        set_operation: None,
+        values: None,
+        distinct: false,
+        select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
+            name: "t1".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
+        where_clause: None,
+        group_by: None,
+        having: None,
+        order_by: Some(vec![vibesql_ast::OrderByItem {
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "a", false,
+            )),
+            direction: vibesql_ast::OrderDirection::Asc,
+            nulls_order: None,
+        }]),
+        limit: None,
+        offset: None,
+    });
+
+    let stmt = vibesql_ast::SelectStmt {
+        into_table: None,
+        into_variables: None,
+        with_clause: None,
+        set_operation: None,
+        values: None,
+        distinct: false,
+        select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
+        from: Some(vibesql_ast::FromClause::Subquery {
+            query: inner_query,
+            alias: "derived".to_string(),
+            column_aliases: None,
+        }),
+        where_clause: None,
+        group_by: None,
+        having: None,
+        order_by: None, // Outer query has NO ORDER BY
+        limit: None,
+        offset: None,
+    };
+
+    let result = executor.execute(&stmt).unwrap();
+    assert_eq!(result.len(), 3);
+
+    // Order should be preserved from inner ORDER BY: 1, 2, 3
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("one")));
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(2));
+    assert_eq!(result[1].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("two")));
+    assert_eq!(result[2].values[0], vibesql_types::SqlValue::Integer(3));
+    assert_eq!(
+        result[2].values[1],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("three"))
+    );
+}
+
+/// Test outer ORDER BY takes precedence over derived table ORDER BY (issue #4734)
+#[test]
+fn test_outer_order_by_takes_precedence_issue_4734() {
+    let mut db = vibesql_storage::Database::new();
+
+    let schema = vibesql_catalog::TableSchema::new(
+        "t1".to_string(),
+        vec![
+            vibesql_catalog::ColumnSchema::new(
+                "a".to_string(),
+                vibesql_types::DataType::Integer,
+                false,
+            ),
+            vibesql_catalog::ColumnSchema::new(
+                "b".to_string(),
+                vibesql_types::DataType::Varchar { max_length: None },
+                false,
+            ),
+        ],
+    );
+    db.create_table(schema).unwrap();
+
+    // Insert: 3, 1, 2 (insertion order)
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(3),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("three")),
+        ]),
+    )
+    .unwrap();
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("one")),
+        ]),
+    )
+    .unwrap();
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("two")),
+        ]),
+    )
+    .unwrap();
+
+    let executor = SelectExecutor::new(&db);
+
+    // Query: SELECT * FROM (SELECT * FROM t1 ORDER BY a) AS derived ORDER BY b
+    // Outer ORDER BY (b) should take precedence over inner ORDER BY (a)
+    let inner_query = Box::new(vibesql_ast::SelectStmt {
+        into_table: None,
+        into_variables: None,
+        with_clause: None,
+        set_operation: None,
+        values: None,
+        distinct: false,
+        select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
+            name: "t1".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
+        where_clause: None,
+        group_by: None,
+        having: None,
+        order_by: Some(vec![vibesql_ast::OrderByItem {
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "a", false,
+            )),
+            direction: vibesql_ast::OrderDirection::Asc,
+            nulls_order: None,
+        }]),
+        limit: None,
+        offset: None,
+    });
+
+    let stmt = vibesql_ast::SelectStmt {
+        into_table: None,
+        into_variables: None,
+        with_clause: None,
+        set_operation: None,
+        values: None,
+        distinct: false,
+        select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
+        from: Some(vibesql_ast::FromClause::Subquery {
+            query: inner_query,
+            alias: "derived".to_string(),
+            column_aliases: None,
+        }),
+        where_clause: None,
+        group_by: None,
+        having: None,
+        order_by: Some(vec![vibesql_ast::OrderByItem {
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "b", false,
+            )),
+            direction: vibesql_ast::OrderDirection::Asc,
+            nulls_order: None,
+        }]),
+        limit: None,
+        offset: None,
+    };
+
+    let result = executor.execute(&stmt).unwrap();
+    assert_eq!(result.len(), 3);
+
+    // Order should be by column b alphabetically: one, three, two
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("one")));
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(3));
+    assert_eq!(
+        result[1].values[1],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("three"))
+    );
+    assert_eq!(result[2].values[0], vibesql_types::SqlValue::Integer(2));
+    assert_eq!(result[2].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("two")));
+}
