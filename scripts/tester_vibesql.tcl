@@ -1419,6 +1419,12 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses sqlite_source_id() (SQLite internal function)"]
     }
 
+    # affinity() - SQLite internal/test function that returns type affinity of a value
+    # Not part of SQL standard, used for SQLite's internal testing
+    if {[regexp {affinity\s*\(} $script]} {
+        return [list 1 "uses affinity() (SQLite internal function)"]
+    }
+
     # SQLite C API functions - not available in VibeSQL
     # These are low-level SQLite library functions, not SQL
     if {[regexp {sqlite3_prepare} $script]} {
