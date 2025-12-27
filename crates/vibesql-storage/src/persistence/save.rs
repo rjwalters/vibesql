@@ -8,9 +8,14 @@
 // - Indexes
 // - Data (INSERT statements)
 // - Roles and privileges
+//
+// IMPORTANT: This module uses atomic writes to prevent database corruption.
+// All writes go to a temporary file first, then are atomically renamed to the
+// target path. This ensures that even if the process crashes mid-write, the
+// original database file remains intact.
 
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{BufWriter, Write},
     path::Path,
 };
@@ -27,6 +32,16 @@ impl Database {
     /// - Data (INSERT statements)
     /// - Roles and privileges
     ///
+    /// # Atomicity
+    ///
+    /// This function uses atomic writes to prevent corruption:
+    /// 1. Writes to a temporary file in the same directory
+    /// 2. Flushes and syncs the buffer to ensure all data is on disk
+    /// 3. Atomically renames the temp file to the target path
+    ///
+    /// This ensures the database file is never in a partial/corrupt state,
+    /// even if the process crashes or is interrupted mid-write.
+    ///
     /// # Example
     /// ```no_run
     /// # use vibesql_storage::Database;
@@ -34,8 +49,46 @@ impl Database {
     /// db.save_sql_dump("database.sql").unwrap();
     /// ```
     pub fn save_sql_dump<P: AsRef<Path>>(&self, path: P) -> Result<(), StorageError> {
-        let file = File::create(path)
-            .map_err(|e| StorageError::NotImplemented(format!("Failed to create file: {}", e)))?;
+        let path_ref = path.as_ref();
+
+        // Create temp file in the same directory to ensure atomic rename works
+        // (rename across filesystems would fail)
+        let temp_path = {
+            let parent = path_ref.parent().unwrap_or(Path::new("."));
+            let file_name = path_ref
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string());
+            let temp_name = format!(
+                ".{}.tmp.{}",
+                file_name.unwrap_or_else(|| "database".to_string()),
+                std::process::id()
+            );
+            parent.join(temp_name)
+        };
+
+        // Write to temp file - clean up on error
+        let result = self.write_sql_dump_to_file(&temp_path);
+        if let Err(e) = &result {
+            // Clean up temp file on error
+            let _ = fs::remove_file(&temp_path);
+            return Err(e.clone());
+        }
+
+        // Atomically rename temp file to target path
+        fs::rename(&temp_path, path_ref).map_err(|e| {
+            // Clean up temp file on rename failure
+            let _ = fs::remove_file(&temp_path);
+            StorageError::NotImplemented(format!("Failed to rename temp file to target: {}", e))
+        })?;
+
+        Ok(())
+    }
+
+    /// Internal helper to write the SQL dump to a file
+    fn write_sql_dump_to_file(&self, path: &Path) -> Result<(), StorageError> {
+        let file = File::create(path).map_err(|e| {
+            StorageError::NotImplemented(format!("Failed to create temp file: {}", e))
+        })?;
 
         let mut writer = BufWriter::new(file);
 
@@ -216,6 +269,19 @@ impl Database {
 
         writeln!(writer, "-- End of dump")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+        // Flush the buffer and sync to disk to ensure data durability
+        // This is critical for atomic writes - we need all data on disk before rename
+        writer
+            .flush()
+            .map_err(|e| StorageError::NotImplemented(format!("Failed to flush buffer: {}", e)))?;
+
+        // Get the underlying file to sync it to disk
+        let file = writer
+            .into_inner()
+            .map_err(|e| StorageError::NotImplemented(format!("Failed to get file: {}", e)))?;
+        file.sync_all()
+            .map_err(|e| StorageError::NotImplemented(format!("Failed to sync file: {}", e)))?;
 
         Ok(())
     }

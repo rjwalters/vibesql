@@ -10,10 +10,15 @@ use std::{fs, path::Path};
 
 use crate::StorageError;
 
+/// Marker that indicates a complete SQL dump file
+pub const SQL_DUMP_END_MARKER: &str = "-- End of dump";
+
 /// Read SQL dump content from file
 ///
 /// # Errors
-/// Returns `StorageError::NotImplemented` if the file cannot be read or is not a text file
+/// Returns `StorageError::NotImplemented` if:
+/// - The file cannot be read or is not a text file
+/// - The file appears to be truncated (missing end marker)
 pub fn read_sql_dump<P: AsRef<Path>>(path: P) -> Result<String, StorageError> {
     let path_ref = path.as_ref();
     if !path_ref.exists() {
@@ -22,7 +27,27 @@ pub fn read_sql_dump<P: AsRef<Path>>(path: P) -> Result<String, StorageError> {
 
     // Try to read the file as text
     match fs::read_to_string(path_ref) {
-        Ok(content) => Ok(content),
+        Ok(content) => {
+            // Verify the dump is complete by checking for the end marker
+            // This detects truncated/corrupted files from interrupted writes
+            if content.contains(SQL_DUMP_END_MARKER) {
+                Ok(content)
+            } else if content.trim().is_empty() {
+                // Empty file is valid for a new database
+                Ok(content)
+            } else if content.starts_with("-- VibeSQL Database Dump") {
+                // File has our header but is missing the end marker - truncated
+                Err(StorageError::NotImplemented(format!(
+                    "Database file {:?} appears to be truncated (missing end marker). \
+                     This may be caused by an interrupted write. \
+                     If you have a backup, please restore it.",
+                    path_ref
+                )))
+            } else {
+                // Not a VibeSQL dump file - might be plain SQL, allow it
+                Ok(content)
+            }
+        }
         Err(e) => {
             // Check if this might be a binary database file (like SQLite)
             if let Ok(bytes) = fs::read(path_ref).map(|b| b.get(0..16).unwrap_or(&[]).to_vec()) {
@@ -233,5 +258,40 @@ mod tests {
         assert_eq!(statements.len(), 1);
         assert!(statements[0].contains("'Alice'"));
         assert!(!statements[0].contains("Add first user"));
+    }
+
+    #[test]
+    fn test_truncation_detection() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Test 1: Complete dump file should succeed
+        let mut complete_file = NamedTempFile::new().unwrap();
+        writeln!(
+            complete_file,
+            "-- VibeSQL Database Dump\nCREATE TABLE t(x INT);\n-- End of dump"
+        )
+        .unwrap();
+        assert!(read_sql_dump(complete_file.path()).is_ok());
+
+        // Test 2: Truncated dump file should fail
+        let mut truncated_file = NamedTempFile::new().unwrap();
+        writeln!(
+            truncated_file,
+            "-- VibeSQL Database Dump\nCREATE TABLE t(x INT);\nINSERT INTO t VALUES ("
+        )
+        .unwrap();
+        let result = read_sql_dump(truncated_file.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("truncated"));
+
+        // Test 3: Empty file should succeed (valid for new database)
+        let empty_file = NamedTempFile::new().unwrap();
+        assert!(read_sql_dump(empty_file.path()).is_ok());
+
+        // Test 4: Plain SQL (not a VibeSQL dump) should succeed
+        let mut plain_sql = NamedTempFile::new().unwrap();
+        writeln!(plain_sql, "CREATE TABLE t(x INT);").unwrap();
+        assert!(read_sql_dump(plain_sql.path()).is_ok());
     }
 }
