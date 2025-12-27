@@ -6516,7 +6516,7 @@ fn load_date_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let is_weekend = d_dow == 0 || d_dow == 6;
 
         stmt.execute(rusqlite::params![
-            d_date_sk,
+            d_date_sk as i64,
             d_date_id,
             date_str,
             d_month_seq,
@@ -6583,7 +6583,7 @@ fn load_time_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         };
 
         stmt.execute(rusqlite::params![
-            t_time_sk, t_time_id, t_time_sk, hour, minute, second, am_pm, shift, sub_shift,
+            t_time_sk as i64, t_time_id, t_time_sk as i64, hour as i64, minute as i64, second as i64, am_pm, shift, sub_shift,
             meal_time
         ])
         .unwrap();
@@ -6607,27 +6607,27 @@ fn load_item_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let wholesale_cost = current_price * 0.5;
 
         stmt.execute(rusqlite::params![
-            i,
+            i as i64,
             i_item_id,
             "1998-01-01",
             rusqlite::types::Null,
             format!("{} {} item", CATEGORIES[category_idx], CLASSES[class_idx]),
             current_price,
             wholesale_cost,
-            brand_idx + 1,
+            (brand_idx + 1) as i64,
             BRANDS[brand_idx],
-            class_idx + 1,
+            (class_idx + 1) as i64,
             CLASSES[class_idx],
-            category_idx + 1,
+            (category_idx + 1) as i64,
             CATEGORIES[category_idx],
-            (i % 10) + 1,
+            ((i % 10) + 1) as i64,
             format!("Manufacturer#{}", (i % 10) + 1),
             ITEM_SIZES[size_idx],
             format!("formula{}", i % 20),
             ITEM_COLORS[color_idx],
             "Each",
             "Unknown",
-            (i % 100) + 1,
+            ((i % 100) + 1) as i64,
             format!("Product#{}", i)
         ])
         .unwrap();
@@ -6645,7 +6645,7 @@ fn load_customer_address_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let state_idx = i % STATES.len();
 
         stmt.execute(rusqlite::params![
-            i,
+            i as i64,
             ca_address_id,
             format!("{}", data.random_i32(1, 999)),
             data.random_varchar(30),
@@ -6682,11 +6682,11 @@ fn load_customer_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let addr_sk = ((i - 1) % data.customer_address_count) + 1;
 
         stmt.execute(rusqlite::params![
-            i,
+            i as i64,
             c_customer_id,
-            i % 1920 + 1,
-            i % 7200 + 1,
-            addr_sk,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            addr_sk as i64,
             data.random_i32(1, 2191),
             data.random_i32(1, 2191),
             salutations[sal_idx],
@@ -6716,7 +6716,7 @@ fn load_store_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let state_idx = i % STATES.len();
 
         stmt.execute(rusqlite::params![
-            i,
+            i as i64,
             s_store_id,
             "1998-01-01",
             rusqlite::types::Null,
@@ -6726,13 +6726,13 @@ fn load_store_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             data.random_i32(5000, 50000),
             "8AM-10PM",
             format!("Manager{}", i % 100),
-            i % 10 + 1,
+            (i % 10 + 1) as i64,
             "Unknown",
             "Market description",
             format!("MarketManager{}", i % 50),
-            i % 5 + 1,
+            (i % 5 + 1) as i64,
             format!("Division{}", i % 5 + 1),
-            i % 3 + 1,
+            (i % 3 + 1) as i64,
             format!("Company{}", i % 3 + 1),
             format!("{}", data.random_i32(1, 999)),
             data.random_varchar(30),
@@ -6781,16 +6781,16 @@ fn load_store_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let net_profit = net_paid - ext_wholesale_cost;
 
         stmt.execute(rusqlite::params![
-            ss_sold_date_sk,
-            ss_sold_time_sk,
-            ss_item_sk,
-            ss_customer_sk,
-            i % 1920 + 1,
-            i % 7200 + 1,
-            (i % data.customer_address_count) + 1,
-            ss_store_sk,
-            i % 300 + 1,
-            ss_ticket_number,
+            ss_sold_date_sk as i64,
+            ss_sold_time_sk as i64,
+            ss_item_sk as i64,
+            ss_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            ss_store_sk as i64,
+            (i % 300 + 1) as i64,
+            ss_ticket_number as i64,
             quantity,
             wholesale_cost,
             list_price,
@@ -7694,11 +7694,11 @@ fn load_promotion_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let end_date_sk = start_date_sk + data.random_i32(7, 30);
 
         stmt.execute(rusqlite::params![
-            i,
+            i as i64,
             p_promo_id,
             start_date_sk,
             end_date_sk,
-            (i % data.item_count) + 1,
+            ((i % data.item_count) + 1) as i64,
             data.random_f64(100.0, 10000.0),
             data.random_i32(1, 10),
             format!("Promo {}", i),
@@ -7729,7 +7729,7 @@ fn load_warehouse_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let state_idx = i % STATES.len();
 
         stmt.execute(rusqlite::params![
-            i,
+            i as i64,
             w_warehouse_id,
             format!("Warehouse {}", i),
             data.random_i32(50000, 500000),
@@ -7761,7 +7761,7 @@ fn load_ship_mode_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let carrier_idx = i % carriers.len();
 
         stmt.execute(rusqlite::params![
-            i,
+            i as i64,
             sm_ship_mode_id,
             ship_types[type_idx],
             format!("{}{}", &carriers[carrier_idx][0..2], i),
@@ -7797,7 +7797,7 @@ fn load_reason_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     for i in 1..=data.reason_count.min(reasons.len()) {
         let r_reason_id = format!("AAAAAA{:010}", i);
 
-        stmt.execute(rusqlite::params![i, r_reason_id, reasons[i - 1]]).unwrap();
+        stmt.execute(rusqlite::params![i as i64, r_reason_id, reasons[i - 1]]).unwrap();
     }
 }
 
@@ -7830,16 +7830,16 @@ fn load_store_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let net_loss = return_amt - refunded_cash - reversed_charge - store_credit + fee;
 
         stmt.execute(rusqlite::params![
-            sr_returned_date_sk,
-            sr_return_time_sk,
-            sr_item_sk,
-            sr_customer_sk,
-            i % 1920 + 1,
-            i % 7200 + 1,
-            (i % data.customer_address_count) + 1,
-            sr_store_sk,
-            sr_reason_sk,
-            sr_ticket_number,
+            sr_returned_date_sk as i64,
+            sr_return_time_sk as i64,
+            sr_item_sk as i64,
+            sr_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            sr_store_sk as i64,
+            sr_reason_sk as i64,
+            sr_ticket_number as i64,
             return_quantity,
             return_amt,
             return_tax,
@@ -7869,13 +7869,13 @@ fn load_catalog_page_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let type_idx = i % page_types.len();
 
         stmt.execute(rusqlite::params![
-            i,
+            i as i64,
             cp_catalog_page_id,
             data.random_i32(1, 500),
             data.random_i32(501, 1000),
             departments[dept_idx],
-            (i / 100) + 1,
-            i % 100 + 1,
+            ((i / 100) + 1) as i64,
+            (i % 100 + 1) as i64,
             format!("Catalog page {} description", i),
             page_types[type_idx]
         ])
@@ -7896,14 +7896,14 @@ fn load_web_page_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let type_idx = i % page_types.len();
 
         stmt.execute(rusqlite::params![
-            i,
+            i as i64,
             wp_web_page_id,
             rusqlite::types::Null,
             rusqlite::types::Null,
             data.random_i32(1, 500),
             data.random_i32(501, 1000),
             if i % 2 == 0 { "Y" } else { "N" },
-            (i % data.customer_count) + 1,
+            ((i % data.customer_count) + 1) as i64,
             format!("http://www.example.com/page{}", i),
             page_types[type_idx],
             data.random_i32(100, 10000),
@@ -7926,7 +7926,7 @@ fn load_web_site_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let state_idx = i % STATES.len();
 
         stmt.execute(rusqlite::params![
-            i,
+            i as i64,
             web_site_id,
             rusqlite::types::Null,
             rusqlite::types::Null,
@@ -7935,11 +7935,11 @@ fn load_web_site_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             rusqlite::types::Null,
             "medium",
             data.random_varchar(30),
-            (i % 6) + 1,
+            ((i % 6) + 1) as i64,
             format!("Market Class {}", i % 10),
             format!("Market description for site {}", i),
             data.random_varchar(30),
-            (i % 3) + 1,
+            ((i % 3) + 1) as i64,
             format!("Company {}", (i % 3) + 1),
             format!("{}", data.random_i32(100, 9999)),
             data.random_varchar(40),
@@ -7991,24 +7991,24 @@ fn load_catalog_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let net_profit = net_paid - ext_wholesale_cost;
 
         stmt.execute(rusqlite::params![
-            cs_sold_date_sk,
-            cs_sold_time_sk,
-            cs_ship_date_sk,
-            cs_bill_customer_sk,
-            i % 1920 + 1,
-            i % 7200 + 1,
-            (i % data.customer_address_count) + 1,
-            cs_bill_customer_sk,
-            i % 1920 + 1,
-            i % 7200 + 1,
-            (i % data.customer_address_count) + 1,
-            (i % data.call_center_count) + 1,
-            (i % data.catalog_page_count) + 1,
-            (i % data.ship_mode_count.min(20)) + 1,
-            (i % data.warehouse_count) + 1,
-            cs_item_sk,
-            (i % data.promotion_count) + 1,
-            cs_order_number,
+            cs_sold_date_sk as i64,
+            cs_sold_time_sk as i64,
+            cs_ship_date_sk as i64,
+            cs_bill_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            cs_bill_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            ((i % data.call_center_count) + 1) as i64,
+            ((i % data.catalog_page_count) + 1) as i64,
+            ((i % data.ship_mode_count.min(20)) + 1) as i64,
+            ((i % data.warehouse_count) + 1) as i64,
+            cs_item_sk as i64,
+            ((i % data.promotion_count) + 1) as i64,
+            cs_order_number as i64,
             quantity,
             wholesale_cost,
             list_price,
@@ -8058,23 +8058,23 @@ fn load_catalog_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let net_loss = return_amt - refunded_cash - reversed_charge - store_credit + fee;
 
         stmt.execute(rusqlite::params![
-            cr_returned_date_sk,
-            cr_returned_time_sk,
-            cr_item_sk,
-            cr_refunded_customer_sk,
-            i % 1920 + 1,
-            i % 7200 + 1,
-            (i % data.customer_address_count) + 1,
-            cr_refunded_customer_sk,
-            i % 1920 + 1,
-            i % 7200 + 1,
-            (i % data.customer_address_count) + 1,
-            (i % data.call_center_count) + 1,
-            (i % data.catalog_page_count) + 1,
-            (i % data.ship_mode_count.min(20)) + 1,
-            (i % data.warehouse_count) + 1,
-            cr_reason_sk,
-            cr_order_number,
+            cr_returned_date_sk as i64,
+            cr_returned_time_sk as i64,
+            cr_item_sk as i64,
+            cr_refunded_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            cr_refunded_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            ((i % data.call_center_count) + 1) as i64,
+            ((i % data.catalog_page_count) + 1) as i64,
+            ((i % data.ship_mode_count.min(20)) + 1) as i64,
+            ((i % data.warehouse_count) + 1) as i64,
+            cr_reason_sk as i64,
+            cr_order_number as i64,
             return_quantity,
             return_amt,
             return_tax,
@@ -8124,24 +8124,24 @@ fn load_web_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let net_profit = net_paid - ext_wholesale_cost;
 
         stmt.execute(rusqlite::params![
-            ws_sold_date_sk,
-            ws_sold_time_sk,
-            ws_ship_date_sk,
-            ws_item_sk,
-            ws_bill_customer_sk,
-            i % 1920 + 1,
-            i % 7200 + 1,
-            (i % data.customer_address_count) + 1,
-            ws_bill_customer_sk,
-            i % 1920 + 1,
-            i % 7200 + 1,
-            (i % data.customer_address_count) + 1,
-            (i % data.web_page_count) + 1,
-            (i % data.web_site_count) + 1,
-            (i % data.ship_mode_count.min(20)) + 1,
-            (i % data.warehouse_count) + 1,
-            (i % data.promotion_count) + 1,
-            ws_order_number,
+            ws_sold_date_sk as i64,
+            ws_sold_time_sk as i64,
+            ws_ship_date_sk as i64,
+            ws_item_sk as i64,
+            ws_bill_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            ws_bill_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            ((i % data.web_page_count) + 1) as i64,
+            ((i % data.web_site_count) + 1) as i64,
+            ((i % data.ship_mode_count.min(20)) + 1) as i64,
+            ((i % data.warehouse_count) + 1) as i64,
+            ((i % data.promotion_count) + 1) as i64,
+            ws_order_number as i64,
             quantity,
             wholesale_cost,
             list_price,
@@ -8191,20 +8191,20 @@ fn load_web_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let net_loss = return_amt - refunded_cash - reversed_charge - account_credit + fee;
 
         stmt.execute(rusqlite::params![
-            wr_returned_date_sk,
-            wr_returned_time_sk,
-            wr_item_sk,
-            wr_refunded_customer_sk,
-            i % 1920 + 1,
-            i % 7200 + 1,
-            (i % data.customer_address_count) + 1,
-            wr_refunded_customer_sk,
-            i % 1920 + 1,
-            i % 7200 + 1,
-            (i % data.customer_address_count) + 1,
-            (i % data.web_page_count) + 1,
-            wr_reason_sk,
-            wr_order_number,
+            wr_returned_date_sk as i64,
+            wr_returned_time_sk as i64,
+            wr_item_sk as i64,
+            wr_refunded_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            wr_refunded_customer_sk as i64,
+            (i % 1920 + 1) as i64,
+            (i % 7200 + 1) as i64,
+            ((i % data.customer_address_count) + 1) as i64,
+            ((i % data.web_page_count) + 1) as i64,
+            wr_reason_sk as i64,
+            wr_order_number as i64,
             return_quantity,
             return_amt,
             return_tax,
@@ -8242,7 +8242,7 @@ fn load_customer_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
                         let dep_college = data.random_i32(0, dep_count);
 
                         stmt.execute(rusqlite::params![
-                            sk,
+                            sk as i64,
                             gender,
                             marital,
                             education,
@@ -8276,8 +8276,8 @@ fn load_household_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
                     }
 
                     stmt.execute(rusqlite::params![
-                        sk,
-                        income_band_sk,
+                        sk as i64,
+                        income_band_sk as i64,
                         buy_potential,
                         dep_count,
                         vehicle_count
@@ -8295,7 +8295,7 @@ fn load_income_band_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
 
     let count = data.income_band_count.min(INCOME_BANDS.len());
     for (i, &(lower, upper)) in INCOME_BANDS.iter().enumerate().take(count) {
-        stmt.execute(rusqlite::params![i + 1, lower, upper]).unwrap();
+        stmt.execute(rusqlite::params![(i + 1) as i64, lower, upper]).unwrap();
     }
 }
 
@@ -8315,7 +8315,7 @@ fn load_call_center_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let state_idx = i % STATES.len();
 
         stmt.execute(rusqlite::params![
-            i,
+            i as i64,
             cc_call_center_id,
             rusqlite::types::Null,
             rusqlite::types::Null,
@@ -8327,13 +8327,13 @@ fn load_call_center_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
             data.random_i32(1000, 50000),
             hours[hours_idx],
             data.random_varchar(30),
-            (i % 6) + 1,
+            ((i % 6) + 1) as i64,
             format!("Market Class {}", i % 10),
             format!("Market Description {}", i),
             data.random_varchar(30),
-            (i % 3) + 1,
+            ((i % 3) + 1) as i64,
             format!("Division {}", (i % 3) + 1),
-            (i % 2) + 1,
+            ((i % 2) + 1) as i64,
             format!("Company {}", (i % 2) + 1),
             format!("{}", data.random_i32(100, 9999)),
             data.random_varchar(40),
@@ -8375,9 +8375,9 @@ fn load_inventory_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
                 }
 
                 stmt.execute(rusqlite::params![
-                    date_sk,
-                    item_sk,
-                    warehouse_sk,
+                    date_sk as i64,
+                    item_sk as i64,
+                    warehouse_sk as i64,
                     data.random_i32(0, 1000)
                 ])
                 .unwrap();
