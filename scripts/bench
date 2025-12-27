@@ -108,6 +108,24 @@ def get_git_info() -> Dict[str, str]:
         return {"commit": "unknown", "branch": "unknown"}
 
 
+def clean_benchmark_crates():
+    """Clean benchmark crates to ensure fresh builds.
+
+    This prevents stale incremental builds from causing compilation errors
+    when struct fields change in the AST or other shared crates.
+    """
+    print("Cleaning benchmark crates...")
+    crates = ["vibesql-executor", "vibesql-server"]
+    for crate in crates:
+        subprocess.run(
+            ["cargo", "clean", "-p", crate],
+            cwd=Path(__file__).parent.parent,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    print("  ✓ Benchmark crates cleaned")
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create and configure argument parser."""
     parser = argparse.ArgumentParser(
@@ -1411,7 +1429,10 @@ def main():
             print(f"  JSON:    {output_dest}")
         if config.verbose:
             print(f"  Verbose: enabled")
-    
+
+    # Clean benchmark crates to ensure fresh builds
+    clean_benchmark_crates()
+
     # Run benchmark(s)
     if config.test == "all":
         return run_all(config)
