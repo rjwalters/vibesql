@@ -1128,6 +1128,24 @@ fn extract_predicates_recursive(
                 }
             }
         }
+        // IS (NULL-safe equals): negated=true means "IS NOT DISTINCT FROM" = "IS"
+        // Displayed as = in EQP output
+        Expression::IsDistinctFrom { left, right, negated: true } => {
+            // Check if left side is a column reference that matches index columns
+            if let Expression::ColumnRef(col_id) = left.as_ref() {
+                let col_name = col_id.column_canonical().to_lowercase();
+                if index_columns.iter().any(|c| c == &col_name) {
+                    predicates.push((col_id.column_canonical().to_string(), "=".to_string()));
+                }
+            }
+            // Check if right side is a column reference
+            else if let Expression::ColumnRef(col_id) = right.as_ref() {
+                let col_name = col_id.column_canonical().to_lowercase();
+                if index_columns.iter().any(|c| c == &col_name) {
+                    predicates.push((col_id.column_canonical().to_string(), "=".to_string()));
+                }
+            }
+        }
         _ => {}
     }
 }
