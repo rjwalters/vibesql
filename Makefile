@@ -271,15 +271,17 @@ test-sqllogictest-halting:
 
 # Run SQLite TCL test suite (Priority 1 - core SQL tests)
 # This is the canonical SQLite conformance test suite
+# Uses errors-only mode by default. Add --verbose for full output.
 test-tcl:
 	@echo "Running SQLite TCL test suite (Priority 1 - core SQL)..."
 	@echo "Tests: select, insert, update, delete, where, join, aggregate, func"
-	./scripts/tcltest run --priority 1 --verbose
+	./scripts/tcltest run --priority 1
 
 # Run all SQLite TCL tests (all priorities)
+# Uses errors-only mode by default. Add --verbose for full output.
 test-tcl-all:
 	@echo "Running full SQLite TCL test suite (all 1174 files)..."
-	./scripts/tcltest run --verbose
+	./scripts/tcltest run
 
 # Run specific TCL test file
 test-tcl-file:

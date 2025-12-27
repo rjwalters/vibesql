@@ -1634,18 +1634,11 @@ proc do_test {name script expected} {
 
     incr ::nTest
 
-    if {$::verbose} {
-        puts -nonewline "  $name... "
-        flush stdout
-    }
-
     if {[catch {uplevel 1 $script} result]} {
-        # Script error
+        # Script error - always print failures
         incr ::nFail
         lappend ::failList $name
-        if {$::verbose} {
-            puts "FAILED (error: $result)"
-        }
+        puts "  $name... FAILED (error: $result)"
         return
     }
 
@@ -1656,16 +1649,14 @@ proc do_test {name script expected} {
         if {[match_regex_pattern $result_str $expected]} {
             incr ::nPass
             if {$::verbose} {
-                puts "ok"
+                puts "  $name... ok"
             }
         } else {
             incr ::nFail
             lappend ::failList $name
-            if {$::verbose} {
-                puts "FAILED"
-                puts "    Expected pattern: $expected"
-                puts "    Got:              $result"
-            }
+            puts "  $name... FAILED"
+            puts "    Expected pattern: $expected"
+            puts "    Got:              $result"
         }
         return
     }
@@ -1677,7 +1668,7 @@ proc do_test {name script expected} {
     if {$result_norm eq $expected_norm} {
         incr ::nPass
         if {$::verbose} {
-            puts "ok"
+            puts "  $name... ok"
         }
     } else {
         # Check for search count mismatch pattern:
@@ -1692,16 +1683,14 @@ proc do_test {name script expected} {
         if {$uses_count_helper && [is_search_count_mismatch $result_norm $expected_norm]} {
             incr ::nPass
             if {$::verbose} {
-                puts "ok (search count ignored)"
+                puts "  $name... ok (search count ignored)"
             }
         } else {
             incr ::nFail
             lappend ::failList $name
-            if {$::verbose} {
-                puts "FAILED"
-                puts "    Expected: $expected"
-                puts "    Got:      $result"
-            }
+            puts "  $name... FAILED"
+            puts "    Expected: $expected"
+            puts "    Got:      $result"
         }
     }
 }
@@ -1952,9 +1941,8 @@ proc integrity_check {name} {
     }
     incr ::nFail
     lappend ::failList $name
-    if {$::verbose} {
-        puts "  $name... FAILED (integrity check: $result)"
-    }
+    # Always print failures
+    puts "  $name... FAILED (integrity check: $result)"
 }
 
 proc db_enter {db} {

@@ -828,7 +828,9 @@ def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeou
                 if in_failed_section and line.strip().startswith('-'):
                     failed_tests.append(line.strip().lstrip('- '))
 
-        if verbose:
+        # Always print output - in non-verbose mode, TCL shim only outputs failures
+        # In verbose mode, it outputs all test results
+        if output.strip():
             print(output)
 
         return passed, failed, skipped, failed_tests
