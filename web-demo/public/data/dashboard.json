@@ -1,5 +1,5 @@
 {
-  "generated_at": "2025-12-27T11:58:29.072972Z",
+  "generated_at": "2025-12-27T13:59:51.202159Z",
   "version": "2.0",
   "summary": {
     "conformance": {
@@ -34,6 +34,13 @@
     },
     "sysbench": {
       "tests_count": 5
+    },
+    "tcl": {
+      "pass_rate": 73.1,
+      "passed": 7362,
+      "failed": 2708,
+      "skipped": 242,
+      "total_tests": 10312
     }
   },
   "benchmarks": {
@@ -361,7 +368,7 @@
   "timeline": [
     {
       "date": "2025-12-27",
-      "commit": "e84374b1",
+      "commit": "e4be320d",
       "conformance_pass_rate": 100.0,
       "tpch_geo_mean_ms": 27.83,
       "tpch_passing": 22,

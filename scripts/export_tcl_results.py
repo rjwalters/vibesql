@@ -42,18 +42,23 @@ def query_db(sql: str, db_path: str = RESULTS_DB) -> List[str]:
         if result.returncode != 0:
             return []
         # Skip header lines and return data
+        # Table format:
+        # +--------+-----+
+        # | col1   | col2|  <-- Header row (skip)
+        # +--------+-----+
+        # | val1   | val2|  <-- Data rows
+        # +--------+-----+
         lines = result.stdout.strip().split('\n')
-        # Find the data lines (after the table header)
         data_lines = []
-        in_data = False
+        separator_count = 0
         for line in lines:
             if line.startswith('+'):
-                if in_data:
-                    break  # End of data
-                in_data = True
+                separator_count += 1
+                if separator_count >= 3:
+                    break  # End of data (closing border)
                 continue
-            if in_data and line.startswith('|'):
-                # Parse pipe-delimited row
+            if separator_count >= 2 and line.startswith('|'):
+                # After 2nd separator, we're in data rows
                 parts = [p.strip() for p in line.split('|')[1:-1]]
                 data_lines.append(parts)
         return data_lines

@@ -613,6 +613,43 @@ def load_pgsql_regress_data() -> Dict[str, Any]:
     return {"summary": {}, "by_category": {}, "files": {}}
 
 
+def load_tcl_data() -> Dict[str, Any]:
+    """Load TCL test results from JSON file or database."""
+    # Try loading from the exported JSON file first
+    tcl_json = get_repo_root() / "web-demo" / "public" / "conformance" / "tcl_results.json"
+    if tcl_json.exists():
+        try:
+            with open(tcl_json, 'r') as f:
+                data = json.load(f)
+            return data.get("summary", {})
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # Try loading directly from database
+    tcl_db = Path.home() / ".vibesql" / "test_results" / "tcl_test_results.vbsql"
+    if tcl_db.exists():
+        try:
+            from export_tcl_results import get_latest_run
+            run = get_latest_run()
+            if run:
+                total = run["total_tests"]
+                passed = run["passed"]
+                skipped = run["skipped"]
+                testable = total - skipped
+                pass_rate = round(passed / testable * 100, 1) if testable > 0 else 0.0
+                return {
+                    "total_tests": total,
+                    "passed": passed,
+                    "failed": run["failed"],
+                    "skipped": skipped,
+                    "pass_rate": pass_rate
+                }
+        except Exception:
+            pass
+
+    return {}
+
+
 def load_conformance_data() -> Dict[str, Any]:
     """Load conformance data from JSON files."""
     json_paths = [
@@ -779,6 +816,9 @@ def export_dashboard(data: BenchmarkData, previous_url: Optional[str] = None) ->
     # Get conformance data
     conformance = load_conformance_data()
 
+    # Get TCL test data
+    tcl_data = load_tcl_data()
+
     # Build dashboard
     commit, branch = get_git_info()
 
@@ -821,7 +861,14 @@ def export_dashboard(data: BenchmarkData, previous_url: Optional[str] = None) ->
             } if tpcc_run else None,
             "sysbench": {
                 "tests_count": len(sysbench_tests)
-            } if sysbench_run else None
+            } if sysbench_run else None,
+            "tcl": {
+                "pass_rate": tcl_data.get("pass_rate"),
+                "passed": tcl_data.get("passed"),
+                "failed": tcl_data.get("failed"),
+                "skipped": tcl_data.get("skipped"),
+                "total_tests": tcl_data.get("total_tests")
+            } if tcl_data else None
         },
         "benchmarks": {
             "tpch": {
