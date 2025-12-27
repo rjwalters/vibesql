@@ -427,7 +427,7 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
     // Column names are uppercased to match the SQL parser's normalization.
     // The parser converts unquoted identifiers to uppercase, so index columns
     // must use uppercase names for case-sensitive matching in cost-based selection.
-    fn col(name: &str) -> IndexColumn::Column {
+    fn col(name: &str) -> IndexColumn {
         IndexColumn::Column {
             column_name: name.to_uppercase(),
             direction: OrderDirection::Asc,

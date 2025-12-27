@@ -612,7 +612,7 @@ fn create_tpce_schema_vibesql(db: &mut VibeDB) {
 fn create_tpce_indexes_vibesql(db: &mut VibeDB) {
     use vibesql_ast::{IndexColumn, OrderDirection};
 
-    fn col(name: &str) -> IndexColumn::Column {
+    fn col(name: &str) -> IndexColumn {
         IndexColumn::Column {
             column_name: name.to_uppercase(),
             direction: OrderDirection::Asc,
