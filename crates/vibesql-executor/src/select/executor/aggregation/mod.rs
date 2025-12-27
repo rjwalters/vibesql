@@ -369,9 +369,9 @@ impl SelectExecutor<'_> {
 
                     // Apply HAVING filter
                     let include_group = if let Some(having_expr) = &stmt.having {
-                        // Build alias values map from computed aggregate results (issue #4676)
-                        // This enables correlated subqueries in HAVING to access outer aliases
-                        let alias_values =
+                        // Build alias and expression values map from computed aggregate results (issue #4676, #4731)
+                        // This enables correlated subqueries in HAVING to access outer aliases AND aggregate expressions
+                        let (alias_values, expr_values) =
                             build_alias_values_map(&expanded_select_list, &aggregate_results);
 
                         // Resolve SELECT list aliases in HAVING (e.g., HAVING y >= 4 where y is count(*))
@@ -379,12 +379,14 @@ impl SelectExecutor<'_> {
                         // aren't resolved (HAVING should use GROUP BY columns, not SELECT aliases)
                         // Also pass schema_columns so table columns take precedence over aliases (#4531)
                         // Use resolve_having_aliases_with_values to also resolve outer aliases in subqueries
+                        // Pass expr_values to resolve aggregate expressions like avg(a.y) in subqueries (#4731)
                         let resolved_having = resolve_having_aliases_with_values(
                             having_expr,
                             &expanded_select_list,
                             &original_group_by_exprs,
                             &schema_columns,
                             &alias_values,
+                            &expr_values,
                         );
                         let having_result = self.evaluate_with_aggregates_and_grouping(
                             &resolved_having,
@@ -502,21 +504,23 @@ impl SelectExecutor<'_> {
 
                 // Apply HAVING filter
                 let include_group = if let Some(having_expr) = &stmt.having {
-                    // Build alias values map from computed aggregate results (issue #4676)
-                    // This enables correlated subqueries in HAVING to access outer aliases
-                    let alias_values =
+                    // Build alias and expression values map from computed aggregate results (issue #4676, #4731)
+                    // This enables correlated subqueries in HAVING to access outer aliases AND aggregate expressions
+                    let (alias_values, expr_values) =
                         build_alias_values_map(&expanded_select_list, &aggregate_results);
 
                     // Resolve SELECT list aliases in HAVING (e.g., HAVING y >= 4 where y is count(*))
                     // No GROUP BY, so no GROUP BY expressions to exclude from alias resolution
                     // Still pass schema_columns so table columns take precedence over aliases (#4531)
                     // Use resolve_having_aliases_with_values to also resolve outer aliases in subqueries
+                    // Pass expr_values to resolve aggregate expressions in subqueries (#4731)
                     let resolved_having = resolve_having_aliases_with_values(
                         having_expr,
                         &expanded_select_list,
                         &[],
                         &schema_columns,
                         &alias_values,
+                        &expr_values,
                     );
                     let having_result = self.evaluate_with_aggregates_and_grouping(
                         &resolved_having,
@@ -780,19 +784,37 @@ pub(crate) fn build_early_schema(
 /// * `computed_values` - The computed values corresponding to each SELECT item
 ///
 /// # Returns
-/// A HashMap mapping lowercase alias names to their computed SqlValue
+/// A tuple of:
+/// - HashMap mapping lowercase alias names to their computed SqlValue
+/// - Vec of (Expression, SqlValue) pairs for aggregate expressions
 fn build_alias_values_map(
     select_list: &[vibesql_ast::SelectItem],
     computed_values: &[vibesql_types::SqlValue],
-) -> HashMap<String, vibesql_types::SqlValue> {
+) -> (
+    HashMap<String, vibesql_types::SqlValue>,
+    Vec<(vibesql_ast::Expression, vibesql_types::SqlValue)>,
+) {
     let mut alias_values = HashMap::new();
+    let mut expr_values = Vec::new();
 
     for (item, value) in select_list.iter().zip(computed_values.iter()) {
-        if let vibesql_ast::SelectItem::Expression { alias: Some(alias_name), .. } = item {
-            // Store with lowercase key for case-insensitive lookup
-            alias_values.insert(alias_name.to_lowercase(), value.clone());
+        if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = item {
+            // Store alias mapping if present
+            if let Some(alias_name) = alias {
+                // Store with lowercase key for case-insensitive lookup
+                alias_values.insert(alias_name.to_lowercase(), value.clone());
+            }
+            // Store expression-to-value mapping for aggregate expressions
+            // This enables subqueries to match outer aggregate expressions like avg(a.y)
+            if matches!(
+                expr,
+                vibesql_ast::Expression::AggregateFunction { .. }
+                    | vibesql_ast::Expression::Function { .. }
+            ) {
+                expr_values.push((expr.clone(), value.clone()));
+            }
         }
     }
 
-    alias_values
+    (alias_values, expr_values)
 }
