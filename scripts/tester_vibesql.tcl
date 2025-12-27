@@ -2452,6 +2452,16 @@ proc run_test_file {filename} {
         file delete -force $::db_file
     }
 
+    # Clean test.db which is used by many test files
+    # This prevents state leakage between test file runs
+    if {[file exists "test.db"]} {
+        file delete -force "test.db"
+    }
+
+    # Clear the opened_dbs tracking so all databases are treated as "first time" opens
+    # This ensures sqlite3 proc will delete stale database files from previous test runs
+    set ::opened_dbs {}
+
     puts "Running: $filename"
     puts ""
 
