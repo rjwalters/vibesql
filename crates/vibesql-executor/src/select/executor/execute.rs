@@ -59,6 +59,19 @@ impl SelectExecutor<'_> {
         // This catches queries like SELECT * FROM t, t, t, ... (65+ times)
         super::validation::validate_join_table_limit(stmt)?;
 
+        // Validate that aggregates don't reference outer columns (issue #4730)
+        // When a subquery contains an aggregate function whose arguments reference columns
+        // from an outer query (not from the subquery's own tables), it's a misuse.
+        // Example: SELECT max((SELECT count(x) FROM t35b)) FROM t35a
+        // Here, count(x) references outer column x from t35a, which is invalid.
+        if let Some(outer_schema) = &self.outer_schema {
+            super::validation::validate_no_aggregate_with_outer_column(
+                stmt,
+                outer_schema,
+                self.database,
+            )?;
+        }
+
         #[cfg(feature = "profile-q6")]
         let execute_start = std::time::Instant::now();
 
