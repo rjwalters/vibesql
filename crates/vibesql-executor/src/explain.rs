@@ -146,14 +146,18 @@ impl ExplainResult {
     ///
     /// Produces output like:
     /// ```text
+    /// QUERY PLAN
     /// |--SEARCH t1 USING INDEX idx1 (w=?)
     /// `--SCAN t2
     /// ```
     ///
-    /// Note: The "QUERY PLAN" column header is added by the CLI/display layer,
-    /// not included here to avoid duplication.
+    /// The "QUERY PLAN" header is included to match SQLite's EQP format used in
+    /// TCL tests with full format comparison (do_eqp_test with QUERY PLAN prefix).
     pub fn to_sqlite_eqp(&self) -> String {
         let mut output = String::new();
+
+        // Add "QUERY PLAN" header to match SQLite's EQP format
+        writeln!(output, "QUERY PLAN").unwrap();
 
         // Collect all leaf scan nodes for SQLite-style flat output
         let scan_nodes = collect_scan_nodes(&self.plan);
@@ -1122,6 +1126,24 @@ fn extract_predicates_recursive(
         Expression::InList { expr, negated: false, .. } => {
             // IN list treated as equality
             if let Expression::ColumnRef(col_id) = expr.as_ref() {
+                let col_name = col_id.column_canonical().to_lowercase();
+                if index_columns.iter().any(|c| c == &col_name) {
+                    predicates.push((col_id.column_canonical().to_string(), "=".to_string()));
+                }
+            }
+        }
+        // IS (NULL-safe equals): negated=true means "IS NOT DISTINCT FROM" = "IS"
+        // Displayed as = in EQP output
+        Expression::IsDistinctFrom { left, right, negated: true } => {
+            // Check if left side is a column reference that matches index columns
+            if let Expression::ColumnRef(col_id) = left.as_ref() {
+                let col_name = col_id.column_canonical().to_lowercase();
+                if index_columns.iter().any(|c| c == &col_name) {
+                    predicates.push((col_id.column_canonical().to_string(), "=".to_string()));
+                }
+            }
+            // Check if right side is a column reference
+            else if let Expression::ColumnRef(col_id) = right.as_ref() {
                 let col_name = col_id.column_canonical().to_lowercase();
                 if index_columns.iter().any(|c| c == &col_name) {
                     predicates.push((col_id.column_canonical().to_string(), "=".to_string()));

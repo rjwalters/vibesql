@@ -222,12 +222,32 @@ pub(crate) fn expression_filters_column(expr: &Expression, column_name: &str) ->
             }
             false
         }
+        // IS / IS NOT (NULL-safe comparison)
+        // negated=true means "IS NOT DISTINCT FROM" which is equivalent to "IS" (NULL-safe equals)
+        // negated=false means "IS DISTINCT FROM" which is equivalent to "IS NOT" (NULL-safe not-equals)
+        // We only use the index for IS (negated=true) as it's equivalent to =
+        Expression::IsDistinctFrom { left, right, negated: true } => {
+            let left_is_col = is_column_reference(left, column_name);
+            let right_is_col = is_column_reference(right, column_name);
+            let left_is_literal = is_literal(left);
+            let right_is_literal = is_literal(right);
+            // column IS literal OR literal IS column
+            (left_is_col && right_is_literal) || (left_is_literal && right_is_col)
+        }
         // IN with value list: col IN (1, 2, 3)
         Expression::InList { expr, .. } => is_column_reference(expr, column_name),
         // IN with subquery: col IN (SELECT ...)
         Expression::In { expr, .. } => is_column_reference(expr, column_name),
         // BETWEEN: col BETWEEN low AND high
         Expression::Between { expr, .. } => is_column_reference(expr, column_name),
+        // Conjunction: AND
+        Expression::Conjunction(exprs) => {
+            exprs.iter().any(|e| expression_filters_column(e, column_name))
+        }
+        // Disjunction: OR
+        Expression::Disjunction(exprs) => {
+            exprs.iter().any(|e| expression_filters_column(e, column_name))
+        }
         _ => false,
     }
 }
@@ -407,30 +427,53 @@ pub(crate) fn count_pinned_index_columns(
     count
 }
 
-/// Collect all column names that have equality predicates (col = literal)
+/// Collect all column names that have equality predicates (col = literal or col IS literal)
 fn collect_equality_columns(expr: &Expression, columns: &mut std::collections::HashSet<String>) {
-    if let Expression::BinaryOp { left, op, right } = expr {
-        match op {
-            vibesql_ast::BinaryOperator::Equal => {
-                // Check for column = literal pattern
-                if let Expression::ColumnRef(col_id) = &**left {
-                    if is_literal(right) {
-                        columns.insert(col_id.column_canonical().to_uppercase());
+    match expr {
+        Expression::BinaryOp { left, op, right } => {
+            match op {
+                vibesql_ast::BinaryOperator::Equal => {
+                    // Check for column = literal pattern
+                    if let Expression::ColumnRef(col_id) = &**left {
+                        if is_literal(right) {
+                            columns.insert(col_id.column_canonical().to_uppercase());
+                        }
+                    }
+                    if let Expression::ColumnRef(col_id) = &**right {
+                        if is_literal(left) {
+                            columns.insert(col_id.column_canonical().to_uppercase());
+                        }
                     }
                 }
-                if let Expression::ColumnRef(col_id) = &**right {
-                    if is_literal(left) {
-                        columns.insert(col_id.column_canonical().to_uppercase());
-                    }
+                vibesql_ast::BinaryOperator::And => {
+                    // Recurse into both sides of AND
+                    collect_equality_columns(left, columns);
+                    collect_equality_columns(right, columns);
                 }
+                _ => {}
             }
-            vibesql_ast::BinaryOperator::And => {
-                // Recurse into both sides of AND
-                collect_equality_columns(left, columns);
-                collect_equality_columns(right, columns);
-            }
-            _ => {}
         }
+        // Handle IS (NULL-safe equals): negated=true means "IS NOT DISTINCT FROM" = "IS"
+        Expression::IsDistinctFrom { left, right, negated: true } => {
+            // Check for column IS literal pattern
+            if let Expression::ColumnRef(col_id) = &**left {
+                if is_literal(right) {
+                    columns.insert(col_id.column_canonical().to_uppercase());
+                }
+            }
+            if let Expression::ColumnRef(col_id) = &**right {
+                if is_literal(left) {
+                    columns.insert(col_id.column_canonical().to_uppercase());
+                }
+            }
+        }
+        // Recurse into Conjunction (AND)
+        Expression::Conjunction(exprs) => {
+            for e in exprs {
+                collect_equality_columns(e, columns);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -777,6 +820,58 @@ pub(crate) fn estimate_selectivity(
                 }
             }
             0.33 // Default fallback
+        }
+        // IS (NULL-safe equals): negated=true means "IS NOT DISTINCT FROM" = "IS"
+        // Treat IS like = for selectivity estimation
+        Expression::IsDistinctFrom { left, right, negated: true } => {
+            // Check if this is a predicate on our column (case-insensitive)
+            // For literal values, use actual statistics
+            if let (Expression::ColumnRef(col_id), Expression::Literal(value)) =
+                (&**left, &**right)
+            {
+                if col_id.column_canonical().eq_ignore_ascii_case(column_name) {
+                    return col_stats.estimate_eq_selectivity(value);
+                }
+            }
+            if let (Expression::Literal(value), Expression::ColumnRef(col_id)) =
+                (&**left, &**right)
+            {
+                if col_id.column_canonical().eq_ignore_ascii_case(column_name) {
+                    return col_stats.estimate_eq_selectivity(value);
+                }
+            }
+            // For placeholder parameters, estimate using 1/n_distinct
+            let left_is_col = is_column_reference(left, column_name);
+            let right_is_col = is_column_reference(right, column_name);
+            let left_is_lit = is_literal(left);
+            let right_is_lit = is_literal(right);
+
+            if (left_is_col && right_is_lit) || (left_is_lit && right_is_col) {
+                if col_stats.n_distinct > 0 {
+                    return 1.0 / col_stats.n_distinct as f64;
+                }
+            }
+            0.33 // Default fallback
+        }
+        // Handle Conjunction (AND) similarly to BinaryOp::And
+        Expression::Conjunction(exprs) => {
+            let mut selectivity = 1.0;
+            for e in exprs {
+                selectivity *= estimate_selectivity(e, column_name, col_stats);
+            }
+            selectivity
+        }
+        // Handle Disjunction (OR) similarly to BinaryOp::Or
+        Expression::Disjunction(exprs) => {
+            let mut selectivity = 0.0;
+            let mut product = 1.0;
+            for e in exprs {
+                let sel = estimate_selectivity(e, column_name, col_stats);
+                selectivity += sel;
+                product *= sel;
+            }
+            // P(A OR B OR C) ≈ P(A) + P(B) + P(C) - P(A)*P(B)*P(C) (simplified)
+            (selectivity - product).min(1.0)
         }
         _ => 0.33, // Default fallback for unsupported expressions
     }

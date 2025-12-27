@@ -261,7 +261,9 @@ impl SqlExecutor {
                         if explain_stmt.query_plan {
                             // SQLite-compatible EXPLAIN QUERY PLAN format
                             let output = explain_result.to_sqlite_eqp();
-                            result.columns = vec!["QUERY PLAN".to_string()];
+                            // Use "detail" as column name (matches SQLite's actual column)
+                            // The "QUERY PLAN" header is now included in the data for TCL test compatibility
+                            result.columns = vec!["detail".to_string()];
                             // Split output into rows for better display
                             for line in output.lines() {
                                 result.rows.push(vec![Some(line.to_string())]);
