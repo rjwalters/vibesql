@@ -26,6 +26,9 @@ Cargo.lock
 lcov.info
 conformance_test_output.log
 validation_run.log
+*.dSYM/
+tf_*.tcl
+test.db
 
 # Python
 __pycache__/
@@ -72,6 +75,7 @@ benchmarks/suite/results/
 fuzz/target/
 fuzz/artifacts/
 fuzz/Cargo.lock
+fuzzy.log
 
 # Profiling (samply output)
 profile.json.gz
