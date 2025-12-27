@@ -146,14 +146,18 @@ impl ExplainResult {
     ///
     /// Produces output like:
     /// ```text
+    /// QUERY PLAN
     /// |--SEARCH t1 USING INDEX idx1 (w=?)
     /// `--SCAN t2
     /// ```
     ///
-    /// Note: The "QUERY PLAN" column header is added by the CLI/display layer,
-    /// not included here to avoid duplication.
+    /// The "QUERY PLAN" header is included to match SQLite's EQP format used in
+    /// TCL tests with full format comparison (do_eqp_test with QUERY PLAN prefix).
     pub fn to_sqlite_eqp(&self) -> String {
         let mut output = String::new();
+
+        // Add "QUERY PLAN" header to match SQLite's EQP format
+        writeln!(output, "QUERY PLAN").unwrap();
 
         // Collect all leaf scan nodes for SQLite-style flat output
         let scan_nodes = collect_scan_nodes(&self.plan);
