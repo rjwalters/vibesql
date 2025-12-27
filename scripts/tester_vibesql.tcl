@@ -1416,6 +1416,12 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses db cache (statement cache metrics)"]
     }
 
+    # db function command - registers TCL functions as SQL functions
+    # This is SQLite/TCL integration, not standard SQL functionality
+    if {[regexp {db\s+function\s+} $script]} {
+        return [list 1 "uses db function (TCL function registration)"]
+    }
+
     # sqlite3_test_control - test harness control function
     if {[regexp {sqlite3_test_control} $script]} {
         return [list 1 "uses sqlite3_test_control (test harness function)"]
