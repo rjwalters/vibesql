@@ -29,6 +29,9 @@ validation_run.log
 *.dSYM/
 tf_*.tcl
 test.db
+test*.db
+*.db.tmp*
+.*.tmp*
 
 # Python
 __pycache__/
