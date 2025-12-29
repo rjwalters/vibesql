@@ -1,5 +1,5 @@
 {
-  "generated_at": "2025-12-27T13:59:51.202159Z",
+  "generated_at": "2025-12-28T20:22:16.084110Z",
   "version": "2.0",
   "summary": {
     "conformance": {
@@ -36,11 +36,11 @@
       "tests_count": 5
     },
     "tcl": {
-      "pass_rate": 73.1,
-      "passed": 7362,
-      "failed": 2708,
+      "pass_rate": 37.1,
+      "passed": 4020,
+      "failed": 6827,
       "skipped": 242,
-      "total_tests": 10312
+      "total_tests": 11089
     }
   },
   "benchmarks": {
@@ -367,8 +367,8 @@
   "changes": [],
   "timeline": [
     {
-      "date": "2025-12-27",
-      "commit": "e4be320d",
+      "date": "2025-12-28",
+      "commit": "6f0dc2bd",
       "conformance_pass_rate": 100.0,
       "tpch_geo_mean_ms": 27.83,
       "tpch_passing": 22,
