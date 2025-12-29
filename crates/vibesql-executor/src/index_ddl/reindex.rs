@@ -74,7 +74,7 @@ mod tests {
     use crate::{index_ddl::create_index::CreateIndexExecutor, CreateTableExecutor};
 
     fn create_test_table(db: &mut Database) {
-        let stmt = CreateTableStmt {
+        let stmt = CreateTableStmt { temporary: false,
             if_not_exists: false,
             table_name: "users".to_string(),
             columns: vec![

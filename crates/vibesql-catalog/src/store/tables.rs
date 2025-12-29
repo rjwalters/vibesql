@@ -192,7 +192,9 @@ impl super::Catalog {
     /// the identifier was quoted in the original SQL.
     ///
     /// For qualified identifiers (schema.table), looks up in the specified schema.
-    /// For unqualified identifiers, looks up in the current schema.
+    /// For unqualified identifiers, follows SQLite semantics:
+    /// 1. First check the temp schema (temporary tables shadow main tables)
+    /// 2. Then check the current schema (main)
     pub fn get_table_by_identifier(&self, identifier: &TableIdentifier) -> Option<&TableSchema> {
         if identifier.is_qualified() {
             // For qualified identifiers, look up in the specified schema
@@ -206,7 +208,15 @@ impl super::Catalog {
                 schema.get_table_by_identifier(&table_id)
             })
         } else {
-            // For unqualified identifiers, use current schema
+            // For unqualified identifiers, check temp schema first (SQLite semantics)
+            // Temp tables shadow tables in the main schema
+            if let Some(temp_schema) = self.schemas.get(crate::TEMP_SCHEMA) {
+                if let Some(table) = temp_schema.get_table_by_identifier(identifier) {
+                    return Some(table);
+                }
+            }
+
+            // Then check current schema
             self.schemas
                 .get(&self.current_schema)
                 .and_then(|schema| schema.get_table_by_identifier(identifier))
@@ -215,6 +225,10 @@ impl super::Catalog {
 
     /// Get a table schema by name (supports qualified names like "schema.table").
     /// Legacy method - uses global case_sensitive_identifiers setting
+    ///
+    /// For unqualified names, follows SQLite semantics:
+    /// 1. First check the temp schema (temporary tables shadow main tables)
+    /// 2. Then check the current schema (main)
     pub fn get_table(&self, name: &str) -> Option<&TableSchema> {
         // Parse qualified name: schema.table or just table
         if let Some((schema_name, table_name)) = name.split_once('.') {
@@ -224,8 +238,20 @@ impl super::Catalog {
                 schema.get_table(&normalized_table, self.case_sensitive_identifiers)
             })
         } else {
-            // Use current schema for unqualified names
+            // Unqualified name: check temp schema first (SQLite semantics)
+            // Temp tables shadow tables in the main schema
             let normalized_table = self.normalize_identifier(name);
+
+            // First check temp schema
+            if let Some(temp_schema) = self.schemas.get(crate::TEMP_SCHEMA) {
+                if let Some(table) =
+                    temp_schema.get_table(&normalized_table, self.case_sensitive_identifiers)
+                {
+                    return Some(table);
+                }
+            }
+
+            // Then check current schema
             self.schemas.get(&self.current_schema).and_then(|schema| {
                 schema.get_table(&normalized_table, self.case_sensitive_identifiers)
             })
@@ -331,7 +357,17 @@ impl super::Catalog {
     /// Uses the `quoted` flag in the identifier to determine case-sensitivity:
     /// - Quoted identifiers are case-sensitive (match exact canonical form)
     /// - Unquoted identifiers are case-insensitive (lowercase canonical form)
+    ///
+    /// For unqualified identifiers, checks temp schema first (SQLite semantics).
     pub fn table_exists_by_identifier(&self, identifier: &TableIdentifier) -> bool {
+        // Check temp schema first
+        if let Some(temp_schema) = self.schemas.get(crate::TEMP_SCHEMA) {
+            if temp_schema.table_exists_by_identifier(identifier) {
+                return true;
+            }
+        }
+
+        // Then check current schema
         self.schemas
             .get(&self.current_schema)
             .is_some_and(|schema| schema.table_exists_by_identifier(identifier))

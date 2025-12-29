@@ -13,7 +13,7 @@ fn test_when_clause_filters_firing() {
     let mut db = Database::new();
 
     // Create table with amount column
-    let table_stmt = vibesql_ast::CreateTableStmt {
+    let table_stmt = vibesql_ast::CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "TRANSACTIONS".to_string(),
         columns: vec![

@@ -13,7 +13,7 @@ fn test_auto_increment_basic_inserts() {
     let mut db = Database::new();
 
     // Create table with AUTO_INCREMENT
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
@@ -101,7 +101,7 @@ fn test_multiple_auto_increment_error() {
     let mut db = Database::new();
 
     // Should fail - multiple AUTO_INCREMENT columns not allowed
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "bad".to_string(),
         columns: vec![
@@ -147,7 +147,7 @@ fn test_last_insert_rowid_basic() {
     let mut db = Database::new();
 
     // Create table with AUTO_INCREMENT
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
@@ -234,7 +234,7 @@ fn test_last_insert_rowid_multi_row_insert() {
     let mut db = Database::new();
 
     // Create table with AUTO_INCREMENT
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "items".to_string(),
         columns: vec![
@@ -314,7 +314,7 @@ fn test_last_insert_rowid_no_auto_increment() {
     let mut db = Database::new();
 
     // Create table WITHOUT AUTO_INCREMENT
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "manual".to_string(),
         columns: vec![
@@ -378,7 +378,7 @@ fn test_last_insert_rowid_via_select() {
     let mut db = Database::new();
 
     // Create table with AUTO_INCREMENT
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![

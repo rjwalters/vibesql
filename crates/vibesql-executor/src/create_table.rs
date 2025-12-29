@@ -34,7 +34,7 @@ impl CreateTableExecutor {
     /// use vibesql_types::DataType;
     ///
     /// let mut db = Database::new();
-    /// let stmt = CreateTableStmt {
+    /// let stmt = CreateTableStmt { temporary: false,
     ///     if_not_exists: false,
     ///     table_name: "users".to_string(),
     ///     columns: vec![
@@ -71,9 +71,17 @@ impl CreateTableExecutor {
         database: &mut Database,
     ) -> Result<String, ExecutorError> {
         // Parse qualified table name (schema.table or just table)
-        let (schema_name, table_name, identifier) = if let Some((schema_part, table_part)) =
-            stmt.table_name.split_once('.')
-        {
+        // For TEMP tables, force the schema to "temp" (SQLite compatibility)
+        let (schema_name, table_name, identifier) = if stmt.temporary {
+            // Temporary table - always use temp schema
+            let id = TableIdentifier::qualified(
+                vibesql_catalog::TEMP_SCHEMA,
+                false,
+                &stmt.table_name,
+                stmt.quoted,
+            );
+            (vibesql_catalog::TEMP_SCHEMA.to_string(), stmt.table_name.clone(), id)
+        } else if let Some((schema_part, table_part)) = stmt.table_name.split_once('.') {
             // Schema-qualified table name - use qualified identifier
             // Note: We use stmt.quoted for both parts since the parser combined them
             // In a future iteration, CREATE TABLE could also store schema/table quoted status separately
@@ -100,8 +108,11 @@ impl CreateTableExecutor {
             );
         }
 
-        // Check if table already exists using identifier (respects quoted semantics)
-        if database.catalog.table_exists_by_identifier(&identifier) {
+        // Check if table already exists in the target schema
+        // For CREATE TABLE, we only check the target schema (not temp schema)
+        // Temp tables can shadow main tables, but we allow creating in main even if temp exists
+        let qualified_name = format!("{}.{}", schema_name, table_name.to_lowercase());
+        if database.catalog.table_exists(&qualified_name) {
             if stmt.if_not_exists {
                 // IF NOT EXISTS - silently return success without creating the table
                 return Ok(format!(

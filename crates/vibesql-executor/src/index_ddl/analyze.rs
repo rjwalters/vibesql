@@ -129,7 +129,7 @@ mod tests {
     use crate::CreateTableExecutor;
 
     fn create_test_table(db: &mut Database, table_name: &str) {
-        let stmt = CreateTableStmt {
+        let stmt = CreateTableStmt { temporary: false,
             if_not_exists: false,
             table_name: table_name.to_string(),
             columns: vec![

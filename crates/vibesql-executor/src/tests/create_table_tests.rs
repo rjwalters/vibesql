@@ -21,7 +21,7 @@ use crate::CreateTableExecutor;
 fn test_create_simple_table() {
     let mut db = Database::new();
 
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
@@ -65,7 +65,7 @@ fn test_create_simple_table() {
 fn test_create_table_with_multiple_types() {
     let mut db = Database::new();
 
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "products".to_string(),
         columns: vec![
@@ -138,7 +138,7 @@ fn test_create_table_with_multiple_types() {
 fn test_create_table_already_exists() {
     let mut db = Database::new();
 
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![ColumnDef {
@@ -170,7 +170,7 @@ fn test_create_table_already_exists() {
 fn test_create_table_with_nullable_columns() {
     let mut db = Database::new();
 
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "employees".to_string(),
         columns: vec![
@@ -222,7 +222,7 @@ fn test_create_table_with_nullable_columns() {
 fn test_create_table_empty_columns_list() {
     let mut db = Database::new();
 
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "empty_table".to_string(),
         columns: vec![], // Empty columns
@@ -245,7 +245,7 @@ fn test_create_multiple_tables() {
     let mut db = Database::new();
 
     // Create first table
-    let stmt1 = CreateTableStmt {
+    let stmt1 = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "customers".to_string(),
         columns: vec![ColumnDef {
@@ -265,7 +265,7 @@ fn test_create_multiple_tables() {
     CreateTableExecutor::execute(&stmt1, &mut db).unwrap();
 
     // Create second table
-    let stmt2 = CreateTableStmt {
+    let stmt2 = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "orders".to_string(),
         columns: vec![ColumnDef {
@@ -295,7 +295,7 @@ fn test_create_table_with_special_characters_in_name() {
     let mut db = Database::new();
 
     // Test with underscores (common case)
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "user_profiles".to_string(),
         columns: vec![ColumnDef {
@@ -322,7 +322,7 @@ fn test_create_table_with_special_characters_in_name() {
 fn test_create_table_case_sensitivity() {
     let mut db = Database::new();
 
-    let stmt1 = CreateTableStmt {
+    let stmt1 = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "Users".to_string(),
         columns: vec![ColumnDef {
@@ -342,7 +342,7 @@ fn test_create_table_case_sensitivity() {
     CreateTableExecutor::execute(&stmt1, &mut db).unwrap();
 
     // Try to create "users" (different case)
-    let stmt2 = CreateTableStmt {
+    let stmt2 = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![ColumnDef {
@@ -372,7 +372,7 @@ fn test_create_table_with_spatial_types() {
     // These are parsed as UserDefined types and should be accepted by executor
     let mut db = Database::new();
 
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "spatial_table".to_string(),
         columns: vec![
@@ -439,7 +439,7 @@ fn test_create_table_multipolygon_sqllogictest() {
     // Test the exact scenario from SQLLogicTest - Issue #818
     let mut db = Database::new();
 
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "t1710a".to_string(),
         columns: vec![

@@ -104,6 +104,13 @@ impl Catalog {
             Schema::new(crate::DEFAULT_SCHEMA.to_string()),
         );
 
+        // Create the temp schema for temporary tables (SQLite compatibility)
+        // Temp tables are stored here and are not persisted
+        catalog.schemas.insert(
+            crate::TEMP_SCHEMA.to_string(),
+            Schema::new(crate::TEMP_SCHEMA.to_string()),
+        );
+
         catalog
     }
 

@@ -13,7 +13,7 @@ fn test_delete_all_rows() {
     setup_test_table(&mut db);
 
     // DELETE FROM users;
-    let stmt = DeleteStmt {
+    let stmt = DeleteStmt { with_clause: None,
         only: false,
         table_name: "users".to_string(),
         quoted: false,
@@ -33,7 +33,7 @@ fn test_delete_with_simple_where() {
     setup_test_table(&mut db);
 
     // DELETE FROM users WHERE id = 2;
-    let stmt = DeleteStmt {
+    let stmt = DeleteStmt { with_clause: None,
         quoted: false,
         only: false,
         table_name: "users".to_string(),
@@ -70,7 +70,7 @@ fn test_delete_with_boolean_where() {
     setup_test_table(&mut db);
 
     // DELETE FROM users WHERE active = TRUE;
-    let stmt = DeleteStmt {
+    let stmt = DeleteStmt { with_clause: None,
         quoted: false,
         only: false,
         table_name: "users".to_string(),
@@ -105,7 +105,7 @@ fn test_delete_multiple_rows() {
     setup_test_table(&mut db);
 
     // DELETE FROM users WHERE id > 1;
-    let stmt = DeleteStmt {
+    let stmt = DeleteStmt { with_clause: None,
         quoted: false,
         only: false,
         table_name: "users".to_string(),

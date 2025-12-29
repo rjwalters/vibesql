@@ -12,11 +12,15 @@ impl Parser {
     ) -> Result<vibesql_ast::CreateTableStmt, ParseError> {
         self.expect_keyword(Keyword::Create)?;
 
-        // Skip TEMP or TEMPORARY if present (SQLite compatibility)
-        // We parse the syntax but treat temp tables as regular tables
-        if self.peek_keyword(Keyword::Temp) || self.peek_keyword(Keyword::Temporary) {
+        // Check for TEMP or TEMPORARY keyword (SQLite compatibility)
+        // Temporary tables are stored in a separate "temp" schema
+        let temporary = if self.peek_keyword(Keyword::Temp) || self.peek_keyword(Keyword::Temporary)
+        {
             self.advance();
-        }
+            true
+        } else {
+            false
+        };
 
         self.expect_keyword(Keyword::Table)?;
 
@@ -45,6 +49,7 @@ impl Parser {
             }
 
             return Ok(vibesql_ast::CreateTableStmt {
+                temporary,
                 if_not_exists,
                 table_name: table.full_name(),
                 columns: Vec::new(),
@@ -229,6 +234,7 @@ impl Parser {
         }
 
         Ok(vibesql_ast::CreateTableStmt {
+            temporary,
             if_not_exists,
             table_name: table.full_name(),
             columns,

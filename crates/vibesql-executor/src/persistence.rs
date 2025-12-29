@@ -94,7 +94,14 @@ fn execute_statement_for_load(
 ) -> Result<(), ExecutorError> {
     match statement {
         vibesql_ast::Statement::CreateSchema(schema_stmt) => {
-            SchemaExecutor::execute_create_schema(&schema_stmt, db)?;
+            // Skip built-in schemas (main and temp) - they already exist
+            // This handles backward compatibility with old SQL dumps
+            let schema_name = schema_stmt.schema_name.to_lowercase();
+            if schema_name != vibesql_catalog::DEFAULT_SCHEMA
+                && schema_name != vibesql_catalog::TEMP_SCHEMA
+            {
+                SchemaExecutor::execute_create_schema(&schema_stmt, db)?;
+            }
         }
         vibesql_ast::Statement::CreateTable(create_stmt) => {
             CreateTableExecutor::execute(&create_stmt, db)?;

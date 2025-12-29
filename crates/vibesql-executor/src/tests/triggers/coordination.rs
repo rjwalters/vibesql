@@ -118,7 +118,7 @@ fn test_before_trigger_executes_first() {
     create_users_table(&mut db);
 
     // Create counter table to track execution order
-    let counter_stmt = vibesql_ast::CreateTableStmt {
+    let counter_stmt = vibesql_ast::CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "COUNTER".to_string(),
         columns: vec![vibesql_ast::ColumnDef {

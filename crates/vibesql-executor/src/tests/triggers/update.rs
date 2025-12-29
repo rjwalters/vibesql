@@ -49,7 +49,7 @@ fn test_after_update_trigger_fires() {
         .expect("Failed to create trigger");
 
     // Update the user - should fire trigger
-    let update = vibesql_ast::UpdateStmt {
+    let update = vibesql_ast::UpdateStmt { with_clause: None,
         quoted: false,
         alias: None,
         table_name: "USERS".to_string(),
@@ -119,7 +119,7 @@ fn test_before_update_trigger_fires() {
         .expect("Failed to create trigger");
 
     // Update the user - should fire trigger
-    let update = vibesql_ast::UpdateStmt {
+    let update = vibesql_ast::UpdateStmt { with_clause: None,
         quoted: false,
         alias: None,
         table_name: "USERS".to_string(),

@@ -515,7 +515,7 @@ mod tests {
     use crate::CreateTableExecutor;
 
     fn create_test_table(db: &mut Database) {
-        let stmt = CreateTableStmt {
+        let stmt = CreateTableStmt { temporary: false,
             if_not_exists: false,
             table_name: "users".to_string(),
             columns: vec![
@@ -825,7 +825,7 @@ mod tests {
     // ========================================================================
 
     fn create_vector_table(db: &mut Database) {
-        let stmt = CreateTableStmt {
+        let stmt = CreateTableStmt { temporary: false,
             if_not_exists: false,
             table_name: "documents".to_string(),
             columns: vec![

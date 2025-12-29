@@ -29,7 +29,7 @@ impl DropTableExecutor {
     /// use vibesql_types::DataType;
     ///
     /// let mut db = Database::new();
-    /// let create_stmt = CreateTableStmt {
+    /// let create_stmt = CreateTableStmt { temporary: false,
     ///     if_not_exists: false,
     ///     table_name: "users".to_string(),
     ///     columns: vec![ColumnDef {
@@ -112,7 +112,7 @@ mod tests {
         let mut db = Database::new();
 
         // Create a table first
-        let create_stmt = CreateTableStmt {
+        let create_stmt = CreateTableStmt { temporary: false,
             if_not_exists: false,
             table_name: "users".to_string(),
             columns: vec![ColumnDef {
@@ -177,7 +177,7 @@ mod tests {
         let mut db = Database::new();
 
         // Create a table first
-        let create_stmt = CreateTableStmt {
+        let create_stmt = CreateTableStmt { temporary: false,
             if_not_exists: false,
             table_name: "products".to_string(),
             columns: vec![ColumnDef {
@@ -213,7 +213,7 @@ mod tests {
         let mut db = Database::new();
 
         // Create a table with data
-        let create_stmt = CreateTableStmt {
+        let create_stmt = CreateTableStmt { temporary: false,
             if_not_exists: false,
             table_name: "customers".to_string(),
             columns: vec![
@@ -270,7 +270,7 @@ mod tests {
         let mut db = Database::new();
 
         // Create table
-        let create_stmt = CreateTableStmt {
+        let create_stmt = CreateTableStmt { temporary: false,
             if_not_exists: false,
             table_name: "temp".to_string(),
             columns: vec![ColumnDef {
@@ -306,7 +306,7 @@ mod tests {
 
         // Create multiple tables
         for name in &["table1", "table2", "table3"] {
-            let create_stmt = CreateTableStmt {
+            let create_stmt = CreateTableStmt { temporary: false,
                 if_not_exists: false,
                 table_name: name.to_string(),
                 columns: vec![ColumnDef {
@@ -344,7 +344,7 @@ mod tests {
         let mut db = Database::new();
 
         // Create table with specific case
-        let create_stmt = CreateTableStmt {
+        let create_stmt = CreateTableStmt { temporary: false,
             if_not_exists: false,
             table_name: "MyTable".to_string(),
             columns: vec![ColumnDef {
@@ -379,7 +379,7 @@ mod tests {
         let mut db = Database::new();
 
         // Create table
-        let create_stmt = CreateTableStmt {
+        let create_stmt = CreateTableStmt { temporary: false,
             if_not_exists: false,
             table_name: "users".to_string(),
             columns: vec![
@@ -463,7 +463,7 @@ mod tests {
         let mut db = Database::new();
 
         // Create table
-        let create_stmt = CreateTableStmt {
+        let create_stmt = CreateTableStmt { temporary: false,
             if_not_exists: false,
             table_name: "products".to_string(),
             columns: vec![
@@ -533,7 +533,7 @@ mod tests {
         let mut db = Database::new();
 
         // Create table without indexes
-        let create_stmt = CreateTableStmt {
+        let create_stmt = CreateTableStmt { temporary: false,
             if_not_exists: false,
             table_name: "simple_table".to_string(),
             columns: vec![ColumnDef {

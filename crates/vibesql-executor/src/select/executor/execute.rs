@@ -1158,11 +1158,16 @@ impl SelectExecutor<'_> {
             // Don't pass ORDER BY if there's a set operation - it will be handled at the set operation level
             let order_by_hint =
                 if stmt.set_operation.is_some() { None } else { stmt.order_by.as_deref() };
-            let limit_val = stmt
-                .limit
-                .as_ref()
-                .map(|expr| self.eval_limit_offset_expr(expr, "LIMIT"))
-                .transpose()?;
+            // Don't pass LIMIT hint for set operations - limit must be applied after combining results
+            // This prevents early termination from incorrectly limiting the left side of UNION queries
+            let limit_val = if stmt.set_operation.is_some() {
+                None
+            } else {
+                stmt.limit
+                    .as_ref()
+                    .map(|expr| self.eval_limit_offset_expr(expr, "LIMIT"))
+                    .transpose()?
+            };
             let from_result = self.execute_from_with_where(
                 from_clause,
                 cte_results,

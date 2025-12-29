@@ -131,6 +131,9 @@ pub enum RowFormat {
 /// CREATE TABLE statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateTableStmt {
+    /// If true, this is a temporary table (CREATE TEMP TABLE)
+    /// Temporary tables are stored in a separate "temp" schema and are not persisted.
+    pub temporary: bool,
     /// If true, don't error if the table already exists
     pub if_not_exists: bool,
     /// Table name (possibly qualified as schema.table)

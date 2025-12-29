@@ -49,7 +49,7 @@ fn test_after_delete_trigger_fires() {
         .expect("Failed to create trigger");
 
     // Delete the user - should fire trigger
-    let delete = vibesql_ast::DeleteStmt {
+    let delete = vibesql_ast::DeleteStmt { with_clause: None,
         quoted: false,
         only: false,
         table_name: "USERS".to_string(),
@@ -112,7 +112,7 @@ fn test_before_delete_trigger_fires() {
         .expect("Failed to create trigger");
 
     // Delete the user - should fire trigger
-    let delete = vibesql_ast::DeleteStmt {
+    let delete = vibesql_ast::DeleteStmt { with_clause: None,
         quoted: false,
         only: false,
         table_name: "USERS".to_string(),

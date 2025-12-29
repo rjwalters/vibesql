@@ -21,7 +21,7 @@ use vibesql_types::{DataType, SqlValue};
 
 // Helper function to create a simple table
 fn create_test_table(db: &mut Database, table_name: &str) {
-    let create_stmt = CreateTableStmt {
+    let create_stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: table_name.to_string(),
         columns: vec![
@@ -495,7 +495,7 @@ fn test_truncate_preserves_table_structure() {
     let mut db = Database::new();
 
     // Create table with specific structure
-    let create_stmt = CreateTableStmt {
+    let create_stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "structured_table".to_string(),
         columns: vec![

@@ -7,6 +7,11 @@
 /// SQLite uses "main" as the default database/schema name.
 pub const DEFAULT_SCHEMA: &str = "main";
 
+/// Temporary schema name for SQLite compatibility.
+/// SQLite stores temporary tables in a separate "temp" schema.
+/// Temp tables are not persisted and have session scope.
+pub const TEMP_SCHEMA: &str = "temp";
+
 mod advanced_objects;
 mod column;
 mod domain;

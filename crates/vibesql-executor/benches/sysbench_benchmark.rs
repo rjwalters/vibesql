@@ -170,8 +170,8 @@ fn bind_select(stmt: &SelectStmt, params: &[SqlValue]) -> SelectStmt {
 }
 
 /// Bind values to placeholders in a DeleteStmt
-fn bind_delete(stmt: &DeleteStmt, params: &[SqlValue]) -> DeleteStmt {
-    DeleteStmt {
+fn bind_delete(stmt: &DeleteStmt, params: &[SqlValue]) -> DeleteStmt { with_clause: None,
+    DeleteStmt { with_clause: None,
         quoted: false,
         only: stmt.only,
         table_name: stmt.table_name.clone(),
@@ -180,8 +180,8 @@ fn bind_delete(stmt: &DeleteStmt, params: &[SqlValue]) -> DeleteStmt {
 }
 
 /// Bind values to placeholders in an UpdateStmt
-fn bind_update(stmt: &UpdateStmt, params: &[SqlValue]) -> UpdateStmt {
-    UpdateStmt {
+fn bind_update(stmt: &UpdateStmt, params: &[SqlValue]) -> UpdateStmt { with_clause: None,
+    UpdateStmt { with_clause: None,
         table_name: stmt.table_name.clone(),
         quoted: false,
         alias: stmt.alias.clone(),

@@ -83,8 +83,9 @@ impl Operations {
     /// This tries multiple lookup strategies to handle both quoted and unquoted identifiers:
     /// 1. Direct lookup as-is (for quoted identifiers that preserve case)
     /// 2. Normalized (lowercase) lookup
-    /// 3. Schema-qualified with original case
-    /// 4. Schema-qualified with normalized case
+    /// 3. Temp schema lookup (SQLite semantics - temp tables shadow main tables)
+    /// 4. Schema-qualified with original case
+    /// 5. Schema-qualified with normalized case
     fn find_table_mut<'a>(
         catalog: &vibesql_catalog::Catalog,
         tables: &'a mut HashMap<String, Table>,
@@ -108,15 +109,21 @@ impl Operations {
 
         // Try with schema prefix if not already qualified
         if !table_name.contains('.') {
+            // Try 3: Temp schema first (SQLite semantics - temp tables shadow main tables)
+            let temp_qualified = format!("{}.{}", vibesql_catalog::TEMP_SCHEMA, normalized_name);
+            if tables.contains_key(&temp_qualified) {
+                return Ok(tables.get_mut(&temp_qualified).unwrap());
+            }
+
             let current_schema = catalog.get_current_schema();
 
-            // Try 3: Schema-qualified with original case (for quoted identifiers)
+            // Try 4: Schema-qualified with original case (for quoted identifiers)
             let qualified_original = format!("{}.{}", current_schema, table_name);
             if tables.contains_key(&qualified_original) {
                 return Ok(tables.get_mut(&qualified_original).unwrap());
             }
 
-            // Try 4: Schema-qualified with normalized case
+            // Try 5: Schema-qualified with normalized case
             if normalized_name != table_name {
                 let qualified_normalized = format!("{}.{}", current_schema, normalized_name);
                 if tables.contains_key(&qualified_normalized) {

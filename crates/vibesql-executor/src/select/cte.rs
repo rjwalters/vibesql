@@ -56,7 +56,10 @@ where
     // CTEs can reference previously defined CTEs
     for cte in ctes {
         // Check if this is a recursive CTE
-        let rows = if cte.recursive {
+        // SQLite compatibility: auto-detect recursive CTEs even without RECURSIVE keyword
+        // A CTE is recursive if it references itself in a UNION/UNION ALL set operation
+        let is_recursive = cte.recursive || is_cte_self_referential(cte);
+        let rows = if is_recursive {
             // Recursive CTE: execute base term, then iteratively execute recursive term
             execute_recursive_cte(cte, &cte_results, &executor, &memory_check)?
         } else {
@@ -370,6 +373,125 @@ fn count_stmt_columns(stmt: &vibesql_ast::SelectStmt) -> Option<usize> {
 
     // Otherwise, count columns from the select_list
     count_explicit_columns(&stmt.select_list)
+}
+
+/// Check if a CTE is self-referential (references itself in UNION/UNION ALL)
+///
+/// SQLite allows recursive CTEs without the RECURSIVE keyword if the CTE
+/// references itself in a set operation. This function detects such cases
+/// by checking if the right side of a UNION/UNION ALL references the CTE name.
+fn is_cte_self_referential(cte: &vibesql_ast::CommonTableExpr) -> bool {
+    // Check if the CTE has a UNION/UNION ALL set operation
+    let set_op = match &cte.query.set_operation {
+        Some(op) if op.op == vibesql_ast::SetOperator::Union => op,
+        _ => return false,
+    };
+
+    // Check if the recursive term references this CTE
+    stmt_references_table(&set_op.right, &cte.name)
+}
+
+/// Check if a SELECT statement references a table name
+fn stmt_references_table(stmt: &vibesql_ast::SelectStmt, table_name: &str) -> bool {
+    // Check FROM clause
+    if let Some(from) = &stmt.from {
+        if from_clause_references_table(from, table_name) {
+            return true;
+        }
+    }
+
+    // Check WHERE clause for subqueries
+    if let Some(where_clause) = &stmt.where_clause {
+        if expr_references_table(where_clause, table_name) {
+            return true;
+        }
+    }
+
+    // Check SELECT list for subqueries
+    for item in &stmt.select_list {
+        if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+            if expr_references_table(expr, table_name) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Check if a FROM clause references a table name
+fn from_clause_references_table(from: &vibesql_ast::FromClause, table_name: &str) -> bool {
+    match from {
+        vibesql_ast::FromClause::Table { name, .. } => {
+            name.eq_ignore_ascii_case(table_name)
+        }
+        vibesql_ast::FromClause::Subquery { query, .. } => {
+            stmt_references_table(query, table_name)
+        }
+        vibesql_ast::FromClause::Join { left, right, condition, .. } => {
+            from_clause_references_table(left, table_name)
+                || from_clause_references_table(right, table_name)
+                || condition.as_ref().map_or(false, |c| expr_references_table(c, table_name))
+        }
+        vibesql_ast::FromClause::Values { .. } => false,
+    }
+}
+
+/// Check if an expression references a table name (in subqueries)
+fn expr_references_table(expr: &vibesql_ast::Expression, table_name: &str) -> bool {
+    match expr {
+        vibesql_ast::Expression::ScalarSubquery(subquery) => {
+            stmt_references_table(subquery, table_name)
+        }
+        vibesql_ast::Expression::In { subquery, .. } => {
+            stmt_references_table(subquery, table_name)
+        }
+        vibesql_ast::Expression::Exists { subquery, .. } => {
+            stmt_references_table(subquery, table_name)
+        }
+        vibesql_ast::Expression::BinaryOp { left, right, .. } => {
+            expr_references_table(left, table_name) || expr_references_table(right, table_name)
+        }
+        vibesql_ast::Expression::UnaryOp { expr, .. } => {
+            expr_references_table(expr, table_name)
+        }
+        vibesql_ast::Expression::Function { args, .. } => {
+            args.iter().any(|arg| expr_references_table(arg, table_name))
+        }
+        vibesql_ast::Expression::AggregateFunction { args, filter, .. } => {
+            args.iter().any(|arg| expr_references_table(arg, table_name))
+                || filter.as_ref().map_or(false, |f| expr_references_table(f, table_name))
+        }
+        vibesql_ast::Expression::Case { operand, when_clauses, else_result, .. } => {
+            operand.as_ref().map_or(false, |o| expr_references_table(o, table_name))
+                || when_clauses.iter().any(|when| {
+                    when.conditions.iter().any(|c| expr_references_table(c, table_name))
+                        || expr_references_table(&when.result, table_name)
+                })
+                || else_result.as_ref().map_or(false, |e| expr_references_table(e, table_name))
+        }
+        vibesql_ast::Expression::Between { expr, low, high, .. } => {
+            expr_references_table(expr, table_name)
+                || expr_references_table(low, table_name)
+                || expr_references_table(high, table_name)
+        }
+        vibesql_ast::Expression::InList { expr, values, .. } => {
+            expr_references_table(expr, table_name)
+                || values.iter().any(|e| expr_references_table(e, table_name))
+        }
+        vibesql_ast::Expression::Cast { expr, .. }
+        | vibesql_ast::Expression::Collate { expr, .. } => {
+            expr_references_table(expr, table_name)
+        }
+        vibesql_ast::Expression::Conjunction(exprs)
+        | vibesql_ast::Expression::Disjunction(exprs) => {
+            exprs.iter().any(|e| expr_references_table(e, table_name))
+        }
+        vibesql_ast::Expression::QuantifiedComparison { expr, subquery, .. } => {
+            expr_references_table(expr, table_name) || stmt_references_table(subquery, table_name)
+        }
+        _ => false,
+    }
 }
 
 /// Infer data type from a SQL value

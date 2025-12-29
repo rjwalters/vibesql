@@ -86,6 +86,8 @@ pub enum StorageFormat {
 /// CREATE TABLE statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateTableStmt<'arena> {
+    /// If true, this is a temporary table (CREATE TEMP TABLE)
+    pub temporary: bool,
     pub table_name: Symbol,
     pub columns: BumpVec<'arena, ColumnDef<'arena>>,
     pub table_constraints: BumpVec<'arena, TableConstraint<'arena>>,

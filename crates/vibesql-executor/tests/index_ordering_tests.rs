@@ -8,7 +8,7 @@ fn test_index_ordering() {
     let mut db = Database::new();
 
     // Create table
-    let create_table_stmt = CreateTableStmt {
+    let create_table_stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![

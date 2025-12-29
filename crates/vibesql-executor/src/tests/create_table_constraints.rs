@@ -10,7 +10,7 @@ use crate::{create_table::CreateTableExecutor, errors::ExecutorError};
 #[test]
 fn test_create_table_with_column_primary_key() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
@@ -53,7 +53,7 @@ fn test_create_table_with_column_primary_key() {
 #[test]
 fn test_create_table_with_table_primary_key() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
@@ -111,7 +111,7 @@ fn test_create_table_with_table_primary_key() {
 #[test]
 fn test_create_table_with_multiple_primary_keys_fails() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![ColumnDef {
@@ -149,7 +149,7 @@ fn test_create_table_with_multiple_primary_keys_fails() {
 #[test]
 fn test_create_table_with_column_unique_constraint() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
@@ -192,7 +192,7 @@ fn test_create_table_with_column_unique_constraint() {
 #[test]
 fn test_create_table_with_table_unique_constraint() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
@@ -260,7 +260,7 @@ fn test_create_table_with_check_constraint() {
         right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(0))),
     };
 
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "products".to_string(),
         columns: vec![ColumnDef {
@@ -297,7 +297,7 @@ fn test_create_table_with_check_constraint() {
 #[test]
 fn test_auto_index_for_single_column_primary_key() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "t1".to_string(),
         columns: vec![ColumnDef {
@@ -337,7 +337,7 @@ fn test_auto_index_for_single_column_primary_key() {
 #[test]
 fn test_auto_index_for_composite_primary_key() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "t2".to_string(),
         columns: vec![
@@ -399,7 +399,7 @@ fn test_auto_index_for_composite_primary_key() {
 #[test]
 fn test_auto_index_for_single_unique_constraint() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "t3".to_string(),
         columns: vec![
@@ -448,7 +448,7 @@ fn test_auto_index_for_single_unique_constraint() {
 #[test]
 fn test_auto_index_for_multiple_unique_constraints() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "t4".to_string(),
         columns: vec![
@@ -503,7 +503,7 @@ fn test_auto_index_for_multiple_unique_constraints() {
 #[test]
 fn test_auto_index_for_composite_unique_constraint() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "t5".to_string(),
         columns: vec![
@@ -565,7 +565,7 @@ fn test_auto_index_for_composite_unique_constraint() {
 #[test]
 fn test_auto_index_for_primary_key_plus_unique() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "t6".to_string(),
         columns: vec![
@@ -612,7 +612,7 @@ fn test_auto_index_for_primary_key_plus_unique() {
 #[test]
 fn test_auto_index_visible_in_catalog() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt {
+    let stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![

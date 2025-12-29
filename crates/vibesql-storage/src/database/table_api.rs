@@ -17,12 +17,31 @@ impl Database {
     // Table Operations
     // ============================================================================
 
+    /// Check if a table name refers to a temporary table (in the "temp" schema)
+    ///
+    /// Temporary tables are not persisted to WAL.
+    fn is_temp_table(&self, table_name: &str) -> bool {
+        // Check if the table name is qualified with "temp." schema
+        if let Some((schema, _)) = table_name.split_once('.') {
+            schema.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA)
+        } else {
+            // Unqualified name - check if it exists in temp schema
+            self.tables.contains_key(&format!(
+                "{}.{}",
+                vibesql_catalog::TEMP_SCHEMA,
+                table_name.to_lowercase()
+            ))
+        }
+    }
+
     /// Create a table with SQL:1999 identifier semantics.
     ///
     /// The `identifier` parameter determines how the table name is stored:
     /// - Quoted identifiers: stored with exact case
     /// - Unquoted identifiers: stored with lowercase canonical form
     /// - Qualified identifiers: schema and table have independent case handling
+    ///
+    /// Temporary tables (in the "temp" schema) are not persisted to WAL.
     pub fn create_table_with_identifier(
         &mut self,
         schema: vibesql_catalog::TableSchema,
@@ -42,17 +61,25 @@ impl Database {
             format!("{}.{}", current_schema, identifier.canonical())
         };
 
-        // Assign table ID and emit WAL entry for persistence
-        let table_id = self.next_table_id();
+        // Check if this is a temporary table (in the "temp" schema)
+        // Temp tables are not persisted to WAL
+        let is_temp = identifier
+            .schema_canonical()
+            .is_some_and(|s| s.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA));
 
-        // Serialize schema for WAL (use a simple binary format)
-        let schema_data = serialize_table_schema(&schema);
+        if !is_temp {
+            // Assign table ID and emit WAL entry for persistence
+            let table_id = self.next_table_id();
 
-        self.emit_wal_op(WalOp::CreateTable {
-            table_id,
-            table_name: qualified_name.clone(),
-            schema_data,
-        });
+            // Serialize schema for WAL (use a simple binary format)
+            let schema_data = serialize_table_schema(&schema);
+
+            self.emit_wal_op(WalOp::CreateTable {
+                table_id,
+                table_name: qualified_name.clone(),
+                schema_data,
+            });
+        }
 
         let table = Table::new(schema);
         self.tables.insert(qualified_name, table);
@@ -116,6 +143,8 @@ impl Database {
 
     /// Get a table for reading
     /// Legacy method with fallback lookups for backward compatibility
+    ///
+    /// For unqualified names, checks temp schema first (SQLite semantics).
     pub fn get_table(&self, name: &str) -> Option<&Table> {
         // Try the name as-is first (for delimited identifiers)
         if let Some(table) = self.tables.get(name) {
@@ -151,8 +180,15 @@ impl Database {
             }
         }
 
-        // Try with schema qualification
+        // For unqualified names, check temp schema first (SQLite semantics)
+        // Temp tables shadow tables in the main schema
         if !name.contains('.') {
+            // Check temp schema first
+            let temp_qualified = format!("{}.{}", vibesql_catalog::TEMP_SCHEMA, lowercase_name);
+            if let Some(table) = self.tables.get(&temp_qualified) {
+                return Some(table);
+            }
+
             let current_schema = &self.catalog.get_current_schema();
 
             // Try as-is with schema prefix
@@ -182,6 +218,8 @@ impl Database {
     }
 
     /// Get a table for writing
+    ///
+    /// For unqualified names, checks temp schema first (SQLite semantics).
     pub fn get_table_mut(&mut self, name: &str) -> Option<&mut Table> {
         // Try the name as-is first (for delimited identifiers)
         if self.tables.contains_key(name) {
@@ -203,8 +241,15 @@ impl Database {
             return self.tables.get_mut(&uppercase_name);
         }
 
-        // Try with schema qualification
+        // For unqualified names, check temp schema first (SQLite semantics)
+        // Temp tables shadow tables in the main schema
         if !name.contains('.') {
+            // Check temp schema first
+            let temp_qualified = format!("{}.{}", vibesql_catalog::TEMP_SCHEMA, lowercase_name);
+            if self.tables.contains_key(&temp_qualified) {
+                return self.tables.get_mut(&temp_qualified);
+            }
+
             let current_schema = &self.catalog.get_current_schema().to_string();
 
             // Try as-is with schema prefix
@@ -235,12 +280,16 @@ impl Database {
     }
 
     /// Drop a table
+    ///
+    /// Temporary tables (in the "temp" schema) are not persisted to WAL.
     pub fn drop_table(&mut self, name: &str) -> Result<(), StorageError> {
-        // Emit WAL entry for persistence before dropping
-        self.emit_wal_op(WalOp::DropTable {
-            table_id: self.table_name_to_id(name),
-            table_name: name.to_string(),
-        });
+        // Emit WAL entry for persistence before dropping (skip for temp tables)
+        if !self.is_temp_table(name) {
+            self.emit_wal_op(WalOp::DropTable {
+                table_id: self.table_name_to_id(name),
+                table_name: name.to_string(),
+            });
+        }
 
         // Invalidate columnar cache before dropping
         self.columnar_cache.invalidate(name);
@@ -248,6 +297,8 @@ impl Database {
     }
 
     /// Insert a row into a table
+    ///
+    /// Temporary tables (in the "temp" schema) are not persisted to WAL.
     pub fn insert_row(&mut self, table_name: &str, row: Row) -> Result<(), StorageError> {
         let row_index =
             self.operations.insert_row(&self.catalog, &mut self.tables, table_name, row.clone())?;
@@ -257,12 +308,14 @@ impl Database {
             row: row.clone(),
         });
 
-        // Emit WAL entry for persistence
-        self.emit_wal_op(WalOp::Insert {
-            table_id: self.table_name_to_id(table_name),
-            row_id: row_index as u64,
-            values: row.values.to_vec(),
-        });
+        // Emit WAL entry for persistence (skip for temp tables)
+        if !self.is_temp_table(table_name) {
+            self.emit_wal_op(WalOp::Insert {
+                table_id: self.table_name_to_id(table_name),
+                row_id: row_index as u64,
+                values: row.values.to_vec(),
+            });
+        }
 
         // Broadcast change event to subscribers
         self.broadcast_change(ChangeEvent::Insert {
@@ -326,6 +379,7 @@ impl Database {
         )?;
 
         let table_id = self.table_name_to_id(table_name);
+        let is_temp = self.is_temp_table(table_name);
 
         // Record changes for transaction management, emit WAL entries, and broadcast events
         for (row, &row_index) in rows.into_iter().zip(row_indices.iter()) {
@@ -334,12 +388,14 @@ impl Database {
                 row: row.clone(),
             });
 
-            // Emit WAL entry for persistence
-            self.emit_wal_op(WalOp::Insert {
-                table_id,
-                row_id: row_index as u64,
-                values: row.values.to_vec(),
-            });
+            // Emit WAL entry for persistence (skip for temp tables)
+            if !is_temp {
+                self.emit_wal_op(WalOp::Insert {
+                    table_id,
+                    row_id: row_index as u64,
+                    values: row.values.to_vec(),
+                });
+            }
 
             // Broadcast change event to subscribers
             self.broadcast_change(ChangeEvent::Insert {
@@ -509,13 +565,15 @@ impl Database {
             Some(&changed_columns),
         );
 
-        // Emit WAL entry for persistence
-        self.emit_wal_op(WalOp::Update {
-            table_id: self.table_name_to_id(&resolved_name),
-            row_id: row_index as u64,
-            old_values: old_row.values.to_vec(),
-            new_values: new_row.values.to_vec(),
-        });
+        // Emit WAL entry for persistence (skip for temp tables)
+        if !self.is_temp_table(&resolved_name) {
+            self.emit_wal_op(WalOp::Update {
+                table_id: self.table_name_to_id(&resolved_name),
+                row_id: row_index as u64,
+                old_values: old_row.values.to_vec(),
+                new_values: new_row.values.to_vec(),
+            });
+        }
 
         // Broadcast change event to subscribers
         self.broadcast_change(ChangeEvent::Update { table_name: resolved_name.clone(), row_index });

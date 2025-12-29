@@ -150,27 +150,37 @@ impl SelectExecutor<'_> {
             }
         }
 
-        // Stage 3: OFFSET (skip rows lazily)
-        let mut iterator: Box<dyn Iterator<Item = _>> = if let Some(ref offset_expr) = stmt.offset {
-            let offset_usize = crate::select::helpers::evaluate_limit_offset_expr(
-                offset_expr,
-                self.database,
-                "OFFSET",
-            )?;
-            Box::new(iterator.skip(offset_usize))
-        } else {
+        // Stage 3 & 4: OFFSET and LIMIT (skip if set operation - applied after UNION)
+        // For set operations (UNION, INTERSECT, EXCEPT), LIMIT/OFFSET must be applied
+        // after combining results, not to individual subqueries
+        let iterator: Box<dyn Iterator<Item = _>> = if stmt.set_operation.is_some() {
+            // Skip OFFSET/LIMIT for set operations - will be applied at top level
             iterator
-        };
+        } else {
+            // Apply OFFSET (skip rows lazily)
+            let iter: Box<dyn Iterator<Item = _>> = if let Some(ref offset_expr) = stmt.offset {
+                let offset_usize = crate::select::helpers::evaluate_limit_offset_expr(
+                    offset_expr,
+                    self.database,
+                    "OFFSET",
+                )?;
+                Box::new(iterator.skip(offset_usize))
+            } else {
+                iterator
+            };
 
-        // Stage 4: LIMIT (take only needed rows)
-        if let Some(ref limit_expr) = stmt.limit {
-            let limit_usize = crate::select::helpers::evaluate_limit_offset_expr(
-                limit_expr,
-                self.database,
-                "LIMIT",
-            )?;
-            iterator = Box::new(iterator.take(limit_usize));
-        }
+            // Apply LIMIT (take only needed rows)
+            if let Some(ref limit_expr) = stmt.limit {
+                let limit_usize = crate::select::helpers::evaluate_limit_offset_expr(
+                    limit_expr,
+                    self.database,
+                    "LIMIT",
+                )?;
+                Box::new(iter.take(limit_usize))
+            } else {
+                iter
+            }
+        };
 
         // Stage 5: Materialize filtered results
         // Use pooled buffer to reduce allocation overhead

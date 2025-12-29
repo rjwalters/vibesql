@@ -11,9 +11,10 @@ use crate::{persistence::save, Database, StorageError};
 
 pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), StorageError> {
     // Write schemas
+    // Skip built-in schemas (main and temp) - they are recreated on load
     let schemas: Vec<String> = db.catalog.list_schemas()
         .into_iter()
-        .filter(|s| s != vibesql_catalog::DEFAULT_SCHEMA) // Skip default schema
+        .filter(|s| s != vibesql_catalog::DEFAULT_SCHEMA && s != vibesql_catalog::TEMP_SCHEMA)
         .collect();
 
     write_u32(writer, schemas.len() as u32)?;
@@ -219,6 +220,13 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
     let schema_count = read_u32(reader)?;
     for _ in 0..schema_count {
         let schema_name = read_string(reader)?;
+        // Skip built-in schemas (main and temp) - they are already created by Database::new()
+        // This handles backward compatibility with databases saved before the write-side fix
+        if schema_name == vibesql_catalog::DEFAULT_SCHEMA
+            || schema_name == vibesql_catalog::TEMP_SCHEMA
+        {
+            continue;
+        }
         // Create schema directly on catalog
         db.catalog
             .create_schema(schema_name)

@@ -45,6 +45,7 @@ instant = { version = "0.1", features = ["wasm-bindgen"] }  # WASM-compatible ti
 bytes = "1.5"
 smallvec = { version = "1.13", features = ["serde"] }
 arcstr = "1.2"
+ryu = "1.0"  # Fast float-to-string conversion with proper formatting
 tokio = { version = "1", features = ["rt", "sync"], optional = true }
 opendal = { version = "0.55", optional = true }
 

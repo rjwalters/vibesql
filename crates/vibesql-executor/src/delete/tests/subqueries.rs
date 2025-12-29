@@ -213,7 +213,7 @@ mod in_subquery {
         });
 
         // DELETE FROM employees WHERE dept_id IN (SELECT dept_id FROM inactive_depts)
-        let stmt = DeleteStmt {
+        let stmt = DeleteStmt { with_clause: None,
             quoted: false,
             only: false,
             table_name: "employees".to_string(),
@@ -278,7 +278,7 @@ mod in_subquery {
         });
 
         // DELETE FROM employees WHERE dept_id NOT IN (SELECT dept_id FROM active_depts)
-        let stmt = DeleteStmt {
+        let stmt = DeleteStmt { with_clause: None,
             quoted: false,
             only: false,
             table_name: "employees".to_string(),
@@ -354,7 +354,7 @@ mod scalar_subquery {
         });
 
         // DELETE FROM employees WHERE salary < (SELECT AVG(salary) FROM employees)
-        let stmt = DeleteStmt {
+        let stmt = DeleteStmt { with_clause: None,
             quoted: false,
             only: false,
             table_name: "employees".to_string(),
@@ -432,7 +432,7 @@ mod scalar_subquery {
         });
 
         // DELETE FROM items WHERE price = (SELECT MAX(price) FROM items)
-        let stmt = DeleteStmt {
+        let stmt = DeleteStmt { with_clause: None,
             quoted: false,
             only: false,
             table_name: "items".to_string(),
@@ -501,7 +501,7 @@ mod scalar_subquery {
         });
 
         // DELETE FROM employees WHERE salary > (SELECT threshold FROM config)
-        let stmt = DeleteStmt {
+        let stmt = DeleteStmt { with_clause: None,
             quoted: false,
             only: false,
             table_name: "employees".to_string(),
@@ -569,7 +569,7 @@ mod empty_subquery {
         });
 
         // DELETE FROM employees WHERE dept_id IN (SELECT dept_id FROM old_depts)
-        let stmt = DeleteStmt {
+        let stmt = DeleteStmt { with_clause: None,
             quoted: false,
             only: false,
             table_name: "employees".to_string(),
@@ -653,7 +653,7 @@ mod complex_subquery {
 
         // DELETE FROM orders WHERE customer_id IN (SELECT customer_id FROM inactive_customers WHERE
         // status = 'inactive')
-        let stmt = DeleteStmt {
+        let stmt = DeleteStmt { with_clause: None,
             quoted: false,
             only: false,
             table_name: "orders".to_string(),

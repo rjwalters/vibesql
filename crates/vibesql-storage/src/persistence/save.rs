@@ -102,11 +102,14 @@ impl Database {
         writeln!(writer)
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
-        // Export schemas (except default schema which always exists)
+        // Export schemas (except built-in schemas which always exist)
         writeln!(writer, "-- Schemas")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
         for schema_name in &self.catalog.list_schemas() {
-            if schema_name != vibesql_catalog::DEFAULT_SCHEMA {
+            // Skip built-in schemas - they are recreated automatically on load
+            if schema_name != vibesql_catalog::DEFAULT_SCHEMA
+                && schema_name != vibesql_catalog::TEMP_SCHEMA
+            {
                 writeln!(writer, "CREATE SCHEMA {};", schema_name)
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
             }
@@ -364,7 +367,7 @@ pub(super) fn sql_value_to_literal(value: &vibesql_types::SqlValue) -> String {
                     "'-Infinity'".to_string()
                 }
             } else {
-                f.to_string()
+                format_f64_for_sql(*f)
             }
         }
         SqlValue::Float(f) | SqlValue::Real(f) => {
@@ -377,7 +380,7 @@ pub(super) fn sql_value_to_literal(value: &vibesql_types::SqlValue) -> String {
                     "'-Infinity'".to_string()
                 }
             } else {
-                f.to_string()
+                format_f32_for_sql(*f)
             }
         }
         SqlValue::Double(f) => {
@@ -390,7 +393,7 @@ pub(super) fn sql_value_to_literal(value: &vibesql_types::SqlValue) -> String {
                     "'-Infinity'".to_string()
                 }
             } else {
-                f.to_string()
+                format_f64_for_sql(*f)
             }
         }
         SqlValue::Character(s) | SqlValue::Varchar(s) => format!("'{}'", s.replace('\'', "''")),
@@ -410,4 +413,24 @@ pub(super) fn sql_value_to_literal(value: &vibesql_types::SqlValue) -> String {
             format!("x'{}'", hex)
         }
     }
+}
+
+/// Format f64 for SQL literal with proper type preservation.
+/// Ensures whole numbers like 5200000.0 include the ".0" suffix
+/// so they're parsed as REAL, not INTEGER, when the dump is reloaded.
+fn format_f64_for_sql(n: f64) -> String {
+    // Use ryu for shortest round-trip representation
+    let mut buffer = ryu::Buffer::new();
+    let s = buffer.format(n);
+    s.to_string()
+}
+
+/// Format f32 for SQL literal with proper type preservation.
+/// Ensures whole numbers like 5200000.0 include the ".0" suffix
+/// so they're parsed as REAL, not INTEGER, when the dump is reloaded.
+fn format_f32_for_sql(n: f32) -> String {
+    // Use ryu for shortest round-trip representation at f32 precision
+    let mut buffer = ryu::Buffer::new();
+    let s = buffer.format(n);
+    s.to_string()
 }

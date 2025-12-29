@@ -10,7 +10,7 @@ fn test_create_spatial_index_basic() {
     let mut db = Database::new();
 
     // Create table with geometry column
-    let create_table_stmt = CreateTableStmt {
+    let create_table_stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "places".to_string(),
         columns: vec![
@@ -64,7 +64,7 @@ fn test_spatial_index_multiple_columns_error() {
     let mut db = Database::new();
 
     // Create table
-    let create_table_stmt = CreateTableStmt {
+    let create_table_stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "places".to_string(),
         columns: vec![
@@ -133,7 +133,7 @@ fn test_drop_spatial_index() {
     let mut db = Database::new();
 
     // Create table with geometry column
-    let create_table_stmt = CreateTableStmt {
+    let create_table_stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "places".to_string(),
         columns: vec![
@@ -194,7 +194,7 @@ fn test_spatial_index_if_not_exists() {
     let mut db = Database::new();
 
     // Create table
-    let create_table_stmt = CreateTableStmt {
+    let create_table_stmt = CreateTableStmt { temporary: false,
         if_not_exists: false,
         table_name: "places".to_string(),
         columns: vec![
