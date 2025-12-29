@@ -41,6 +41,12 @@ set ::pragma_case_sensitive_like 0 ;# Default: OFF (case-insensitive LIKE)
 # This emulates SQLite's deprecated DQS_DML mode (SQLITE_DBCONFIG_DQS_DML)
 set ::dqs_dml_mode 0  ;# Default: OFF (double quotes are identifiers)
 
+# TEMP TABLE emulation
+# Since VibeSQL stores temp tables in the main schema, we rename them to avoid conflicts.
+# Maps: original_name -> unique_name (e.g., "t1" -> "_temp_t1_12345")
+set ::temp_table_map [dict create]
+set ::temp_table_session_id [pid]  ;# Use PID for uniqueness
+
 # SQLite configuration variables (used by tests)
 set ::AUTOVACUUM 0       ;# Auto-vacuum not supported
 set ::TEMP_STORE 0       ;# Temp storage in file
@@ -384,6 +390,93 @@ proc translate_error_to_sqlite {vibesql_error} {
 
     # If no specific translation, return original (without prefix)
     return $error_msg
+}
+
+#-----------------------------------------------------------------------------
+# TEMP TABLE Emulation
+#-----------------------------------------------------------------------------
+# VibeSQL stores temp tables in the main schema, but SQLite uses a separate
+# temp schema. Tests may create temp tables with the same names as regular
+# tables, or reuse temp table names across test cases expecting isolation.
+#
+# Solution: Rename temp tables to unique names (_temp_<name>_<session>_<counter>)
+# and rewrite all SQL to use the unique names.
+
+proc get_temp_table_name {original_name} {
+    # Get or create a unique name for a temp table
+    global temp_table_map temp_table_session_id
+    variable temp_counter
+    if {![info exists temp_counter]} {
+        set temp_counter 0
+    }
+
+    set key [string tolower $original_name]
+    if {[dict exists $::temp_table_map $key]} {
+        return [dict get $::temp_table_map $key]
+    }
+
+    incr temp_counter
+    set unique_name "_temp_${original_name}_${::temp_table_session_id}_${temp_counter}"
+    dict set ::temp_table_map $key $unique_name
+    return $unique_name
+}
+
+proc clear_temp_table {original_name} {
+    # Remove a temp table mapping (called on DROP)
+    set key [string tolower $original_name]
+    if {[dict exists $::temp_table_map $key]} {
+        dict unset ::temp_table_map $key
+    }
+}
+
+proc reset_temp_tables {} {
+    # Reset all temp table mappings (called at test cleanup)
+    set ::temp_table_map [dict create]
+}
+
+proc rewrite_temp_table_sql {sql} {
+    # Rewrite SQL to handle temp table creation and references
+    # Returns modified SQL with temp tables renamed
+
+    set result $sql
+
+    # Handle CREATE TEMP TABLE / CREATE TEMPORARY TABLE
+    # Pattern: CREATE TEMP[ORARY] TABLE [IF NOT EXISTS] name
+    if {[regexp -nocase {CREATE\s+TEMP(?:ORARY)?\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\[?[a-zA-Z_][a-zA-Z0-9_]*\]?)} $sql match table_name]} {
+        # Strip brackets if present
+        set clean_name [string trim $table_name {[]}]
+        set unique_name [get_temp_table_name $clean_name]
+
+        # Replace CREATE TEMP TABLE with CREATE TABLE using unique name
+        # Remove TEMP/TEMPORARY keyword and replace table name
+        set result [regsub -nocase {CREATE\s+TEMP(?:ORARY)?\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?(\[?[a-zA-Z_][a-zA-Z0-9_]*\]?)} $result "CREATE TABLE \\1$unique_name"]
+    }
+
+    # Handle DROP TABLE for temp tables
+    # Check if this is dropping a known temp table
+    if {[regexp -nocase {DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\[?[a-zA-Z_][a-zA-Z0-9_]*\]?)} $sql match table_name]} {
+        set clean_name [string trim $table_name {[]}]
+        set key [string tolower $clean_name]
+        if {[dict exists $::temp_table_map $key]} {
+            set unique_name [dict get $::temp_table_map $key]
+            set result [regsub -nocase "DROP\\s+TABLE\\s+(IF\\s+EXISTS\\s+)?\\[?${clean_name}\\]?" $result "DROP TABLE \\1$unique_name"]
+            clear_temp_table $clean_name
+        }
+    }
+
+    # Replace references to known temp tables in the SQL
+    # This handles SELECT, INSERT, UPDATE, DELETE, etc.
+    dict for {original_key unique_name} $::temp_table_map {
+        # Simple word-boundary replacement using \y (TCL word boundary)
+        # This is safer than complex nested loops with regex metacharacters
+
+        # Replace table name with word boundaries
+        # Pattern: word boundary + table name + word boundary (case insensitive)
+        set pattern "(?i)\\y${original_key}\\y"
+        set result [regsub -all $pattern $result $unique_name]
+    }
+
+    return $result
 }
 
 #-----------------------------------------------------------------------------
@@ -873,6 +966,12 @@ proc execsql {sql {db ""}} {
     if {$::dqs_dml_mode} {
         set sql [convert_dqs_to_single_quotes $sql]
     }
+
+    # TEMP TABLE emulation is disabled - simple word-boundary replacement
+    # breaks column names and other identifiers. Proper solution requires
+    # either SQL parsing or actual TEMP TABLE support in VibeSQL.
+    # TODO: Implement proper TEMP TABLE support in VibeSQL core
+    # set sql [rewrite_temp_table_sql $sql]
 
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
@@ -2476,6 +2575,10 @@ proc run_test_file {filename} {
     # Clear the opened_dbs tracking so all databases are treated as "first time" opens
     # This ensures sqlite3 proc will delete stale database files from previous test runs
     set ::opened_dbs {}
+
+    # Reset temp table mappings for fresh session
+    # This ensures temp table names don't conflict across test files
+    reset_temp_tables
 
     puts "Running: $filename"
     puts ""

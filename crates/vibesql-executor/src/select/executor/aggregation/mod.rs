@@ -69,21 +69,28 @@ impl SelectExecutor<'_> {
         let from_result = match &stmt.from {
             Some(from_clause) => {
                 // Pre-resolve SELECT aliases in WHERE clause before predicate pushdown
-                // This uses a lightweight schema built from the FROM clause
-                let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
-                    // Build a minimal schema from the FROM clause to resolve aliases
-                    // For simple table references, get the schema from the catalog
-                    if let Some(schema) = build_early_schema(from_clause, self.database) {
-                        crate::select::order::resolve_where_aliases_with_schema(
-                            where_expr,
-                            &stmt.select_list,
-                            &schema,
-                        )
-                    } else {
-                        // Fallback: use legacy resolution without schema
-                        crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
-                    }
-                });
+                // PERFORMANCE: Skip schema building if no aliases exist (common case in OLTP)
+                let resolved_where = if stmt.where_clause.is_some()
+                    && crate::select::order::select_list_has_aliases(&stmt.select_list)
+                {
+                    stmt.where_clause.as_ref().map(|where_expr| {
+                        // Build a minimal schema from the FROM clause to resolve aliases
+                        // For simple table references, get the schema from the catalog
+                        if let Some(schema) = build_early_schema(from_clause, self.database) {
+                            crate::select::order::resolve_where_aliases_with_schema(
+                                where_expr,
+                                &stmt.select_list,
+                                &schema,
+                            )
+                        } else {
+                            // Fallback: use legacy resolution without schema
+                            crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+                        }
+                    })
+                } else {
+                    // No aliases - no need to resolve, just clone the WHERE clause
+                    stmt.where_clause.clone()
+                };
                 self.execute_from_with_where(
                     from_clause,
                     cte_results,
@@ -156,13 +163,19 @@ impl SelectExecutor<'_> {
             // Resolve SELECT aliases in WHERE clause (SQLite extension)
             // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
             // NOTE: Table column names take precedence over aliases (SQLite behavior)
-            let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
-                crate::select::order::resolve_where_aliases_with_schema(
-                    where_expr,
-                    &stmt.select_list,
-                    &original_schema,
-                )
-            });
+            // PERFORMANCE: Skip resolution if no aliases exist (common case in OLTP)
+            let resolved_where = if crate::select::order::select_list_has_aliases(&stmt.select_list)
+            {
+                stmt.where_clause.as_ref().map(|where_expr| {
+                    crate::select::order::resolve_where_aliases_with_schema(
+                        where_expr,
+                        &stmt.select_list,
+                        &original_schema,
+                    )
+                })
+            } else {
+                stmt.where_clause.clone()
+            };
 
             // Optimize WHERE clause with constant folding and dead code elimination
             let where_optimization = optimize_where_clause(resolved_where.as_ref(), &evaluator)?;

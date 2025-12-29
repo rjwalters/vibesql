@@ -91,6 +91,9 @@ pub enum WhereClause {
 /// UPDATE statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateStmt {
+    /// Optional WITH clause (CTEs) for UPDATE statements
+    /// SQLite supports: WITH cte AS (...) UPDATE table SET ... WHERE ...
+    pub with_clause: Option<Vec<CommonTableExpr>>,
     pub table_name: String,
     /// Whether the table name was quoted (delimited) in the original SQL.
     /// Per SQL:1999, quoted identifiers are case-sensitive.
@@ -118,6 +121,9 @@ pub struct Assignment {
 /// DELETE statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeleteStmt {
+    /// Optional WITH clause (CTEs) for DELETE statements
+    /// SQLite supports: WITH cte AS (...) DELETE FROM table WHERE ...
+    pub with_clause: Option<Vec<CommonTableExpr>>,
     /// If true, DELETE FROM ONLY (excludes derived tables in table inheritance)
     pub only: bool,
     pub table_name: String,

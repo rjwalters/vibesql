@@ -745,10 +745,19 @@ impl Parser {
                 let insert_stmt = self.parse_insert_statement_with_cte(cte_list)?;
                 Ok(vibesql_ast::Statement::Insert(insert_stmt))
             }
-            // TODO: Add UPDATE and DELETE with CTEs support
+            Token::Keyword { keyword: Keyword::Update, .. } => {
+                // Parse UPDATE with pre-parsed CTEs
+                let update_stmt = self.parse_update_statement_with_cte(cte_list)?;
+                Ok(vibesql_ast::Statement::Update(update_stmt))
+            }
+            Token::Keyword { keyword: Keyword::Delete, .. } => {
+                // Parse DELETE with pre-parsed CTEs
+                let delete_stmt = self.parse_delete_statement_with_cte(cte_list)?;
+                Ok(vibesql_ast::Statement::Delete(delete_stmt))
+            }
             _ => Err(ParseError {
                 message: format!(
-                    "Expected SELECT or INSERT after WITH clause, found {}",
+                    "Expected SELECT, INSERT, UPDATE, or DELETE after WITH clause, found {}",
                     self.peek().syntax_error()
                 ),
             }),

@@ -89,13 +89,18 @@ impl SelectExecutor<'_> {
         // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
         // IMPORTANT: Use schema-aware resolution to avoid incorrectly substituting
         // table column names with aggregate aliases (SQLite behavior)
-        let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
-            crate::select::order::resolve_where_aliases_with_schema(
-                where_expr,
-                &stmt.select_list,
-                &schema,
-            )
-        });
+        // PERFORMANCE: Skip alias resolution if no aliases exist (common case in OLTP)
+        let resolved_where = if crate::select::order::select_list_has_aliases(&stmt.select_list) {
+            stmt.where_clause.as_ref().map(|where_expr| {
+                crate::select::order::resolve_where_aliases_with_schema(
+                    where_expr,
+                    &stmt.select_list,
+                    &schema,
+                )
+            })
+        } else {
+            stmt.where_clause.clone()
+        };
 
         // Validate WHERE clause subqueries upfront (before row iteration)
         // This ensures schema validation happens even for empty result sets

@@ -69,7 +69,7 @@ impl<'arena> ArenaParser<'arena> {
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
 
-        let stmt = DeleteStmt { only, table_name, quoted, where_clause };
+        let stmt = DeleteStmt { with_clause: None, only, table_name, quoted, where_clause };
 
         Ok(self.arena.alloc(stmt))
     }

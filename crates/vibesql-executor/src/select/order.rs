@@ -1003,8 +1003,30 @@ pub(crate) fn resolve_where_aliases(
     where_expr: &vibesql_ast::Expression,
     select_list: &[vibesql_ast::SelectItem],
 ) -> vibesql_ast::Expression {
+    // Fast path: if no SELECT items have aliases, nothing to resolve
+    if !select_list_has_aliases(select_list) {
+        return where_expr.clone();
+    }
+
     // Use empty schema - no table columns to protect from alias resolution
     resolve_where_expression_with_schema(where_expr, select_list, &std::collections::HashSet::new())
+}
+
+/// Check if any SELECT item has an alias.
+///
+/// This is used as a fast path check to skip alias resolution when no aliases exist.
+/// Call sites should use this BEFORE building schemas to avoid unnecessary work.
+#[inline]
+pub(crate) fn select_list_has_aliases(select_list: &[vibesql_ast::SelectItem]) -> bool {
+    select_list.iter().any(|item| {
+        matches!(
+            item,
+            vibesql_ast::SelectItem::Expression {
+                alias: Some(_),
+                ..
+            }
+        )
+    })
 }
 
 /// Resolve SELECT aliases in WHERE clause with schema column awareness.
@@ -1026,16 +1048,260 @@ pub(crate) fn resolve_where_aliases_with_schema(
     select_list: &[vibesql_ast::SelectItem],
     schema: &crate::schema::CombinedSchema,
 ) -> vibesql_ast::Expression {
-    // Build set of all column names in the schema (lowercase for case-insensitive matching)
-    let table_columns: std::collections::HashSet<String> = schema
-        .table_schemas
-        .values()
-        .flat_map(|(_, table_schema)| table_schema.columns.iter().map(|c| c.name.to_lowercase()))
-        .collect();
-    resolve_where_expression_with_schema(where_expr, select_list, &table_columns)
+    // Fast path: if no SELECT items have aliases, nothing to resolve
+    // This is a common case in TPC-C and other OLTP workloads
+    if !select_list_has_aliases(select_list) {
+        return where_expr.clone();
+    }
+
+    // Use schema's has_column method directly instead of building a HashSet
+    // This is a performance optimization for TPC-C and other high-throughput workloads
+    resolve_where_expression_with_schema_ref(where_expr, select_list, schema)
 }
 
-/// Recursively resolve alias references in a WHERE clause expression.
+/// Optimized version that uses CombinedSchema.has_column() directly.
+/// Avoids building a HashSet of column names on every query.
+fn resolve_where_expression_with_schema_ref(
+    expr: &vibesql_ast::Expression,
+    select_list: &[vibesql_ast::SelectItem],
+    schema: &crate::schema::CombinedSchema,
+) -> vibesql_ast::Expression {
+    use vibesql_ast::Expression;
+
+    match expr {
+        // Column reference: check if it's an alias
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
+        {
+            let column = col_id.column_canonical();
+            // SQLite behavior: table column names ALWAYS take precedence over aliases
+            // Use schema.has_column() directly instead of HashSet lookup
+            if schema.has_column(column) {
+                return expr.clone();
+            }
+
+            // Fallback: check if any SELECT item is a direct column reference with this name
+            for item in select_list {
+                if let vibesql_ast::SelectItem::Expression {
+                    expr: Expression::ColumnRef(sel_col_id),
+                    ..
+                } = item
+                {
+                    if sel_col_id.schema_canonical().is_none()
+                        && sel_col_id.table_canonical().is_none()
+                    {
+                        let col_name = sel_col_id.column_canonical();
+                        if col_name.eq_ignore_ascii_case(column) {
+                            return expr.clone();
+                        }
+                    }
+                    if sel_col_id.schema_canonical().is_none()
+                        && sel_col_id.table_canonical().is_some()
+                    {
+                        let col_name = sel_col_id.column_canonical();
+                        if col_name.eq_ignore_ascii_case(column) {
+                            return expr.clone();
+                        }
+                    }
+                }
+            }
+
+            // Now search for matching alias in SELECT list
+            for item in select_list {
+                if let vibesql_ast::SelectItem::Expression {
+                    expr: select_expr,
+                    alias: Some(alias_name),
+                    ..
+                } = item
+                {
+                    if alias_name.eq_ignore_ascii_case(column) {
+                        return select_expr.clone();
+                    }
+                }
+            }
+            expr.clone()
+        }
+
+        // Qualified column references: not aliases
+        Expression::ColumnRef(col_id)
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() =>
+        {
+            expr.clone()
+        }
+        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_some() => expr.clone(),
+        Expression::ColumnRef(_) => expr.clone(),
+
+        // BinaryOp: resolve both sides
+        Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
+            left: Box::new(resolve_where_expression_with_schema_ref(left, select_list, schema)),
+            op: *op,
+            right: Box::new(resolve_where_expression_with_schema_ref(right, select_list, schema)),
+        },
+
+        // UnaryOp: resolve inner expression
+        Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
+            op: *op,
+            expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
+        },
+
+        // Function call: resolve all arguments
+        Expression::Function { name, args, character_unit } => Expression::Function {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|arg| resolve_where_expression_with_schema_ref(arg, select_list, schema))
+                .collect(),
+            character_unit: character_unit.clone(),
+        },
+
+        // CASE expression
+        Expression::Case { operand, when_clauses, else_result } => Expression::Case {
+            operand: operand
+                .as_ref()
+                .map(|op| Box::new(resolve_where_expression_with_schema_ref(op, select_list, schema))),
+            when_clauses: when_clauses
+                .iter()
+                .map(|clause| vibesql_ast::CaseWhen {
+                    conditions: clause
+                        .conditions
+                        .iter()
+                        .map(|cond| resolve_where_expression_with_schema_ref(cond, select_list, schema))
+                        .collect(),
+                    result: resolve_where_expression_with_schema_ref(&clause.result, select_list, schema),
+                })
+                .collect(),
+            else_result: else_result
+                .as_ref()
+                .map(|e| Box::new(resolve_where_expression_with_schema_ref(e, select_list, schema))),
+        },
+
+        // IS NULL / IS NOT NULL
+        Expression::IsNull { expr: inner, negated } => Expression::IsNull {
+            expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
+            negated: *negated,
+        },
+
+        // IS DISTINCT FROM
+        Expression::IsDistinctFrom { left, right, negated } => Expression::IsDistinctFrom {
+            left: Box::new(resolve_where_expression_with_schema_ref(left, select_list, schema)),
+            right: Box::new(resolve_where_expression_with_schema_ref(right, select_list, schema)),
+            negated: *negated,
+        },
+
+        // IS TRUE / IS FALSE / IS UNKNOWN
+        Expression::IsTruthValue { expr: inner, truth_value, negated } => Expression::IsTruthValue {
+            expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
+            truth_value: *truth_value,
+            negated: *negated,
+        },
+
+        // IN list
+        Expression::InList { expr: inner, values, negated } => Expression::InList {
+            expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
+            values: values
+                .iter()
+                .map(|v| resolve_where_expression_with_schema_ref(v, select_list, schema))
+                .collect(),
+            negated: *negated,
+        },
+
+        // IN subquery
+        Expression::In { expr: inner, subquery, negated } => Expression::In {
+            expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
+            subquery: subquery.clone(),
+            negated: *negated,
+        },
+
+        // BETWEEN
+        Expression::Between { expr: inner, low, high, negated, symmetric } => Expression::Between {
+            expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
+            low: Box::new(resolve_where_expression_with_schema_ref(low, select_list, schema)),
+            high: Box::new(resolve_where_expression_with_schema_ref(high, select_list, schema)),
+            negated: *negated,
+            symmetric: *symmetric,
+        },
+
+        // LIKE
+        Expression::Like { expr: inner, pattern, negated } => Expression::Like {
+            expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
+            pattern: Box::new(resolve_where_expression_with_schema_ref(pattern, select_list, schema)),
+            negated: *negated,
+        },
+
+        // GLOB
+        Expression::Glob { expr: inner, pattern, negated } => Expression::Glob {
+            expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
+            pattern: Box::new(resolve_where_expression_with_schema_ref(pattern, select_list, schema)),
+            negated: *negated,
+        },
+
+        // CAST
+        Expression::Cast { expr: inner, data_type } => Expression::Cast {
+            expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
+            data_type: data_type.clone(),
+        },
+
+        // Conjunction / Disjunction
+        Expression::Conjunction(children) => Expression::Conjunction(
+            children
+                .iter()
+                .map(|c| resolve_where_expression_with_schema_ref(c, select_list, schema))
+                .collect(),
+        ),
+        Expression::Disjunction(children) => Expression::Disjunction(
+            children
+                .iter()
+                .map(|c| resolve_where_expression_with_schema_ref(c, select_list, schema))
+                .collect(),
+        ),
+
+        // Aggregate functions
+        Expression::AggregateFunction { name, args, distinct, order_by, filter } => {
+            Expression::AggregateFunction {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| resolve_where_expression_with_schema_ref(arg, select_list, schema))
+                    .collect(),
+                distinct: *distinct,
+                order_by: order_by.as_ref().map(|items| {
+                    items
+                        .iter()
+                        .map(|item| vibesql_ast::OrderByItem {
+                            expr: resolve_where_expression_with_schema_ref(&item.expr, select_list, schema),
+                            direction: item.direction.clone(),
+                            nulls_order: item.nulls_order,
+                        })
+                        .collect()
+                }),
+                filter: filter
+                    .as_ref()
+                    .map(|f| Box::new(resolve_where_expression_with_schema_ref(f, select_list, schema))),
+            }
+        }
+
+        // RowValueConstructor
+        Expression::RowValueConstructor(children) => Expression::RowValueConstructor(
+            children
+                .iter()
+                .map(|c| resolve_where_expression_with_schema_ref(c, select_list, schema))
+                .collect(),
+        ),
+
+        // Collate
+        Expression::Collate { expr, collation } => Expression::Collate {
+            expr: Box::new(resolve_where_expression_with_schema_ref(expr, select_list, schema)),
+            collation: collation.clone(),
+        },
+
+        // For all other expressions that don't need alias resolution, just clone
+        _ => expr.clone(),
+    }
+}
+
+/// Recursively resolve alias references in a WHERE clause expression (legacy version).
+/// Uses a pre-built HashSet of column names. Kept for backward compatibility with
+/// resolve_where_aliases() which doesn't have a schema reference.
 fn resolve_where_expression_with_schema(
     expr: &vibesql_ast::Expression,
     select_list: &[vibesql_ast::SelectItem],

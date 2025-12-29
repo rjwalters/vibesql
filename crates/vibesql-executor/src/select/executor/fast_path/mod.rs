@@ -117,25 +117,32 @@ impl SelectExecutor<'_> {
         // Resolve SELECT aliases in WHERE clause BEFORE any processing (SQLite extension)
         // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
         // NOTE: Table column names take precedence over aliases (SQLite behavior)
-        let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
-            // Build schema for the single table
-            // catalog.get_table returns &TableSchema, not &Table
-            if let Some(table_schema) = self.database.catalog.get_table(table_name) {
-                let effective_name = alias.map(|a| a.as_str()).unwrap_or(table_name);
-                let schema = crate::schema::CombinedSchema::from_table(
-                    effective_name.to_string(),
-                    table_schema.clone(),
-                );
-                crate::select::order::resolve_where_aliases_with_schema(
-                    where_expr,
-                    &stmt.select_list,
-                    &schema,
-                )
-            } else {
-                // Fallback if schema not found (shouldn't happen in fast path)
-                crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
-            }
-        });
+        // PERFORMANCE: Skip alias resolution if no aliases exist (common case in OLTP)
+        let resolved_where = if stmt.where_clause.is_some()
+            && crate::select::order::select_list_has_aliases(&stmt.select_list)
+        {
+            stmt.where_clause.as_ref().map(|where_expr| {
+                // Build schema for the single table
+                // catalog.get_table returns &TableSchema, not &Table
+                if let Some(table_schema) = self.database.catalog.get_table(table_name) {
+                    let effective_name = alias.map(|a| a.as_str()).unwrap_or(table_name);
+                    let schema = crate::schema::CombinedSchema::from_table(
+                        effective_name.to_string(),
+                        table_schema.clone(),
+                    );
+                    crate::select::order::resolve_where_aliases_with_schema(
+                        where_expr,
+                        &stmt.select_list,
+                        &schema,
+                    )
+                } else {
+                    // Fallback if schema not found (shouldn't happen in fast path)
+                    crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+                }
+            })
+        } else {
+            stmt.where_clause.clone()
+        };
 
         // Try ultra-fast PK lookup path first
         if let Some(result) = self.try_pk_lookup_fast(table_name, alias, stmt)? {

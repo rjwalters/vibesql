@@ -391,6 +391,28 @@ impl CombinedSchema {
         false
     }
 
+    /// Check if any table in this schema has a column with the given name.
+    ///
+    /// This is a faster alternative to building a HashSet of all column names
+    /// for cases where we just need to check if a column exists.
+    /// Used for WHERE clause alias resolution (SQLite compatibility).
+    ///
+    /// # Arguments
+    /// * `column` - The column name (case-insensitive)
+    ///
+    /// # Returns
+    /// `true` if any table in the schema has a column matching this name
+    #[inline]
+    pub fn has_column(&self, column: &str) -> bool {
+        // Case-insensitive search through all tables
+        for (_start_index, schema) in self.table_schemas.values() {
+            if schema.get_column_index(column).is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Validate that a qualified column reference is not ambiguous.
     ///
     /// This checks if the table identifier appears more than once in the FROM clause,

@@ -221,6 +221,16 @@ impl DeleteExecutor {
             .get_table(table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
+        // Execute CTEs if present (WITH clause support)
+        let cte_results = if let Some(ref cte_list) = stmt.with_clause {
+            Some(crate::select::cte::execute_ctes(cte_list, |cte_query, prior_ctes| {
+                let cte_executor = crate::SelectExecutor::new_with_cte(database, prior_ctes);
+                cte_executor.execute(cte_query)
+            })?)
+        } else {
+            None
+        };
+
         // Create evaluator with database reference for subquery support (EXISTS, NOT EXISTS, IN
         // with subquery, etc.) and optional procedural/trigger context for variable resolution
         let evaluator = if let Some(ctx) = trigger_context {
@@ -228,6 +238,9 @@ impl DeleteExecutor {
             ExpressionEvaluator::with_trigger_context(&schema, database, ctx)
         } else if let Some(ctx) = procedural_context {
             ExpressionEvaluator::with_procedural_context(&schema, database, ctx)
+        } else if let Some(ref cte_ctx) = cte_results {
+            // Use CTE context for WITH clause support
+            ExpressionEvaluator::with_database_and_cte(&schema, database, cte_ctx)
         } else {
             ExpressionEvaluator::with_database(&schema, database)
         };

@@ -639,6 +639,9 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     /// Convert an arena UpdateStmt to an owned UpdateStmt.
     pub fn convert_update(&self, stmt: &arena_dml::UpdateStmt<'arena>) -> UpdateStmt {
         UpdateStmt {
+            with_clause: stmt.with_clause.as_ref().map(|ctes| {
+                ctes.iter().map(|cte| self.convert_cte(cte)).collect()
+            }),
             table_name: self.resolve(stmt.table_name),
             quoted: stmt.quoted,
             alias: stmt.alias.map(|a| self.resolve(a)),
@@ -662,6 +665,9 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     /// Convert an arena DeleteStmt to an owned DeleteStmt.
     pub fn convert_delete(&self, stmt: &arena_dml::DeleteStmt<'arena>) -> DeleteStmt {
         DeleteStmt {
+            with_clause: stmt.with_clause.as_ref().map(|ctes| {
+                ctes.iter().map(|cte| self.convert_cte(cte)).collect()
+            }),
             only: stmt.only,
             table_name: self.resolve(stmt.table_name),
             quoted: stmt.quoted,

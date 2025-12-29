@@ -324,23 +324,30 @@ impl SelectExecutor<'_> {
         // table column names with aggregate aliases (SQLite behavior)
         // Example: SELECT COUNT(*) AS col1 FROM tab0 WHERE col1 > 0
         // Here 'col1' in WHERE refers to the TABLE COLUMN, not the COUNT(*) alias
-        let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
-            // Try to build early schema from FROM clause
-            if let Some(from_clause) = &stmt.from {
-                if let Some(early_schema) =
-                    super::aggregation::build_early_schema(from_clause, self.database)
-                {
-                    // Use schema-aware resolution
-                    return crate::select::order::resolve_where_aliases_with_schema(
-                        where_expr,
-                        &stmt.select_list,
-                        &early_schema,
-                    );
+        // PERFORMANCE: Skip alias resolution if no aliases exist (common case in OLTP)
+        let resolved_where = if stmt.where_clause.is_some()
+            && crate::select::order::select_list_has_aliases(&stmt.select_list)
+        {
+            stmt.where_clause.as_ref().map(|where_expr| {
+                // Try to build early schema from FROM clause
+                if let Some(from_clause) = &stmt.from {
+                    if let Some(early_schema) =
+                        super::aggregation::build_early_schema(from_clause, self.database)
+                    {
+                        // Use schema-aware resolution
+                        return crate::select::order::resolve_where_aliases_with_schema(
+                            where_expr,
+                            &stmt.select_list,
+                            &early_schema,
+                        );
+                    }
                 }
-            }
-            // Fall back to non-schema-aware resolution for complex FROM clauses
-            crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
-        });
+                // Fall back to non-schema-aware resolution for complex FROM clauses
+                crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+            })
+        } else {
+            stmt.where_clause.clone()
+        };
 
         // First, get the FROM result to access the schema
         let from_result = if let Some(from_clause) = &stmt.from {
@@ -413,23 +420,30 @@ impl SelectExecutor<'_> {
         // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
         // IMPORTANT: Use schema-aware resolution to avoid incorrectly substituting
         // table column names with aggregate aliases (SQLite behavior)
-        let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
-            // Try to build early schema from FROM clause
-            if let Some(from_clause) = &stmt.from {
-                if let Some(early_schema) =
-                    super::aggregation::build_early_schema(from_clause, self.database)
-                {
-                    // Use schema-aware resolution
-                    return crate::select::order::resolve_where_aliases_with_schema(
-                        where_expr,
-                        &stmt.select_list,
-                        &early_schema,
-                    );
+        // PERFORMANCE: Skip alias resolution if no aliases exist (common case in OLTP)
+        let resolved_where = if stmt.where_clause.is_some()
+            && crate::select::order::select_list_has_aliases(&stmt.select_list)
+        {
+            stmt.where_clause.as_ref().map(|where_expr| {
+                // Try to build early schema from FROM clause
+                if let Some(from_clause) = &stmt.from {
+                    if let Some(early_schema) =
+                        super::aggregation::build_early_schema(from_clause, self.database)
+                    {
+                        // Use schema-aware resolution
+                        return crate::select::order::resolve_where_aliases_with_schema(
+                            where_expr,
+                            &stmt.select_list,
+                            &early_schema,
+                        );
+                    }
                 }
-            }
-            // Fall back to non-schema-aware resolution for complex FROM clauses
-            crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
-        });
+                // Fall back to non-schema-aware resolution for complex FROM clauses
+                crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+            })
+        } else {
+            stmt.where_clause.clone()
+        };
 
         // Execute the FROM clause to get combined schema
         let from_result = if let Some(from_clause) = &stmt.from {
@@ -929,13 +943,18 @@ impl SelectExecutor<'_> {
         // table column names with aggregate aliases (issue #4XXX)
         // Example: SELECT COUNT(*) AS col1 FROM tab0 WHERE col1 > 0
         // Here 'col1' in WHERE refers to the TABLE COLUMN, not the COUNT(*) alias
-        let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
-            crate::select::order::resolve_where_aliases_with_schema(
-                where_expr,
-                &stmt.select_list,
-                &from_result.schema,
-            )
-        });
+        // PERFORMANCE: Skip alias resolution if no aliases exist (common case in OLTP)
+        let resolved_where = if crate::select::order::select_list_has_aliases(&stmt.select_list) {
+            stmt.where_clause.as_ref().map(|where_expr| {
+                crate::select::order::resolve_where_aliases_with_schema(
+                    where_expr,
+                    &stmt.select_list,
+                    &from_result.schema,
+                )
+            })
+        } else {
+            stmt.where_clause.clone()
+        };
 
         // Stage 1: Filter (WHERE clause)
         let filtered = match pipeline.apply_filter(input, resolved_where.as_ref(), &exec_ctx) {
@@ -1109,21 +1128,28 @@ impl SelectExecutor<'_> {
             // The alias 'x' is resolved to 'f1-22' so predicate pushdown can work correctly
             // IMPORTANT: Use schema-aware resolution to avoid incorrectly substituting
             // table column names with aggregate aliases (SQLite behavior)
-            let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
-                // Try to build early schema from FROM clause
-                if let Some(early_schema) =
-                    super::aggregation::build_early_schema(from_clause, self.database)
-                {
-                    // Use schema-aware resolution
-                    return crate::select::order::resolve_where_aliases_with_schema(
-                        where_expr,
-                        &stmt.select_list,
-                        &early_schema,
-                    );
-                }
-                // Fall back to non-schema-aware resolution for complex FROM clauses
-                crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
-            });
+            // PERFORMANCE: Skip alias resolution if no aliases exist (common case in OLTP)
+            let resolved_where = if stmt.where_clause.is_some()
+                && crate::select::order::select_list_has_aliases(&stmt.select_list)
+            {
+                stmt.where_clause.as_ref().map(|where_expr| {
+                    // Try to build early schema from FROM clause
+                    if let Some(early_schema) =
+                        super::aggregation::build_early_schema(from_clause, self.database)
+                    {
+                        // Use schema-aware resolution
+                        return crate::select::order::resolve_where_aliases_with_schema(
+                            where_expr,
+                            &stmt.select_list,
+                            &early_schema,
+                        );
+                    }
+                    // Fall back to non-schema-aware resolution for complex FROM clauses
+                    crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+                })
+            } else {
+                stmt.where_clause.clone()
+            };
 
             // Pass WHERE, ORDER BY, and LIMIT to execute_from for optimization
             // LIMIT enables early termination when ORDER BY is satisfied by index (#3253)

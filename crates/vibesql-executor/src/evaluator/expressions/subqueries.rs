@@ -56,8 +56,12 @@ impl ExpressionEvaluator<'_> {
             } else {
                 // Cache miss - execute and cache
                 // IMPORTANT: Propagate depth to prevent bypassing MAX_EXPRESSION_DEPTH
-                let select_executor =
-                    crate::select::SelectExecutor::new_with_depth(database, self.depth);
+                // Use CTE context if available for WITH clause support in UPDATE/DELETE
+                let select_executor = if let Some(cte_ctx) = self.cte_context {
+                    crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+                } else {
+                    crate::select::SelectExecutor::new_with_depth(database, self.depth)
+                };
                 let rows = select_executor.execute(subquery)?;
 
                 // Cache the result
@@ -66,12 +70,17 @@ impl ExpressionEvaluator<'_> {
             }
         } else {
             // Correlated subquery - execute with outer context (can't cache)
-            let select_executor = crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                database,
-                row,
-                &outer_combined,
-                self.depth,
-            );
+            // TODO: Add CTE context support for correlated IN subqueries
+            let select_executor = if let Some(cte_ctx) = self.cte_context {
+                crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+            } else {
+                crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                    database,
+                    row,
+                    &outer_combined,
+                    self.depth,
+                )
+            };
             select_executor.execute(subquery)?
         };
 
@@ -182,8 +191,12 @@ impl ExpressionEvaluator<'_> {
                 cached_rows
             } else {
                 // Cache miss - execute and cache
-                let select_executor =
-                    crate::select::SelectExecutor::new_with_depth(database, self.depth);
+                // Use CTE context if available for WITH clause support in UPDATE/DELETE
+                let select_executor = if let Some(cte_ctx) = self.cte_context {
+                    crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+                } else {
+                    crate::select::SelectExecutor::new_with_depth(database, self.depth)
+                };
                 let executed_rows = select_executor.execute(subquery)?;
 
                 // Cache the result
@@ -199,6 +212,8 @@ impl ExpressionEvaluator<'_> {
                     &outer_combined,
                     self.depth,
                 )
+            } else if let Some(cte_ctx) = self.cte_context {
+                crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
             } else {
                 crate::select::SelectExecutor::new(database)
             };
@@ -256,8 +271,12 @@ impl ExpressionEvaluator<'_> {
                 cached_rows
             } else {
                 // Cache miss - execute and cache
-                let select_executor =
-                    crate::select::SelectExecutor::new_with_depth(database, self.depth);
+                // Use CTE context if available for WITH clause support in UPDATE/DELETE
+                let select_executor = if let Some(cte_ctx) = self.cte_context {
+                    crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+                } else {
+                    crate::select::SelectExecutor::new_with_depth(database, self.depth)
+                };
                 let executed_rows = select_executor.execute(subquery)?;
 
                 // Cache the result
@@ -266,7 +285,9 @@ impl ExpressionEvaluator<'_> {
             }
         } else {
             // Correlated subquery - execute with outer context (can't cache)
-            let select_executor = if !outer_combined.table_schemas.is_empty() {
+            let select_executor = if let Some(cte_ctx) = self.cte_context {
+                crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+            } else if !outer_combined.table_schemas.is_empty() {
                 crate::select::SelectExecutor::new_with_outer_context_and_depth(
                     database,
                     row,
@@ -335,8 +356,12 @@ impl ExpressionEvaluator<'_> {
                 cached_rows
             } else {
                 // Cache miss - execute and cache
-                let select_executor =
-                    crate::select::SelectExecutor::new_with_depth(database, self.depth);
+                // Use CTE context if available for WITH clause support in UPDATE/DELETE
+                let select_executor = if let Some(cte_ctx) = self.cte_context {
+                    crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+                } else {
+                    crate::select::SelectExecutor::new_with_depth(database, self.depth)
+                };
                 let executed_rows = select_executor.execute(subquery)?;
 
                 // Cache the result
@@ -345,7 +370,9 @@ impl ExpressionEvaluator<'_> {
             }
         } else {
             // Correlated subquery - execute with outer context (can't cache)
-            let select_executor = if !outer_combined.table_schemas.is_empty() {
+            let select_executor = if let Some(cte_ctx) = self.cte_context {
+                crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+            } else if !outer_combined.table_schemas.is_empty() {
                 crate::select::SelectExecutor::new_with_outer_context_and_depth(
                     database,
                     row,

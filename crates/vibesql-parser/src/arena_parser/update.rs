@@ -110,7 +110,7 @@ impl<'arena> ArenaParser<'arena> {
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
 
-        let stmt = UpdateStmt { table_name, quoted, alias, assignments, where_clause, conflict_clause };
+        let stmt = UpdateStmt { with_clause: None, table_name, quoted, alias, assignments, where_clause, conflict_clause };
 
         Ok(self.arena.alloc(stmt))
     }

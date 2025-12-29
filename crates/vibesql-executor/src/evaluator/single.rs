@@ -19,6 +19,8 @@ pub struct ExpressionEvaluator<'a> {
     pub(super) trigger_context: Option<&'a crate::trigger_execution::TriggerContext<'a>>,
     /// Procedural context for stored procedure/function variable resolution
     pub(super) procedural_context: Option<&'a crate::procedural::ExecutionContext>,
+    /// CTE context for WITH clause support in UPDATE/DELETE subqueries
+    pub(super) cte_context: Option<&'a std::collections::HashMap<String, crate::select::cte::CteResult>>,
     /// Current depth in expression tree (for preventing stack overflow)
     pub(super) depth: usize,
     /// CSE cache for common sub-expression elimination with LRU eviction (shared via Rc across
@@ -47,6 +49,7 @@ impl<'a> ExpressionEvaluator<'a> {
             database: None,
             trigger_context: None,
             procedural_context: None,
+            cte_context: None,
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
@@ -69,6 +72,7 @@ impl<'a> ExpressionEvaluator<'a> {
             database: None,
             trigger_context: None,
             procedural_context: None,
+            cte_context: None,
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
@@ -90,6 +94,7 @@ impl<'a> ExpressionEvaluator<'a> {
             database: Some(database),
             trigger_context: None,
             procedural_context: None,
+            cte_context: None,
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
@@ -112,6 +117,7 @@ impl<'a> ExpressionEvaluator<'a> {
             database: Some(database),
             trigger_context: Some(trigger_context),
             procedural_context: None,
+            cte_context: None,
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
@@ -136,6 +142,7 @@ impl<'a> ExpressionEvaluator<'a> {
             database: Some(database),
             trigger_context: None,
             procedural_context: None,
+            cte_context: None,
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
@@ -159,6 +166,31 @@ impl<'a> ExpressionEvaluator<'a> {
             database: Some(database),
             trigger_context: None,
             procedural_context: Some(procedural_context),
+            cte_context: None,
+            depth: 0,
+            cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
+            enable_cse: super::caching::is_cse_enabled(),
+            subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
+            row_index: None,
+            table_alias: None,
+        }
+    }
+
+    /// Create a new expression evaluator with database and CTE context
+    /// Used for UPDATE/DELETE statements with WITH clauses
+    pub fn with_database_and_cte(
+        schema: &'a vibesql_catalog::TableSchema,
+        database: &'a vibesql_storage::Database,
+        cte_context: &'a std::collections::HashMap<String, crate::select::cte::CteResult>,
+    ) -> Self {
+        ExpressionEvaluator {
+            schema,
+            outer_row: None,
+            outer_schema: None,
+            database: Some(database),
+            trigger_context: None,
+            procedural_context: None,
+            cte_context: Some(cte_context),
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
@@ -268,6 +300,7 @@ impl<'a> ExpressionEvaluator<'a> {
             database: self.database,
             trigger_context: self.trigger_context,
             procedural_context: self.procedural_context,
+            cte_context: self.cte_context,
             depth: self.depth + 1,
             cse_cache: self.cse_cache.clone(),
             enable_cse: self.enable_cse,

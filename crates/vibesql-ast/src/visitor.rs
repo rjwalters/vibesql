@@ -1289,6 +1289,17 @@ pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertSt
 /// Transform an UPDATE statement
 pub fn transform_update<V: ExpressionMutVisitor>(visitor: &mut V, stmt: UpdateStmt) -> UpdateStmt {
     UpdateStmt {
+        with_clause: stmt.with_clause.map(|ctes| {
+            ctes.into_iter()
+                .map(|cte| crate::CommonTableExpr {
+                    name: cte.name,
+                    columns: cte.columns,
+                    query: Box::new(transform_select(visitor, *cte.query)),
+                    recursive: cte.recursive,
+                    materialization: cte.materialization,
+                })
+                .collect()
+        }),
         table_name: stmt.table_name,
         quoted: stmt.quoted,
         alias: stmt.alias,
@@ -1310,6 +1321,17 @@ pub fn transform_update<V: ExpressionMutVisitor>(visitor: &mut V, stmt: UpdateSt
 /// Transform a DELETE statement
 pub fn transform_delete<V: ExpressionMutVisitor>(visitor: &mut V, stmt: DeleteStmt) -> DeleteStmt {
     DeleteStmt {
+        with_clause: stmt.with_clause.map(|ctes| {
+            ctes.into_iter()
+                .map(|cte| crate::CommonTableExpr {
+                    name: cte.name,
+                    columns: cte.columns,
+                    query: Box::new(transform_select(visitor, *cte.query)),
+                    recursive: cte.recursive,
+                    materialization: cte.materialization,
+                })
+                .collect()
+        }),
         only: stmt.only,
         table_name: stmt.table_name,
         quoted: stmt.quoted,
