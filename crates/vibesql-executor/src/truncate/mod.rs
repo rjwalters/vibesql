@@ -51,6 +51,7 @@ impl TruncateTableExecutor {
     /// let mut db = Database::new();
     /// let create_stmt = CreateTableStmt {
     ///     if_not_exists: false,
+    ///     temporary: false,
     ///     table_name: "users".to_string(),
     ///     columns: vec![ColumnDef {
     ///         name: "id".to_string(),

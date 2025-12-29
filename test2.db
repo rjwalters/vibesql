@@ -1,0 +1,20 @@
+-- VibeSQL Database Dump
+-- Generated: 2025-12-29 23:00:57.197861 UTC
+--
+
+-- Schemas
+
+-- Roles
+
+-- Tables and Data
+CREATE TABLE t42 (d INTEGER NOT NULL, e INTEGER, PRIMARY KEY (d));
+
+CREATE TABLE t43 (f INTEGER NOT NULL, g INTEGER, PRIMARY KEY (f));
+
+CREATE TABLE t41 (a INTEGER NOT NULL, b INTEGER, PRIMARY KEY (a));
+
+-- Indexes
+
+-- Views
+
+-- End of dump

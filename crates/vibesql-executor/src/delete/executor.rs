@@ -71,6 +71,7 @@ impl DeleteExecutor {
     ///
     /// // Delete specific row
     /// let stmt = DeleteStmt {
+    ///     with_clause: None,
     ///     only: false,
     ///     table_name: "users".to_string(),
     ///     quoted: false,

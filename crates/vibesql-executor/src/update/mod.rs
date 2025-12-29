@@ -82,6 +82,7 @@ impl UpdateExecutor {
     ///
     /// // Update salary
     /// let stmt = UpdateStmt {
+    ///     with_clause: None,
     ///     table_name: "employees".to_string(),
     ///     quoted: false,
     ///     alias: None,
