@@ -253,12 +253,26 @@ Dot-commands (SQLite-style):
 /// Check if a SQL statement is a modification (DDL/DML) that should trigger auto-save
 fn is_modification_statement(sql: &str) -> bool {
     let upper = sql.trim().to_uppercase();
-    upper.starts_with("CREATE ")
+    // Direct DDL/DML statements
+    if upper.starts_with("CREATE ")
         || upper.starts_with("DROP ")
         || upper.starts_with("ALTER ")
         || upper.starts_with("INSERT ")
         || upper.starts_with("UPDATE ")
         || upper.starts_with("DELETE ")
+    {
+        return true;
+    }
+    // CTEs (WITH clause) containing DML statements
+    // e.g., WITH RECURSIVE ... INSERT INTO ... SELECT ...
+    if upper.starts_with("WITH ") {
+        // Check if the CTE contains INSERT, UPDATE, or DELETE after the WITH clause
+        // Look for these keywords that aren't inside the CTE definition
+        if upper.contains(" INSERT ") || upper.contains(" UPDATE ") || upper.contains(" DELETE ") {
+            return true;
+        }
+    }
+    false
 }
 
 /// Parse SQL script into individual statements
