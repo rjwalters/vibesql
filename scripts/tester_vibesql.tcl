@@ -1912,6 +1912,14 @@ proc do_realnum_test {name script expected} {
     do_test $name $script $expected
 }
 
+proc do_vmstep_test {name sql limit expected} {
+    # SQLite virtual machine step test
+    # In SQLite, this tests that a query completes within a certain number of VM steps
+    # Since VibeSQL doesn't track VM steps, we just run the SQL and check the expected result
+    # The 'limit' parameter (step count) is ignored
+    do_execsql_test $name $sql $expected
+}
+
 proc normalize_result {val} {
     # Normalize result for comparison
     # Convert to string and normalize whitespace
@@ -2483,6 +2491,19 @@ proc testvfs {args} {
 proc faultsim_save_and_close {} {
     # Fault simulation save and close - ignore
     return
+}
+
+proc clang_sanitize_address {} {
+    # Check if running under Clang address sanitizer
+    # Always return 0 since VibeSQL isn't typically compiled with ASAN
+    return 0
+}
+
+proc atomic_batch_write {filename} {
+    # SQLite atomic batch write capability check
+    # Returns 1 if the file supports atomic batch writes, 0 otherwise
+    # We return 0 since this is an SQLite-specific optimization
+    return 0
 }
 
 proc sqlite3_rekey {args} {
