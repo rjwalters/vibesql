@@ -135,7 +135,7 @@ pub(super) fn eval_scalar_function(
         "RANDOM" => sqlite_compat::random(args),
         "RANDOMBLOB" => sqlite_compat::randomblob(args),
         "HEX" => sqlite_compat::hex(args),
-        "MD5SUM" => sqlite_compat::md5sum(args),
+        // MD5SUM is now an aggregate function, not a scalar function
         "UNHEX" => sqlite_compat::unhex(args),
         "ZEROBLOB" => sqlite_compat::zeroblob(args),
         "UNICODE" => sqlite_compat::unicode(args),

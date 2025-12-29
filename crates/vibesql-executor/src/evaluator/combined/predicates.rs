@@ -70,10 +70,16 @@ impl CombinedExpressionEvaluator<'_> {
 
         // Apply SQLite type affinity rules for BETWEEN comparisons
         // TEXT column vs INTEGER literal → convert INTEGER to TEXT, string compare
-        let (expr_val, mut low_val) =
-            self.apply_affinity_for_comparison(expr, expr_val, low, low_val);
-        let (expr_val, mut high_val) =
-            self.apply_affinity_for_comparison(expr, expr_val, high, high_val);
+        //
+        // IMPORTANT: Apply affinity transformations independently for each comparison.
+        // The expr value may be transformed differently when compared to low vs high.
+        // Example: '-1' BETWEEN 0 AND col where col is INTEGER:
+        //   - For '-1' >= 0: string vs integer → use type ordering (TEXT > INTEGER → TRUE)
+        //   - For '-1' <= col: string vs INTEGER column → coerce '-1' to -1 → -1 <= col
+        let (expr_val_for_low, mut low_val) =
+            self.apply_affinity_for_comparison(expr, expr_val.clone(), low, low_val);
+        let (expr_val_for_high, mut high_val) =
+            self.apply_affinity_for_comparison(expr, expr_val.clone(), high, high_val);
 
         // Check if bounds are reversed (low > high)
         let gt_result = ExpressionEvaluator::eval_binary_op_static(
@@ -105,7 +111,7 @@ impl CombinedExpressionEvaluator<'_> {
 
         // Check if expr >= low
         let ge_low = ExpressionEvaluator::eval_binary_op_static(
-            &expr_val,
+            &expr_val_for_low,
             &vibesql_ast::BinaryOperator::GreaterThanOrEqual,
             &low_val,
             sql_mode.clone(),
@@ -113,7 +119,7 @@ impl CombinedExpressionEvaluator<'_> {
 
         // Check if expr <= high
         let le_high = ExpressionEvaluator::eval_binary_op_static(
-            &expr_val,
+            &expr_val_for_high,
             &vibesql_ast::BinaryOperator::LessThanOrEqual,
             &high_val,
             sql_mode.clone(),
@@ -123,13 +129,13 @@ impl CombinedExpressionEvaluator<'_> {
         if negated {
             // NOT BETWEEN: expr < low OR expr > high
             let lt_low = ExpressionEvaluator::eval_binary_op_static(
-                &expr_val,
+                &expr_val_for_low,
                 &vibesql_ast::BinaryOperator::LessThan,
                 &low_val,
                 sql_mode.clone(),
             )?;
             let gt_high = ExpressionEvaluator::eval_binary_op_static(
-                &expr_val,
+                &expr_val_for_high,
                 &vibesql_ast::BinaryOperator::GreaterThan,
                 &high_val,
                 sql_mode.clone(),

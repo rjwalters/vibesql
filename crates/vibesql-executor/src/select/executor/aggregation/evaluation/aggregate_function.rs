@@ -459,6 +459,44 @@ pub(super) fn evaluate(
         return Ok(result);
     }
 
+    // Handle MD5SUM with multiple arguments
+    // md5sum(col, lit1, lit2, ...) concatenates all arguments for each row,
+    // then concatenates all rows, and computes MD5 of the final string
+    if name_upper == "MD5SUM" && args.len() > 1 {
+        let mut acc = AggregateAccumulator::new(name.canonical(), distinct)?;
+
+        for row in group_rows {
+            evaluator.clear_cse_cache();
+
+            // Skip rows that don't pass the FILTER condition
+            if !passes_filter(row, evaluator)? {
+                continue;
+            }
+
+            // Evaluate all arguments and concatenate them for this row
+            let mut row_value = String::new();
+            for arg in args {
+                let value = evaluator.eval(arg, row)?;
+                // Convert value to string representation
+                let str_val = match &value {
+                    vibesql_types::SqlValue::Null => String::new(), // NULL becomes empty
+                    vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                        s.to_string()
+                    }
+                    other => other.to_string(),
+                };
+                row_value.push_str(&str_val);
+            }
+
+            // Accumulate the concatenated row value
+            acc.accumulate(&vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(row_value)));
+        }
+
+        let result = acc.finalize()?;
+        executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
+        return Ok(result);
+    }
+
     // Regular aggregate - evaluate single argument for each row
     // This should be caught by validate_aggregate_args above, but keep as safety net
     if args.len() != 1 {

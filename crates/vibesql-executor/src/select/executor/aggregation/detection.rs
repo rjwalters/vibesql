@@ -29,7 +29,8 @@ impl SelectExecutor<'_> {
                 let name_upper = name.to_uppercase();
                 // Check if this is an aggregate function name
                 let is_aggregate = match name_upper.as_str() {
-                    "COUNT" | "SUM" | "AVG" => true,
+                    "COUNT" | "SUM" | "AVG" | "TOTAL" | "GROUP_CONCAT" | "STRING_AGG"
+                    | "JSON_GROUP_ARRAY" | "MD5SUM" => true,
                     "MIN" | "MAX" => args.len() <= 1, // multi-arg min/max are scalar functions
                     _ => false,
                 };

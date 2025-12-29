@@ -296,47 +296,6 @@ pub(super) fn hex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     Ok(SqlValue::Varchar(hex_string.into()))
 }
 
-/// MD5SUM(x) - Return MD5 hash of x as lowercase hexadecimal string
-///
-/// This is a SQLite test extension function used extensively in the TCL test suite.
-/// Returns the MD5 hash of the input as a 32-character lowercase hexadecimal string.
-/// Returns NULL if the input is NULL.
-pub(super) fn md5sum(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
-    use md5::{Digest, Md5};
-
-    if args.is_empty() {
-        return Err(ExecutorError::UnsupportedFeature(
-            "MD5SUM requires at least 1 argument".to_string(),
-        ));
-    }
-
-    // SQLite's md5sum concatenates all arguments before hashing
-    let mut hasher = Md5::new();
-    for arg in args {
-        match arg {
-            SqlValue::Null => {
-                // If any argument is NULL, include "NULL" in the hash
-                hasher.update(b"NULL");
-            }
-            SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                hasher.update(s.as_bytes());
-            }
-            SqlValue::Blob(bytes) => {
-                hasher.update(bytes);
-            }
-            _ => {
-                // Convert other types to string
-                hasher.update(arg.to_string().as_bytes());
-            }
-        }
-    }
-
-    let result = hasher.finalize();
-    let hex_string = format!("{:x}", result);
-
-    Ok(SqlValue::Varchar(hex_string.into()))
-}
-
 /// UNHEX(x) - Convert hexadecimal string to blob
 ///
 /// Returns a blob containing the binary data represented by the hexadecimal string.

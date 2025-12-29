@@ -66,6 +66,12 @@ pub enum AggregateAccumulator {
         distinct: bool,
         seen: Option<HashSet<vibesql_types::SqlValue>>,
     },
+    /// MD5SUM - Compute MD5 hash of concatenated values (SQLite TCL test compatible)
+    Md5sum {
+        values: Vec<String>,
+        distinct: bool,
+        seen: Option<HashSet<String>>,
+    },
 }
 
 impl AggregateAccumulator {
@@ -113,6 +119,11 @@ impl AggregateAccumulator {
             "JSON_GROUP_ARRAY" => {
                 Ok(AggregateAccumulator::JsonGroupArray { values: Vec::new(), distinct, seen })
             }
+            "MD5SUM" => Ok(AggregateAccumulator::Md5sum {
+                values: Vec::new(),
+                distinct,
+                seen: if distinct { Some(HashSet::new()) } else { None },
+            }),
             _ => Err(crate::errors::ExecutorError::UnsupportedExpression(format!(
                 "Unknown aggregate function: {}",
                 function_name
@@ -342,6 +353,24 @@ impl AggregateAccumulator {
                     values.push(value.clone());
                 }
             }
+
+            // MD5SUM - collects string values for MD5 hashing (like GROUP_CONCAT)
+            AggregateAccumulator::Md5sum { ref mut values, distinct, seen } => {
+                // Skip NULL values like GROUP_CONCAT
+                if value.is_null() {
+                    return;
+                }
+                let str_value = sql_value_to_string(value);
+                if *distinct {
+                    let seen_set = seen.as_mut().unwrap();
+                    if !seen_set.contains(&str_value) {
+                        seen_set.insert(str_value.clone());
+                        values.push(str_value);
+                    }
+                } else {
+                    values.push(str_value);
+                }
+            }
         }
     }
 
@@ -447,6 +476,16 @@ impl AggregateAccumulator {
                 // Convert values to JSON array string
                 let json_array = sql_values_to_json_array(values);
                 Ok(vibesql_types::SqlValue::Varchar(json_array.into()))
+            }
+            AggregateAccumulator::Md5sum { values, .. } => {
+                use md5::{Digest, Md5};
+                // Concatenate all values and compute MD5
+                let concatenated = values.join("");
+                let mut hasher = Md5::new();
+                hasher.update(concatenated.as_bytes());
+                let result = hasher.finalize();
+                let hash = format!("{:x}", result);
+                Ok(vibesql_types::SqlValue::Varchar(hash.into()))
             }
         }
     }
@@ -714,6 +753,32 @@ impl AggregateAccumulator {
                     }
                 } else {
                     *s1 += s2;
+                }
+            }
+
+            // MD5SUM: Merge value lists
+            (
+                AggregateAccumulator::Md5sum { values: v1, distinct: d1, seen: seen1 },
+                AggregateAccumulator::Md5sum { values: v2, distinct: d2, seen: seen2 },
+            ) => {
+                if *d1 != d2 {
+                    return Err(crate::errors::ExecutorError::UnsupportedExpression(
+                        "Cannot combine MD5SUM with different DISTINCT flags".into(),
+                    ));
+                }
+
+                if *d1 {
+                    // DISTINCT: Merge seen sets
+                    if let (Some(s1_set), Some(_s2_set)) = (seen1, seen2) {
+                        for val in v2 {
+                            if !s1_set.contains(&val) {
+                                s1_set.insert(val.clone());
+                                v1.push(val);
+                            }
+                        }
+                    }
+                } else {
+                    v1.extend(v2);
                 }
             }
 
