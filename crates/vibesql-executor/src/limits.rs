@@ -31,7 +31,10 @@
 /// - Arithmetic expressions
 /// - Function calls
 /// - Boolean logic (AND/OR chains)
-pub const MAX_EXPRESSION_DEPTH: usize = 200;
+///
+/// SQLite uses 1000 for SQLITE_MAX_EXPR_DEPTH by default.
+/// We match this value for better compatibility.
+pub const MAX_EXPRESSION_DEPTH: usize = 1000;
 
 /// Maximum number of compound SELECT terms
 ///

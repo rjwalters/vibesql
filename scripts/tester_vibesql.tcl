@@ -1873,6 +1873,7 @@ proc ifcapable {args} {
     # Handle various forms of ifcapable:
     # ifcapable cap script
     # ifcapable cap { script }
+    # ifcapable cap { script } else { else_script }
     # ifcapable !cap script  (negated capability)
     if {[llength $args] < 2} {
         error "wrong # args: should be \"ifcapable capability script\""
@@ -1880,8 +1881,14 @@ proc ifcapable {args} {
     set capability [lindex $args 0]
     set script [lindex $args 1]
 
+    # Handle optional else clause
+    set else_script ""
+    if {[llength $args] >= 4 && [lindex $args 2] eq "else"} {
+        set else_script [lindex $args 3]
+    }
+
     # Skip SQLite-specific capabilities that we don't support
-    set skip_caps {wal vacuum_incr stat4 stat3 compound_select tclvar vtab fts3 fts4 fts5 datetime datetime_time datetime_funcs trigger conflict}
+    set skip_caps {wal vacuum_incr stat4 stat3 tclvar vtab fts3 fts4 fts5 datetime datetime_time datetime_funcs trigger conflict}
 
     # Handle negated capabilities (e.g., !floatingpoint)
     set negate 0
@@ -1897,6 +1904,9 @@ proc ifcapable {args} {
     }
 
     if {$should_skip} {
+        if {$else_script ne ""} {
+            uplevel 1 $else_script
+        }
         return
     }
     uplevel 1 $script
