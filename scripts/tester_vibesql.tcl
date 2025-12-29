@@ -929,6 +929,17 @@ proc exec_preserve_newlines {sql db_file} {
     # Clean up temp file
     catch {file delete $tmpfile}
 
+    # RACE CONDITION FIX: Force filesystem sync after database writes.
+    # Without this, rapid sequential vibesql invocations can fail because
+    # the database file may not be fully visible to the next process.
+    # Opening and closing the file in append mode triggers filesystem sync.
+    if {$db_file ne "" && [file exists $db_file]} {
+        catch {
+            set syncfd [open $db_file a]
+            close $syncfd
+        }
+    }
+
     # Check for errors in output (regardless of exit code)
     # vibesql outputs errors starting with "Error"
     if {[regexp {^Error} $result]} {
