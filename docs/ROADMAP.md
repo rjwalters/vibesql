@@ -7,11 +7,11 @@ VibeSQL has achieved **100% SQL:1999 compliance** and **100% SQLLogicTest confor
 | Metric | Status |
 |--------|--------|
 | SQL:1999 Core (sqltest) | 739/739 (100%) |
-| SQLLogicTest | 623/623 files (100%) |
-| Unit tests | 5,500+ |
+| SQLLogicTest | 622/622 files (100%) |
+| Unit tests | 7,000+ |
 | TPC-H | 22/22 queries (100%) |
 | TPC-C | All transactions |
-| TPC-DS | 99/99 queries (100%) |
+| TPC-DS | 102/102 queries (100%) |
 
 See [HISTORY.md](HISTORY.md) for development timeline.
 

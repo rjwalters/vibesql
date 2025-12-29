@@ -65,10 +65,10 @@ This document describes the performance benchmarking strategy for vibesql, inclu
 | Metric                     | vibesql | MySQL  | Notes |
 |----------------------------|---------|--------|-------|
 | SQL:1999 Core Coverage     | 100%    | ~60%   | Full 739/739 sqltest |
-| SQLLogicTest Coverage      | 100%    | N/A    | 623 files, ~5.9M tests |
+| SQLLogicTest Coverage      | 100%    | N/A    | 622 files, ~7.4M tests |
 | TPC-H                      | 22/22   | 22/22  | Decision support |
-| TPC-DS                     | 99/99   | N/A    | Complex analytics |
-| TPC-C                      | 22.5K TPS | N/A  | OLTP mixed workload |
+| TPC-DS                     | 102/102 | N/A    | Complex analytics |
+| TPC-C                      | 10.8K TPS | N/A  | OLTP mixed workload |
 
 **Value**: Shows whether compliance investment affects performance
 

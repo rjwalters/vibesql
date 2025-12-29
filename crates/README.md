@@ -78,7 +78,7 @@ This directory contains all the individual crates that make up the VibeSQL datab
 
 - **`vibesql-sqllogictest/`** - SQL conformance testing
   - SQLLogicTest parser and runner
-  - 623/623 test files passing (100%, ~5.9M tests)
+  - 622/622 test files passing (100%, ~7.4M tests)
   - Validates SQL:1999 compliance
 
 ## Building
@@ -151,8 +151,8 @@ The crates form a layered architecture with clear dependency flow:
 ✅ **Complete and Production-Ready**
 - All core SQL:1999 features implemented
 - 100% sqltest conformance (739/739 mandatory tests)
-- 100% SQLLogicTest coverage (623/623 files, ~5.9M tests)
-- 4,800+ unit tests across all crates
+- 100% SQLLogicTest coverage (622/622 files, ~7.4M tests)
+- 7,000+ unit tests across all crates
 - Comprehensive documentation
 
 ## Publishing to crates.io

@@ -54,7 +54,7 @@ A timeline of major milestones in the development of VibeSQL.
 
 ### December 2025: TPC-DS Full Coverage & Server Enhancements
 
-- Achieved 100% TPC-DS coverage (99/99 queries)
+- Achieved 100% TPC-DS coverage (102/102 queries)
 - Fixed GROUPING() function for ROLLUP/CUBE queries
 - Resolved complex CTE and column resolution issues
 - PostgreSQL wire protocol server with environment variable configuration

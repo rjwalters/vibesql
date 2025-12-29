@@ -36,7 +36,7 @@ Full SQLLogicTest suite benchmark (VibeSQL only)
 
 **Usage:**
 ```bash
-./suite.sh                                    # Run all 623 files
+./suite.sh                                    # Run all 622 files
 ./suite.sh --sample 50                        # Random sample of 50 files
 ./suite.sh --categories "select,random"       # Specific categories
 ```

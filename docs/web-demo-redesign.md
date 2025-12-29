@@ -55,13 +55,13 @@ Redesign the web demo to be a **performance storytelling platform** that communi
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  VibeSQL Performance                                                    │
-│  Tracking correctness and speed across 5.9M tests and TPC benchmarks    │
+│  Tracking correctness and speed across 7.4M tests and TPC benchmarks    │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐  ┌───────────┐ │
 │  │  CORRECTNESS  │  │  TPC-H PASS   │  │  PERFORMANCE  │  │  TREND    │ │
-│  │    99.98%     │  │    20/22      │  │    42ms avg   │  │   ↓ 5%    │ │
-│  │  5.9M tests   │  │   queries     │  │  geo mean     │  │  30 days  │ │
+│  │    100%       │  │    22/22      │  │    28ms avg   │  │   ↓ 5%    │ │
+│  │  7.4M tests   │  │   queries     │  │  geo mean     │  │  30 days  │ │
 │  └───────────────┘  └───────────────┘  └───────────────┘  └───────────┘ │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘

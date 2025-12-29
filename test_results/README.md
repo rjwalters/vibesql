@@ -7,7 +7,7 @@ This directory contains backup snapshots of the VibeSQL test results databases.
 ### SQLLogicTest Results
 - **Format**: `.vbsql` (VibeSQL native) or `.sql` (legacy SQLite)
 - **Contents**: Test file status, run metadata, individual test results
-- **Milestone**: 100% conformance achieved 2025-11-19 (628/628 test files, ~5.9M tests)
+- **Milestone**: 100% conformance achieved 2025-11-19 (622/622 test files, ~7.4M tests)
 
 ### Benchmark Results
 - **Format**: `.db` (SQLite)

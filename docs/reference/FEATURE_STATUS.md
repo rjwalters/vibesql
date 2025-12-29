@@ -102,12 +102,12 @@ This document provides a detailed breakdown of implemented features in VibeSQL a
 
 ## Test Coverage
 
-- **Unit tests**: 5,500+ tests
-- **SQLLogicTest**: 623 files (~5.9M individual tests), 100% pass rate
+- **Unit tests**: 7,000+ tests
+- **SQLLogicTest**: 622 files (~7.4M individual tests), 100% pass rate
 - **SQL:1999 sqltest**: 739/739 (100%)
 - **TPC-H**: 22/22 queries (100%)
 - **TPC-C**: All OLTP transactions
-- **TPC-DS**: 99/99 queries (100%)
+- **TPC-DS**: 102/102 queries (100%)
 
 ## See Also
 
