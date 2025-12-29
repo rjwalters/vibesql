@@ -242,12 +242,14 @@ impl Database {
             }
         };
 
-        // Schemas (excluding default schema)
+        // Schemas (excluding default and temp schemas which are auto-created)
         let schemas = self
             .catalog
             .list_schemas()
             .into_iter()
-            .filter(|name| name != vibesql_catalog::DEFAULT_SCHEMA)
+            .filter(|name| {
+                name != vibesql_catalog::DEFAULT_SCHEMA && name != vibesql_catalog::TEMP_SCHEMA
+            })
             .map(|name| JsonSchema { name })
             .collect();
 
@@ -484,8 +486,14 @@ fn sql_value_to_json(value: &SqlValue) -> serde_json::Value {
 fn json_database_to_db(json_db: JsonDatabase) -> Result<Database, StorageError> {
     let mut db = Database::new();
 
-    // Create schemas
+    // Create schemas (skip auto-created ones like public/temp)
     for schema in json_db.schemas {
+        // Skip schemas that already exist (e.g., temp schema is auto-created)
+        if schema.name == vibesql_catalog::DEFAULT_SCHEMA
+            || schema.name == vibesql_catalog::TEMP_SCHEMA
+        {
+            continue;
+        }
         db.catalog.create_schema(schema.name).map_err(|e: vibesql_catalog::CatalogError| {
             StorageError::CatalogError(e.to_string())
         })?;
