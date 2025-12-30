@@ -54,7 +54,7 @@ fn test_create_insert_statement() {
 
 #[test]
 fn test_create_update_statement() {
-    let stmt = Statement::Update(UpdateStmt { with_clause: None,
+    let stmt = Statement::Update(UpdateStmt {
         with_clause: None,
         table_name: "users".to_string(),
         quoted: false,
@@ -75,7 +75,7 @@ fn test_create_update_statement() {
 
 #[test]
 fn test_create_delete_statement() {
-    let stmt = Statement::Delete(DeleteStmt { with_clause: None,
+    let stmt = Statement::Delete(DeleteStmt {
         with_clause: None,
         only: false,
         table_name: "users".to_string(),
