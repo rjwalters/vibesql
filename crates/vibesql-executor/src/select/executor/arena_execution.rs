@@ -204,15 +204,25 @@ impl SelectExecutor<'_> {
             // Apply WHERE clause filter
             if let Some(where_clause) = &stmt.where_clause {
                 let filter_result = evaluator.eval(where_clause, row)?;
-                match filter_result {
-                    SqlValue::Boolean(true) => {}
-                    SqlValue::Boolean(false) | SqlValue::Null => continue,
-                    _ => {
+                let is_truthy = match filter_result {
+                    SqlValue::Boolean(b) => b,
+                    SqlValue::Null => false,
+                    SqlValue::Integer(n) => n != 0,
+                    SqlValue::Smallint(n) => n != 0,
+                    SqlValue::Bigint(n) => n != 0,
+                    SqlValue::Float(f) => f != 0.0,
+                    SqlValue::Real(f) => f != 0.0,
+                    SqlValue::Double(f) => f != 0.0,
+                    SqlValue::Numeric(f) => f != 0.0,
+                    other => {
                         return Err(ExecutorError::TypeError(format!(
                             "WHERE clause must evaluate to boolean, got {:?}",
-                            filter_result
+                            other
                         )));
                     }
+                };
+                if !is_truthy {
+                    continue;
                 }
             }
 

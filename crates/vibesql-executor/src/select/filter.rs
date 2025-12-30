@@ -38,6 +38,7 @@ fn is_truthy_combined(value: &vibesql_types::SqlValue) -> Result<bool, ExecutorE
         SqlValue::Float(f) => Ok(*f != 0.0),
         SqlValue::Real(f) => Ok(*f != 0.0),
         SqlValue::Double(f) => Ok(*f != 0.0),
+        SqlValue::Numeric(f) => Ok(*f != 0.0),
 
         // Error case (should be rare)
         other => Err(ExecutorError::InvalidWhereClause(format!(
@@ -68,6 +69,7 @@ fn is_truthy_basic(value: &vibesql_types::SqlValue) -> Result<bool, ExecutorErro
         SqlValue::Float(f) => Ok(*f != 0.0),
         SqlValue::Real(f) => Ok(*f != 0.0),
         SqlValue::Double(f) => Ok(*f != 0.0),
+        SqlValue::Numeric(f) => Ok(*f != 0.0),
 
         // Error case (should be rare)
         other => Err(ExecutorError::InvalidWhereClause(format!(

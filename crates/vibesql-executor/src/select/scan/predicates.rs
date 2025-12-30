@@ -144,6 +144,8 @@ pub(crate) fn apply_table_local_predicates(
                 vibesql_types::SqlValue::Real(_) => true,
                 vibesql_types::SqlValue::Double(0.0) => false,
                 vibesql_types::SqlValue::Double(_) => true,
+                vibesql_types::SqlValue::Numeric(n) if n == 0.0 => false,
+                vibesql_types::SqlValue::Numeric(_) => true,
                 other => {
                     return Err(ExecutorError::InvalidWhereClause(format!(
                         "WHERE clause must evaluate to boolean, got: {:?}",
@@ -212,6 +214,8 @@ fn apply_predicates_parallel(
                 vibesql_types::SqlValue::Real(_) => true,
                 vibesql_types::SqlValue::Double(0.0) => false,
                 vibesql_types::SqlValue::Double(_) => true,
+                vibesql_types::SqlValue::Numeric(n) if n == 0.0 => false,
+                vibesql_types::SqlValue::Numeric(_) => true,
                 other => {
                     return Err(ExecutorError::InvalidWhereClause(format!(
                         "WHERE clause must evaluate to boolean, got: {:?}",
@@ -335,6 +339,8 @@ pub(crate) fn filter_and_clone_rows(
             vibesql_types::SqlValue::Real(_) => true,
             vibesql_types::SqlValue::Double(0.0) => false,
             vibesql_types::SqlValue::Double(_) => true,
+            vibesql_types::SqlValue::Numeric(n) if n == 0.0 => false,
+            vibesql_types::SqlValue::Numeric(_) => true,
             other => {
                 return Err(ExecutorError::InvalidWhereClause(format!(
                     "WHERE clause must evaluate to boolean, got: {:?}",

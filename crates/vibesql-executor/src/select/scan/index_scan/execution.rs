@@ -708,6 +708,8 @@ fn apply_where_filter_zerocopy<'a>(
             vibesql_types::SqlValue::Real(_) => true,
             vibesql_types::SqlValue::Double(0.0) => false,
             vibesql_types::SqlValue::Double(_) => true,
+            vibesql_types::SqlValue::Numeric(n) if n == 0.0 => false,
+            vibesql_types::SqlValue::Numeric(_) => true,
             other => {
                 return Err(ExecutorError::InvalidWhereClause(format!(
                     "WHERE clause must evaluate to boolean, got: {:?}",
@@ -813,6 +815,8 @@ fn apply_where_filter_zerocopy_parallel<'a>(
                 vibesql_types::SqlValue::Real(_) => true,
                 vibesql_types::SqlValue::Double(0.0) => false,
                 vibesql_types::SqlValue::Double(_) => true,
+                vibesql_types::SqlValue::Numeric(n) if n == 0.0 => false,
+                vibesql_types::SqlValue::Numeric(_) => true,
                 other => {
                     return Err(ExecutorError::InvalidWhereClause(format!(
                         "WHERE clause must evaluate to boolean, got: {:?}",
