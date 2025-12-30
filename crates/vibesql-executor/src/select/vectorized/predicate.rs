@@ -183,12 +183,52 @@ fn is_truthy(value: &vibesql_types::SqlValue) -> Result<bool, ExecutorError> {
         SqlValue::Double(f) => Ok(*f != 0.0),
         SqlValue::Numeric(f) => Ok(*f != 0.0),
 
+        // String types (SQLite coerces strings to numeric for boolean context)
+        SqlValue::Varchar(s) | SqlValue::Character(s) => Ok(string_to_truthy(&s)),
+
         // Error case (should be rare)
         other => Err(ExecutorError::InvalidWhereClause(format!(
             "WHERE clause must evaluate to boolean, got: {:?}",
             other
         ))),
     }
+}
+
+/// Convert string to boolean using SQLite semantics
+#[inline(always)]
+fn string_to_truthy(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // Parse leading numeric portion
+    let mut end = 0;
+    let mut has_dot = false;
+    let mut has_digit = false;
+    let chars: Vec<char> = trimmed.chars().collect();
+    if !chars.is_empty() && (chars[0] == '-' || chars[0] == '+') {
+        end = 1;
+    }
+    while end < chars.len() {
+        let c = chars[end];
+        if c.is_ascii_digit() {
+            has_digit = true;
+            end += 1;
+        } else if c == '.' && !has_dot {
+            has_dot = true;
+            end += 1;
+        } else {
+            break;
+        }
+    }
+    if !has_digit {
+        return false;
+    }
+    let num_str: String = chars[..end].iter().collect();
+    num_str.parse::<f64>().map(|n| n != 0.0).unwrap_or(false)
 }
 
 #[cfg(test)]

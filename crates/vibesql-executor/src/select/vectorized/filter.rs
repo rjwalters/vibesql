@@ -188,6 +188,22 @@ fn compare_int64(
     let val = match literal {
         SqlValue::Integer(i) | SqlValue::Bigint(i) => *i,
         SqlValue::Smallint(i) => *i as i64,
+        // SQLite type affinity: coerce string literals to integers for numeric column comparisons
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            let trimmed = s.trim();
+            // Try parsing as integer first
+            if let Ok(n) = trimmed.parse::<i64>() {
+                n
+            } else if let Ok(f) = trimmed.parse::<f64>() {
+                // If it parses as float, truncate to integer for comparison
+                // (SQLite uses numeric value comparison)
+                f as i64
+            } else {
+                // String doesn't look like a number - return all false
+                // (INTEGER column never equals non-numeric string per SQLite type ordering)
+                return Ok(BooleanArray::from(vec![false; array.len()]));
+            }
+        }
         _ => {
             return Err(ExecutorError::ColumnarTypeMismatch {
                 operation: "Int64 comparison".to_string(),
@@ -261,6 +277,17 @@ fn compare_float64(
         SqlValue::Double(f) | SqlValue::Numeric(f) => *f,
         SqlValue::Float(f) | SqlValue::Real(f) => *f as f64,
         SqlValue::Integer(i) => *i as f64,
+        // SQLite type affinity: coerce string literals to floats for numeric column comparisons
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            let trimmed = s.trim();
+            if let Ok(f) = trimmed.parse::<f64>() {
+                f
+            } else {
+                // String doesn't look like a number - return all false
+                // (REAL column never equals non-numeric string per SQLite type ordering)
+                return Ok(BooleanArray::from(vec![false; array.len()]));
+            }
+        }
         _ => {
             return Err(ExecutorError::ColumnarTypeMismatch {
                 operation: "Float64 comparison".to_string(),

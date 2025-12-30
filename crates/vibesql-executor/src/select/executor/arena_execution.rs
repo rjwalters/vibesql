@@ -214,6 +214,8 @@ impl SelectExecutor<'_> {
                     SqlValue::Real(f) => f != 0.0,
                     SqlValue::Double(f) => f != 0.0,
                     SqlValue::Numeric(f) => f != 0.0,
+                    // String types (SQLite coerces strings to numeric for boolean context)
+                    SqlValue::Varchar(ref s) | SqlValue::Character(ref s) => string_to_truthy(s),
                     other => {
                         return Err(ExecutorError::TypeError(format!(
                             "WHERE clause must evaluate to boolean, got {:?}",
@@ -507,4 +509,41 @@ impl SelectExecutor<'_> {
             _ => false,
         }
     }
+}
+
+/// Convert string to boolean using SQLite semantics
+#[inline(always)]
+fn string_to_truthy(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // Parse leading numeric portion
+    let mut end = 0;
+    let mut has_dot = false;
+    let mut has_digit = false;
+    let chars: Vec<char> = trimmed.chars().collect();
+    if !chars.is_empty() && (chars[0] == '-' || chars[0] == '+') {
+        end = 1;
+    }
+    while end < chars.len() {
+        let c = chars[end];
+        if c.is_ascii_digit() {
+            has_digit = true;
+            end += 1;
+        } else if c == '.' && !has_dot {
+            has_dot = true;
+            end += 1;
+        } else {
+            break;
+        }
+    }
+    if !has_digit {
+        return false;
+    }
+    let num_str: String = chars[..end].iter().collect();
+    num_str.parse::<f64>().map(|n| n != 0.0).unwrap_or(false)
 }

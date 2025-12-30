@@ -16,6 +16,61 @@ use crate::{
     evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator},
 };
 
+/// Convert string to boolean using SQLite semantics
+/// SQLite converts strings to numeric first, then to boolean:
+/// - "1x" → 1.0 → true
+/// - "0" → 0.0 → false
+/// - "" → 0.0 → false
+/// - "abc" → 0.0 → false (no leading digits)
+#[inline(always)]
+fn string_to_truthy(s: &str) -> bool {
+    // SQLite behavior: parse leading numeric portion
+    // Empty string is falsy
+    if s.is_empty() {
+        return false;
+    }
+    // Try to parse as f64, extracting leading numeric portion
+    // "1x" → 1.0, "0.5abc" → 0.5, "abc" → 0.0
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // Find the longest numeric prefix
+    let mut end = 0;
+    let mut has_dot = false;
+    let mut has_digit = false;
+    let chars: Vec<char> = trimmed.chars().collect();
+
+    // Handle optional leading sign
+    if !chars.is_empty() && (chars[0] == '-' || chars[0] == '+') {
+        end = 1;
+    }
+
+    while end < chars.len() {
+        let c = chars[end];
+        if c.is_ascii_digit() {
+            has_digit = true;
+            end += 1;
+        } else if c == '.' && !has_dot {
+            has_dot = true;
+            end += 1;
+        } else {
+            break;
+        }
+    }
+
+    if !has_digit {
+        return false;
+    }
+
+    // Parse the numeric prefix
+    let num_str: String = chars[..end].iter().collect();
+    match num_str.parse::<f64>() {
+        Ok(n) => n != 0.0,
+        Err(_) => false,
+    }
+}
+
 /// Fast truthy evaluation optimized for hot path (Combined evaluator version)
 ///
 /// Inlined aggressively and optimized for the common case (Boolean values).
@@ -39,6 +94,9 @@ fn is_truthy_combined(value: &vibesql_types::SqlValue) -> Result<bool, ExecutorE
         SqlValue::Real(f) => Ok(*f != 0.0),
         SqlValue::Double(f) => Ok(*f != 0.0),
         SqlValue::Numeric(f) => Ok(*f != 0.0),
+
+        // String types (SQLite coerces strings to numeric for boolean context)
+        SqlValue::Varchar(s) | SqlValue::Character(s) => Ok(string_to_truthy(&s)),
 
         // Error case (should be rare)
         other => Err(ExecutorError::InvalidWhereClause(format!(
@@ -70,6 +128,9 @@ fn is_truthy_basic(value: &vibesql_types::SqlValue) -> Result<bool, ExecutorErro
         SqlValue::Real(f) => Ok(*f != 0.0),
         SqlValue::Double(f) => Ok(*f != 0.0),
         SqlValue::Numeric(f) => Ok(*f != 0.0),
+
+        // String types (SQLite coerces strings to numeric for boolean context)
+        SqlValue::Varchar(s) | SqlValue::Character(s) => Ok(string_to_truthy(&s)),
 
         // Error case (should be rare)
         other => Err(ExecutorError::InvalidWhereClause(format!(
@@ -156,6 +217,11 @@ pub(super) fn apply_where_filter_combined<'a>(
                 vibesql_types::SqlValue::Real(_) => true,
                 vibesql_types::SqlValue::Double(0.0) => false,
                 vibesql_types::SqlValue::Double(_) => true,
+                vibesql_types::SqlValue::Numeric(n) if n == 0.0 => false,
+                vibesql_types::SqlValue::Numeric(_) => true,
+                // String types (SQLite coerces strings to numeric for boolean context)
+                vibesql_types::SqlValue::Varchar(ref s)
+                | vibesql_types::SqlValue::Character(ref s) => string_to_truthy(s),
                 other => {
                     return Err(ExecutorError::InvalidWhereClause(format!(
                         "WHERE clause must evaluate to boolean, got: {:?}",
