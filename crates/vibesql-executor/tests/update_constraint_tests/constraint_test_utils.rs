@@ -173,8 +173,9 @@ pub fn create_update_with_id_clause(
     column: &str,
     value: SqlValue,
     id: i64,
-) -> vibesql_ast::UpdateStmt { with_clause: None,
-    vibesql_ast::UpdateStmt { with_clause: None,
+) -> vibesql_ast::UpdateStmt {
+    vibesql_ast::UpdateStmt {
+        with_clause: None,
         quoted: false,
         alias: None,
         table_name: table_name.to_string(),

@@ -123,8 +123,9 @@ fn create_update_stmt(
     column: &str,
     value: Expression,
     where_clause: Option<vibesql_ast::WhereClause>,
-) -> UpdateStmt { with_clause: None,
-    UpdateStmt { with_clause: None,
+) -> UpdateStmt {
+    UpdateStmt {
+        with_clause: None,
         quoted: false,
         alias: None,
         table_name: table_name.to_string(),
@@ -137,8 +138,9 @@ fn create_update_stmt(
 fn create_multi_column_update_stmt(
     table_name: &str,
     assignments: Vec<(&str, Expression)>,
-) -> UpdateStmt { with_clause: None,
-    UpdateStmt { with_clause: None,
+) -> UpdateStmt {
+    UpdateStmt {
+        with_clause: None,
         quoted: false,
         alias: None,
         table_name: table_name.to_string(),

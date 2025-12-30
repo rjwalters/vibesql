@@ -219,6 +219,44 @@ impl SelectExecutor<'_> {
                             || column_lower == "oid";
 
                         if is_rowid {
+                            // Issue #4538: For tables with INTEGER PRIMARY KEY, use the IPK column
+                            // instead of row metadata. The IPK column IS the rowid.
+                            // Check if any table in the schema has a rowid_alias_column
+                            let ipk_col_idx = if let Some(table_qualifier) = table {
+                                // Qualified rowid (e.g., t1.rowid)
+                                let table_id =
+                                    vibesql_catalog::TableIdentifier::unquoted(table_qualifier);
+                                schema.table_schemas.get(&table_id).and_then(
+                                    |(start_idx, table_schema)| {
+                                        table_schema
+                                            .rowid_alias_column
+                                            .map(|col_idx| start_idx + col_idx)
+                                    },
+                                )
+                            } else {
+                                // Unqualified rowid - find first table with IPK
+                                schema.table_schemas.values().find_map(
+                                    |(start_idx, table_schema)| {
+                                        table_schema
+                                            .rowid_alias_column
+                                            .map(|col_idx| start_idx + col_idx)
+                                    },
+                                )
+                            };
+
+                            // If we found an IPK column, use it for sorting
+                            if let Some(col_idx) = ipk_col_idx {
+                                sort_keys.push((
+                                    SortKey::Column(col_idx),
+                                    item.direction.clone(),
+                                    item.nulls_order.is_some_and(|no| {
+                                        matches!(no, vibesql_ast::NullsOrder::First)
+                                    }),
+                                ));
+                                continue; // Skip the rest of this loop iteration
+                            }
+
+                            // No IPK found, fall back to row metadata rowid
                             // Verify table qualifier if present
                             if let Some(qualifier) = table {
                                 let qualifier_lower = qualifier.to_lowercase();

@@ -108,11 +108,13 @@ impl CreateTableExecutor {
             );
         }
 
-        // Check if table already exists in the target schema
+        // Check if table already exists in the target schema using SQL:1999 identifier semantics
         // For CREATE TABLE, we only check the target schema (not temp schema)
         // Temp tables can shadow main tables, but we allow creating in main even if temp exists
-        let qualified_name = format!("{}.{}", schema_name, table_name.to_lowercase());
-        if database.catalog.table_exists(&qualified_name) {
+        // Use table_exists_by_identifier which respects quoted/unquoted semantics:
+        // - Quoted identifiers: case-sensitive (exact match)
+        // - Unquoted identifiers: case-insensitive (lowercase canonical)
+        if database.catalog.table_exists_by_identifier(&identifier) {
             if stmt.if_not_exists {
                 // IF NOT EXISTS - silently return success without creating the table
                 return Ok(format!(
