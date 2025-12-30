@@ -10,7 +10,7 @@
 mod eval;
 mod predicates;
 mod special;
-mod subqueries;
+pub mod subqueries;
 
 // Re-export cache clearing function for benchmarks
 pub use subqueries::clear_in_subquery_cache;

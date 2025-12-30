@@ -88,10 +88,24 @@ impl ExpressionEvaluator<'_> {
         // (single column) when the left expression is not a row value expression.
         // We must validate this AFTER execution because wildcards like SELECT *
         // expand to multiple columns at runtime.
-        if !rows.is_empty() && rows[0].values.len() != 1 {
+        //
+        // Issue: Must also validate when rows are empty (e.g., empty table).
+        // Without this, `5 IN (SELECT a,b FROM empty_table)` incorrectly returns 0
+        // instead of erroring with "sub-select returns 2 columns - expected 1".
+        let column_count = if !rows.is_empty() {
+            rows[0].values.len()
+        } else {
+            // For empty result sets, compute column count from select list
+            crate::evaluator::combined::subqueries::schema_utils::compute_select_list_column_count(
+                subquery,
+                database,
+                self.cte_context,
+            )?
+        };
+        if column_count != 1 {
             return Err(ExecutorError::SubqueryColumnCountMismatch {
                 expected: 1,
-                actual: rows[0].values.len(),
+                actual: column_count,
             });
         }
 

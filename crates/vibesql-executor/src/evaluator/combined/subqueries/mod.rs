@@ -10,9 +10,9 @@
 //!
 //! Note: Cache key computation is provided by the shared `crate::evaluator::caching` module.
 
-// Utility modules (private)
+// Utility modules
 mod correlation;
-mod schema_utils;
+pub mod schema_utils;
 
 // Evaluator modules (private - methods defined on CombinedExpressionEvaluator)
 mod exists;

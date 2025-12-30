@@ -88,7 +88,7 @@ pub(super) fn build_merged_outer_row<'a>(
 /// Handles wildcards by expanding them using table schemas from the database
 ///
 /// Issue #3562: Added CTE context so wildcards can be expanded for CTE references
-pub(super) fn compute_select_list_column_count(
+pub fn compute_select_list_column_count(
     stmt: &vibesql_ast::SelectStmt,
     database: &vibesql_storage::Database,
     cte_results: Option<&HashMap<String, CteResult>>,
