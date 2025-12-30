@@ -48,6 +48,7 @@ fn extract_column_name_from_expr(expr: &Expression) -> String {
         }
         Expression::Function { name, .. } => name.to_string(),
         Expression::BinaryOp { left, .. } => extract_column_name_from_expr(left),
+        Expression::Wildcard => "*".to_string(),
         _ => "?column?".to_string(),
     }
 }

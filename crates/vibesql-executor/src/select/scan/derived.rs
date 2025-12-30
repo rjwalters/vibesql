@@ -76,6 +76,7 @@ fn derive_column_name_from_expr(expr: &vibesql_ast::Expression) -> String {
             }
             vibesql_types::SqlValue::Null => "NULL".to_string(),
         },
+        vibesql_ast::Expression::Wildcard => "*".to_string(),
         _ => "?column?".to_string(),
     }
 }

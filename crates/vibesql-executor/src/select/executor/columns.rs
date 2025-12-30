@@ -305,6 +305,10 @@ fn derive_expression_name_impl(
                 derive_expression_name_impl(right, schema, &None, mode)
             )
         }
+        vibesql_ast::Expression::Wildcard => {
+            // For wildcard (*), return "*" - used in COUNT(*) and similar
+            "*".to_string()
+        }
         vibesql_ast::Expression::Literal(val) => {
             // For literals, use a clean string representation
             match val {

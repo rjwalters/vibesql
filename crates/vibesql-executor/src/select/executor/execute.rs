@@ -309,6 +309,7 @@ impl SelectExecutor<'_> {
         match expr {
             vibesql_ast::Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
             vibesql_ast::Expression::Literal(val) => format!("{}", val),
+            vibesql_ast::Expression::Wildcard => "*".to_string(),
             _ => "?column?".to_string(),
         }
     }
