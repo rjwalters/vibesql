@@ -69,12 +69,27 @@ pub fn resolve_target_columns_with_rowid(
 }
 
 /// Validate that each row has the correct number of values
+///
+/// SQLite checks in this order:
+/// 1. All VALUES rows must have the same number of terms
+/// 2. The number of terms must match the table column count
 pub fn validate_row_column_counts(
     rows: &[Vec<vibesql_ast::Expression>],
     expected_count: usize,
     table_name: &str,
     has_explicit_columns: bool,
 ) -> Result<(), ExecutorError> {
+    // First check: all VALUES rows must have the same number of terms
+    if let Some(first_row) = rows.first() {
+        let first_len = first_row.len();
+        for value_exprs in rows.iter().skip(1) {
+            if value_exprs.len() != first_len {
+                return Err(ExecutorError::ValuesRowCountMismatch);
+            }
+        }
+    }
+
+    // Second check: number of terms must match expected column count
     for value_exprs in rows.iter() {
         if value_exprs.len() != expected_count {
             return Err(ExecutorError::InsertColumnCountMismatch {

@@ -109,6 +109,9 @@ pub enum ExecutorError {
         /// Whether explicit column list was provided in INSERT statement
         has_explicit_columns: bool,
     },
+    /// VALUES rows have inconsistent number of terms (SQLite-compatible error)
+    /// Format: "all VALUES must have the same number of terms"
+    ValuesRowCountMismatch,
     /// Column not found in INSERT statement (SQLite-compatible error)
     /// Format: "table T has no column named C"
     InsertNoSuchColumn {
@@ -651,6 +654,10 @@ impl std::fmt::Display for ExecutorError {
                     // SQLite format when no column list: "table T has N columns but M values were supplied"
                     write!(f, "table {} has {} columns but {} values were supplied", table_name, expected, provided)
                 }
+            }
+            ExecutorError::ValuesRowCountMismatch => {
+                // SQLite format for inconsistent VALUES row lengths
+                write!(f, "all VALUES must have the same number of terms")
             }
             ExecutorError::InsertNoSuchColumn { table_name, column_name } => {
                 // SQLite format: "table T has no column named C"
