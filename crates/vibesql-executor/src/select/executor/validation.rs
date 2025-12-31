@@ -497,11 +497,20 @@ fn find_aggregate_in_expression(expr: &Expression) -> Option<String> {
 /// Returns Some(inner_aggregate_name) if found, None otherwise.
 fn find_nested_aggregate(expr: &Expression) -> Option<String> {
     match expr {
-        Expression::AggregateFunction { args, .. } => {
+        Expression::AggregateFunction { args, order_by, .. } => {
             // Check if any argument contains an aggregate function
             for arg in args {
                 if let Some(inner_name) = find_aggregate_in_expression(arg) {
                     return Some(inner_name);
+                }
+            }
+            // Also check ORDER BY expressions for aggregate functions
+            // e.g., group_concat(a ORDER BY max(d)) is invalid
+            if let Some(order_items) = order_by {
+                for item in order_items {
+                    if let Some(inner_name) = find_aggregate_in_expression(&item.expr) {
+                        return Some(inner_name);
+                    }
                 }
             }
             None

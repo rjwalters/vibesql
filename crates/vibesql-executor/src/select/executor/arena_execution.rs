@@ -324,10 +324,14 @@ impl SelectExecutor<'_> {
 
                 // Determine NULL ordering:
                 // - If explicitly specified via NULLS FIRST/LAST, use that
-                // - Default: SQLite uses NULLS LAST for all directions
-                let nulls_first = order_item
-                    .and_then(|o| o.nulls_order)
-                    .is_some_and(|no| matches!(no, vibesql_ast::arena::NullsOrder::First));
+                // - Default: SQLite treats NULL as smallest value, so:
+                //   - ASC: NULL comes first (smallest first)
+                //   - DESC: NULL comes last (smallest last)
+                let nulls_first = match order_item.and_then(|o| o.nulls_order) {
+                    Some(vibesql_ast::arena::NullsOrder::First) => true,
+                    Some(vibesql_ast::arena::NullsOrder::Last) => false,
+                    None => asc, // Default: NULLS FIRST for ASC, NULLS LAST for DESC
+                };
 
                 // Handle NULLs according to nulls_first setting
                 let cmp = match (key_a.is_null(), key_b.is_null()) {
