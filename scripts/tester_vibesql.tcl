@@ -1585,6 +1585,11 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses attached database schema (requires ATTACH)"]
     }
 
+    # EXPLAIN on DDL statements (CREATE, DROP, ALTER) - not supported
+    if {[regexp -nocase {EXPLAIN\s+(?:QUERY\s+PLAN\s+)?(?:CREATE|DROP|ALTER)\s} $script]} {
+        return [list 1 "uses EXPLAIN on DDL (not supported)"]
+    }
+
     # SQLite sort tracking helper functions
     # These tests use helper functions that call "db status sort" or "sqlite_sort_count"
     # to verify ORDER BY optimization (index vs explicit sort). The helpers append
