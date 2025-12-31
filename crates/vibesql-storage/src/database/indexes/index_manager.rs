@@ -214,13 +214,21 @@ impl IndexManager {
 
                     // Check if key already exists (skip NULLs)
                     if !key_values.contains(&SqlValue::Null) {
+                        // Build SQLite-compatible column list: "table.col1, table.col2"
+                        let columns_str = metadata
+                            .columns
+                            .iter()
+                            .map(|col| format!("{}.{}", metadata.table_name, col.expect_column_name()))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+
                         match index_data {
                             IndexData::InMemory { data, .. } => {
                                 if data.contains_key(&key_values) {
-                                    // SQLite format for explicit UNIQUE INDEX violations
+                                    // SQLite format: "UNIQUE constraint failed: table.col1, table.col2"
                                     return Err(StorageError::UniqueConstraintViolation(format!(
-                                        "UNIQUE constraint failed: index '{}'",
-                                        index_name
+                                        "UNIQUE constraint failed: {}",
+                                        columns_str
                                     )));
                                 }
                             }
@@ -229,10 +237,10 @@ impl IndexManager {
                                 let guard = acquire_btree_lock(btree)?;
                                 if let Ok(row_ids) = guard.lookup(&key_values) {
                                     if !row_ids.is_empty() {
-                                        // SQLite format for explicit UNIQUE INDEX violations
+                                        // SQLite format: "UNIQUE constraint failed: table.col1, table.col2"
                                         return Err(StorageError::UniqueConstraintViolation(format!(
-                                            "UNIQUE constraint failed: index '{}'",
-                                            index_name
+                                            "UNIQUE constraint failed: {}",
+                                            columns_str
                                         )));
                                     }
                                 }

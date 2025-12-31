@@ -101,7 +101,8 @@ fn test_unique_index_basic_insert_enforcement() {
     match result.unwrap_err() {
         vibesql_storage::StorageError::UniqueConstraintViolation(msg) => {
             assert!(msg.contains("UNIQUE constraint"));
-            assert!(msg.contains("idx_users_email")); // Index names are normalized to lowercase
+            // SQLite-compatible format: "UNIQUE constraint failed: table.column"
+            assert!(msg.contains("users.email"), "Expected message to contain 'users.email', got: {}", msg);
         }
         e => panic!("Expected UniqueConstraintViolation, got {:?}", e),
     }
@@ -245,7 +246,9 @@ fn test_unique_index_composite_key() {
     match result.unwrap_err() {
         vibesql_storage::StorageError::UniqueConstraintViolation(msg) => {
             assert!(msg.contains("UNIQUE constraint"));
-            assert!(msg.contains("idx_users_name")); // Index names are normalized to lowercase
+            // SQLite-compatible format: "UNIQUE constraint failed: table.col1, table.col2"
+            assert!(msg.contains("users.first_name") && msg.contains("users.last_name"),
+                "Expected message to contain 'users.first_name' and 'users.last_name', got: {}", msg);
         }
         e => panic!("Expected UniqueConstraintViolation, got {:?}", e),
     }
@@ -363,11 +366,12 @@ fn test_unique_index_update_enforcement() {
         ExecutorError::ConstraintViolation(msg) => {
             eprintln!("Error message: {}", msg);
             assert!(msg.contains("UNIQUE constraint"), "Message: {}", msg);
+            // SQLite-compatible format: "UNIQUE constraint failed: table.column"
             assert!(
-                msg.contains("idx_users_email") || msg.contains("idx_users_email"),
-                "Message: {}",
+                msg.contains("users.email"),
+                "Expected message to contain 'users.email', got: {}",
                 msg
-            ); // Index names should be normalized to uppercase
+            );
         }
         e => panic!("Expected ConstraintViolation, got {:?}", e),
     }

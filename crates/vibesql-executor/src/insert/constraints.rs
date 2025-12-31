@@ -249,10 +249,16 @@ pub fn enforce_unique_indexes(
             // Check if this key already exists in the index
             if let Some(index_data) = db.get_index_data(&index_name) {
                 if index_data.contains_key(&key_values) {
-                    // SQLite format for explicit UNIQUE INDEX violations
+                    // SQLite format: "UNIQUE constraint failed: table.col1, table.col2"
+                    let columns_str = index_metadata
+                        .columns
+                        .iter()
+                        .map(|col| format!("{}.{}", table_name, col.expect_column_name()))
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     return Err(ExecutorError::ConstraintViolation(format!(
-                        "UNIQUE constraint failed: index '{}'",
-                        index_metadata.index_name
+                        "UNIQUE constraint failed: {}",
+                        columns_str
                     )));
                 }
             }
