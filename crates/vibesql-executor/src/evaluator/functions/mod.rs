@@ -278,7 +278,7 @@ pub(super) fn eval_scalar_function(
         #[cfg(feature = "spatial")]
         "ST_SYMDIFFERENCE" | "ST_SYM_DIFFERENCE" => spatial::operations::st_sym_difference(args),
 
-        // Unknown function
-        _ => Err(ExecutorError::UnsupportedFeature(format!("Unknown function: {}", name))),
+        // Unknown function - use SQLite-compatible error format
+        _ => Err(ExecutorError::NoSuchFunction { function_name: name.to_string() }),
     }
 }
