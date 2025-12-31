@@ -62,10 +62,11 @@ impl ExpressionEvaluator<'_> {
         args: &[vibesql_ast::Expression],
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
-        if args.is_empty() {
-            return Err(ExecutorError::UnsupportedFeature(
-                "COALESCE requires at least one argument".to_string(),
-            ));
+        // SQLite requires coalesce to have at least 2 arguments
+        if args.len() < 2 {
+            return Err(ExecutorError::WrongNumberOfArguments {
+                function_name: "coalesce".to_string(),
+            });
         }
 
         // Lazy evaluation: return first non-NULL value without evaluating remaining args

@@ -159,7 +159,7 @@ pub(super) fn random(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 /// RANDOMBLOB(N) - Return N bytes of pseudo-random data
 ///
 /// Returns a blob containing N bytes of pseudo-random data.
-/// SQLite returns an empty blob for negative or zero sizes.
+/// SQLite returns a 1-byte blob for negative sizes, empty blob for zero.
 pub(super) fn randomblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
         return Err(ExecutorError::UnsupportedFeature(format!(
@@ -168,51 +168,58 @@ pub(super) fn randomblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         )));
     }
 
-    // SQLite returns empty blob for negative sizes
+    // SQLite returns 1-byte blob for negative sizes, empty blob for zero
     let n = match &args[0] {
         SqlValue::Null => return Ok(SqlValue::Null),
         SqlValue::Integer(i) => {
-            if *i <= 0 {
-                return Ok(SqlValue::Blob(vec![]));
+            if *i < 0 {
+                1usize // SQLite returns 1 byte for negative sizes
+            } else {
+                *i as usize
             }
-            *i as usize
         }
         SqlValue::Bigint(i) => {
-            if *i <= 0 {
-                return Ok(SqlValue::Blob(vec![]));
+            if *i < 0 {
+                1usize
+            } else {
+                *i as usize
             }
-            *i as usize
         }
         SqlValue::Smallint(i) => {
-            if *i <= 0 {
-                return Ok(SqlValue::Blob(vec![]));
+            if *i < 0 {
+                1usize
+            } else {
+                *i as usize
             }
-            *i as usize
         }
         SqlValue::Unsigned(u) => *u as usize,
         SqlValue::Numeric(n) => {
-            if *n <= 0.0 {
-                return Ok(SqlValue::Blob(vec![]));
+            if *n < 0.0 {
+                1usize
+            } else {
+                *n as usize
             }
-            *n as usize
         }
         SqlValue::Real(r) => {
-            if *r <= 0.0 {
-                return Ok(SqlValue::Blob(vec![]));
+            if *r < 0.0 {
+                1usize
+            } else {
+                *r as usize
             }
-            *r as usize
         }
         SqlValue::Double(d) => {
-            if *d <= 0.0 {
-                return Ok(SqlValue::Blob(vec![]));
+            if *d < 0.0 {
+                1usize
+            } else {
+                *d as usize
             }
-            *d as usize
         }
         SqlValue::Float(f) => {
-            if *f <= 0.0 {
-                return Ok(SqlValue::Blob(vec![]));
+            if *f < 0.0 {
+                1usize
+            } else {
+                *f as usize
             }
-            *f as usize
         }
         _ => {
             return Err(ExecutorError::UnsupportedFeature(
@@ -1111,10 +1118,10 @@ mod tests {
             _ => panic!("Expected Blob"),
         }
 
-        // SQLite returns empty blob for negative sizes
+        // SQLite returns 1-byte blob for negative sizes
         let result = randomblob(&[SqlValue::Integer(-5)]).unwrap();
         match result {
-            SqlValue::Blob(bytes) => assert_eq!(bytes.len(), 0),
+            SqlValue::Blob(bytes) => assert_eq!(bytes.len(), 1),
             _ => panic!("Expected Blob"),
         }
 

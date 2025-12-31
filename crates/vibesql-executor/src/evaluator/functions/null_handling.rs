@@ -10,10 +10,11 @@ use crate::errors::ExecutorError;
 pub(super) fn coalesce(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
-    if args.is_empty() {
-        return Err(ExecutorError::UnsupportedFeature(
-            "COALESCE requires at least one argument".to_string(),
-        ));
+    // SQLite requires coalesce to have at least 2 arguments
+    if args.len() < 2 {
+        return Err(ExecutorError::WrongNumberOfArguments {
+            function_name: "coalesce".to_string(),
+        });
     }
 
     // Return first non-NULL value
