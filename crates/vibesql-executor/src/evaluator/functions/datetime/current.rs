@@ -211,10 +211,60 @@ pub fn datetime(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             // Already a timestamp, return as-is
             Ok(SqlValue::Timestamp(*ts))
         }
+        // Integer or float: treat as Julian Day number (SQLite compatibility)
+        SqlValue::Integer(n) => julian_day_to_timestamp(*n as f64),
+        SqlValue::Bigint(n) => julian_day_to_timestamp(*n as f64),
+        SqlValue::Smallint(n) => julian_day_to_timestamp(*n as f64),
+        SqlValue::Float(n) => julian_day_to_timestamp(*n as f64),
+        SqlValue::Double(n) => julian_day_to_timestamp(*n),
+        SqlValue::Real(n) => julian_day_to_timestamp(*n),
+        SqlValue::Numeric(n) => julian_day_to_timestamp(*n),
         _ => Err(ExecutorError::UnsupportedFeature(format!(
-            "DATETIME requires string, date, or timestamp argument, got {:?}",
+            "DATETIME requires string, date, timestamp, or numeric argument, got {:?}",
             args[0]
         ))),
+    }
+}
+
+/// Convert Julian Day number to timestamp (SQLite compatibility)
+/// Julian Day 0 is November 24, 4714 BC in the proleptic Gregorian calendar
+/// SQLite uses this for datetime(julianday) conversions
+fn julian_day_to_timestamp(jd: f64) -> Result<SqlValue, ExecutorError> {
+    use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
+
+    // Julian Day epoch: November 24, 4714 BC = JD 0
+    // We use the algorithm from the U.S. Naval Observatory
+    // JD 2440587.5 = January 1, 1970 00:00:00 UTC (Unix epoch)
+
+    // For very large or very small Julian days, we may not be able to represent
+    // them in our date/time types. Return NULL for out-of-range values.
+    let unix_jd: f64 = 2440587.5;
+    let seconds_since_unix = (jd - unix_jd) * 86400.0;
+
+    // Check for reasonable bounds (year -4713 to year 9999)
+    if jd < 0.0 || jd > 5373484.0 {
+        // Return NULL for out-of-range Julian days
+        // (SQLite returns weird dates, we return NULL)
+        return Ok(SqlValue::Null);
+    }
+
+    // Convert to Unix timestamp and then to datetime
+    let naive = NaiveDateTime::from_timestamp_opt(seconds_since_unix as i64, 0);
+
+    match naive {
+        Some(dt) => {
+            let date = vibesql_types::Date::new(dt.year(), dt.month() as u8, dt.day() as u8)
+                .map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid date: {}", e)))?;
+            let time = vibesql_types::Time::new(
+                dt.hour() as u8,
+                dt.minute() as u8,
+                dt.second() as u8,
+                0,
+            )
+            .map_err(|e| ExecutorError::UnsupportedFeature(format!("Invalid time: {}", e)))?;
+            Ok(SqlValue::Timestamp(vibesql_types::Timestamp::new(date, time)))
+        }
+        None => Ok(SqlValue::Null),
     }
 }
 

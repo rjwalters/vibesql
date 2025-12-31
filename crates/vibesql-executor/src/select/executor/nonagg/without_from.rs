@@ -8,6 +8,7 @@ use crate::{
     errors::ExecutorError,
     evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator},
     select::helpers::{apply_limit_offset, evaluate_limit, evaluate_offset},
+    select::window::{evaluate_window_functions, has_window_functions},
 };
 
 impl SelectExecutor<'_> {
@@ -104,6 +105,13 @@ impl SelectExecutor<'_> {
             }
         }
 
+        // Check if SELECT list contains window functions
+        // Window functions without FROM clause operate on a single implicit row (Issue #4747)
+        // Example: SELECT min(1) OVER() returns 1 (the min of a single implicit row)
+        if has_window_functions(&stmt.select_list) {
+            return self.execute_select_without_from_with_windows(stmt, has_outer_context);
+        }
+
         // Evaluate each item in the SELECT list
         let mut values = Vec::new();
         for item in &stmt.select_list {
@@ -158,6 +166,92 @@ impl SelectExecutor<'_> {
         let result = vec![vibesql_storage::Row::new(values)];
 
         // Apply LIMIT and OFFSET (important for queries like SELECT 1 LIMIT 0)
+        let limit = evaluate_limit(&stmt.limit, self.database)?;
+        let offset = evaluate_offset(&stmt.offset, self.database)?;
+        Ok(apply_limit_offset(result, limit, offset))
+    }
+
+    /// Execute SELECT without FROM clause that contains window functions
+    ///
+    /// Window functions without FROM clause operate on a single implicit row.
+    /// For example: `SELECT min(1) OVER()` returns 1 because the window frame
+    /// contains exactly one row (the implicit single row for queries without FROM).
+    ///
+    /// This is SQLite-compatible behavior where window functions can appear in
+    /// scalar subqueries without FROM.
+    fn execute_select_without_from_with_windows(
+        &self,
+        stmt: &vibesql_ast::SelectStmt,
+        has_outer_context: bool,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        // Create an implicit single empty row for window function processing
+        // This represents the single implicit row that exists for SELECT without FROM
+        let implicit_row = vibesql_storage::Row::new(vec![]);
+        let mut rows = vec![implicit_row];
+
+        // Create evaluator for window function processing
+        let empty_combined_schema = crate::schema::CombinedSchema::empty();
+        let evaluator = if has_outer_context {
+            let outer_row = self.outer_row.unwrap();
+            let outer_schema = self.outer_schema.unwrap();
+            CombinedExpressionEvaluator::with_database_and_outer_context(
+                &empty_combined_schema,
+                self.database,
+                outer_row,
+                outer_schema,
+            )
+        } else {
+            CombinedExpressionEvaluator::with_database(&empty_combined_schema, self.database)
+        };
+
+        // Process window functions - this adds computed values to each row
+        // and returns a mapping from WindowFunctionKey to column index
+        let (rows_with_windows, window_mapping) =
+            evaluate_window_functions(rows, &stmt.select_list, &evaluator)?;
+        rows = rows_with_windows;
+
+        // Now evaluate the SELECT list with the window mapping
+        // The evaluator needs access to the window mapping to resolve WindowFunction expressions
+        let mut values = Vec::new();
+        for item in &stmt.select_list {
+            match item {
+                vibesql_ast::SelectItem::Wildcard { .. }
+                | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
+                    return Err(ExecutorError::UnsupportedFeature(
+                        "SELECT * and qualified wildcards require FROM clause".to_string(),
+                    ));
+                }
+                vibesql_ast::SelectItem::Expression { expr, .. } => {
+                    // Create evaluator with window mapping for this expression
+                    let eval_with_windows = if has_outer_context {
+                        let outer_row = self.outer_row.unwrap();
+                        let outer_schema = self.outer_schema.unwrap();
+                        CombinedExpressionEvaluator::with_database_outer_and_windows(
+                            &empty_combined_schema,
+                            self.database,
+                            outer_row,
+                            outer_schema,
+                            &window_mapping,
+                        )
+                    } else {
+                        CombinedExpressionEvaluator::with_database_and_windows(
+                            &empty_combined_schema,
+                            self.database,
+                            &window_mapping,
+                        )
+                    };
+                    // Use the row with window values appended
+                    let row = &rows[0];
+                    let value = eval_with_windows.eval(expr, row)?;
+                    values.push(value);
+                }
+            }
+        }
+
+        // Build result row
+        let result = vec![vibesql_storage::Row::new(values)];
+
+        // Apply LIMIT and OFFSET
         let limit = evaluate_limit(&stmt.limit, self.database)?;
         let offset = evaluate_offset(&stmt.offset, self.database)?;
         Ok(apply_limit_offset(result, limit, offset))

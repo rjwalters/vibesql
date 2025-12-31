@@ -290,6 +290,22 @@ pub fn coerce_value(
         (SqlValue::Bigint(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)),  // Real is now f64
         (SqlValue::Bigint(i), DataType::DoublePrecision) => Ok(SqlValue::Double(*i as f64)),
 
+        // Integer → Numeric/Decimal (SQLite type affinity - integers can be stored in NUMERIC columns)
+        (SqlValue::Integer(i), DataType::Numeric { .. }) => Ok(SqlValue::Integer(*i)),
+        (SqlValue::Integer(i), DataType::Decimal { .. }) => Ok(SqlValue::Integer(*i)),
+        (SqlValue::Smallint(i), DataType::Numeric { .. }) => Ok(SqlValue::Integer(*i as i64)),
+        (SqlValue::Smallint(i), DataType::Decimal { .. }) => Ok(SqlValue::Integer(*i as i64)),
+        (SqlValue::Bigint(i), DataType::Numeric { .. }) => Ok(SqlValue::Bigint(*i)),
+        (SqlValue::Bigint(i), DataType::Decimal { .. }) => Ok(SqlValue::Bigint(*i)),
+
+        // Float/Real/Double → Numeric/Decimal (SQLite type affinity)
+        (SqlValue::Float(f), DataType::Numeric { .. }) => Ok(SqlValue::Double(*f as f64)),
+        (SqlValue::Float(f), DataType::Decimal { .. }) => Ok(SqlValue::Double(*f as f64)),
+        (SqlValue::Real(f), DataType::Numeric { .. }) => Ok(SqlValue::Double(*f)),
+        (SqlValue::Real(f), DataType::Decimal { .. }) => Ok(SqlValue::Double(*f)),
+        (SqlValue::Double(f), DataType::Numeric { .. }) => Ok(SqlValue::Double(*f)),
+        (SqlValue::Double(f), DataType::Decimal { .. }) => Ok(SqlValue::Double(*f)),
+
         // Integer widening conversions
         (SqlValue::Smallint(i), DataType::Integer) => Ok(SqlValue::Integer(*i as i64)),
         (SqlValue::Smallint(i), DataType::Bigint) => Ok(SqlValue::Bigint(*i as i64)),
@@ -520,6 +536,10 @@ pub fn coerce_value(
         (SqlValue::Boolean(b), DataType::Varchar { .. }) => {
             Ok(SqlValue::Varchar(arcstr::ArcStr::from(if *b { "1" } else { "0" })))
         }
+
+        // Blob → Varchar (SQLite type affinity - blob data can be stored in TEXT columns)
+        // In SQLite, blobs can be stored in TEXT columns; they retain their blob type internally
+        (SqlValue::Blob(_), DataType::Varchar { .. }) => Ok(value),
 
         // Type mismatch
         _ => Err(ExecutorError::UnsupportedExpression(format!(

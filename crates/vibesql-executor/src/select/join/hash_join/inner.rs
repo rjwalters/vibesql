@@ -16,6 +16,26 @@ use super::{
 use crate::select::parallel::ParallelConfig;
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
+/// Check if a key could potentially match a different type via SQLite affinity
+/// SQLite allows TEXT '1.0' to equal INTEGER 1 when comparing columns with different types.
+/// This helper identifies values that should be checked with cross-type comparison.
+fn is_potential_cross_type_match(key: &vibesql_types::SqlValue) -> bool {
+    use vibesql_types::SqlValue;
+    match key {
+        // String values that look like numbers may match numeric values
+        SqlValue::Varchar(s) | SqlValue::Character(s) => s.trim().parse::<f64>().is_ok(),
+        // Numeric values may match string representations
+        SqlValue::Integer(_)
+        | SqlValue::Bigint(_)
+        | SqlValue::Smallint(_)
+        | SqlValue::Real(_)
+        | SqlValue::Double(_)
+        | SqlValue::Float(_)
+        | SqlValue::Numeric(_) => true,
+        _ => false,
+    }
+}
+
 // Note: Memory limit checking removed from hash join.
 // Hash join uses O(smaller_table) memory for the hash table, not O(result_size).
 // The actual join output size depends on data distribution and selectivity,
@@ -155,9 +175,22 @@ pub(in crate::select::join) fn hash_join_inner(
                 continue;
             }
 
+            // First try exact hash lookup (fast path for same-type comparisons)
             if let Some(build_indices) = hash_table.get(key) {
                 for &build_idx in build_indices {
                     pairs.push((build_idx, probe_idx));
+                }
+            } else if is_potential_cross_type_match(key) {
+                // SQLite type affinity fallback: TEXT values may equal numeric values
+                // When exact lookup fails, scan the hash table using values_are_equal
+                // This handles cases like TEXT '1.0' = INTEGER 1
+                for (build_key, build_indices) in hash_table.iter() {
+                    if crate::evaluator::values_are_equal(key, build_key) {
+                        for &build_idx in build_indices {
+                            pairs.push((build_idx, probe_idx));
+                        }
+                        break; // Found a match, move to next probe row
+                    }
                 }
             }
         }
@@ -308,9 +341,26 @@ pub(in crate::select::join) fn hash_join_inner_multi(
                 continue;
             }
 
+            // First try exact hash lookup (fast path for same-type comparisons)
             if let Some(build_indices) = hash_table.get(&probe_key) {
                 for &build_idx in build_indices {
                     pairs.push((build_idx, probe_idx));
+                }
+            } else if probe_key.0.iter().any(|v| is_potential_cross_type_match(v)) {
+                // SQLite type affinity fallback for multi-column joins
+                // Check if any column could have cross-type matches
+                for (build_key, build_indices) in hash_table.iter() {
+                    let all_match = probe_key
+                        .0
+                        .iter()
+                        .zip(build_key.0.iter())
+                        .all(|(p, b)| crate::evaluator::values_are_equal(p, b));
+                    if all_match {
+                        for &build_idx in build_indices {
+                            pairs.push((build_idx, probe_idx));
+                        }
+                        break; // Found a match, move to next probe row
+                    }
                 }
             }
         }

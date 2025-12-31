@@ -151,6 +151,34 @@ impl<'a> CombinedExpressionEvaluator<'a> {
         }
     }
 
+    /// Create a new combined expression evaluator with database, outer context, and window mapping
+    /// Used for window functions in correlated subqueries without FROM clause
+    pub(crate) fn with_database_outer_and_windows(
+        schema: &'a CombinedSchema,
+        database: &'a vibesql_storage::Database,
+        outer_row: &'a vibesql_storage::Row,
+        outer_schema: &'a CombinedSchema,
+        window_mapping: &'a HashMap<WindowFunctionKey, usize>,
+    ) -> Self {
+        CombinedExpressionEvaluator {
+            schema,
+            database: Some(database),
+            outer_row: Some(outer_row),
+            outer_schema: Some(outer_schema),
+            outer_context: None,
+            window_mapping: Some(window_mapping),
+            procedural_context: None,
+            cte_context: None,
+            column_cache: RefCell::new(HashMap::new()),
+            subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
+            depth: 0,
+            cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
+            enable_cse: super::caching::is_cse_enabled(),
+            correlation_cache: Rc::new(RefCell::new(HashMap::new())),
+            subquery_hash_cache: Rc::new(RefCell::new(HashMap::new())),
+        }
+    }
+
     /// Create a new combined expression evaluator with database, window mapping, and CTE context
     pub(crate) fn with_database_and_windows_and_cte(
         schema: &'a CombinedSchema,

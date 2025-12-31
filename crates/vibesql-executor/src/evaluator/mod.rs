@@ -28,6 +28,8 @@ mod tests;
 
 // Re-export public API
 pub use core::{CombinedExpressionEvaluator, ExpressionEvaluator};
+// Re-export values_are_equal for cross-type hash join comparisons
+pub(crate) use core::values_are_equal;
 
 pub use arena::ArenaExpressionEvaluator;
 // Re-export cache clearing function for benchmarks

@@ -7,7 +7,12 @@ use super::{
 };
 #[cfg(feature = "parallel")]
 use crate::select::parallel::ParallelConfig;
-use crate::{errors::ExecutorError, schema::CombinedSchema};
+use crate::{
+    errors::ExecutorError,
+    evaluator::CombinedExpressionEvaluator,
+    schema::CombinedSchema,
+    select::join::combine_rows,
+};
 
 /// Create a row with all NULL values
 #[allow(dead_code)]

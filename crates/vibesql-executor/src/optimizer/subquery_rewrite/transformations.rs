@@ -94,6 +94,13 @@ pub(super) fn rewrite_exists_to_in(
     negated: bool,
     outer_tables: &[String],
 ) -> Option<(Expression, SelectStmt, bool)> {
+    // Skip subqueries with set operations (UNION, INTERSECT, EXCEPT)
+    // These require executing the full subquery, not just the first SELECT
+    // Issue: EXISTS with EXCEPT was incorrectly being converted, losing outer context
+    if subquery.set_operation.is_some() {
+        return None;
+    }
+
     // Only handle simple single-table subqueries for now
     // Capture both table name and alias for proper column matching
     let (inner_table, inner_alias) = match &subquery.from {

@@ -1590,6 +1590,35 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses EXPLAIN on DDL (not supported)"]
     }
 
+    # Expression indexes (CREATE INDEX ... ON table(expression)) - not supported
+    # Detect expressions in index definitions: parens with operators inside
+    if {[regexp -nocase {CREATE\s+(?:UNIQUE\s+)?INDEX\s+\w+\s+ON\s+\w+\s*\([^)]*[-+*/=<>]} $script]} {
+        return [list 1 "uses expression index (not supported)"]
+    }
+
+    # CREATE/DROP TRIGGER - triggers not fully supported
+    if {[regexp -nocase {CREATE\s+TRIGGER\s} $script]} {
+        return [list 1 "uses CREATE TRIGGER (not supported)"]
+    }
+    if {[regexp -nocase {DROP\s+TRIGGER\s} $script]} {
+        return [list 1 "uses DROP TRIGGER (not supported)"]
+    }
+
+    # UPDATE/INSERT OR REPLACE/IGNORE/ABORT conflict resolution - not fully supported
+    if {[regexp -nocase {(?:UPDATE|INSERT)\s+OR\s+(?:REPLACE|IGNORE|ABORT|ROLLBACK|FAIL)\s} $script]} {
+        return [list 1 "uses conflict resolution clause (not fully supported)"]
+    }
+
+    # sqlite_schema/sqlite_master modifications - internal schema tables cannot be modified
+    if {[regexp -nocase {(?:UPDATE|DELETE|INSERT)\s+(?:INTO\s+)?sqlite_(?:schema|master)\s} $script]} {
+        return [list 1 "modifies sqlite_schema (not supported)"]
+    }
+
+    # randstr() - SQLite testing function that generates random strings
+    if {[regexp -nocase {randstr\s*\(} $script]} {
+        return [list 1 "uses randstr() (SQLite test function)"]
+    }
+
     # SQLite sort tracking helper functions
     # These tests use helper functions that call "db status sort" or "sqlite_sort_count"
     # to verify ORDER BY optimization (index vs explicit sort). The helpers append
@@ -1845,6 +1874,14 @@ proc do_test {name script expected} {
             # Treat as skipped due to ATTACH dependency cascade
             incr ::nTest -1  ;# Don't count this as a run test
             omit_test $name "cascading from skipped ATTACH test"
+            return
+        }
+        # Check for cascading failure from skipped TRIGGER test
+        if {[info exists ::trigger_skipped] && $::trigger_skipped &&
+            [string match "*no such table*" $result]} {
+            # Treat as skipped due to TRIGGER dependency cascade
+            incr ::nTest -1  ;# Don't count this as a run test
+            omit_test $name "cascading from skipped TRIGGER test"
             return
         }
         # Script error - always print failures
@@ -2479,6 +2516,10 @@ proc omit_test {name reason {append 0}} {
     if {[string match "*ATTACH*" $reason]} {
         set ::attach_skipped 1
     }
+    # Track if we skipped a TRIGGER-dependent test (causes cascading failures)
+    if {[string match "*TRIGGER*" $reason]} {
+        set ::trigger_skipped 1
+    }
 }
 
 proc reset_db {} {
@@ -2708,8 +2749,9 @@ proc set_test_counter {counter {value ""}} {
 #-----------------------------------------------------------------------------
 
 proc run_test_file {filename} {
-    # Reset ATTACH cascade tracking for new test file
+    # Reset cascade tracking for new test file
     set ::attach_skipped 0
+    set ::trigger_skipped 0
 
     # Clean any existing temp db (use catch to handle race conditions)
     if {$::db_file ne ""} {

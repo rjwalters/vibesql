@@ -159,6 +159,42 @@ pub(crate) fn values_are_equal(
             }
         }
 
+        // SQLite type affinity: TEXT vs NUMERIC comparison
+        // When comparing a numeric value with a text value, try to parse the text as a number.
+        // If parseable, compare numerically. This enables joins like TEXT '1.0' = INTEGER 1.
+        (
+            Integer(_) | Smallint(_) | Bigint(_) | Unsigned(_) | Numeric(_) | Float(_) | Real(_)
+            | Double(_),
+            Varchar(s) | Character(s),
+        ) => {
+            // Try to parse string as f64
+            if let Ok(text_f64) = s.trim().parse::<f64>() {
+                match crate::evaluator::casting::to_f64(left) {
+                    Ok(num_f64) => (num_f64 - text_f64).abs() < f64::EPSILON,
+                    _ => false,
+                }
+            } else {
+                false // String doesn't parse as number
+            }
+        }
+
+        // Symmetric case: TEXT on left, NUMERIC on right
+        (
+            Varchar(s) | Character(s),
+            Integer(_) | Smallint(_) | Bigint(_) | Unsigned(_) | Numeric(_) | Float(_) | Real(_)
+            | Double(_),
+        ) => {
+            // Try to parse string as f64
+            if let Ok(text_f64) = s.trim().parse::<f64>() {
+                match crate::evaluator::casting::to_f64(right) {
+                    Ok(num_f64) => (text_f64 - num_f64).abs() < f64::EPSILON,
+                    _ => false,
+                }
+            } else {
+                false // String doesn't parse as number
+            }
+        }
+
         _ => false, // Type mismatch = not equal
     }
 }
