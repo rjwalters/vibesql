@@ -152,11 +152,16 @@ fn execute_insert_internal(
                 select_executor.execute_with_columns(select_stmt)?
             };
 
-            // Validate column count
-            if select_result.columns.len() != target_column_info.len() {
+            // Validate column count - if rowid is specified, SELECT should return one extra column
+            let expected_select_columns = if rowid_position.is_some() {
+                target_column_info.len() + 1
+            } else {
+                target_column_info.len()
+            };
+            if select_result.columns.len() != expected_select_columns {
                 return Err(ExecutorError::InsertColumnCountMismatch {
                     table_name: table_name.to_string(),
-                    expected: target_column_info.len(),
+                    expected: expected_select_columns,
                     provided: select_result.columns.len(),
                     has_explicit_columns: !stmt.columns.is_empty(),
                 });
@@ -237,12 +242,26 @@ fn execute_insert_internal(
     // Get INTEGER PRIMARY KEY column index if present
     let ipk_col_idx = schema.get_integer_primary_key_index();
 
+    // Get table's current max rowid for auto-assignment (SQLite semantics)
+    // When inserting with explicit rowid column, NULL rowids should be assigned values
+    // greater than both:
+    // 1. The table's current max rowid
+    // 2. Explicit rowids processed so far in the batch (NOT future rows)
+    let table_max_rowid = db
+        .get_table(&storage_table_name)
+        .map(|t| t.row_count() as u64)
+        .unwrap_or(0);
+
+    // Track maximum rowid seen so far (updated as we process each row)
+    let mut batch_max_rowid = table_max_rowid;
+
     for value_exprs in &rows_to_insert {
         // Build a complete row with values for all columns
         // Start with NULL for all columns, then fill in provided values
         let mut full_row_values = vec![vibesql_types::SqlValue::Null; schema.columns.len()];
 
         // Extract rowid value if present (SQLite compatibility)
+        // For NULL rowids, auto-assign using batch_max_rowid + 1
         let explicit_rowid = if let Some(rowid_pos) = rowid_position {
             // Get the rowid expression
             let rowid_expr = &value_exprs[rowid_pos];
@@ -252,9 +271,22 @@ fn execute_insert_internal(
                 vibesql_ast::Expression::Literal(val) => {
                     // Convert to u64 for row_id
                     match val {
-                        vibesql_types::SqlValue::Integer(i) if *i > 0 => Some(*i as u64),
-                        vibesql_types::SqlValue::Bigint(i) if *i > 0 => Some(*i as u64),
-                        vibesql_types::SqlValue::Null => None, // NULL rowid means auto-assign
+                        vibesql_types::SqlValue::Integer(i) if *i > 0 => {
+                            let rowid = *i as u64;
+                            // Update batch_max_rowid for subsequent NULL auto-assignments
+                            batch_max_rowid = batch_max_rowid.max(rowid);
+                            Some(rowid)
+                        }
+                        vibesql_types::SqlValue::Bigint(i) if *i > 0 => {
+                            let rowid = *i as u64;
+                            batch_max_rowid = batch_max_rowid.max(rowid);
+                            Some(rowid)
+                        }
+                        vibesql_types::SqlValue::Null => {
+                            // NULL rowid means auto-assign: max_seen + 1
+                            batch_max_rowid += 1;
+                            Some(batch_max_rowid)
+                        }
                         _ => {
                             return Err(ExecutorError::UnsupportedExpression(
                                 "ROWID must be a positive integer".to_string(),
