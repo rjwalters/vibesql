@@ -14,7 +14,9 @@
 package require Tcl 8.5
 
 # Configuration
-set ::vibesql_path [file normalize "./target/release/vibesql"]
+# Compute vibesql path relative to shim location, not CWD
+set ::script_dir [file dirname [file normalize [info script]]]
+set ::vibesql_path [file normalize [file join $::script_dir ".." "target" "release" "vibesql"]]
 # Use temp file for persistence - :memory: won't work across process invocations
 set ::db_file [file normalize "/tmp/vibesql_test_[pid].vbsql"]
 set ::verbose 0
@@ -2117,9 +2119,19 @@ proc sqlite3 {db args} {
     # Create/open a database
     # Note: :memory: is mapped to a temp file because we spawn separate processes
     # for each SQL execution, and memory databases don't persist across processes.
+    # We also map "test.db" to a unique temp file to prevent race conditions
+    # when multiple tests run in parallel.
     if {$filename eq ":memory:" || $filename eq ""} {
         # Use temp file instead of :memory: for persistence
         set new_file [file normalize "/tmp/vibesql_test_[pid].vbsql"]
+    } elseif {$filename eq "test.db" || [file tail $filename] eq "test.db"} {
+        # Map test.db to a unique temp file to prevent race conditions
+        # Use current db_file if set (from run_test_file), otherwise create unique
+        if {[info exists ::db_file] && $::db_file ne ""} {
+            set new_file $::db_file
+        } else {
+            set new_file [file normalize "/tmp/vibesql_test_[pid].vbsql"]
+        }
     } else {
         set new_file [file normalize $filename]
     }
@@ -2593,16 +2605,15 @@ proc set_test_counter {counter {value ""}} {
 #-----------------------------------------------------------------------------
 
 proc run_test_file {filename} {
-    # Clean any existing temp db
-    if {$::db_file ne "" && [file exists $::db_file]} {
-        file delete -force $::db_file
+    # Clean any existing temp db (use catch to handle race conditions)
+    if {$::db_file ne ""} {
+        catch {file delete -force $::db_file}
     }
 
     # Clean test.db which is used by many test files
     # This prevents state leakage between test file runs
-    if {[file exists "test.db"]} {
-        file delete -force "test.db"
-    }
+    # Use catch to handle race conditions when file is deleted between check and delete
+    catch {file delete -force "test.db"}
 
     # Clear the opened_dbs tracking so all databases are treated as "first time" opens
     # This ensures sqlite3 proc will delete stale database files from previous test runs
@@ -2635,26 +2646,33 @@ proc run_test_file {filename} {
     # that tester.tcl would have set are available in the eval scope.
     # Simply commenting it out doesn't work because variables defined with ::
     # might not be visible without the :: prefix in the eval'd code.
-    set tester_vars {
-        set SQLITE_MAX_LENGTH $::SQLITE_MAX_LENGTH
-        set SQLITE_MAX_COLUMN $::SQLITE_MAX_COLUMN
-        set SQLITE_MAX_SQL_LENGTH $::SQLITE_MAX_SQL_LENGTH
-        set SQLITE_MAX_EXPR_DEPTH $::SQLITE_MAX_EXPR_DEPTH
-        set SQLITE_MAX_COMPOUND_SELECT $::SQLITE_MAX_COMPOUND_SELECT
-        set SQLITE_MAX_VDBE_OP $::SQLITE_MAX_VDBE_OP
-        set SQLITE_MAX_FUNCTION_ARG $::SQLITE_MAX_FUNCTION_ARG
-        set SQLITE_MAX_ATTACHED $::SQLITE_MAX_ATTACHED
-        set SQLITE_MAX_LIKE_PATTERN_LENGTH $::SQLITE_MAX_LIKE_PATTERN_LENGTH
-        set SQLITE_MAX_VARIABLE_NUMBER $::SQLITE_MAX_VARIABLE_NUMBER
-        set SQLITE_MAX_TRIGGER_DEPTH $::SQLITE_MAX_TRIGGER_DEPTH
-        set AUTOVACUUM $::AUTOVACUUM
-        set TEMP_STORE $::TEMP_STORE
-        set SQLITE_DEFAULT_AUTOVACUUM $::SQLITE_DEFAULT_AUTOVACUUM
-        array set sqlite_options [array get ::sqlite_options]
-        # Initialize the default database connection (as SQLite's tester.tcl does)
-        # This ensures tests that use execsql without explicit sqlite3 db calls work correctly
-        sqlite3 db test.db
-    }
+
+    # Generate unique database file name for this test run to avoid race conditions
+    # Each test file gets its own database based on test name and PID
+    set test_basename [file rootname [file tail $filename]]
+    set unique_db "/tmp/vibesql_tcl_${test_basename}_[pid].vbsql"
+
+    # Build tester_vars with unique database path
+    set tester_vars "
+        set SQLITE_MAX_LENGTH \$::SQLITE_MAX_LENGTH
+        set SQLITE_MAX_COLUMN \$::SQLITE_MAX_COLUMN
+        set SQLITE_MAX_SQL_LENGTH \$::SQLITE_MAX_SQL_LENGTH
+        set SQLITE_MAX_EXPR_DEPTH \$::SQLITE_MAX_EXPR_DEPTH
+        set SQLITE_MAX_COMPOUND_SELECT \$::SQLITE_MAX_COMPOUND_SELECT
+        set SQLITE_MAX_VDBE_OP \$::SQLITE_MAX_VDBE_OP
+        set SQLITE_MAX_FUNCTION_ARG \$::SQLITE_MAX_FUNCTION_ARG
+        set SQLITE_MAX_ATTACHED \$::SQLITE_MAX_ATTACHED
+        set SQLITE_MAX_LIKE_PATTERN_LENGTH \$::SQLITE_MAX_LIKE_PATTERN_LENGTH
+        set SQLITE_MAX_VARIABLE_NUMBER \$::SQLITE_MAX_VARIABLE_NUMBER
+        set SQLITE_MAX_TRIGGER_DEPTH \$::SQLITE_MAX_TRIGGER_DEPTH
+        set AUTOVACUUM \$::AUTOVACUUM
+        set TEMP_STORE \$::TEMP_STORE
+        set SQLITE_DEFAULT_AUTOVACUUM \$::SQLITE_DEFAULT_AUTOVACUUM
+        array set sqlite_options \[array get ::sqlite_options\]
+        # Initialize the default database connection using unique filename
+        # This prevents race conditions when multiple tests run in parallel
+        sqlite3 db $unique_db
+    "
     regsub {source \$testdir/tester\.tcl} $content $tester_vars content
 
     # Execute the modified content at GLOBAL level
