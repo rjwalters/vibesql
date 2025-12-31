@@ -316,7 +316,17 @@ fn execute_insert_internal(
             value_exprs.iter().collect()
         };
 
+        // Track which columns have been assigned (SQLite uses first occurrence for duplicates)
+        let mut assigned_columns = std::collections::HashSet::new();
+
         for (expr, (col_idx, data_type)) in column_values.iter().zip(target_column_info.iter()) {
+            // SQLite behavior: if a column is specified multiple times, use the first value
+            // Skip duplicate column assignments
+            if assigned_columns.contains(col_idx) {
+                continue;
+            }
+            assigned_columns.insert(*col_idx);
+
             // Evaluate expression (literals, DEFAULT, procedural variables, and trigger
             // pseudo-variables)
             let value = super::defaults::evaluate_insert_expression_with_trigger_context(
