@@ -10,6 +10,7 @@
 //! - `advanced` - Advanced SQL objects (types, domains, sequences, views, triggers, etc.)
 
 use std::collections::{HashMap, HashSet};
+use indexmap::IndexMap;
 
 use crate::{
     advanced_objects::{
@@ -55,7 +56,8 @@ pub struct Catalog {
     pub(crate) functions: HashMap<String, Function>,
     pub(crate) procedures: HashMap<String, Procedure>,
     // Index metadata (maps qualified name "table.index" -> IndexMetadata)
-    pub(crate) indexes: HashMap<String, IndexMetadata>,
+    // Uses IndexMap to preserve creation order for sqlite_master compatibility
+    pub(crate) indexes: IndexMap<String, IndexMetadata>,
     // Session state (SQL:1999 session configuration)
     pub(crate) current_catalog: Option<String>,
     pub(crate) current_charset: String,
@@ -86,7 +88,7 @@ impl Catalog {
             assertions: HashMap::new(),
             functions: HashMap::new(),
             procedures: HashMap::new(),
-            indexes: HashMap::new(),
+            indexes: IndexMap::new(),
             // Session defaults (SQL:1999)
             current_catalog: None,
             current_charset: "UTF8".to_string(),
