@@ -407,7 +407,9 @@ pub(super) fn evaluate(
 /// Handles: Literal, ColumnRef, Wildcard, CurrentDate, etc.
 ///
 /// These are truly simple expressions that can be evaluated directly using the standard evaluator.
+/// Uses the representative row (from MAX/MIN aggregate) when available for SQLite compatibility.
 pub(super) fn evaluate_no_aggregates(
+    executor: &SelectExecutor,
     expr: &vibesql_ast::Expression,
     group_rows: &[vibesql_storage::Row],
     evaluator: &CombinedExpressionEvaluator,
@@ -416,12 +418,19 @@ pub(super) fn evaluate_no_aggregates(
         // Literals can be evaluated without row context
         vibesql_ast::Expression::Literal(val) => Ok(val.clone()),
 
-        // All other simple expressions: use first row from group as context and delegate to
-        // evaluator This includes: ColumnRef, Wildcard, CurrentDate, CurrentTime,
-        // CurrentTimestamp, Default, etc.
+        // All other simple expressions: use representative row from MAX/MIN aggregate when
+        // available, otherwise fall back to first row. This matches SQLite's behavior where
+        // bare column references in aggregate queries return values from the row that
+        // determined the MAX/MIN result.
         _ => {
-            if let Some(first_row) = group_rows.first() {
-                evaluator.eval(expr, first_row)
+            let row = if let Some(rep_idx) = executor.get_aggregate_representative_row() {
+                group_rows.get(rep_idx)
+            } else {
+                group_rows.first()
+            };
+
+            if let Some(row) = row {
+                evaluator.eval(expr, row)
             } else {
                 Ok(vibesql_types::SqlValue::Null)
             }

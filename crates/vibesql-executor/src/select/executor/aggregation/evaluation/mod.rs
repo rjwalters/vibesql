@@ -99,7 +99,7 @@ impl SelectExecutor<'_> {
             | vibesql_ast::Expression::DuplicateKeyValue { .. }
             | vibesql_ast::Expression::PseudoVariable { .. }
             | vibesql_ast::Expression::SessionVariable { .. } => {
-                simple::evaluate_no_aggregates(expr, group_rows, evaluator)
+                simple::evaluate_no_aggregates(self, expr, group_rows, evaluator)
             }
 
             // Window functions in aggregate context: evaluate the inner aggregate argument
@@ -577,7 +577,7 @@ impl SelectExecutor<'_> {
                     return Ok(vibesql_types::SqlValue::Null);
                 }
                 // Not rolled up, evaluate normally
-                simple::evaluate_no_aggregates(expr, group_rows, evaluator)
+                simple::evaluate_no_aggregates(self, expr, group_rows, evaluator)
             }
 
             // Aggregate functions - delegate to aggregate handler
