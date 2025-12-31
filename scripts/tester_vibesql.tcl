@@ -1796,6 +1796,11 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses sqlite_options() (SQLite internal)"]
     }
 
+    # tclvar() - SQLite TCL integration function
+    if {[regexp -nocase {tclvar\s*\(} $script]} {
+        return [list 1 "uses tclvar() (SQLite TCL integration)"]
+    }
+
     # SQLite internal functions
     if {[regexp {sqlite_offset\s*\(} $script]} {
         return [list 1 "uses sqlite_offset() (SQLite internal)"]
