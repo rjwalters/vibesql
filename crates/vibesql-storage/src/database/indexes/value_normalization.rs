@@ -14,6 +14,9 @@ use vibesql_types::SqlValue;
 /// to a canonical form (Double) before storing in the BTreeMap. This ensures that queries
 /// comparing different numeric types (e.g., Real > Numeric) work correctly.
 ///
+/// SQLite Type Affinity: String values that look like numbers are also normalized to Double.
+/// This enables queries like `WHERE int_col = '123'` to find rows where int_col = 123.
+///
 /// Uses f64 (Double) instead of f32 (Real) to preserve precision for:
 /// - Large integers (Bigint, Unsigned) beyond f32 precision range (> 2^24 ≈ 16 million)
 /// - High-precision floating point values (Double, Numeric)
@@ -27,13 +30,25 @@ pub fn normalize_for_comparison(value: &SqlValue) -> SqlValue {
         SqlValue::Real(r) => SqlValue::Double(*r as f64),
         SqlValue::Double(d) => SqlValue::Double(*d),
         SqlValue::Numeric(n) => SqlValue::Double(*n),
-        // For non-numeric types, return as-is
+        // SQLite type affinity: strings that look like numbers should be normalized
+        // This enables queries like: WHERE int_col = '123' to match int_col = 123
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            if let Ok(n) = s.trim().parse::<f64>() {
+                SqlValue::Double(n)
+            } else {
+                value.clone()
+            }
+        }
+        // For other non-numeric types, return as-is
         other => other.clone(),
     }
 }
 
 /// Zero-copy normalization using Cow - avoids allocation for non-numeric values.
 /// Returns Borrowed for non-numeric types (no clone), Owned for normalized numerics.
+///
+/// SQLite Type Affinity: String values that look like numbers are also normalized to Double.
+/// This enables queries like `WHERE int_col = '123'` to find rows where int_col = 123.
 #[inline]
 pub fn normalize_cow(value: &SqlValue) -> Cow<'_, SqlValue> {
     match value {
@@ -45,7 +60,15 @@ pub fn normalize_cow(value: &SqlValue) -> Cow<'_, SqlValue> {
         SqlValue::Real(r) => Cow::Owned(SqlValue::Double(*r as f64)),
         SqlValue::Double(d) => Cow::Owned(SqlValue::Double(*d)),
         SqlValue::Numeric(n) => Cow::Owned(SqlValue::Double(*n)),
-        // For non-numeric types, borrow without clone
+        // SQLite type affinity: strings that look like numbers should be normalized
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            if let Ok(n) = s.trim().parse::<f64>() {
+                Cow::Owned(SqlValue::Double(n))
+            } else {
+                Cow::Borrowed(value)
+            }
+        }
+        // For other non-numeric types, borrow without clone
         other => Cow::Borrowed(other),
     }
 }

@@ -473,6 +473,68 @@ impl CompiledPredicate {
             (SqlValue::Integer(x), SqlValue::Real(y)) => (*x as f64) == f64::from(*y),
             (SqlValue::Real(x), SqlValue::Integer(y)) => f64::from(*x) == (*y as f64),
 
+            // Integer <-> String coercion (SQLite type affinity)
+            // When comparing integer column to string literal, try to parse string as number
+            (SqlValue::Integer(x), SqlValue::Varchar(s))
+            | (SqlValue::Integer(x), SqlValue::Character(s)) => {
+                s.trim().parse::<i64>().map(|y| *x == y).unwrap_or(false)
+            }
+            (SqlValue::Varchar(s), SqlValue::Integer(y))
+            | (SqlValue::Character(s), SqlValue::Integer(y)) => {
+                s.trim().parse::<i64>().map(|x| x == *y).unwrap_or(false)
+            }
+            // Bigint <-> String
+            (SqlValue::Bigint(x), SqlValue::Varchar(s))
+            | (SqlValue::Bigint(x), SqlValue::Character(s)) => {
+                s.trim().parse::<i64>().map(|y| *x == y).unwrap_or(false)
+            }
+            (SqlValue::Varchar(s), SqlValue::Bigint(y))
+            | (SqlValue::Character(s), SqlValue::Bigint(y)) => {
+                s.trim().parse::<i64>().map(|x| x == *y).unwrap_or(false)
+            }
+            // Smallint <-> String
+            (SqlValue::Smallint(x), SqlValue::Varchar(s))
+            | (SqlValue::Smallint(x), SqlValue::Character(s)) => {
+                s.trim().parse::<i16>().map(|y| *x == y).unwrap_or(false)
+            }
+            (SqlValue::Varchar(s), SqlValue::Smallint(y))
+            | (SqlValue::Character(s), SqlValue::Smallint(y)) => {
+                s.trim().parse::<i16>().map(|x| x == *y).unwrap_or(false)
+            }
+            // Float/Double/Real <-> String
+            (SqlValue::Float(x), SqlValue::Varchar(s))
+            | (SqlValue::Float(x), SqlValue::Character(s)) => {
+                s.trim().parse::<f64>().map(|y| f64::from(*x) == y).unwrap_or(false)
+            }
+            (SqlValue::Varchar(s), SqlValue::Float(y))
+            | (SqlValue::Character(s), SqlValue::Float(y)) => {
+                s.trim().parse::<f64>().map(|x| x == f64::from(*y)).unwrap_or(false)
+            }
+            (SqlValue::Double(x), SqlValue::Varchar(s))
+            | (SqlValue::Double(x), SqlValue::Character(s)) => {
+                s.trim().parse::<f64>().map(|y| *x == y).unwrap_or(false)
+            }
+            (SqlValue::Varchar(s), SqlValue::Double(y))
+            | (SqlValue::Character(s), SqlValue::Double(y)) => {
+                s.trim().parse::<f64>().map(|x| x == *y).unwrap_or(false)
+            }
+            (SqlValue::Real(x), SqlValue::Varchar(s))
+            | (SqlValue::Real(x), SqlValue::Character(s)) => {
+                s.trim().parse::<f64>().map(|y| *x == y).unwrap_or(false)
+            }
+            (SqlValue::Varchar(s), SqlValue::Real(y))
+            | (SqlValue::Character(s), SqlValue::Real(y)) => {
+                s.trim().parse::<f64>().map(|x| x == *y).unwrap_or(false)
+            }
+            (SqlValue::Numeric(x), SqlValue::Varchar(s))
+            | (SqlValue::Numeric(x), SqlValue::Character(s)) => {
+                s.trim().parse::<f64>().map(|y| *x == y).unwrap_or(false)
+            }
+            (SqlValue::Varchar(s), SqlValue::Numeric(y))
+            | (SqlValue::Character(s), SqlValue::Numeric(y)) => {
+                s.trim().parse::<f64>().map(|x| x == *y).unwrap_or(false)
+            }
+
             // Fallback to PartialEq
             _ => a == b,
         }
@@ -634,6 +696,71 @@ impl CompiledPredicate {
             (SqlValue::Smallint(x), SqlValue::Numeric(y)) => {
                 Some(Self::apply_range_op(f64::from(*x), op, *y))
             }
+
+            // Integer <-> String range comparisons (SQLite type affinity)
+            // When comparing integer column to string literal, try to parse string as number
+            (SqlValue::Integer(x), SqlValue::Varchar(s))
+            | (SqlValue::Integer(x), SqlValue::Character(s)) => s
+                .trim()
+                .parse::<i64>()
+                .map(|y| Self::apply_range_op(*x, op, y))
+                .ok(),
+            (SqlValue::Varchar(s), SqlValue::Integer(y))
+            | (SqlValue::Character(s), SqlValue::Integer(y)) => s
+                .trim()
+                .parse::<i64>()
+                .map(|x| Self::apply_range_op(x, op, *y))
+                .ok(),
+            // Bigint <-> String
+            (SqlValue::Bigint(x), SqlValue::Varchar(s))
+            | (SqlValue::Bigint(x), SqlValue::Character(s)) => s
+                .trim()
+                .parse::<i64>()
+                .map(|y| Self::apply_range_op(*x, op, y))
+                .ok(),
+            (SqlValue::Varchar(s), SqlValue::Bigint(y))
+            | (SqlValue::Character(s), SqlValue::Bigint(y)) => s
+                .trim()
+                .parse::<i64>()
+                .map(|x| Self::apply_range_op(x, op, *y))
+                .ok(),
+            // Float/Double/Real <-> String
+            (SqlValue::Float(x), SqlValue::Varchar(s))
+            | (SqlValue::Float(x), SqlValue::Character(s)) => s
+                .trim()
+                .parse::<f64>()
+                .map(|y| Self::apply_range_op(f64::from(*x), op, y))
+                .ok(),
+            (SqlValue::Varchar(s), SqlValue::Float(y))
+            | (SqlValue::Character(s), SqlValue::Float(y)) => s
+                .trim()
+                .parse::<f64>()
+                .map(|x| Self::apply_range_op(x, op, f64::from(*y)))
+                .ok(),
+            (SqlValue::Double(x), SqlValue::Varchar(s))
+            | (SqlValue::Double(x), SqlValue::Character(s)) => s
+                .trim()
+                .parse::<f64>()
+                .map(|y| Self::apply_range_op(*x, op, y))
+                .ok(),
+            (SqlValue::Varchar(s), SqlValue::Double(y))
+            | (SqlValue::Character(s), SqlValue::Double(y)) => s
+                .trim()
+                .parse::<f64>()
+                .map(|x| Self::apply_range_op(x, op, *y))
+                .ok(),
+            (SqlValue::Real(x), SqlValue::Varchar(s))
+            | (SqlValue::Real(x), SqlValue::Character(s)) => s
+                .trim()
+                .parse::<f64>()
+                .map(|y| Self::apply_range_op(*x, op, y))
+                .ok(),
+            (SqlValue::Varchar(s), SqlValue::Real(y))
+            | (SqlValue::Character(s), SqlValue::Real(y)) => s
+                .trim()
+                .parse::<f64>()
+                .map(|x| Self::apply_range_op(x, op, *y))
+                .ok(),
 
             // Type mismatch - fall back to None (needs full evaluation)
             _ => None,
