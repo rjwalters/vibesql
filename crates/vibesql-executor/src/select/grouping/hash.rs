@@ -111,6 +111,10 @@ fn group_rows_sequential<'a>(
         result.push((key, group_rows));
     }
 
+    // Sort by group key for deterministic ordering (SQLite compatibility)
+    // SQLite returns GROUP BY results sorted by the GROUP BY columns
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+
     Ok(result)
 }
 
@@ -304,6 +308,10 @@ fn group_rows_parallel<'a>(
         result.push((key, group_rows));
     }
 
+    // Sort by group key for deterministic ordering (SQLite compatibility)
+    // SQLite returns GROUP BY results sorted by the GROUP BY columns
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+
     Ok(result)
 }
 
@@ -412,6 +420,10 @@ fn group_rows_parallel_simple<'a>(
         }
         result.push((key, group_rows));
     }
+
+    // Sort by group key for deterministic ordering (SQLite compatibility)
+    // SQLite returns GROUP BY results sorted by the GROUP BY columns
+    result.sort_by(|a, b| a.0.cmp(&b.0));
 
     Ok(result)
 }
