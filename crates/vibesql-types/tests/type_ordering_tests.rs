@@ -158,7 +158,7 @@ fn test_real_ordering() {
 
 #[test]
 fn test_real_nan_is_incomparable() {
-    let nan = SqlValue::Real(f32::NAN);
+    let nan = SqlValue::Real(f64::NAN);
     let one = SqlValue::Real(1.0);
     assert_eq!(nan.partial_cmp(&one), None);
     assert_eq!(one.partial_cmp(&nan), None);

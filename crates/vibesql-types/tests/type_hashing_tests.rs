@@ -74,8 +74,8 @@ fn test_real_hash() {
 
 #[test]
 fn test_real_nan_hash() {
-    let nan1 = SqlValue::Real(f32::NAN);
-    let nan2 = SqlValue::Real(f32::NAN);
+    let nan1 = SqlValue::Real(f64::NAN);
+    let nan2 = SqlValue::Real(f64::NAN);
     assert_eq!(calculate_hash(&nan1), calculate_hash(&nan2));
 }
 

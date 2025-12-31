@@ -24,9 +24,11 @@ fn format_f64(n: f64) -> String {
     let abs_n = n.abs();
 
     // Use scientific notation for very large or very small numbers (like SQLite)
-    // SQLite format: 1.0e+15, 1.0e-05 (lowercase e, explicit +/-, 2-digit exponent)
+    // SQLite uses ~15 significant figures (IEEE 754 double precision)
+    // Format: 1.0e+15, 1.0e-05 (lowercase e, explicit +/-, 2-digit exponent)
     if abs_n >= 1e15 || (abs_n < 1e-4 && abs_n != 0.0) {
-        let s = format!("{:e}", n);
+        // Use 14 decimal places in mantissa (15 total significant figures)
+        let s = format!("{:.14e}", n);
         return format_scientific_sqlite(&s);
     }
 
@@ -43,12 +45,16 @@ fn format_f64(n: f64) -> String {
 /// - Lowercase 'e'
 /// - Explicit + or - sign for exponent
 /// - Two-digit exponent (padded with leading zero if needed)
+/// - Strip trailing zeros from mantissa (but keep at least one decimal place)
 fn format_scientific_sqlite(s: &str) -> String {
-    // Input format from Rust: "1.5e10" or "1.5e-5"
+    // Input format from Rust: "1.50000000000000e10" or "1.5e-5"
     // Output format for SQLite: "1.5e+10" or "1.5e-05"
     if let Some(e_pos) = s.find('e') {
         let (mantissa, exp_part) = s.split_at(e_pos);
         let exp_str = &exp_part[1..]; // Skip the 'e'
+
+        // Strip trailing zeros from mantissa and trailing decimal point
+        let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
 
         let (sign, exp_digits) = if let Some(stripped) = exp_str.strip_prefix('-') {
             ("-", stripped)
@@ -85,9 +91,11 @@ fn format_f32(n: f32) -> String {
     let abs_n = n.abs();
 
     // Use scientific notation for very large or very small numbers (like SQLite)
-    // SQLite format: 1.0e+15, 1.0e-05 (lowercase e, explicit +/-, 2-digit exponent)
+    // SQLite uses ~15 significant figures (IEEE 754 double precision)
+    // Format: 1.0e+15, 1.0e-05 (lowercase e, explicit +/-, 2-digit exponent)
     if abs_n >= 1e15 || (abs_n < 1e-4 && abs_n != 0.0) {
-        let s = format!("{:e}", n);
+        // Use 14 decimal places in mantissa (15 total significant figures)
+        let s = format!("{:.14e}", n);
         return format_scientific_sqlite(&s);
     }
 

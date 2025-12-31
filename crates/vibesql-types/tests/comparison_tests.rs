@@ -32,7 +32,7 @@ fn test_eq_ord_consistency() {
         SqlValue::Float(f32::NAN),
         SqlValue::Float(-f32::NAN),
         SqlValue::Real(2.5),
-        SqlValue::Real(f32::NAN),
+        SqlValue::Real(f64::NAN),
         SqlValue::Double(3.14),
         SqlValue::Double(f64::NAN),
         SqlValue::Numeric(2.718),
@@ -82,7 +82,7 @@ fn test_eq_ord_consistency() {
 fn test_nan_consistency() {
     let nan_float = SqlValue::Float(f32::NAN);
     let nan_float2 = SqlValue::Float(f32::NAN);
-    let nan_real = SqlValue::Real(f32::NAN);
+    let nan_real = SqlValue::Real(f64::NAN);
     let nan_double = SqlValue::Double(f64::NAN);
     let nan_numeric = SqlValue::Numeric(f64::NAN);
 
