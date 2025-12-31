@@ -2193,7 +2193,12 @@ proc sqlite3 {db args} {
     # when multiple tests run in parallel.
     if {$filename eq ":memory:" || $filename eq ""} {
         # Use temp file instead of :memory: for persistence
+        # IMPORTANT: Each :memory: open should get a FRESH database, so we always delete
         set new_file [file normalize "/tmp/vibesql_test_[pid].vbsql"]
+        # Always delete for :memory: - SQLite gives fresh empty database each time
+        if {[file exists $new_file]} {
+            catch {file delete -force $new_file}
+        }
     } elseif {$filename eq "test.db" || [file tail $filename] eq "test.db"} {
         # Map test.db to a unique temp file to prevent race conditions
         # Use current db_file if set (from run_test_file), otherwise create unique
