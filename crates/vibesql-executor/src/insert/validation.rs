@@ -142,7 +142,7 @@ pub fn coerce_value(
 
         // Numeric literal → Float/Real/Double
         (SqlValue::Numeric(f), DataType::Float { .. }) => Ok(SqlValue::Float(*f as f32)),
-        (SqlValue::Numeric(f), DataType::Real) => Ok(SqlValue::Real(*f as f32)),
+        (SqlValue::Numeric(f), DataType::Real) => Ok(SqlValue::Real(*f)),  // Real is now f64
         (SqlValue::Numeric(f), DataType::DoublePrecision) => Ok(SqlValue::Double(*f)),
 
         // Numeric literal → Integer types
@@ -231,8 +231,9 @@ pub fn coerce_value(
             }
         }
         (SqlValue::Varchar(s) | SqlValue::Character(s), DataType::Real) => {
+            // Real is now f64 (SQLite REAL is 8-byte IEEE float)
             let trimmed = s.trim();
-            if let Ok(f) = trimmed.parse::<f32>() {
+            if let Ok(f) = trimmed.parse::<f64>() {
                 Ok(SqlValue::Real(f))
             } else {
                 Ok(value)
@@ -265,13 +266,13 @@ pub fn coerce_value(
 
         // Integer → Float types (safe widening conversion)
         (SqlValue::Integer(i), DataType::Float { .. }) => Ok(SqlValue::Float(*i as f32)),
-        (SqlValue::Integer(i), DataType::Real) => Ok(SqlValue::Real(*i as f32)),
+        (SqlValue::Integer(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)),  // Real is now f64
         (SqlValue::Integer(i), DataType::DoublePrecision) => Ok(SqlValue::Double(*i as f64)),
         (SqlValue::Smallint(i), DataType::Float { .. }) => Ok(SqlValue::Float(*i as f32)),
-        (SqlValue::Smallint(i), DataType::Real) => Ok(SqlValue::Real(*i as f32)),
+        (SqlValue::Smallint(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)),  // Real is now f64
         (SqlValue::Smallint(i), DataType::DoublePrecision) => Ok(SqlValue::Double(*i as f64)),
         (SqlValue::Bigint(i), DataType::Float { .. }) => Ok(SqlValue::Float(*i as f32)),
-        (SqlValue::Bigint(i), DataType::Real) => Ok(SqlValue::Real(*i as f32)),
+        (SqlValue::Bigint(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)),  // Real is now f64
         (SqlValue::Bigint(i), DataType::DoublePrecision) => Ok(SqlValue::Double(*i as f64)),
 
         // Integer widening conversions

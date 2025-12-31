@@ -189,7 +189,8 @@ pub fn truncate(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             return Ok(SqlValue::Double((f * multiplier).trunc() / multiplier));
         }
         SqlValue::Real(f) => {
-            let multiplier = 10_f32.powi(precision);
+            // Real is now f64
+            let multiplier = 10_f64.powi(precision);
             return Ok(SqlValue::Real((f * multiplier).trunc() / multiplier));
         }
         SqlValue::Numeric(n) => {

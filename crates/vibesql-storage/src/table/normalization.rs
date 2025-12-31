@@ -93,30 +93,31 @@ impl<'a> RowNormalizer<'a> {
             }
             DataType::Real => {
                 // REAL affinity: Accept any value type, convert numeric types to Real
+                // Real is now f64 (SQLite REAL is 8-byte IEEE float)
                 match value {
                     SqlValue::Real(_) => {
                         // Already correct type
                     }
                     SqlValue::Integer(i) => {
-                        *value = SqlValue::Real(*i as f32);
+                        *value = SqlValue::Real(*i as f64);
                     }
                     SqlValue::Bigint(i) => {
-                        *value = SqlValue::Real(*i as f32);
+                        *value = SqlValue::Real(*i as f64);
                     }
                     SqlValue::Smallint(i) => {
-                        *value = SqlValue::Real(*i as f32);
+                        *value = SqlValue::Real(*i as f64);
                     }
                     SqlValue::Double(d) => {
-                        *value = SqlValue::Real(*d as f32);
+                        *value = SqlValue::Real(*d);
                     }
                     SqlValue::Float(f) => {
-                        *value = SqlValue::Real(*f);
+                        *value = SqlValue::Real(*f as f64);
                     }
                     SqlValue::Numeric(n) => {
-                        *value = SqlValue::Real(*n as f32);
+                        *value = SqlValue::Real(*n);
                     }
                     SqlValue::Unsigned(u) => {
-                        *value = SqlValue::Real(*u as f32);
+                        *value = SqlValue::Real(*u as f64);
                     }
                     _ => {
                         // SQLite affinity: keep non-numeric values as-is

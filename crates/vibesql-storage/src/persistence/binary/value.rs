@@ -58,7 +58,7 @@ pub fn write_sql_value<W: Write>(writer: &mut W, value: &SqlValue) -> Result<(),
             writer
                 .write_all(&[TypeTag::Real as u8])
                 .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-            write_f32(writer, *f)?;
+            write_f64(writer, *f)?;  // Real is now f64 (SQLite REAL is 8-byte)
         }
         SqlValue::Double(f) => {
             writer
@@ -145,7 +145,7 @@ pub fn read_sql_value<R: Read>(reader: &mut R) -> Result<SqlValue, StorageError>
         TypeTag::Unsigned => Ok(SqlValue::Unsigned(read_u64(reader)?)),
         TypeTag::Numeric => Ok(SqlValue::Numeric(read_f64(reader)?)),
         TypeTag::Float => Ok(SqlValue::Float(read_f32(reader)?)),
-        TypeTag::Real => Ok(SqlValue::Real(read_f32(reader)?)),
+        TypeTag::Real => Ok(SqlValue::Real(read_f64(reader)?)),  // Real is now f64
         TypeTag::Double => Ok(SqlValue::Double(read_f64(reader)?)),
         TypeTag::Character => Ok(SqlValue::Character(arcstr::ArcStr::from(read_string(reader)?))),
         TypeTag::Varchar => Ok(SqlValue::Varchar(arcstr::ArcStr::from(read_string(reader)?))),

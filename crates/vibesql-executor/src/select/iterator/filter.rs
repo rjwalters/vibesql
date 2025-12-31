@@ -71,12 +71,13 @@ impl<'a, I: RowIterator> FilterIterator<'a, I> {
             vibesql_types::SqlValue::Integer(_)
             | vibesql_types::SqlValue::Smallint(_)
             | vibesql_types::SqlValue::Bigint(_) => Ok(true),
-            vibesql_types::SqlValue::Float(f) | vibesql_types::SqlValue::Real(f) if *f == 0.0 => {
+            vibesql_types::SqlValue::Float(f) if *f == 0.0 => Ok(false),
+            vibesql_types::SqlValue::Float(_) => Ok(true),
+            // Real and Double are both f64
+            vibesql_types::SqlValue::Real(f) | vibesql_types::SqlValue::Double(f) if *f == 0.0 => {
                 Ok(false)
             }
-            vibesql_types::SqlValue::Float(_) | vibesql_types::SqlValue::Real(_) => Ok(true),
-            vibesql_types::SqlValue::Double(f) if *f == 0.0 => Ok(false),
-            vibesql_types::SqlValue::Double(_) => Ok(true),
+            vibesql_types::SqlValue::Real(_) | vibesql_types::SqlValue::Double(_) => Ok(true),
             other => Err(ExecutorError::InvalidWhereClause(format!(
                 "Filter expression must evaluate to boolean, got: {:?}",
                 other

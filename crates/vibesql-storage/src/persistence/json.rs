@@ -679,7 +679,7 @@ fn json_value_to_sql(
             .ok_or_else(|| StorageError::NotImplemented(format!("Invalid float value: {}", n))),
         (serde_json::Value::Number(n), DataType::Real) => n
             .as_f64()
-            .map(|v| SqlValue::Real(v as f32))
+            .map(SqlValue::Real)  // Real is now f64
             .ok_or_else(|| StorageError::NotImplemented(format!("Invalid real value: {}", n))),
         (serde_json::Value::Number(n), DataType::DoublePrecision) => n
             .as_f64()

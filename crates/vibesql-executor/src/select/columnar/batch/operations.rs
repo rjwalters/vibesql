@@ -376,7 +376,7 @@ impl ColumnArray {
                 }
                 values
                     .get(index)
-                    .map(|v| SqlValue::Real(*v))
+                    .map(|v| SqlValue::Float(*v))  // Float32 → SqlValue::Float (f32)
                     .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
@@ -493,12 +493,12 @@ impl ColumnArray {
                         row_values[i].push(if is_null {
                             SqlValue::Null
                         } else {
-                            SqlValue::Real(v)
+                            SqlValue::Float(v)  // Float32 → SqlValue::Float (f32)
                         });
                     }
                 } else {
                     for (i, &v) in values.iter().enumerate() {
-                        row_values[i].push(SqlValue::Real(v));
+                        row_values[i].push(SqlValue::Float(v));  // Float32 → SqlValue::Float (f32)
                     }
                 }
             }

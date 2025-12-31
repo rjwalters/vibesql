@@ -22,8 +22,8 @@ pub fn coerce_to_string(value: &SqlValue) -> Option<String> {
         SqlValue::Integer(n) | SqlValue::Bigint(n) => Some(n.to_string()),
         SqlValue::Smallint(n) => Some(n.to_string()),
         SqlValue::Unsigned(n) => Some(n.to_string()),
-        SqlValue::Double(n) | SqlValue::Numeric(n) => Some(format_sqlite_float(*n)),
-        SqlValue::Float(n) | SqlValue::Real(n) => Some(format_sqlite_float(*n as f64)),
+        SqlValue::Double(n) | SqlValue::Numeric(n) | SqlValue::Real(n) => Some(format_sqlite_float(*n)),
+        SqlValue::Float(n) => Some(format_sqlite_float(*n as f64)),
         SqlValue::Boolean(b) => Some(if *b { "1" } else { "0" }.to_string()),
         SqlValue::Vector(v) => {
             // Format vector as comma-separated values in brackets
@@ -51,8 +51,8 @@ pub fn coerce_to_number(value: &SqlValue) -> Option<f64> {
         SqlValue::Integer(n) | SqlValue::Bigint(n) => Some(*n as f64),
         SqlValue::Smallint(n) => Some(*n as f64),
         SqlValue::Unsigned(n) => Some(*n as f64),
-        SqlValue::Double(n) | SqlValue::Numeric(n) => Some(*n),
-        SqlValue::Float(n) | SqlValue::Real(n) => Some(*n as f64),
+        SqlValue::Double(n) | SqlValue::Numeric(n) | SqlValue::Real(n) => Some(*n),
+        SqlValue::Float(n) => Some(*n as f64),
         SqlValue::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             // SQLite: parse string to number, default to 0.0
@@ -76,8 +76,8 @@ pub fn coerce_to_integer(value: &SqlValue) -> Option<i64> {
         SqlValue::Integer(n) | SqlValue::Bigint(n) => Some(*n),
         SqlValue::Smallint(n) => Some(*n as i64),
         SqlValue::Unsigned(n) => Some(*n as i64),
-        SqlValue::Double(n) | SqlValue::Numeric(n) => Some(*n as i64),
-        SqlValue::Float(n) | SqlValue::Real(n) => Some(*n as i64),
+        SqlValue::Double(n) | SqlValue::Numeric(n) | SqlValue::Real(n) => Some(*n as i64),
+        SqlValue::Float(n) => Some(*n as i64),
         SqlValue::Boolean(b) => Some(if *b { 1 } else { 0 }),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             // SQLite: parse string to integer, default to 0

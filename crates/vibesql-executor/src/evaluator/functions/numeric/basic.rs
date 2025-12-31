@@ -183,11 +183,18 @@ pub fn mod_fn(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             return Ok(SqlValue::Integer(x % y));
         }
 
-        (SqlValue::Float(x), SqlValue::Float(y)) | (SqlValue::Real(x), SqlValue::Real(y)) => {
+        (SqlValue::Float(x), SqlValue::Float(y)) => {
             if *y == 0.0 {
                 return Ok(SqlValue::Null);
             }
             return Ok(SqlValue::Float(x % y));
+        }
+        (SqlValue::Real(x), SqlValue::Real(y)) => {
+            // Real is now f64
+            if *y == 0.0 {
+                return Ok(SqlValue::Null);
+            }
+            return Ok(SqlValue::Real(x % y));
         }
 
         _ => {}

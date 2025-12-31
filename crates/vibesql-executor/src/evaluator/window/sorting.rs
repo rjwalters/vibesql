@@ -79,12 +79,12 @@ pub fn compare_values(a: &SqlValue, b: &SqlValue) -> Ordering {
         (SqlValue::Character(a), SqlValue::Character(b)) => a.cmp(b),
         (SqlValue::Boolean(a), SqlValue::Boolean(b)) => a.cmp(b),
 
-        // Type coercion for mixed integer/real (Real is f32)
+        // Type coercion for mixed integer/real (Real is now f64)
         (SqlValue::Integer(a), SqlValue::Real(b)) => {
-            (*a as f32).partial_cmp(b).unwrap_or(Ordering::Equal)
+            (*a as f64).partial_cmp(b).unwrap_or(Ordering::Equal)
         }
         (SqlValue::Real(a), SqlValue::Integer(b)) => {
-            a.partial_cmp(&(*b as f32)).unwrap_or(Ordering::Equal)
+            a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
         }
 
         // Other type combinations: compare as strings

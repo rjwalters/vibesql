@@ -28,7 +28,7 @@ pub enum SqlValue {
     Numeric(f64),  // f64 for performance (was: String)
 
     Float(f32),
-    Real(f32),
+    Real(f64),  // SQLite REAL is 8-byte IEEE float (same as f64)
     Double(f64),
 
     Character(StringValue),

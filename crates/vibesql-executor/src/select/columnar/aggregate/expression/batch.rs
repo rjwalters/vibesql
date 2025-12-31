@@ -121,10 +121,11 @@ fn create_literal_column_array(value: &SqlValue, len: usize) -> Result<ColumnArr
             Ok(ColumnArray::Int64(Arc::new(vec![*i; len]), None))
         }
         SqlValue::Smallint(i) => Ok(ColumnArray::Int64(Arc::new(vec![*i as i64; len]), None)),
-        SqlValue::Float(f) | SqlValue::Real(f) => {
+        SqlValue::Float(f) => {
             Ok(ColumnArray::Float64(Arc::new(vec![*f as f64; len]), None))
         }
-        SqlValue::Double(f) | SqlValue::Numeric(f) => {
+        SqlValue::Double(f) | SqlValue::Numeric(f) | SqlValue::Real(f) => {
+            // Real is now f64 (SQLite REAL is 8-byte IEEE float)
             Ok(ColumnArray::Float64(Arc::new(vec![*f; len]), None))
         }
         SqlValue::Null => {
@@ -261,8 +262,8 @@ fn try_extract_f64_from_mixed(values: &[SqlValue]) -> Result<Vec<f64>, ExecutorE
         .map(|v| match v {
             SqlValue::Integer(i) | SqlValue::Bigint(i) => Ok(*i as f64),
             SqlValue::Smallint(i) => Ok(*i as f64),
-            SqlValue::Float(f) | SqlValue::Real(f) => Ok(*f as f64),
-            SqlValue::Double(f) | SqlValue::Numeric(f) => Ok(*f),
+            SqlValue::Float(f) => Ok(*f as f64),
+            SqlValue::Double(f) | SqlValue::Numeric(f) | SqlValue::Real(f) => Ok(*f),  // Real is now f64
             SqlValue::Null => Ok(f64::NAN), // NaN will propagate correctly
             _ => Err(ExecutorError::UnsupportedExpression(
                 "Non-numeric columns not supported in batch arithmetic".to_string(),

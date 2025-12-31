@@ -195,9 +195,10 @@ pub fn deserialize_value<R: Read>(reader: &mut R) -> io::Result<SqlValue> {
             Ok(SqlValue::Float(f32::from_le_bytes(buf)))
         }
         tags::REAL => {
-            let mut buf = [0u8; 4];
+            // Real is now f64 (SQLite REAL is 8-byte IEEE float)
+            let mut buf = [0u8; 8];
             reader.read_exact(&mut buf)?;
-            Ok(SqlValue::Real(f32::from_le_bytes(buf)))
+            Ok(SqlValue::Real(f64::from_le_bytes(buf)))
         }
         tags::DOUBLE => {
             let mut buf = [0u8; 8];
@@ -423,8 +424,8 @@ fn estimate_value_size(value: &SqlValue) -> usize {
         SqlValue::Null => 1,
         SqlValue::Integer(_) | SqlValue::Bigint(_) => 1 + 8,
         SqlValue::Smallint(_) => 1 + 2,
-        SqlValue::Unsigned(_) | SqlValue::Numeric(_) | SqlValue::Double(_) => 1 + 8,
-        SqlValue::Float(_) | SqlValue::Real(_) => 1 + 4,
+        SqlValue::Unsigned(_) | SqlValue::Numeric(_) | SqlValue::Double(_) | SqlValue::Real(_) => 1 + 8,  // Real is now f64
+        SqlValue::Float(_) => 1 + 4,
         SqlValue::Boolean(_) => 1,
         SqlValue::Character(s) | SqlValue::Varchar(s) => 1 + 4 + s.len(),
         SqlValue::Date(_) => 1 + 4 + 1 + 1, // tag + year + month + day

@@ -370,7 +370,7 @@ pub(super) fn sql_value_to_literal(value: &vibesql_types::SqlValue) -> String {
                 format_f64_for_sql(*f)
             }
         }
-        SqlValue::Float(f) | SqlValue::Real(f) => {
+        SqlValue::Float(f) => {
             if f.is_nan() {
                 "'NaN'".to_string()
             } else if f.is_infinite() {
@@ -381,6 +381,20 @@ pub(super) fn sql_value_to_literal(value: &vibesql_types::SqlValue) -> String {
                 }
             } else {
                 format_f32_for_sql(*f)
+            }
+        }
+        SqlValue::Real(f) => {
+            // Real is now f64 (SQLite REAL is 8-byte IEEE float)
+            if f.is_nan() {
+                "'NaN'".to_string()
+            } else if f.is_infinite() {
+                if f.is_sign_positive() {
+                    "'Infinity'".to_string()
+                } else {
+                    "'-Infinity'".to_string()
+                }
+            } else {
+                format_f64_for_sql(*f)
             }
         }
         SqlValue::Double(f) => {

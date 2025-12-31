@@ -13,8 +13,9 @@ fn format_f64(n: f64) -> String {
     if n.is_nan() {
         return "NaN".to_string();
     }
+    // SQLite represents infinity as 9.0e+999 (a very large but finite-looking number)
     if n.is_infinite() {
-        return if n > 0.0 { "inf".to_string() } else { "-inf".to_string() };
+        return if n > 0.0 { "9.0e+999".to_string() } else { "-9.0e+999".to_string() };
     }
 
     // Normalize negative zero to positive zero (SQLite behavior)
@@ -73,8 +74,9 @@ fn format_f32(n: f32) -> String {
     if n.is_nan() {
         return "NaN".to_string();
     }
+    // SQLite represents infinity as 9.0e+999 (a very large but finite-looking number)
     if n.is_infinite() {
-        return if n > 0.0 { "inf".to_string() } else { "-inf".to_string() };
+        return if n > 0.0 { "9.0e+999".to_string() } else { "-9.0e+999".to_string() };
     }
 
     // Normalize negative zero to positive zero (SQLite behavior)
@@ -109,7 +111,7 @@ impl fmt::Display for SqlValue {
             // Use f32-specific formatting for Float/Real to avoid precision artifacts
             SqlValue::Numeric(n) => write!(f, "{}", format_f64(*n)),
             SqlValue::Float(n) => write!(f, "{}", format_f32(*n)),
-            SqlValue::Real(n) => write!(f, "{}", format_f32(*n)),
+            SqlValue::Real(n) => write!(f, "{}", format_f64(*n)),
             SqlValue::Double(n) => write!(f, "{}", format_f64(*n)),
             SqlValue::Character(s) => write!(f, "{}", s),
             SqlValue::Varchar(s) => write!(f, "{}", s),
@@ -217,8 +219,9 @@ mod tests {
     fn test_numeric_display_special_values() {
         // Special values
         assert_eq!(format!("{}", SqlValue::Numeric(f64::NAN)), "NaN");
-        assert_eq!(format!("{}", SqlValue::Numeric(f64::INFINITY)), "inf");
-        assert_eq!(format!("{}", SqlValue::Numeric(f64::NEG_INFINITY)), "-inf");
+        // SQLite displays infinity as 9.0e+999
+        assert_eq!(format!("{}", SqlValue::Numeric(f64::INFINITY)), "9.0e+999");
+        assert_eq!(format!("{}", SqlValue::Numeric(f64::NEG_INFINITY)), "-9.0e+999");
     }
 
     #[test]
@@ -232,11 +235,10 @@ mod tests {
 
     #[test]
     fn test_real_display_fractional() {
-        // Real type displays with minimal representation at f32 precision
-        // This is the key fix for issue #4362
+        // Real type (now f64) displays with minimal representation
+        // SQLite REAL is an 8-byte IEEE float (same as f64)
         assert_eq!(format!("{}", SqlValue::Real(32.5)), "32.5");
         assert_eq!(format!("{}", SqlValue::Real(0.5)), "0.5");
-        // 1.1f32 should display as "1.1", not "1.100000023841858"
         assert_eq!(format!("{}", SqlValue::Real(1.1)), "1.1");
         assert_eq!(format!("{}", SqlValue::Real(2.2)), "2.2");
     }
@@ -245,8 +247,9 @@ mod tests {
     fn test_double_display_special_values() {
         // Double type handles special values
         assert_eq!(format!("{}", SqlValue::Double(f64::NAN)), "NaN");
-        assert_eq!(format!("{}", SqlValue::Double(f64::INFINITY)), "inf");
-        assert_eq!(format!("{}", SqlValue::Double(f64::NEG_INFINITY)), "-inf");
+        // SQLite displays infinity as 9.0e+999
+        assert_eq!(format!("{}", SqlValue::Double(f64::INFINITY)), "9.0e+999");
+        assert_eq!(format!("{}", SqlValue::Double(f64::NEG_INFINITY)), "-9.0e+999");
         assert_eq!(format!("{}", SqlValue::Double(123.45)), "123.45");
     }
 

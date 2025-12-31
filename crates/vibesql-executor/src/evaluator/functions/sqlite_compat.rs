@@ -464,16 +464,17 @@ pub(super) fn toreal(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         )));
     }
 
+    // Real is now f64 (SQLite REAL is 8-byte IEEE float)
     match &args[0] {
         SqlValue::Null => Ok(SqlValue::Null),
         SqlValue::Real(r) => Ok(SqlValue::Real(*r)),
-        SqlValue::Double(d) => Ok(SqlValue::Real(*d as f32)),
-        SqlValue::Float(f) => Ok(SqlValue::Real(*f)),
-        SqlValue::Numeric(n) => Ok(SqlValue::Real(*n as f32)),
-        SqlValue::Integer(i) => Ok(SqlValue::Real(*i as f32)),
-        SqlValue::Bigint(i) => Ok(SqlValue::Real(*i as f32)),
-        SqlValue::Smallint(i) => Ok(SqlValue::Real(*i as f32)),
-        SqlValue::Unsigned(u) => Ok(SqlValue::Real(*u as f32)),
+        SqlValue::Double(d) => Ok(SqlValue::Real(*d)),
+        SqlValue::Float(f) => Ok(SqlValue::Real(*f as f64)),
+        SqlValue::Numeric(n) => Ok(SqlValue::Real(*n)),
+        SqlValue::Integer(i) => Ok(SqlValue::Real(*i as f64)),
+        SqlValue::Bigint(i) => Ok(SqlValue::Real(*i as f64)),
+        SqlValue::Smallint(i) => Ok(SqlValue::Real(*i as f64)),
+        SqlValue::Unsigned(u) => Ok(SqlValue::Real(*u as f64)),
         SqlValue::Boolean(b) => Ok(SqlValue::Real(if *b { 1.0 } else { 0.0 })),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             // Try to parse string as a number
@@ -482,7 +483,7 @@ pub(super) fn toreal(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 return Ok(SqlValue::Real(0.0));
             }
             match trimmed.parse::<f64>() {
-                Ok(f) => Ok(SqlValue::Real(f as f32)),
+                Ok(f) => Ok(SqlValue::Real(f)),
                 Err(_) => Ok(SqlValue::Real(0.0)), // SQLite returns 0.0 for non-numeric strings
             }
         }

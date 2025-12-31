@@ -318,8 +318,8 @@ impl Row {
             SqlValue::Integer(i) | SqlValue::Bigint(i) => *i as f64,
             SqlValue::Smallint(s) => *s as f64,
             SqlValue::Unsigned(u) => *u as f64,
-            SqlValue::Numeric(n) | SqlValue::Double(n) => *n,
-            SqlValue::Float(f) | SqlValue::Real(f) => *f as f64,
+            SqlValue::Numeric(n) | SqlValue::Double(n) | SqlValue::Real(n) => *n,  // Real is now f64
+            SqlValue::Float(f) => *f as f64,
             _ => std::hint::unreachable_unchecked(),
         }
     }

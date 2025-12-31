@@ -450,18 +450,18 @@ impl CompiledPredicate {
             // Float <-> Double
             (SqlValue::Float(x), SqlValue::Double(y)) => f64::from(*x) == *y,
             (SqlValue::Double(x), SqlValue::Float(y)) => *x == f64::from(*y),
-            // Float <-> Real (both f32)
-            (SqlValue::Float(x), SqlValue::Real(y)) => x == y,
-            (SqlValue::Real(x), SqlValue::Float(y)) => x == y,
+            // Float <-> Real (Float is f32, Real is now f64)
+            (SqlValue::Float(x), SqlValue::Real(y)) => f64::from(*x) == *y,
+            (SqlValue::Real(x), SqlValue::Float(y)) => *x == f64::from(*y),
             // Double <-> Numeric (both f64)
             (SqlValue::Double(x), SqlValue::Numeric(y)) => x == y,
             (SqlValue::Numeric(x), SqlValue::Double(y)) => x == y,
-            // Double <-> Real
-            (SqlValue::Double(x), SqlValue::Real(y)) => *x == f64::from(*y),
-            (SqlValue::Real(x), SqlValue::Double(y)) => f64::from(*x) == *y,
-            // Real <-> Numeric
-            (SqlValue::Real(x), SqlValue::Numeric(y)) => f64::from(*x) == *y,
-            (SqlValue::Numeric(x), SqlValue::Real(y)) => *x == f64::from(*y),
+            // Double <-> Real (both f64)
+            (SqlValue::Double(x), SqlValue::Real(y)) => x == y,
+            (SqlValue::Real(x), SqlValue::Double(y)) => x == y,
+            // Real <-> Numeric (both f64)
+            (SqlValue::Real(x), SqlValue::Numeric(y)) => x == y,
+            (SqlValue::Numeric(x), SqlValue::Real(y)) => x == y,
 
             // Integer <-> Floating point equality (promote integers to f64)
             (SqlValue::Integer(x), SqlValue::Float(y)) => (*x as f64) == f64::from(*y),
@@ -539,26 +539,22 @@ impl CompiledPredicate {
             (SqlValue::Double(x), SqlValue::Float(y)) => {
                 Some(Self::apply_range_op(*x, op, f64::from(*y)))
             }
-            // Float <-> Real (both f32)
-            (SqlValue::Float(x), SqlValue::Real(y)) => Some(Self::apply_range_op(*x, op, *y)),
-            (SqlValue::Real(x), SqlValue::Float(y)) => Some(Self::apply_range_op(*x, op, *y)),
+            // Float <-> Real (Float is f32, Real is now f64)
+            (SqlValue::Float(x), SqlValue::Real(y)) => {
+                Some(Self::apply_range_op(f64::from(*x), op, *y))
+            }
+            (SqlValue::Real(x), SqlValue::Float(y)) => {
+                Some(Self::apply_range_op(*x, op, f64::from(*y)))
+            }
             // Double <-> Numeric (both f64)
             (SqlValue::Double(x), SqlValue::Numeric(y)) => Some(Self::apply_range_op(*x, op, *y)),
             (SqlValue::Numeric(x), SqlValue::Double(y)) => Some(Self::apply_range_op(*x, op, *y)),
-            // Double <-> Real
-            (SqlValue::Double(x), SqlValue::Real(y)) => {
-                Some(Self::apply_range_op(*x, op, f64::from(*y)))
-            }
-            (SqlValue::Real(x), SqlValue::Double(y)) => {
-                Some(Self::apply_range_op(f64::from(*x), op, *y))
-            }
-            // Real <-> Numeric
-            (SqlValue::Real(x), SqlValue::Numeric(y)) => {
-                Some(Self::apply_range_op(f64::from(*x), op, *y))
-            }
-            (SqlValue::Numeric(x), SqlValue::Real(y)) => {
-                Some(Self::apply_range_op(*x, op, f64::from(*y)))
-            }
+            // Double <-> Real (both f64)
+            (SqlValue::Double(x), SqlValue::Real(y)) => Some(Self::apply_range_op(*x, op, *y)),
+            (SqlValue::Real(x), SqlValue::Double(y)) => Some(Self::apply_range_op(*x, op, *y)),
+            // Real <-> Numeric (both f64)
+            (SqlValue::Real(x), SqlValue::Numeric(y)) => Some(Self::apply_range_op(*x, op, *y)),
+            (SqlValue::Numeric(x), SqlValue::Real(y)) => Some(Self::apply_range_op(*x, op, *y)),
 
             // Cross-type Float/Double/Real vs Integer comparisons - promote to f64
             // This fixes issue #3360: Float(678.28) > Integer(85) was returning None
@@ -627,10 +623,10 @@ impl CompiledPredicate {
                 Some(Self::apply_range_op(f64::from(*x), op, *y))
             }
             (SqlValue::Real(x), SqlValue::Smallint(y)) => {
-                Some(Self::apply_range_op(*x, op, f32::from(*y)))
+                Some(Self::apply_range_op(*x, op, f64::from(*y)))  // Real is now f64
             }
             (SqlValue::Smallint(x), SqlValue::Real(y)) => {
-                Some(Self::apply_range_op(f32::from(*x), op, *y))
+                Some(Self::apply_range_op(f64::from(*x), op, *y))  // Real is now f64
             }
             (SqlValue::Numeric(x), SqlValue::Smallint(y)) => {
                 Some(Self::apply_range_op(*x, op, f64::from(*y)))

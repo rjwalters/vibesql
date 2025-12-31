@@ -360,10 +360,10 @@ pub(crate) fn cast_value(
             }
         }
 
-        // Cast to FLOAT
+        // Cast to FLOAT (f32)
         Float { .. } => match value {
             SqlValue::Float(n) => Ok(SqlValue::Float(*n)),
-            SqlValue::Real(n) => Ok(SqlValue::Float(*n)),
+            SqlValue::Real(n) => Ok(SqlValue::Float(*n as f32)),  // Real is now f64
             SqlValue::Double(n) => Ok(SqlValue::Float(*n as f32)),
             SqlValue::Integer(n) => Ok(SqlValue::Float(*n as f32)),
             SqlValue::Smallint(n) => Ok(SqlValue::Float(*n as f32)),
@@ -379,21 +379,21 @@ pub(crate) fn cast_value(
             _ => Ok(SqlValue::Float(0.0)), // SQLite: Default to 0.0 for unknown types
         },
 
-        // Cast to REAL
+        // Cast to REAL (now f64 - SQLite REAL is 8-byte IEEE float)
         Real => match value {
             SqlValue::Real(n) => Ok(SqlValue::Real(*n)),
-            SqlValue::Float(n) => Ok(SqlValue::Real(*n)),
-            SqlValue::Double(n) => Ok(SqlValue::Real(*n as f32)),
-            SqlValue::Integer(n) => Ok(SqlValue::Real(*n as f32)),
-            SqlValue::Smallint(n) => Ok(SqlValue::Real(*n as f32)),
-            SqlValue::Bigint(n) => Ok(SqlValue::Real(*n as f32)),
-            SqlValue::Unsigned(n) => Ok(SqlValue::Real(*n as f32)),
-            SqlValue::Numeric(f) => Ok(SqlValue::Real(*f as f32)),
+            SqlValue::Float(n) => Ok(SqlValue::Real(*n as f64)),
+            SqlValue::Double(n) => Ok(SqlValue::Real(*n)),
+            SqlValue::Integer(n) => Ok(SqlValue::Real(*n as f64)),
+            SqlValue::Smallint(n) => Ok(SqlValue::Real(*n as f64)),
+            SqlValue::Bigint(n) => Ok(SqlValue::Real(*n as f64)),
+            SqlValue::Unsigned(n) => Ok(SqlValue::Real(*n as f64)),
+            SqlValue::Numeric(f) => Ok(SqlValue::Real(*f)),
             SqlValue::Boolean(b) => Ok(SqlValue::Real(if *b { 1.0 } else { 0.0 })),
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
                 // SQLite: Permissive conversion - extract leading numeric portion, default to 0.0
                 let (_, float_val, _) = string_to_number(s);
-                Ok(SqlValue::Real(float_val as f32))
+                Ok(SqlValue::Real(float_val))
             }
             _ => Ok(SqlValue::Real(0.0)), // SQLite: Default to 0.0 for unknown types
         },

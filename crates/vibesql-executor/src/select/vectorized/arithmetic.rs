@@ -216,10 +216,11 @@ fn create_literal_array(value: &SqlValue, len: usize) -> Result<ArrayRef, Execut
             Ok(Arc::new(Int64Array::from(vec![*i; len])) as ArrayRef)
         }
         SqlValue::Smallint(i) => Ok(Arc::new(Int64Array::from(vec![*i as i64; len])) as ArrayRef),
-        SqlValue::Float(f) | SqlValue::Real(f) => {
+        SqlValue::Float(f) => {
             Ok(Arc::new(Float64Array::from(vec![*f as f64; len])) as ArrayRef)
         }
-        SqlValue::Double(f) | SqlValue::Numeric(f) => {
+        SqlValue::Double(f) | SqlValue::Numeric(f) | SqlValue::Real(f) => {
+            // Real is now f64 (SQLite REAL is 8-byte IEEE float)
             Ok(Arc::new(Float64Array::from(vec![*f; len])) as ArrayRef)
         }
         SqlValue::Null => {

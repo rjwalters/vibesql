@@ -63,8 +63,8 @@ pub fn try_increment_sqlvalue(value: &SqlValue) -> Option<SqlValue> {
         }
         SqlValue::Real(f) if f.is_finite() => {
             // Special case: For zero and very small values, abs() * EPSILON may be 0 or too small.
-            // Use f32::MIN_POSITIVE as a fallback minimum increment.
-            let increment = (f.abs() * f32::EPSILON).max(f32::MIN_POSITIVE);
+            // Use f64::MIN_POSITIVE as a fallback minimum increment (Real is now f64).
+            let increment = (f.abs() * f64::EPSILON).max(f64::MIN_POSITIVE);
             let next = f + increment;
             if next > *f && next.is_finite() {
                 Some(SqlValue::Real(next))
