@@ -199,6 +199,12 @@ impl Database {
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
                 }
 
+                // Add UNIQUE constraints
+                for unique_cols in &schema.unique_constraints {
+                    write!(writer, ", UNIQUE ({})", unique_cols.join(", "))
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                }
+
                 writeln!(writer, ");")
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
