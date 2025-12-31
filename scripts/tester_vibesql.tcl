@@ -28,6 +28,11 @@ set ::nFail 0
 set ::nSkip 0
 set ::failList {}
 
+# Track row changes for db changes command
+# Since each SQL execution is a separate process, we need to track changes ourselves
+set ::last_changes 0
+set ::total_changes 0
+
 # SQL statement accumulator for batching
 set ::sql_batch {}
 set ::in_transaction 0
@@ -37,6 +42,7 @@ set ::in_transaction 0
 set ::pragma_full_column_names 0   ;# Default: OFF
 set ::pragma_short_column_names 1  ;# Default: ON
 set ::pragma_case_sensitive_like 0 ;# Default: OFF (case-insensitive LIKE)
+set ::pragma_count_changes 0       ;# Default: OFF (UPDATE/DELETE return nothing)
 
 # DQS (Double-Quoted Strings) mode tracking
 # When enabled, double-quoted strings are treated as string literals instead of identifiers
@@ -74,6 +80,8 @@ set ::sqlite_search_count 0      ;# B-tree cursor search operations
 set ::sqlite_fullscan_count 0    ;# Full table scan count
 set ::sqlite_sort_count 0        ;# Sort operations count
 set ::sqlite_found_count 0       ;# Rows found count
+set ::sqlite_like_count 0        ;# LIKE operation count
+set ::sqlite_interrupt_count 0   ;# Interrupt count
 
 # SQLite options array - used by tests to check feature availability
 array set ::sqlite_options {
@@ -837,6 +845,19 @@ proc track_pragma_setting {sql} {
         set found 1
     }
 
+    # Look for count_changes settings (find all occurrences, use last one)
+    # This pragma makes UPDATE/DELETE return the number of rows changed
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?count_changes\s*[=(]\s*(\w+)\s*[)]?} $sql]
+    foreach {match value} $matches {
+        set upper [string toupper $value]
+        if {$upper eq "ON" || $upper eq "TRUE" || $upper eq "YES" || $value eq "1"} {
+            set ::pragma_count_changes 1
+        } else {
+            set ::pragma_count_changes 0
+        }
+        set found 1
+    }
+
     return $found
 }
 
@@ -1126,11 +1147,24 @@ proc execsql {sql {db ""}} {
     # Direct execution for non-transaction SQL
     # Build PRAGMA prefix to maintain session state across process invocations
     set pragma_prefix [build_pragma_prefix]
+
+    # Check if this is a data modification statement (INSERT/UPDATE/DELETE/REPLACE)
+    # If so, append SELECT changes() to track the row count
+    set sql_upper [string toupper [string trim $sql]]
+    set is_dml [regexp {^(INSERT|UPDATE|DELETE|REPLACE)\s} $sql_upper]
+
     # Use raw format for proper NULL handling:
     # - Actual NULL values become empty strings
     # - The literal string 'NULL' remains as "NULL"
     # This matches SQLite TCL interface behavior
-    set raw_sql ".mode raw\n${pragma_prefix}$sql"
+    if {$is_dml} {
+        # Append SELECT changes() to capture row count in same execution
+        # Remove trailing semicolon from sql if present to avoid double semicolon
+        set trimmed_sql [string trimright $sql " \t\n;"]
+        set raw_sql ".mode raw\n${pragma_prefix}${trimmed_sql};\nSELECT changes();"
+    } else {
+        set raw_sql ".mode raw\n${pragma_prefix}$sql"
+    }
 
     # Use exec_preserve_newlines to avoid TCL's exec stripping trailing newlines.
     # This is critical for distinguishing between:
@@ -1144,6 +1178,21 @@ proc execsql {sql {db ""}} {
     }
 
     set parsed [parse_raw_result $result]
+
+    # If this was a DML statement, extract the changes count from the result
+    if {$is_dml && [llength $parsed] > 0} {
+        # The last value should be the changes() result
+        set ::last_changes [lindex $parsed end]
+        set ::total_changes [expr {$::total_changes + $::last_changes}]
+        # Remove the changes count from the result
+        set parsed [lrange $parsed 0 end-1]
+
+        # When PRAGMA count_changes=on, return the row count for DML statements
+        if {$::pragma_count_changes} {
+            set parsed [list $::last_changes]
+        }
+    }
+
     update_sqlite_counters $sql $parsed
     return $parsed
 }
@@ -1501,6 +1550,27 @@ proc uses_sqlite_internals {script} {
     }
     if {[regexp {sqlite_sort_count} $script]} {
         return [list 1 "uses sqlite_sort_count (sort operation counter)"]
+    }
+    if {[regexp {sqlite_like_count} $script]} {
+        return [list 1 "uses sqlite_like_count (LIKE operation counter)"]
+    }
+    if {[regexp {sqlite_interrupt_count} $script]} {
+        return [list 1 "uses sqlite_interrupt_count (interrupt counter)"]
+    }
+
+    # SQLite REGEXP operator - requires custom function registration, not standard SQL
+    if {[regexp -nocase {\sREGEXP\s} $script]} {
+        return [list 1 "uses REGEXP operator (requires custom function)"]
+    }
+
+    # SQLite MATCH operator - used for FTS (Full Text Search), not standard SQL
+    if {[regexp -nocase {\sMATCH\s} $script]} {
+        return [list 1 "uses MATCH operator (FTS feature)"]
+    }
+
+    # sqlite3_exec_hex - SQLite test helper for hex encoding
+    if {[regexp {sqlite3_exec_hex} $script]} {
+        return [list 1 "uses sqlite3_exec_hex (SQLite test helper)"]
     }
 
     # SQLite sort tracking helper functions
@@ -2247,19 +2317,13 @@ proc db {cmd args} {
         }
         changes {
             # Return number of rows changed by last statement
-            set result [execsql "SELECT changes()"]
-            if {[llength $result] > 0} {
-                return [lindex $result 0]
-            }
-            return 0
+            # We track this ourselves since each SQL execution is a separate process
+            return $::last_changes
         }
         total_changes {
             # Return total number of rows changed
-            set result [execsql "SELECT total_changes()"]
-            if {[llength $result] > 0} {
-                return [lindex $result 0]
-            }
-            return 0
+            # We track this ourselves since each SQL execution is a separate process
+            return $::total_changes
         }
         exists {
             # Check if query returns any rows
