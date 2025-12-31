@@ -13,9 +13,9 @@ fn format_f64(n: f64) -> String {
     if n.is_nan() {
         return "NaN".to_string();
     }
-    // SQLite represents infinity as 9.0e+999 (a very large but finite-looking number)
+    // Normal display uses inf/-inf - quote() function formats as 9.0e+999
     if n.is_infinite() {
-        return if n > 0.0 { "9.0e+999".to_string() } else { "-9.0e+999".to_string() };
+        return if n > 0.0 { "inf".to_string() } else { "-inf".to_string() };
     }
 
     // Normalize negative zero to positive zero (SQLite behavior)
@@ -74,9 +74,9 @@ fn format_f32(n: f32) -> String {
     if n.is_nan() {
         return "NaN".to_string();
     }
-    // SQLite represents infinity as 9.0e+999 (a very large but finite-looking number)
+    // Normal display uses inf/-inf - quote() function formats as 9.0e+999
     if n.is_infinite() {
-        return if n > 0.0 { "9.0e+999".to_string() } else { "-9.0e+999".to_string() };
+        return if n > 0.0 { "inf".to_string() } else { "-inf".to_string() };
     }
 
     // Normalize negative zero to positive zero (SQLite behavior)
@@ -219,9 +219,9 @@ mod tests {
     fn test_numeric_display_special_values() {
         // Special values
         assert_eq!(format!("{}", SqlValue::Numeric(f64::NAN)), "NaN");
-        // SQLite displays infinity as 9.0e+999
-        assert_eq!(format!("{}", SqlValue::Numeric(f64::INFINITY)), "9.0e+999");
-        assert_eq!(format!("{}", SqlValue::Numeric(f64::NEG_INFINITY)), "-9.0e+999");
+        // Normal display uses inf/-inf - quote() function formats as 9.0e+999
+        assert_eq!(format!("{}", SqlValue::Numeric(f64::INFINITY)), "inf");
+        assert_eq!(format!("{}", SqlValue::Numeric(f64::NEG_INFINITY)), "-inf");
     }
 
     #[test]
@@ -247,9 +247,9 @@ mod tests {
     fn test_double_display_special_values() {
         // Double type handles special values
         assert_eq!(format!("{}", SqlValue::Double(f64::NAN)), "NaN");
-        // SQLite displays infinity as 9.0e+999
-        assert_eq!(format!("{}", SqlValue::Double(f64::INFINITY)), "9.0e+999");
-        assert_eq!(format!("{}", SqlValue::Double(f64::NEG_INFINITY)), "-9.0e+999");
+        // Normal display uses inf/-inf - quote() function formats as 9.0e+999
+        assert_eq!(format!("{}", SqlValue::Double(f64::INFINITY)), "inf");
+        assert_eq!(format!("{}", SqlValue::Double(f64::NEG_INFINITY)), "-inf");
         assert_eq!(format!("{}", SqlValue::Double(123.45)), "123.45");
     }
 

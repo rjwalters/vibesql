@@ -826,6 +826,18 @@ pub(super) fn concat_ws(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     Ok(SqlValue::Varchar(parts.join(&separator).into()))
 }
 
+/// Format a float for QUOTE() - uses 9.0e+999 for infinity (SQLite compatibility)
+fn format_float_for_quote(n: f64) -> String {
+    if n.is_nan() {
+        "NaN".to_string()
+    } else if n.is_infinite() {
+        // SQLite's quote() represents infinity as 9.0e+999
+        if n > 0.0 { "9.0e+999".to_string() } else { "-9.0e+999".to_string() }
+    } else {
+        n.to_string()
+    }
+}
+
 /// QUOTE(x) - Return SQL literal representation of a value
 ///
 /// Returns a string which is the value of its argument suitable for
@@ -845,10 +857,10 @@ pub(super) fn quote(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Bigint(i) => Ok(SqlValue::Varchar(i.to_string().into())),
         SqlValue::Smallint(i) => Ok(SqlValue::Varchar(i.to_string().into())),
         SqlValue::Unsigned(u) => Ok(SqlValue::Varchar(u.to_string().into())),
-        SqlValue::Real(r) => Ok(SqlValue::Varchar(r.to_string().into())),
-        SqlValue::Double(d) => Ok(SqlValue::Varchar(d.to_string().into())),
-        SqlValue::Numeric(n) => Ok(SqlValue::Varchar(n.to_string().into())),
-        SqlValue::Float(f) => Ok(SqlValue::Varchar(f.to_string().into())),
+        SqlValue::Real(r) => Ok(SqlValue::Varchar(format_float_for_quote(*r).into())),
+        SqlValue::Double(d) => Ok(SqlValue::Varchar(format_float_for_quote(*d).into())),
+        SqlValue::Numeric(n) => Ok(SqlValue::Varchar(format_float_for_quote(*n).into())),
+        SqlValue::Float(f) => Ok(SqlValue::Varchar(format_float_for_quote(*f as f64).into())),
         SqlValue::Boolean(b) => Ok(SqlValue::Varchar(if *b { "1" } else { "0" }.into())),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             // Escape single quotes by doubling them
