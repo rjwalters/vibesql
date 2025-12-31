@@ -46,6 +46,50 @@ RESULTS_DIR="$HOME/.vibesql/test_results"
 RESULTS_DB="$RESULTS_DIR/tcl_test_results.vbsql"
 VIBESQL_BIN="./target/release/vibesql"
 
+# Lock file for coordinating parallel agents
+LOCK_FILE="$REPO_ROOT/target/.tcl_test.lock"
+
+# Acquire exclusive lock for TCL tests
+acquire_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        local lock_pid
+        lock_pid=$(grep "^PID=" "$LOCK_FILE" 2>/dev/null | cut -d= -f2)
+
+        # Check if lock-holding process is still running
+        if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+            print_error "TCL tests are already running"
+            echo ""
+            cat "$LOCK_FILE"
+            echo ""
+            echo "If this is stale, remove: $LOCK_FILE"
+            exit 1
+        else
+            print_warning "Removing stale lock from PID $lock_pid"
+            rm -f "$LOCK_FILE"
+        fi
+    fi
+
+    # Create lock file
+    mkdir -p "$(dirname "$LOCK_FILE")"
+    cat > "$LOCK_FILE" << EOF
+PID=$$
+HOST=$(hostname)
+STARTED=$(date -Iseconds)
+COMMAND=$0 $*
+EOF
+}
+
+# Release the lock
+release_lock() {
+    rm -f "$LOCK_FILE"
+}
+
+# Cleanup on exit
+cleanup_lock() {
+    release_lock
+}
+trap cleanup_lock EXIT INT TERM
+
 # Check if VibeSQL is built
 check_vibesql() {
     if [ ! -f "$VIBESQL_BIN" ]; then
@@ -294,6 +338,7 @@ EOF
 
     check_vibesql
     check_tcl_tests
+    acquire_lock
 
     local full_path="$TCL_TEST_DIR/$test_file"
 
@@ -410,6 +455,7 @@ EOF
     check_vibesql
     check_tcl_tests
     init_results_db
+    acquire_lock
 
     # Build file list
     local files=()
