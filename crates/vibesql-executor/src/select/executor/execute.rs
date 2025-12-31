@@ -59,18 +59,13 @@ impl SelectExecutor<'_> {
         // This catches queries like SELECT * FROM t, t, t, ... (65+ times)
         super::validation::validate_join_table_limit(stmt)?;
 
-        // Validate that aggregates don't reference outer columns (issue #4730)
-        // When a subquery contains an aggregate function whose arguments reference columns
-        // from an outer query (not from the subquery's own tables), it's a misuse.
-        // Example: SELECT max((SELECT count(x) FROM t35b)) FROM t35a
-        // Here, count(x) references outer column x from t35a, which is invalid.
-        if let Some(outer_schema) = &self.outer_schema {
-            super::validation::validate_no_aggregate_with_outer_column(
-                stmt,
-                outer_schema,
-                self.database,
-            )?;
-        }
+        // NOTE: Validation for aggregates referencing outer columns was removed.
+        // The previous validation (issue #4730) was too strict - it rejected valid SQLite queries
+        // like `SELECT (SELECT string_agg(a1,'x') FROM t2) FROM t1;` where a scalar subquery's
+        // aggregate references an outer column. SQLite allows this when the subquery result
+        // is not used as an argument to an outer aggregate function. The specific case that
+        // should error (like `SELECT max((SELECT count(x) FROM t35b)) FROM t35a;`) requires
+        // more targeted detection of when a subquery is used as an outer aggregate argument.
 
         #[cfg(feature = "profile-q6")]
         let execute_start = std::time::Instant::now();
@@ -662,7 +657,12 @@ impl SelectExecutor<'_> {
         // Process operations left-to-right to ensure correct associativity
         if let Some(set_op) = &stmt.set_operation {
             // Extract collations from the leftmost SELECT list for set operation comparisons
-            let collations = Self::extract_collations_from_select_list(&stmt.select_list);
+            // Use schema-aware lookup to get column collations from CREATE TABLE definitions
+            let collations = Self::extract_collations_from_select_list_with_schema(
+                &stmt.select_list,
+                Some(self.database),
+                stmt.from.as_ref(),
+            );
             // Issue #4602: Compute left column count from AST for schema-level validation
             // This is needed when the left result set is empty (table has no rows)
             let left_col_count = super::nonagg::compute_select_list_column_count(
@@ -685,11 +685,13 @@ impl SelectExecutor<'_> {
                 // Collect aliases from all UNION branches for ORDER BY resolution
                 // Pass database to enable wildcard expansion using table schemas
                 let all_aliases = collect_union_aliases(self.database, stmt);
+                // Pass column collations from the first SELECT for collation-aware sorting
                 results = self.sort_set_operation_results(
                     results,
                     order_by,
                     &stmt.select_list,
                     &all_aliases,
+                    &collations,
                 )?;
             }
 
@@ -1201,25 +1203,90 @@ impl SelectExecutor<'_> {
     /// Extract collation information from a SELECT list.
     ///
     /// Returns a Vec of Option<String> where each element corresponds to a SELECT item.
-    /// If the SELECT item has a COLLATE clause (e.g., `a COLLATE NOCASE`), the collation
-    /// name is returned; otherwise None.
-    fn extract_collations_from_select_list(
+    /// Collation is determined by:
+    /// 1. Explicit COLLATE clause in the SELECT expression (e.g., `a COLLATE NOCASE`)
+    /// 2. Column's schema collation if the expression is a simple column reference
+    ///
+    /// The optional `database` and `from_clause` parameters enable schema-based collation lookup.
+    fn extract_collations_from_select_list_with_schema(
         select_list: &[vibesql_ast::SelectItem],
+        database: Option<&vibesql_storage::Database>,
+        from_clause: Option<&vibesql_ast::FromClause>,
     ) -> Vec<Option<String>> {
         select_list
             .iter()
             .map(|item| {
-                // Check if the item is an expression with a COLLATE clause
-                if let vibesql_ast::SelectItem::Expression {
-                    expr: vibesql_ast::Expression::Collate { collation, .. },
-                    ..
-                } = item
-                {
-                    return Some(collation.clone());
+                match item {
+                    // Check if the item is an expression with a COLLATE clause
+                    vibesql_ast::SelectItem::Expression {
+                        expr: vibesql_ast::Expression::Collate { collation, .. },
+                        ..
+                    } => Some(collation.clone()),
+                    // Check if it's a column reference - look up schema collation
+                    vibesql_ast::SelectItem::Expression {
+                        expr: vibesql_ast::Expression::ColumnRef(col_id),
+                        ..
+                    } => {
+                        if let (Some(db), Some(_from)) = (database, from_clause) {
+                            // Try to find the column's collation from the table schema
+                            let table_name = col_id.table_canonical();
+                            let column_name = col_id.column_canonical();
+                            // If table is qualified, look it up directly
+                            if let Some(table_name) = table_name {
+                                if let Some(table) = db.get_table(table_name) {
+                                    for col in &table.schema.columns {
+                                        if col.name.eq_ignore_ascii_case(column_name) {
+                                            return col.collation.clone();
+                                        }
+                                    }
+                                }
+                            } else {
+                                // If table wasn't qualified, search all tables in FROM
+                                if let Some(collation) = Self::find_column_collation_in_from(
+                                    db, from_clause.unwrap(), column_name
+                                ) {
+                                    return Some(collation);
+                                }
+                            }
+                        }
+                        None
+                    }
+                    _ => None,
                 }
-                None
             })
             .collect()
+    }
+
+    /// Find a column's collation by searching through a FROM clause
+    fn find_column_collation_in_from(
+        database: &vibesql_storage::Database,
+        from_clause: &vibesql_ast::FromClause,
+        column_name: &str,
+    ) -> Option<String> {
+        match from_clause {
+            vibesql_ast::FromClause::Table { name, .. } => {
+                if let Some(table) = database.get_table(name) {
+                    for col in &table.schema.columns {
+                        if col.name.eq_ignore_ascii_case(column_name) {
+                            return col.collation.clone();
+                        }
+                    }
+                }
+                None
+            }
+            vibesql_ast::FromClause::Join { left, right, .. } => {
+                Self::find_column_collation_in_from(database, left, column_name)
+                    .or_else(|| Self::find_column_collation_in_from(database, right, column_name))
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract collation information from a SELECT list (legacy version without schema lookup).
+    fn extract_collations_from_select_list(
+        select_list: &[vibesql_ast::SelectItem],
+    ) -> Vec<Option<String>> {
+        Self::extract_collations_from_select_list_with_schema(select_list, None, None)
     }
 
     /// Execute a chain of set operations left-to-right
@@ -1521,12 +1588,16 @@ impl SelectExecutor<'_> {
     ///
     /// The all_union_aliases parameter provides expanded column names (with wildcards resolved)
     /// from all UNION branches for name resolution.
+    ///
+    /// The column_collations parameter provides collations inherited from the first SELECT's
+    /// column definitions (e.g., columns defined with COLLATE NOCASE in CREATE TABLE).
     fn sort_set_operation_results(
         &self,
         mut rows: Vec<vibesql_storage::Row>,
         order_by: &[vibesql_ast::OrderByItem],
         select_list: &[vibesql_ast::SelectItem],
         all_union_aliases: &[Vec<Option<String>>], // Aliases from all UNION branches (wildcards expanded)
+        column_collations: &[Option<String>],      // Inherited collations from first SELECT columns
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         use crate::select::grouping::compare_sql_values_with_collation;
         use std::cmp::Ordering;
@@ -1546,12 +1617,16 @@ impl SelectExecutor<'_> {
                 Vec::new()
             };
 
+        // Use the provided column_collations which were extracted with schema lookup
+        // This properly handles COLLATE NOCASE from column definitions
+        let inherited_collations = column_collations;
+
         // Parse order_by items and resolve to column indices
         // (column_index, is_desc, nulls_first, collation)
         let mut sort_columns: Vec<(usize, bool, bool, Option<String>)> = Vec::new();
         for (term_index, item) in order_by.iter().enumerate() {
-            // Extract column index and optional collation
-            let (col_idx_opt, collation) = match &item.expr {
+            // Extract column index and optional collation (explicit COLLATE in ORDER BY)
+            let (col_idx_opt, explicit_collation) = match &item.expr {
                 // Numeric literal: ORDER BY 1
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) => {
                     (Some((*n as usize).saturating_sub(1)), None) // 1-based to 0-based
@@ -1623,6 +1698,10 @@ impl SelectExecutor<'_> {
                     Some(vibesql_ast::NullsOrder::Last) => false,
                     None => !is_desc, // SQLite default: NULL is smallest
                 };
+                // Use explicit collation if specified, otherwise inherit from column schema
+                let collation = explicit_collation.or_else(|| {
+                    inherited_collations.get(col_idx).cloned().flatten()
+                });
                 sort_columns.push((col_idx, is_desc, nulls_first, collation));
             } else {
                 // ORDER BY term doesn't match any column in the result set
