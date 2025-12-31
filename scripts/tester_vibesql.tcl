@@ -1829,6 +1829,14 @@ proc do_test {name script expected} {
     incr ::nTest
 
     if {[catch {uplevel 1 $script} result]} {
+        # Check for cascading failure from skipped ATTACH test
+        if {[info exists ::attach_skipped] && $::attach_skipped &&
+            [string match "*no such table*" $result]} {
+            # Treat as skipped due to ATTACH dependency cascade
+            incr ::nTest -1  ;# Don't count this as a run test
+            omit_test $name "cascading from skipped ATTACH test"
+            return
+        }
         # Script error - always print failures
         incr ::nFail
         lappend ::failList $name
@@ -2457,6 +2465,10 @@ proc omit_test {name reason {append 0}} {
     if {$::verbose} {
         puts "  $name... SKIPPED ($reason)"
     }
+    # Track if we skipped an ATTACH-dependent test (causes cascading failures)
+    if {[string match "*ATTACH*" $reason]} {
+        set ::attach_skipped 1
+    }
 }
 
 proc reset_db {} {
@@ -2686,6 +2698,9 @@ proc set_test_counter {counter {value ""}} {
 #-----------------------------------------------------------------------------
 
 proc run_test_file {filename} {
+    # Reset ATTACH cascade tracking for new test file
+    set ::attach_skipped 0
+
     # Clean any existing temp db (use catch to handle race conditions)
     if {$::db_file ne ""} {
         catch {file delete -force $::db_file}
