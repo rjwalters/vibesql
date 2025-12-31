@@ -131,14 +131,38 @@ impl Database {
         writeln!(writer, "-- Tables and Data")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
-        // Get list of table names
-        let table_names = self.catalog.list_tables();
+        // Iterate through all schemas except temp schema
+        // We must NOT use get_table() which follows shadowing rules - temp tables would
+        // incorrectly override main schema tables in the dump.
+        for schema_name in &self.catalog.list_schemas() {
+            // Skip temp schema - temp tables are session-scoped and should not be persisted
+            if schema_name == vibesql_catalog::TEMP_SCHEMA {
+                continue;
+            }
 
-        for table_name in &table_names {
-            if let Some(table) = self.get_table(table_name) {
+            // Get tables directly from this schema
+            let schema_tables = if let Some(schema) = self.catalog.get_schema(schema_name) {
+                schema.list_tables()
+            } else {
+                continue;
+            };
+
+            for table_name in &schema_tables {
+                // Use fully qualified name to bypass temp table shadowing
+                let qualified_name = format!("{}.{}", schema_name, table_name);
+                let Some(table) = self.tables.get(&qualified_name) else {
+                    continue;
+                };
+
+                // For default schema, use unqualified name in output for cleaner SQL
+                let output_name = if schema_name == vibesql_catalog::DEFAULT_SCHEMA {
+                    table_name.clone()
+                } else {
+                    qualified_name.clone()
+                };
                 // CREATE TABLE statement
                 let schema = &table.schema;
-                write!(writer, "CREATE TABLE {} (", &table_name)
+                write!(writer, "CREATE TABLE {} (", &output_name)
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
                 for (i, col) in schema.columns.iter().enumerate() {
@@ -184,7 +208,7 @@ impl Database {
                     writeln!(writer)
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
                     for (_idx, row) in table.scan_live() {
-                        write!(writer, "INSERT INTO {} VALUES (", &table_name).map_err(|e| {
+                        write!(writer, "INSERT INTO {} VALUES (", &output_name).map_err(|e| {
                             StorageError::NotImplemented(format!("Write error: {}", e))
                         })?;
                         for (i, value) in row.values.iter().enumerate() {
