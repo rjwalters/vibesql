@@ -1573,6 +1573,18 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses sqlite3_exec_hex (SQLite test helper)"]
     }
 
+    # ATTACH/DETACH DATABASE - multi-database feature not supported
+    if {[regexp -nocase {ATTACH\s} $script]} {
+        return [list 1 "uses ATTACH DATABASE (multi-database feature)"]
+    }
+    if {[regexp -nocase {DETACH\s} $script]} {
+        return [list 1 "uses DETACH DATABASE (multi-database feature)"]
+    }
+    # Multi-database schema references (aux1.table, aux.table) - requires ATTACH
+    if {[regexp -nocase {aux\d*\.\w+} $script]} {
+        return [list 1 "uses attached database schema (requires ATTACH)"]
+    }
+
     # SQLite sort tracking helper functions
     # These tests use helper functions that call "db status sort" or "sqlite_sort_count"
     # to verify ORDER BY optimization (index vs explicit sort). The helpers append
