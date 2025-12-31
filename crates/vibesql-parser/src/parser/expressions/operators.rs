@@ -222,22 +222,24 @@ impl Parser {
                     let subquery = self.parse_select_statement()?;
                     self.expect_token(Token::RParen)?;
 
-                    return Ok(vibesql_ast::Expression::In {
+                    // Don't return - assign to left and continue to check for IS NULL
+                    left = vibesql_ast::Expression::In {
                         expr: Box::new(left),
                         subquery: Box::new(subquery),
                         negated: true,
-                    });
+                    };
                 } else {
                     // It's a value list: NOT IN (val1, val2, ...)
                     let values = self.parse_expression_list()?;
                     self.expect_token(Token::RParen)?;
 
                     // Empty IN lists are allowed per SQL:1999 (evaluates to TRUE for NOT IN)
-                    return Ok(vibesql_ast::Expression::InList {
+                    // Don't return - assign to left and continue to check for IS NULL
+                    left = vibesql_ast::Expression::InList {
                         expr: Box::new(left),
                         values,
                         negated: true,
-                    });
+                    };
                 }
             } else if self.peek_keyword(Keyword::Between) {
                 // It's NOT BETWEEN
@@ -260,13 +262,14 @@ impl Parser {
                 self.consume_keyword(Keyword::And)?;
                 let high = self.parse_shift_expression()?;
 
-                return Ok(vibesql_ast::Expression::Between {
+                // Don't return - assign to left and continue to check for IS NULL
+                left = vibesql_ast::Expression::Between {
                     expr: Box::new(left),
                     low: Box::new(low),
                     high: Box::new(high),
                     negated: true,
                     symmetric,
-                });
+                };
             } else if self.peek_keyword(Keyword::Like) {
                 // It's NOT LIKE
                 self.consume_keyword(Keyword::Like)?;
@@ -274,11 +277,12 @@ impl Parser {
                 // Parse pattern expression
                 let pattern = self.parse_shift_expression()?;
 
-                return Ok(vibesql_ast::Expression::Like {
+                // Don't return - assign to left and continue to check for IS NULL
+                left = vibesql_ast::Expression::Like {
                     expr: Box::new(left),
                     pattern: Box::new(pattern),
                     negated: true,
-                });
+                };
             } else if self.peek_keyword(Keyword::Glob) {
                 // It's NOT GLOB (SQLite)
                 self.consume_keyword(Keyword::Glob)?;
@@ -286,11 +290,12 @@ impl Parser {
                 // Parse pattern expression
                 let pattern = self.parse_shift_expression()?;
 
-                return Ok(vibesql_ast::Expression::Glob {
+                // Don't return - assign to left and continue to check for IS NULL
+                left = vibesql_ast::Expression::Glob {
                     expr: Box::new(left),
                     pattern: Box::new(pattern),
                     negated: true,
-                });
+                };
             } else if self.peek_keyword(Keyword::Null) {
                 // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS NOT NULL"
                 // BUT: In column definition context, "DEFAULT expr NOT NULL" should parse NOT NULL
@@ -347,22 +352,24 @@ impl Parser {
                 let subquery = self.parse_select_statement()?;
                 self.expect_token(Token::RParen)?;
 
-                return Ok(vibesql_ast::Expression::In {
+                // Don't return - assign to left and continue to check for IS NULL
+                left = vibesql_ast::Expression::In {
                     expr: Box::new(left),
                     subquery: Box::new(subquery),
                     negated: false,
-                });
+                };
             } else {
                 // It's a value list: IN (val1, val2, ...)
                 let values = self.parse_expression_list()?;
                 self.expect_token(Token::RParen)?;
 
                 // Empty IN lists are allowed per SQL:1999 (evaluates to FALSE)
-                return Ok(vibesql_ast::Expression::InList {
+                // Don't return - assign to left and continue to check for IS NULL
+                left = vibesql_ast::Expression::InList {
                     expr: Box::new(left),
                     values,
                     negated: false,
-                });
+                };
             }
         } else if self.peek_keyword(Keyword::Between) {
             // It's BETWEEN (not negated)
@@ -385,13 +392,14 @@ impl Parser {
             self.consume_keyword(Keyword::And)?;
             let high = self.parse_additive_expression()?;
 
-            return Ok(vibesql_ast::Expression::Between {
+            // Don't return - assign to left and continue to check for IS NULL
+            left = vibesql_ast::Expression::Between {
                 expr: Box::new(left),
                 low: Box::new(low),
                 high: Box::new(high),
                 negated: false,
                 symmetric,
-            });
+            };
         } else if self.peek_keyword(Keyword::Like) {
             // It's LIKE (not negated)
             self.consume_keyword(Keyword::Like)?;
@@ -399,11 +407,12 @@ impl Parser {
             // Parse pattern expression
             let pattern = self.parse_additive_expression()?;
 
-            return Ok(vibesql_ast::Expression::Like {
+            // Don't return - assign to left and continue to check for IS NULL
+            left = vibesql_ast::Expression::Like {
                 expr: Box::new(left),
                 pattern: Box::new(pattern),
                 negated: false,
-            });
+            };
         } else if self.peek_keyword(Keyword::Glob) {
             // It's GLOB (SQLite) (not negated)
             self.consume_keyword(Keyword::Glob)?;
@@ -411,11 +420,12 @@ impl Parser {
             // Parse pattern expression
             let pattern = self.parse_additive_expression()?;
 
-            return Ok(vibesql_ast::Expression::Glob {
+            // Don't return - assign to left and continue to check for IS NULL
+            left = vibesql_ast::Expression::Glob {
                 expr: Box::new(left),
                 pattern: Box::new(pattern),
                 negated: false,
-            });
+            };
         }
 
         // Check for comparison operators (both single-char and multi-char)
