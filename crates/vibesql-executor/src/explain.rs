@@ -66,6 +66,12 @@ pub struct PlanNode {
     pub index_name: Option<String>,
     /// Index predicates for SQLite EQP format (e.g., "w=?", "x>? AND x<?")
     pub index_predicates: Vec<IndexPredicate>,
+    /// Whether this query requires a temp B-tree for ORDER BY
+    pub needs_temp_btree_for_order_by: bool,
+    /// Set operation type for compound queries (UNION, INTERSECT, EXCEPT)
+    pub set_operation_type: Option<String>,
+    /// Whether this is a compound query root
+    pub is_compound_query: bool,
 }
 
 impl PlanNode {
@@ -79,6 +85,9 @@ impl PlanNode {
             scan_type: None,
             index_name: None,
             index_predicates: Vec::new(),
+            needs_temp_btree_for_order_by: false,
+            set_operation_type: None,
+            is_compound_query: false,
         }
     }
 
@@ -147,8 +156,18 @@ impl ExplainResult {
     /// Produces output like:
     /// ```text
     /// QUERY PLAN
-    /// |--SEARCH t1 USING INDEX idx1 (w=?)
-    /// `--SCAN t2
+    /// |--SCAN t1 USING INDEX i1
+    /// `--USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+    /// ```
+    ///
+    /// For compound queries:
+    /// ```text
+    /// QUERY PLAN
+    /// `--COMPOUND QUERY
+    ///    |--LEFT-MOST SUBQUERY
+    ///    |  `--SCAN t1
+    ///    `--UNION ALL
+    ///       `--SCAN t2
     /// ```
     ///
     /// The "QUERY PLAN" header is included to match SQLite's EQP format used in
@@ -159,14 +178,18 @@ impl ExplainResult {
         // Add "QUERY PLAN" header to match SQLite's EQP format
         writeln!(output, "QUERY PLAN").unwrap();
 
-        // Collect all leaf scan nodes for SQLite-style flat output
-        let scan_nodes = collect_scan_nodes(&self.plan);
+        // Check if this is a compound query
+        if self.plan.is_compound_query {
+            format_compound_query_eqp(&self.plan, "", true, &mut output);
+        } else {
+            // Collect all EQP entries (scan nodes + temp b-tree if needed)
+            let entries = collect_eqp_entries(&self.plan);
 
-        for (i, node) in scan_nodes.iter().enumerate() {
-            let is_last = i == scan_nodes.len() - 1;
-            let prefix = if is_last { "`--" } else { "|--" };
-            let line = format_sqlite_eqp_node(node);
-            writeln!(output, "{}{}", prefix, line).unwrap();
+            for (i, entry) in entries.iter().enumerate() {
+                let is_last = i == entries.len() - 1;
+                let prefix = if is_last { "`--" } else { "|--" };
+                writeln!(output, "{}{}", prefix, entry).unwrap();
+            }
         }
 
         output
@@ -465,13 +488,97 @@ fn collect_scan_nodes(node: &PlanNode) -> Vec<&PlanNode> {
     nodes
 }
 
+/// Collect all EQP entries from the plan tree, including TEMP B-TREE entries
+fn collect_eqp_entries(node: &PlanNode) -> Vec<String> {
+    let mut entries = Vec::new();
+
+    // Collect scan nodes first
+    let scan_nodes = collect_scan_nodes(node);
+    for scan_node in &scan_nodes {
+        entries.push(format_sqlite_eqp_node(scan_node));
+    }
+
+    // Add TEMP B-TREE entry if needed for ORDER BY
+    if node.needs_temp_btree_for_order_by {
+        entries.push("USE TEMP B-TREE FOR ORDER BY".to_string());
+    }
+
+    // Check children for temp b-tree needs as well
+    for child in &node.children {
+        if child.needs_temp_btree_for_order_by && !node.needs_temp_btree_for_order_by {
+            entries.push("USE TEMP B-TREE FOR ORDER BY".to_string());
+            break;
+        }
+    }
+
+    entries
+}
+
+/// Format a compound query in SQLite EQP style
+fn format_compound_query_eqp(node: &PlanNode, indent: &str, is_last: bool, output: &mut String) {
+    let connector = if is_last { "`--" } else { "|--" };
+    let child_indent = if is_last {
+        format!("{}   ", indent)
+    } else {
+        format!("{}|  ", indent)
+    };
+
+    // Write COMPOUND QUERY header
+    writeln!(output, "{}{}COMPOUND QUERY", indent, connector).unwrap();
+
+    // Write compound query children
+    let child_count = node.children.len();
+    for (i, child) in node.children.iter().enumerate() {
+        let is_child_last = i == child_count - 1;
+        let child_connector = if is_child_last { "`--" } else { "|--" };
+        let grandchild_indent = if is_child_last {
+            format!("{}   ", child_indent)
+        } else {
+            format!("{}|  ", child_indent)
+        };
+
+        if i == 0 {
+            // First subquery
+            writeln!(output, "{}{}LEFT-MOST SUBQUERY", child_indent, child_connector).unwrap();
+            // Write scan nodes for this subquery
+            let scan_nodes = collect_scan_nodes(child);
+            for (j, scan_node) in scan_nodes.iter().enumerate() {
+                let is_scan_last = j == scan_nodes.len() - 1;
+                let scan_connector = if is_scan_last { "`--" } else { "|--" };
+                writeln!(output, "{}{}{}", grandchild_indent, scan_connector, format_sqlite_eqp_node(scan_node)).unwrap();
+            }
+        } else {
+            // Subsequent parts with set operation label
+            let set_op = child.set_operation_type.as_deref().unwrap_or("UNION ALL");
+            writeln!(output, "{}{}{}", child_indent, child_connector, set_op).unwrap();
+            // Write scan nodes for this subquery
+            let scan_nodes = collect_scan_nodes(child);
+            for (j, scan_node) in scan_nodes.iter().enumerate() {
+                let is_scan_last = j == scan_nodes.len() - 1;
+                let scan_connector = if is_scan_last { "`--" } else { "|--" };
+                writeln!(output, "{}{}{}", grandchild_indent, scan_connector, format_sqlite_eqp_node(scan_node)).unwrap();
+            }
+        }
+    }
+}
+
 /// Format a single node in SQLite EQP style
 fn format_sqlite_eqp_node(node: &PlanNode) -> String {
+    // Handle constant row scan (no FROM clause)
+    if node.operation == "SCAN CONSTANT ROW" {
+        return "SCAN CONSTANT ROW".to_string();
+    }
+
     let table_name = node.object.as_deref().unwrap_or("?");
 
     match node.scan_type.as_ref() {
         Some(ScanType::Scan) => {
-            format!("SCAN {}", table_name)
+            // Check if we have an index for ordering (SCAN table USING INDEX idx)
+            if let Some(ref index_name) = node.index_name {
+                format!("SCAN {} USING INDEX {}", table_name, index_name)
+            } else {
+                format!("SCAN {}", table_name)
+            }
         }
         Some(ScanType::Search) | Some(ScanType::CoveringIndex) => {
             let index_name = node.index_name.as_deref().unwrap_or("?");
@@ -603,6 +710,11 @@ impl ExplainExecutor {
 
     /// Generate execution plan for a SELECT statement
     fn explain_select(stmt: &SelectStmt, database: &Database) -> Result<PlanNode, ExecutorError> {
+        // Check if this is a compound query (UNION, INTERSECT, EXCEPT)
+        if stmt.set_operation.is_some() {
+            return Self::explain_compound_select(stmt, database);
+        }
+
         let mut root = PlanNode::new("Select");
 
         // Extract columns needed by the SELECT list for covering index detection
@@ -618,6 +730,23 @@ impl ExplainExecutor {
                 database,
             )?;
             root.add_child(scan_node);
+        } else {
+            // No FROM clause - this is a constant expression scan
+            let mut constant_node = PlanNode::new("Constant Row");
+            constant_node.scan_type = Some(ScanType::Scan);
+            constant_node.operation = "SCAN CONSTANT ROW".to_string();
+            root.add_child(constant_node);
+        }
+
+        // Check if we need a temp B-tree for ORDER BY
+        // This happens when ORDER BY cannot be satisfied by an index
+        if let Some(ref order_by) = stmt.order_by {
+            let needs_temp = Self::needs_temp_btree_for_order_by(
+                stmt.from.as_ref(),
+                order_by,
+                database,
+            );
+            root.needs_temp_btree_for_order_by = needs_temp;
         }
 
         // Add WHERE clause info
@@ -641,6 +770,118 @@ impl ExplainExecutor {
         }
 
         Ok(root)
+    }
+
+    /// Generate execution plan for a compound SELECT (UNION, INTERSECT, EXCEPT)
+    fn explain_compound_select(stmt: &SelectStmt, database: &Database) -> Result<PlanNode, ExecutorError> {
+        let mut root = PlanNode::new("CompoundQuery");
+        root.is_compound_query = true;
+
+        // Add left-most subquery
+        let left_stmt = SelectStmt {
+            with_clause: stmt.with_clause.clone(),
+            distinct: stmt.distinct,
+            select_list: stmt.select_list.clone(),
+            into_table: stmt.into_table.clone(),
+            into_variables: stmt.into_variables.clone(),
+            from: stmt.from.clone(),
+            where_clause: stmt.where_clause.clone(),
+            group_by: stmt.group_by.clone(),
+            having: stmt.having.clone(),
+            order_by: None, // ORDER BY applies to the compound result
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: stmt.values.clone(),
+        };
+        let left_plan = Self::explain_select(&left_stmt, database)?;
+        root.add_child(left_plan);
+
+        // Add subsequent set operations
+        let mut current_set_op = stmt.set_operation.as_ref();
+        while let Some(set_op) = current_set_op {
+            let op_label = match (&set_op.op, set_op.all) {
+                (vibesql_ast::SetOperator::Union, true) => "UNION ALL",
+                (vibesql_ast::SetOperator::Union, false) => "UNION",
+                (vibesql_ast::SetOperator::Intersect, true) => "INTERSECT ALL",
+                (vibesql_ast::SetOperator::Intersect, false) => "INTERSECT",
+                (vibesql_ast::SetOperator::Except, true) => "EXCEPT ALL",
+                (vibesql_ast::SetOperator::Except, false) => "EXCEPT",
+            };
+
+            // Create plan for right side of set operation
+            let right_stmt = SelectStmt {
+                with_clause: set_op.right.with_clause.clone(),
+                distinct: set_op.right.distinct,
+                select_list: set_op.right.select_list.clone(),
+                into_table: set_op.right.into_table.clone(),
+                into_variables: set_op.right.into_variables.clone(),
+                from: set_op.right.from.clone(),
+                where_clause: set_op.right.where_clause.clone(),
+                group_by: set_op.right.group_by.clone(),
+                having: set_op.right.having.clone(),
+                order_by: None,
+                limit: None,
+                offset: None,
+                set_operation: None,
+                values: set_op.right.values.clone(),
+            };
+            let mut right_plan = Self::explain_select(&right_stmt, database)?;
+            right_plan.set_operation_type = Some(op_label.to_string());
+            root.add_child(right_plan);
+
+            // Continue to nested set operations
+            current_set_op = set_op.right.set_operation.as_ref();
+        }
+
+        Ok(root)
+    }
+
+    /// Check if ORDER BY requires a temp B-tree (sorting pass)
+    fn needs_temp_btree_for_order_by(
+        from: Option<&vibesql_ast::FromClause>,
+        order_by: &[vibesql_ast::OrderByItem],
+        database: &Database,
+    ) -> bool {
+        // If no FROM clause, this is a constant expression - no sorting needed
+        // (e.g., "SELECT 5 ORDER BY 1" just returns one row)
+        let Some(from_clause) = from else {
+            return false;
+        };
+
+        // Get the table name
+        let table_name = match from_clause {
+            vibesql_ast::FromClause::Table { name, .. } => name.as_str(),
+            _ => return true, // Joins/subqueries need temp B-tree
+        };
+
+        // Check if we have an index that can satisfy the ORDER BY
+        let order_by_vec: Vec<vibesql_ast::OrderByItem> = order_by.to_vec();
+        let index_info = cost_based_index_selection(
+            table_name,
+            None, // No WHERE clause for this check
+            Some(&order_by_vec),
+            database,
+        );
+
+        if index_info.is_none() {
+            return true; // No index can satisfy ORDER BY
+        }
+
+        // Check if index fully covers all ORDER BY columns
+        if let Some((_index_name, sorted_cols)) = index_info {
+            if let Some(ref cols) = sorted_cols {
+                // If we have a partial match (fewer columns than ORDER BY), we need temp B-tree
+                if cols.len() < order_by.len() {
+                    return true;
+                }
+            } else {
+                // No sorted columns means we need temp B-tree
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Generate plan node for FROM clause
@@ -795,13 +1036,28 @@ impl ExplainExecutor {
             }
             let is_covering = is_covering_index(&index_name, &all_needed_columns, database);
 
-            // Determine scan type: PK lookup > Covering Index > Regular Search
+            // Check if we have any predicates on the index (determines SCAN vs SEARCH)
+            let has_index_predicates = if let Some(where_expr) = where_clause {
+                let predicates = extract_index_predicates(where_expr, &index_name, database);
+                !predicates.is_empty()
+            } else {
+                false
+            };
+
+            // Determine scan type:
+            // - If we have predicates → SEARCH (or COVERING SEARCH)
+            // - If no predicates but using index for ordering → SCAN USING INDEX
             let scan_type = if is_pk_lookup {
                 ScanType::IntegerPrimaryKey
-            } else if is_covering {
-                ScanType::CoveringIndex
+            } else if has_index_predicates {
+                if is_covering {
+                    ScanType::CoveringIndex
+                } else {
+                    ScanType::Search
+                }
             } else {
-                ScanType::Search
+                // No predicates - this is a SCAN using index for ordering
+                ScanType::Scan
             };
 
             let mut idx_node = PlanNode::new("Index Scan")
