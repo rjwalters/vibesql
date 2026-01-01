@@ -1,4 +1,4 @@
-use crate::errors::ExecutorError;
+use crate::{errors::ExecutorError, expression_index_maintenance};
 
 /// Handle REPLACE logic: detect conflicts and delete conflicting rows
 /// Returns Ok(()) if no conflict or conflict was resolved
@@ -88,6 +88,16 @@ pub fn handle_replace_conflicts(
     let rows_refs: Vec<(usize, &vibesql_storage::Row)> =
         rows_to_delete.iter().map(|(idx, row)| (*idx, row)).collect();
     db.batch_update_indexes_for_delete(table_name, &rows_refs);
+
+    // Maintain expression indexes for each deleted row
+    for (row_index, row) in &rows_to_delete {
+        expression_index_maintenance::maintain_expression_indexes_for_delete(
+            db,
+            table_name,
+            row,
+            *row_index,
+        );
+    }
 
     // Collect indices for deletion
     let mut deleted_indices: Vec<usize> = rows_to_delete.iter().map(|(idx, _)| *idx).collect();

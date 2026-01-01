@@ -263,6 +263,89 @@ pub fn maintain_expression_indexes_for_delete(
     db.update_expression_indexes_for_delete(table_name, row_index, &expression_keys);
 }
 
+/// Rebuild expression indexes after compaction
+///
+/// When table compaction occurs (e.g., after bulk deletes), all row indices change.
+/// Regular indexes are rebuilt by the storage layer, but expression indexes require
+/// the executor to evaluate expressions. This function clears and rebuilds all
+/// expression indexes for the given table.
+///
+/// # Arguments
+/// * `db` - Database reference
+/// * `table_name` - Name of the table
+pub fn rebuild_expression_indexes_after_compaction(db: &mut Database, table_name: &str) {
+    // Check if there are any expression indexes
+    if !db.has_expression_indexes(table_name) {
+        return;
+    }
+
+    // Get the table schema and rows
+    let table_schema = match db.catalog.get_table(table_name) {
+        Some(schema) => schema.clone(),
+        None => return,
+    };
+
+    let rows: Vec<vibesql_storage::Row> = match db.get_table(table_name) {
+        Some(table) => table.scan().to_vec(),
+        None => return,
+    };
+
+    // Get expression indexes for this table and clone metadata to avoid borrow conflict
+    let expression_indexes: Vec<(String, vibesql_storage::database::indexes::IndexMetadata)> = db
+        .get_expression_indexes_for_table(table_name)
+        .into_iter()
+        .map(|(name, metadata)| (name, metadata.clone()))
+        .collect();
+    if expression_indexes.is_empty() {
+        return;
+    }
+
+    // Create expression evaluator
+    let evaluator = ExpressionEvaluator::new(&table_schema);
+
+    // Clear existing expression index data
+    db.clear_expression_index_data(table_name);
+
+    // Rebuild expression indexes by inserting all rows
+    for (row_index, row) in rows.iter().enumerate() {
+        let mut expression_keys: HashMap<String, Vec<SqlValue>> = HashMap::new();
+
+        for (index_name, metadata) in &expression_indexes {
+            let mut key_values = Vec::new();
+
+            for col in &metadata.columns {
+                let value = if let Some(expr) = col.get_expression() {
+                    match evaluator.eval(expr, row) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            log::warn!(
+                                "Failed to evaluate expression for index '{}' during rebuild: {:?}",
+                                index_name,
+                                e
+                            );
+                            SqlValue::Null
+                        }
+                    }
+                } else if let Some(col_name) = col.column_name() {
+                    if let Some(col_idx) = table_schema.get_column_index(col_name) {
+                        row.values[col_idx].clone()
+                    } else {
+                        SqlValue::Null
+                    }
+                } else {
+                    SqlValue::Null
+                };
+                key_values.push(value);
+            }
+
+            expression_keys.insert(index_name.clone(), key_values);
+        }
+
+        // Add entries to expression indexes
+        db.add_to_expression_indexes_for_insert(table_name, row_index, &expression_keys);
+    }
+}
+
 // Unit tests for expression index maintenance are deferred to integration tests.
 // The core functionality is tested through the create_index tests which exercise
 // the expression index creation with pre-computed keys.

@@ -682,6 +682,11 @@ impl Operations {
         self.index_manager.has_expression_indexes(table_name)
     }
 
+    /// Clear expression index data for a table (for rebuilding after compaction)
+    pub fn clear_expression_index_data(&mut self, table_name: &str) {
+        self.index_manager.clear_expression_index_data(table_name);
+    }
+
     /// Rebuild user-defined indexes after bulk operations that change row indices
     pub fn rebuild_indexes(
         &mut self,
@@ -763,6 +768,7 @@ impl Operations {
     }
 
     /// Check if a column has any user-defined index (B-tree or spatial)
+    /// Note: Expression indexes are NOT checked here - they don't have named columns
     #[inline]
     pub fn has_index_on_column(&self, table_name: &str, column_name: &str) -> bool {
         let normalized_table = table_name.to_lowercase();
@@ -773,9 +779,14 @@ impl Operations {
             if let Some(metadata) = self.index_manager.get_index(&index_name) {
                 if metadata.table_name.to_lowercase() == normalized_table {
                     for col in &metadata.columns {
-                        if col.expect_column_name().to_lowercase() == normalized_column {
-                            return true;
+                        // Use column_name() instead of expect_column_name() to handle
+                        // expression indexes gracefully - they return None for column_name
+                        if let Some(col_name) = col.column_name() {
+                            if col_name.to_lowercase() == normalized_column {
+                                return true;
+                            }
                         }
+                        // Skip expression indexes - they don't have named columns
                     }
                 }
             }

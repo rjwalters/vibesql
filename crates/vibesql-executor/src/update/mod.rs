@@ -34,7 +34,8 @@ use vibesql_storage::{statistics::CostEstimator, Database};
 
 use crate::{
     dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
-    privilege_checker::PrivilegeChecker, sqlite_schema::is_sqlite_schema_table,
+    expression_index_maintenance, privilege_checker::PrivilegeChecker,
+    sqlite_schema::is_sqlite_schema_table,
 };
 
 /// Executor for UPDATE statements
@@ -204,11 +205,14 @@ impl UpdateExecutor {
         // Try fast path for simple single-row PK updates without triggers
         // Conditions: no triggers, no procedural context, simple WHERE pk = value, no assertions
         // Skip fast path if assertions exist because we need rollback capability on violation
+        // Skip fast path if expression indexes exist because they need maintenance
         let has_assertions = database.catalog.get_all_assertions().next().is_some();
+        let has_expression_indexes = database.has_expression_indexes(table_name);
         if !has_triggers
             && procedural_context.is_none()
             && trigger_context.is_none()
             && !has_assertions
+            && !has_expression_indexes
         {
             if let Some(result) = Self::try_fast_path_update(stmt, database, schema)? {
                 // Invalidate columnar cache after fast path update
@@ -478,6 +482,16 @@ impl UpdateExecutor {
                     rows_for_index.iter().map(|(idx, row)| (*idx, row)).collect();
                 database.batch_update_indexes_for_delete(table_name, &rows_refs);
 
+                // Maintain expression indexes for each deleted row
+                for (row_index, row) in &rows_for_index {
+                    expression_index_maintenance::maintain_expression_indexes_for_delete(
+                        database,
+                        table_name,
+                        row,
+                        *row_index,
+                    );
+                }
+
                 // Delete conflicting rows
                 let table_mut = database
                     .get_table_mut(table_name)
@@ -601,6 +615,15 @@ impl UpdateExecutor {
                 &new_row,
                 index,
                 Some(&changed_columns),
+            );
+
+            // Maintain expression indexes for this update
+            expression_index_maintenance::maintain_expression_indexes_for_update(
+                database,
+                table_name,
+                &old_row,
+                &new_row,
+                index,
             );
         }
 
@@ -815,6 +838,15 @@ impl UpdateExecutor {
             &new_row,
             row_index,
             Some(&changed_columns),
+        );
+
+        // Maintain expression indexes for this update
+        expression_index_maintenance::maintain_expression_indexes_for_update(
+            database,
+            table_name,
+            &old_row,
+            &new_row,
+            row_index,
         );
 
         // Apply the update directly (transfers ownership of new_row, no clone needed)
@@ -1211,11 +1243,25 @@ fn find_conflicting_rows_for_update(
             }
 
             // Build key values for this index
+            // Skip expression indexes - they are handled separately
             let mut key_values = Vec::new();
+            let mut is_expression_index = false;
             for index_col in &index_metadata.columns {
-                if let Some(col_idx) = schema.get_column_index(index_col.expect_column_name()) {
-                    key_values.push(new_row.values[col_idx].clone());
+                if index_col.get_expression().is_some() {
+                    is_expression_index = true;
+                    break;
                 }
+                if let Some(col_name) = index_col.column_name() {
+                    if let Some(col_idx) = schema.get_column_index(col_name) {
+                        key_values.push(new_row.values[col_idx].clone());
+                    }
+                } else {
+                    is_expression_index = true;
+                    break;
+                }
+            }
+            if is_expression_index {
+                continue;
             }
 
             // Skip if any value is NULL

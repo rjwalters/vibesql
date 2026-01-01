@@ -341,6 +341,11 @@ impl Database {
         self.operations.has_expression_indexes(table_name)
     }
 
+    /// Clear expression index data for a table (for rebuilding after compaction)
+    pub fn clear_expression_index_data(&mut self, table_name: &str) {
+        self.operations.clear_expression_index_data(table_name);
+    }
+
     // ============================================================================
     // Spatial Index Methods
     // ============================================================================
