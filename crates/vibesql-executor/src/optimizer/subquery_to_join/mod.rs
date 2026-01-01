@@ -42,9 +42,11 @@
 mod exists;
 mod helpers;
 mod in_clause;
+mod scalar_comparison;
 
 use exists::try_convert_exists_to_join;
 use in_clause::try_convert_in_to_join;
+use scalar_comparison::try_convert_scalar_comparison_to_join;
 use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectStmt};
 
 /// Transform a SELECT statement by converting IN/NOT IN subqueries to semi/anti-joins
@@ -56,6 +58,11 @@ use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectStmt};
 /// (e.g., Q21 with both EXISTS and NOT EXISTS clauses).
 pub fn transform_subqueries_to_joins(stmt: &SelectStmt) -> SelectStmt {
     let mut result = stmt.clone();
+
+    // First, recursively transform any subqueries in the WHERE clause
+    if let Some(where_clause) = &result.where_clause {
+        result.where_clause = Some(transform_subqueries_in_expression(where_clause));
+    }
 
     // Only transform if we have a FROM clause and a WHERE clause
     if result.from.is_none() || result.where_clause.is_none() {
@@ -98,6 +105,223 @@ pub fn transform_subqueries_to_joins(stmt: &SelectStmt) -> SelectStmt {
     result
 }
 
+/// Transform scalar comparison subqueries within a SELECT statement (for nested subqueries)
+///
+/// This is a lighter-weight version of `transform_subqueries_to_joins` that ONLY handles
+/// scalar comparison subqueries like `col > (SELECT SUM(...) ...)`. It does NOT convert
+/// IN/EXISTS to semi/anti-joins.
+///
+/// This is used when recursing into IN/EXISTS subqueries to decorrelate scalar comparisons
+/// without affecting the structure of nested IN/EXISTS (which would prevent the parent
+/// IN/EXISTS from being transformed to a join).
+fn transform_scalar_subqueries_in_stmt(stmt: &SelectStmt) -> SelectStmt {
+    let mut result = stmt.clone();
+
+    // Only transform if we have a FROM clause and a WHERE clause
+    if result.from.is_none() || result.where_clause.is_none() {
+        return result;
+    }
+
+    // Apply scalar comparison transformation iteratively
+    let max_iterations = 5;
+    for _iteration in 0..max_iterations {
+        let mut made_progress = false;
+
+        if let Some(where_clause) = &result.where_clause {
+            if let Some((new_from, new_where)) =
+                try_extract_scalar_comparisons_only(result.from.as_ref().unwrap(), where_clause)
+            {
+                result.from = Some(new_from);
+                result.where_clause = new_where;
+                made_progress = true;
+            }
+        }
+
+        if !made_progress {
+            break;
+        }
+    }
+
+    result
+}
+
+/// Try to extract scalar comparison subqueries from WHERE clause and convert to LEFT JOINs
+/// This does NOT handle IN/EXISTS - only scalar comparisons like `col > (SELECT ...)`
+fn try_extract_scalar_comparisons_only(
+    from: &FromClause,
+    where_clause: &Expression,
+) -> Option<(FromClause, Option<Expression>)> {
+    match where_clause {
+        // Scalar comparison with subquery at top level
+        Expression::BinaryOp { op, left, right }
+            if matches!(right.as_ref(), Expression::ScalarSubquery(_)) =>
+        {
+            if let Some(result) = try_convert_scalar_comparison_to_join(from, op, left, right) {
+                return Some((result.from, Some(result.replacement_expr)));
+            }
+            None
+        }
+
+        // AND with potential scalar comparison
+        Expression::BinaryOp {
+            op: BinaryOperator::And,
+            left,
+            right,
+        } => {
+            // Try left side
+            if let Expression::BinaryOp {
+                op,
+                left: inner_left,
+                right: inner_right,
+            } = left.as_ref()
+            {
+                if matches!(inner_right.as_ref(), Expression::ScalarSubquery(_)) {
+                    if let Some(result) =
+                        try_convert_scalar_comparison_to_join(from, op, inner_left, inner_right)
+                    {
+                        let new_where = Expression::BinaryOp {
+                            op: BinaryOperator::And,
+                            left: Box::new(result.replacement_expr),
+                            right: right.clone(),
+                        };
+                        return Some((result.from, Some(new_where)));
+                    }
+                }
+            }
+
+            // Try right side
+            if let Expression::BinaryOp {
+                op,
+                left: inner_left,
+                right: inner_right,
+            } = right.as_ref()
+            {
+                if matches!(inner_right.as_ref(), Expression::ScalarSubquery(_)) {
+                    if let Some(result) =
+                        try_convert_scalar_comparison_to_join(from, op, inner_left, inner_right)
+                    {
+                        let new_where = Expression::BinaryOp {
+                            op: BinaryOperator::And,
+                            left: left.clone(),
+                            right: Box::new(result.replacement_expr),
+                        };
+                        return Some((result.from, Some(new_where)));
+                    }
+                }
+            }
+
+            None
+        }
+
+        // Conjunction (flattened AND chain)
+        Expression::Conjunction(children) => {
+            for (i, child) in children.iter().enumerate() {
+                if let Expression::BinaryOp { op, left, right } = child {
+                    if matches!(right.as_ref(), Expression::ScalarSubquery(_)) {
+                        if let Some(result) =
+                            try_convert_scalar_comparison_to_join(from, op, left, right)
+                        {
+                            let mut remaining: Vec<_> = children
+                                .iter()
+                                .enumerate()
+                                .filter(|(j, _)| *j != i)
+                                .map(|(_, c)| c.clone())
+                                .collect();
+                            remaining.push(result.replacement_expr);
+                            let new_where = match remaining.len() {
+                                0 => None,
+                                1 => Some(remaining.into_iter().next().unwrap()),
+                                _ => Some(Expression::Conjunction(remaining)),
+                            };
+                            return Some((result.from, new_where));
+                        }
+                    }
+                }
+            }
+            None
+        }
+
+        _ => None,
+    }
+}
+
+/// Recursively transform subqueries within an expression
+///
+/// This applies scalar comparison decorrelation to SELECT statements nested within
+/// IN and EXISTS subquery expressions (like Q20's pattern: `ps_availqty > (SELECT SUM(...) ...)`).
+///
+/// IMPORTANT: We only decorrelate scalar comparisons, NOT IN/EXISTS to semi/anti-joins.
+/// Converting nested IN/EXISTS would change their FROM clause structure, which would then
+/// prevent the PARENT IN/EXISTS from being converted to a join (because the parent
+/// transformation expects a simple table in the subquery's FROM clause).
+fn transform_subqueries_in_expression(expr: &Expression) -> Expression {
+    match expr {
+        Expression::In { expr: inner_expr, subquery, negated } => {
+            // Transform the inner expression
+            let transformed_inner = transform_subqueries_in_expression(inner_expr);
+            // Only apply scalar comparison decorrelation, NOT IN/EXISTS transformation
+            // This preserves the subquery's FROM clause structure for parent transformation
+            let transformed_subquery = transform_scalar_subqueries_in_stmt(subquery);
+            Expression::In {
+                expr: Box::new(transformed_inner),
+                subquery: Box::new(transformed_subquery),
+                negated: *negated,
+            }
+        }
+        Expression::Exists { subquery, negated } => {
+            // Only apply scalar comparison decorrelation, NOT IN/EXISTS transformation
+            let transformed_subquery = transform_scalar_subqueries_in_stmt(subquery);
+            Expression::Exists {
+                subquery: Box::new(transformed_subquery),
+                negated: *negated,
+            }
+        }
+        Expression::ScalarSubquery(subquery) => {
+            let transformed_subquery = transform_subqueries_to_joins(subquery);
+            Expression::ScalarSubquery(Box::new(transformed_subquery))
+        }
+        Expression::BinaryOp { op, left, right } => Expression::BinaryOp {
+            op: op.clone(),
+            left: Box::new(transform_subqueries_in_expression(left)),
+            right: Box::new(transform_subqueries_in_expression(right)),
+        },
+        Expression::Conjunction(children) => {
+            Expression::Conjunction(children.iter().map(transform_subqueries_in_expression).collect())
+        }
+        Expression::Disjunction(children) => {
+            Expression::Disjunction(children.iter().map(transform_subqueries_in_expression).collect())
+        }
+        Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
+            op: op.clone(),
+            expr: Box::new(transform_subqueries_in_expression(inner)),
+        },
+        Expression::IsNull { expr: inner, negated } => Expression::IsNull {
+            expr: Box::new(transform_subqueries_in_expression(inner)),
+            negated: *negated,
+        },
+        Expression::Between { expr: inner, low, high, negated, symmetric } => Expression::Between {
+            expr: Box::new(transform_subqueries_in_expression(inner)),
+            low: Box::new(transform_subqueries_in_expression(low)),
+            high: Box::new(transform_subqueries_in_expression(high)),
+            negated: *negated,
+            symmetric: *symmetric,
+        },
+        Expression::Case { operand, when_clauses, else_result } => Expression::Case {
+            operand: operand.as_ref().map(|o| Box::new(transform_subqueries_in_expression(o))),
+            when_clauses: when_clauses
+                .iter()
+                .map(|w| vibesql_ast::CaseWhen {
+                    conditions: w.conditions.iter().map(transform_subqueries_in_expression).collect(),
+                    result: transform_subqueries_in_expression(&w.result),
+                })
+                .collect(),
+            else_result: else_result.as_ref().map(|e| Box::new(transform_subqueries_in_expression(e))),
+        },
+        // For other expression types, just return as-is
+        _ => expr.clone(),
+    }
+}
+
 /// Try to extract IN/NOT IN subqueries from WHERE clause and convert to semi/anti-joins
 fn try_extract_subqueries_to_joins(
     from: &FromClause,
@@ -113,9 +337,9 @@ fn try_extract_subqueries_to_joins(
             None
         }
 
-        // AND with potential IN/EXISTS subqueries
+        // AND with potential IN/EXISTS/scalar comparison subqueries
         Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
-            // Try left side first - check both IN and EXISTS
+            // Try left side first - check IN, EXISTS, and scalar comparison
             match left.as_ref() {
                 Expression::In { expr, subquery, negated } => {
                     if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated) {
@@ -134,10 +358,25 @@ fn try_extract_subqueries_to_joins(
                         return Some((join, Some((**right).clone())));
                     }
                 }
+                Expression::BinaryOp { op, left: inner_left, right: inner_right }
+                    if matches!(inner_right.as_ref(), Expression::ScalarSubquery(_)) =>
+                {
+                    if let Some(result) =
+                        try_convert_scalar_comparison_to_join(from, op, inner_left, inner_right)
+                    {
+                        // Replace the scalar comparison with the new expression
+                        let new_where = Expression::BinaryOp {
+                            op: BinaryOperator::And,
+                            left: Box::new(result.replacement_expr),
+                            right: right.clone(),
+                        };
+                        return Some((result.from, Some(new_where)));
+                    }
+                }
                 _ => {}
             }
 
-            // Try right side - check both IN and EXISTS
+            // Try right side - check IN, EXISTS, and scalar comparison
             match right.as_ref() {
                 Expression::In { expr, subquery, negated } => {
                     if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated) {
@@ -152,6 +391,21 @@ fn try_extract_subqueries_to_joins(
                     if let Some((join, _)) = try_convert_exists_to_join(from, subquery, *negated) {
                         // Successfully converted right EXISTS side, keep left side as WHERE clause
                         return Some((join, Some((**left).clone())));
+                    }
+                }
+                Expression::BinaryOp { op, left: inner_left, right: inner_right }
+                    if matches!(inner_right.as_ref(), Expression::ScalarSubquery(_)) =>
+                {
+                    if let Some(result) =
+                        try_convert_scalar_comparison_to_join(from, op, inner_left, inner_right)
+                    {
+                        // Replace the scalar comparison with the new expression
+                        let new_where = Expression::BinaryOp {
+                            op: BinaryOperator::And,
+                            left: left.clone(),
+                            right: Box::new(result.replacement_expr),
+                        };
+                        return Some((result.from, Some(new_where)));
                     }
                 }
                 _ => {}
@@ -197,10 +451,18 @@ fn try_extract_subqueries_to_joins(
             try_convert_exists_to_join(from, subquery, *negated)
         }
 
+        // Scalar comparison with subquery (e.g., ps_availqty > (SELECT SUM(...) ...))
+        Expression::BinaryOp { op, left, right } if matches!(right.as_ref(), Expression::ScalarSubquery(_)) => {
+            if let Some(result) = try_convert_scalar_comparison_to_join(from, op, left, right) {
+                return Some((result.from, Some(result.replacement_expr)));
+            }
+            None
+        }
+
         // Conjunction (flattened AND chain) - produced by arena parser
-        // Handle IN/EXISTS subqueries within the conjunction children
+        // Handle IN/EXISTS/scalar comparison subqueries within the conjunction children
         Expression::Conjunction(children) => {
-            // Look for IN or EXISTS subqueries among children
+            // Look for IN, EXISTS, or scalar comparison subqueries among children
             for (i, child) in children.iter().enumerate() {
                 match child {
                     Expression::In { expr, subquery, negated } => {
@@ -238,6 +500,29 @@ fn try_extract_subqueries_to_joins(
                                 _ => Some(Expression::Conjunction(remaining)),
                             };
                             return Some((join, new_where));
+                        }
+                    }
+                    Expression::BinaryOp { op, left, right }
+                        if matches!(right.as_ref(), Expression::ScalarSubquery(_)) =>
+                    {
+                        if let Some(result) =
+                            try_convert_scalar_comparison_to_join(from, op, left, right)
+                        {
+                            // Build remaining WHERE from other children, replacing this child
+                            // with the replacement expression
+                            let mut remaining: Vec<_> = children
+                                .iter()
+                                .enumerate()
+                                .filter(|(j, _)| *j != i)
+                                .map(|(_, c)| c.clone())
+                                .collect();
+                            remaining.push(result.replacement_expr);
+                            let new_where = match remaining.len() {
+                                0 => None,
+                                1 => Some(remaining.into_iter().next().unwrap()),
+                                _ => Some(Expression::Conjunction(remaining)),
+                            };
+                            return Some((result.from, new_where));
                         }
                     }
                     _ => {}
