@@ -3,6 +3,7 @@
 //! Determines when and which index to use for query optimization.
 //! Supports both rule-based (simple) and cost-based (statistics-aware) selection.
 //! Also includes skip-scan optimization for queries filtering on non-prefix columns.
+//! Supports expression indexes (functional indexes) like `CREATE INDEX idx ON t(LOWER(name))`.
 
 use vibesql_ast::Expression;
 use vibesql_catalog::TableSchema;
@@ -95,13 +96,13 @@ pub(crate) fn should_use_index_scan(
             let first_indexed_column = index_metadata.columns.first()?;
 
             // Check if this index can be used for WHERE clause
+            // Supports both column-based and expression-based indexes
             let can_use_for_where = where_clause
-                .map(|expr| {
-                    expression_filters_column(expr, first_indexed_column.expect_column_name())
-                })
+                .map(|expr| expression_filters_indexed_column(expr, first_indexed_column))
                 .unwrap_or(false);
 
             // Count how many leading index columns are pinned by equality predicates
+            // Note: For expression indexes, we count expression matches as pinned
             let pinned_columns = count_pinned_index_columns(where_clause, &index_metadata.columns);
 
             // Check if this index can be used for ORDER BY clause
@@ -290,6 +291,233 @@ fn is_literal(expr: &Expression) -> bool {
     }
 }
 
+/// Check if two expressions are structurally equivalent for index matching purposes.
+///
+/// This performs a normalized comparison of expressions, suitable for matching
+/// WHERE clause expressions against expression index definitions.
+///
+/// Normalization includes:
+/// - Case-insensitive comparison of column names and function names
+/// - Order-independent comparison for commutative operators where applicable
+///
+/// # Example
+/// ```text
+/// Index: CREATE INDEX idx ON t(LOWER(email))
+/// Query: SELECT * FROM t WHERE LOWER(email) = 'x'
+///
+/// expressions_match(LOWER(email), LOWER(email)) -> true
+/// ```
+pub(crate) fn expressions_match(expr1: &Expression, expr2: &Expression) -> bool {
+    match (expr1, expr2) {
+        // Column references: case-insensitive comparison
+        (Expression::ColumnRef(col1), Expression::ColumnRef(col2)) => {
+            col1.column_canonical().eq_ignore_ascii_case(&col2.column_canonical())
+        }
+
+        // Function calls: compare function name and arguments
+        (
+            Expression::Function { name: name1, args: args1, .. },
+            Expression::Function { name: name2, args: args2, .. },
+        ) => {
+            // Function names are case-insensitive in SQL
+            name1.canonical().eq_ignore_ascii_case(name2.canonical())
+                && args1.len() == args2.len()
+                && args1.iter().zip(args2.iter()).all(|(a1, a2)| expressions_match(a1, a2))
+        }
+
+        // Binary operations: compare operator and operands
+        (
+            Expression::BinaryOp { left: l1, op: op1, right: r1 },
+            Expression::BinaryOp { left: l2, op: op2, right: r2 },
+        ) => op1 == op2 && expressions_match(l1, l2) && expressions_match(r1, r2),
+
+        // Unary operations
+        (Expression::UnaryOp { op: op1, expr: e1 }, Expression::UnaryOp { op: op2, expr: e2 }) => {
+            op1 == op2 && expressions_match(e1, e2)
+        }
+
+        // Cast expressions
+        (
+            Expression::Cast { expr: e1, data_type: t1 },
+            Expression::Cast { expr: e2, data_type: t2 },
+        ) => t1 == t2 && expressions_match(e1, e2),
+
+        // Literals: exact match
+        (Expression::Literal(v1), Expression::Literal(v2)) => v1 == v2,
+
+        // CASE expressions
+        (
+            Expression::Case { operand: op1, when_clauses: wc1, else_result: er1 },
+            Expression::Case { operand: op2, when_clauses: wc2, else_result: er2 },
+        ) => {
+            // Compare operand
+            let op_match = match (op1, op2) {
+                (Some(o1), Some(o2)) => expressions_match(o1, o2),
+                (None, None) => true,
+                _ => false,
+            };
+            // Compare else
+            let else_match = match (er1, er2) {
+                (Some(e1), Some(e2)) => expressions_match(e1, e2),
+                (None, None) => true,
+                _ => false,
+            };
+            // Compare when clauses (conditions is a Vec, result is Expression)
+            op_match
+                && else_match
+                && wc1.len() == wc2.len()
+                && wc1.iter().zip(wc2.iter()).all(|(w1, w2)| {
+                    w1.conditions.len() == w2.conditions.len()
+                        && w1
+                            .conditions
+                            .iter()
+                            .zip(w2.conditions.iter())
+                            .all(|(c1, c2)| expressions_match(c1, c2))
+                        && expressions_match(&w1.result, &w2.result)
+                })
+        }
+
+        // NULL handling
+        (
+            Expression::IsNull { expr: e1, negated: n1 },
+            Expression::IsNull { expr: e2, negated: n2 },
+        ) => n1 == n2 && expressions_match(e1, e2),
+
+        // Conjunction (AND chain)
+        (Expression::Conjunction(exprs1), Expression::Conjunction(exprs2)) => {
+            exprs1.len() == exprs2.len()
+                && exprs1.iter().zip(exprs2.iter()).all(|(e1, e2)| expressions_match(e1, e2))
+        }
+
+        // Disjunction (OR chain)
+        (Expression::Disjunction(exprs1), Expression::Disjunction(exprs2)) => {
+            exprs1.len() == exprs2.len()
+                && exprs1.iter().zip(exprs2.iter()).all(|(e1, e2)| expressions_match(e1, e2))
+        }
+
+        // For all other expression types, they must be exactly equal
+        // This is conservative but safe
+        _ => expr1 == expr2,
+    }
+}
+
+/// Check if an expression references a specific expression from an expression index.
+///
+/// Similar to `is_column_reference` but for expression indexes. Returns true if
+/// the expression exactly matches the indexed expression.
+///
+/// # Example
+/// ```text
+/// index_expr: LOWER(email)
+/// check_expr: LOWER(email)  -> true
+/// check_expr: email         -> false
+/// check_expr: UPPER(email)  -> false
+/// ```
+pub(super) fn is_expression_reference(expr: &Expression, index_expr: &Expression) -> bool {
+    expressions_match(expr, index_expr)
+}
+
+/// Check if a WHERE clause filters on a specific expression from an expression index.
+///
+/// This is analogous to `expression_filters_column` but works with expression indexes.
+/// For an expression index on `LOWER(email)`, it checks if the WHERE clause contains
+/// a predicate like `LOWER(email) = 'value'` or `LOWER(email) > 'value'`.
+///
+/// # Arguments
+/// * `expr` - The WHERE clause expression to analyze
+/// * `index_expr` - The expression from the expression index
+///
+/// # Returns
+/// `true` if the WHERE clause filters on the indexed expression
+///
+/// # Example
+/// ```text
+/// Index: CREATE INDEX idx ON t(LOWER(email))
+/// Query: WHERE LOWER(email) = 'user@example.com'
+/// -> Returns true
+/// ```
+pub(crate) fn expression_filters_expression(expr: &Expression, index_expr: &Expression) -> bool {
+    match expr {
+        Expression::BinaryOp { left, op, right } => {
+            match op {
+                vibesql_ast::BinaryOperator::Equal
+                | vibesql_ast::BinaryOperator::GreaterThan
+                | vibesql_ast::BinaryOperator::GreaterThanOrEqual
+                | vibesql_ast::BinaryOperator::LessThan
+                | vibesql_ast::BinaryOperator::LessThanOrEqual => {
+                    // Index can only filter when comparing expression to a LITERAL value
+                    let left_is_expr = is_expression_reference(left, index_expr);
+                    let right_is_expr = is_expression_reference(right, index_expr);
+                    let left_is_literal = is_literal(left);
+                    let right_is_literal = is_literal(right);
+
+                    // expression op literal OR literal op expression
+                    if (left_is_expr && right_is_literal) || (left_is_literal && right_is_expr) {
+                        return true;
+                    }
+                }
+                vibesql_ast::BinaryOperator::And | vibesql_ast::BinaryOperator::Or => {
+                    // Recursively check sub-expressions for AND/OR
+                    return expression_filters_expression(left, index_expr)
+                        || expression_filters_expression(right, index_expr);
+                }
+                _ => {}
+            }
+            false
+        }
+        // IS / IS NOT (NULL-safe comparison)
+        Expression::IsDistinctFrom { left, right, negated: true } => {
+            let left_is_expr = is_expression_reference(left, index_expr);
+            let right_is_expr = is_expression_reference(right, index_expr);
+            let left_is_literal = is_literal(left);
+            let right_is_literal = is_literal(right);
+            (left_is_expr && right_is_literal) || (left_is_literal && right_is_expr)
+        }
+        // IN with value list: expr IN (1, 2, 3)
+        Expression::InList { expr: in_expr, .. } => is_expression_reference(in_expr, index_expr),
+        // IN with subquery: expr IN (SELECT ...)
+        Expression::In { expr: in_expr, .. } => is_expression_reference(in_expr, index_expr),
+        // BETWEEN: expr BETWEEN low AND high
+        Expression::Between { expr: between_expr, .. } => {
+            is_expression_reference(between_expr, index_expr)
+        }
+        // Conjunction: AND
+        Expression::Conjunction(exprs) => {
+            exprs.iter().any(|e| expression_filters_expression(e, index_expr))
+        }
+        // Disjunction: OR
+        Expression::Disjunction(exprs) => {
+            exprs.iter().any(|e| expression_filters_expression(e, index_expr))
+        }
+        _ => false,
+    }
+}
+
+/// Check if an expression can be used for index filtering
+///
+/// This function checks if a WHERE clause expression filters on the first column
+/// of an index, supporting both regular column indexes and expression indexes.
+///
+/// # Arguments
+/// * `expr` - The WHERE clause expression to analyze
+/// * `index_col` - The first indexed column (may be a column or expression)
+///
+/// # Returns
+/// `true` if the WHERE clause can use this index for filtering
+pub(crate) fn expression_filters_indexed_column(
+    expr: &Expression,
+    index_col: &vibesql_ast::IndexColumn,
+) -> bool {
+    match index_col {
+        vibesql_ast::IndexColumn::Column { column_name, .. } => {
+            expression_filters_column(expr, column_name)
+        }
+        vibesql_ast::IndexColumn::Expression { expr: index_expr, .. } => {
+            expression_filters_expression(expr, index_expr)
+        }
+    }
+}
+
 /// Case-insensitive lookup of column statistics
 ///
 /// Returns the ColumnStatistics for a column name, ignoring case differences.
@@ -360,19 +588,33 @@ pub(crate) fn can_use_index_for_order_by_with_pinned(
 
     // Check each ORDER BY column against corresponding index column
     for (order_item, index_col) in order_items.iter().zip(remaining_index_columns.iter()) {
-        // ORDER BY expression must be a simple column reference
-        let order_col_name = match &order_item.expr {
-            Expression::ColumnRef(col_id)
-                if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
-            {
-                col_id.column_canonical()
-            }
-            _ => return false, // Complex expressions not supported
-        };
+        // For expression indexes, we need to check if ORDER BY uses the same expression
+        // For column indexes, ORDER BY must be a simple column reference
+        match index_col {
+            vibesql_ast::IndexColumn::Column { column_name, .. } => {
+                // ORDER BY expression must be a simple column reference
+                let order_col_name = match &order_item.expr {
+                    Expression::ColumnRef(col_id)
+                        if col_id.schema_canonical().is_none()
+                            && col_id.table_canonical().is_none() =>
+                    {
+                        col_id.column_canonical()
+                    }
+                    _ => return false, // Complex expressions not supported for column indexes
+                };
 
-        // Column names must match (case-insensitive due to SQL identifier normalization)
-        if !order_col_name.eq_ignore_ascii_case(index_col.expect_column_name()) {
-            return false;
+                // Column names must match (case-insensitive due to SQL identifier normalization)
+                if !order_col_name.eq_ignore_ascii_case(column_name) {
+                    return false;
+                }
+            }
+            vibesql_ast::IndexColumn::Expression { expr: index_expr, .. } => {
+                // For expression indexes, ORDER BY must use the exact same expression
+                // e.g., ORDER BY LOWER(name) can use index on LOWER(name)
+                if !expressions_match(&order_item.expr, index_expr) {
+                    return false;
+                }
+            }
         }
 
         // Check sort directions
@@ -398,6 +640,8 @@ pub(crate) fn can_use_index_for_order_by_with_pinned(
 /// Count how many leading index columns are pinned by equality predicates
 ///
 /// A column is "pinned" if there's an equality predicate (col = value) in the WHERE clause.
+/// For expression indexes, an expression is "pinned" if there's an equality predicate
+/// (expr = value) where expr matches the indexed expression.
 /// Returns the number of consecutive leading index columns that are pinned.
 pub(crate) fn count_pinned_index_columns(
     where_clause: Option<&Expression>,
@@ -412,12 +656,24 @@ pub(crate) fn count_pinned_index_columns(
     let mut pinned_columns = std::collections::HashSet::new();
     collect_equality_columns(where_clause, &mut pinned_columns);
 
+    // Collect all expressions that have equality predicates (for expression indexes)
+    let mut pinned_expressions: Vec<&Expression> = Vec::new();
+    collect_equality_expressions(where_clause, &mut pinned_expressions);
+
     // Count consecutive leading index columns that are pinned
     let mut count = 0;
     for index_col in index_columns {
-        // Check if this index column is pinned (case-insensitive match)
-        let is_pinned =
-            pinned_columns.iter().any(|c| c.eq_ignore_ascii_case(index_col.expect_column_name()));
+        let is_pinned = match index_col {
+            vibesql_ast::IndexColumn::Column { column_name, .. } => {
+                // Check if this column is pinned (case-insensitive match)
+                pinned_columns.iter().any(|c| c.eq_ignore_ascii_case(column_name))
+            }
+            vibesql_ast::IndexColumn::Expression { expr: index_expr, .. } => {
+                // Check if any pinned expression matches the indexed expression
+                pinned_expressions.iter().any(|e| expressions_match(e, index_expr))
+            }
+        };
+
         if is_pinned {
             count += 1;
         } else {
@@ -471,6 +727,54 @@ fn collect_equality_columns(expr: &Expression, columns: &mut std::collections::H
         Expression::Conjunction(exprs) => {
             for e in exprs {
                 collect_equality_columns(e, columns);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Collect all expressions that have equality predicates (expr = literal)
+///
+/// This is used for expression index support. It collects non-column expressions
+/// that are compared to literals in equality predicates.
+fn collect_equality_expressions<'a>(
+    expr: &'a Expression,
+    expressions: &mut Vec<&'a Expression>,
+) {
+    match expr {
+        Expression::BinaryOp { left, op, right } => {
+            match op {
+                vibesql_ast::BinaryOperator::Equal => {
+                    // Check for expr = literal pattern (where expr is not a simple column)
+                    if is_literal(right) && !matches!(&**left, Expression::ColumnRef(_)) {
+                        expressions.push(left);
+                    }
+                    if is_literal(left) && !matches!(&**right, Expression::ColumnRef(_)) {
+                        expressions.push(right);
+                    }
+                }
+                vibesql_ast::BinaryOperator::And => {
+                    // Recurse into both sides of AND
+                    collect_equality_expressions(left, expressions);
+                    collect_equality_expressions(right, expressions);
+                }
+                _ => {}
+            }
+        }
+        // Handle IS (NULL-safe equals): negated=true means "IS NOT DISTINCT FROM" = "IS"
+        Expression::IsDistinctFrom { left, right, negated: true } => {
+            // Check for expr IS literal pattern
+            if is_literal(right) && !matches!(&**left, Expression::ColumnRef(_)) {
+                expressions.push(left);
+            }
+            if is_literal(left) && !matches!(&**right, Expression::ColumnRef(_)) {
+                expressions.push(right);
+            }
+        }
+        // Recurse into Conjunction (AND)
+        Expression::Conjunction(exprs) => {
+            for e in exprs {
+                collect_equality_expressions(e, expressions);
             }
         }
         _ => {}
@@ -535,11 +839,15 @@ pub(crate) fn cost_based_index_selection(
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
             let first_indexed_column = index_metadata.columns.first()?;
-            let column_name = &first_indexed_column.expect_column_name();
+
+            // For expression indexes, we may not have column stats, so extract column name if available
+            let column_name_opt = first_indexed_column.column_name();
+            let is_expression_index = first_indexed_column.is_expression();
 
             // Check if this index can be used for WHERE or ORDER BY
+            // Supports both column-based and expression-based indexes
             let can_use_for_where = where_clause
-                .map(|expr| expression_filters_column(expr, column_name))
+                .map(|expr| expression_filters_indexed_column(expr, first_indexed_column))
                 .unwrap_or(false);
 
             // Count how many leading index columns are pinned by equality predicates
@@ -547,9 +855,14 @@ pub(crate) fn cost_based_index_selection(
 
             // Debug: trace index selection
             if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                let col_desc = if is_expression_index {
+                    "<expression>".to_string()
+                } else {
+                    column_name_opt.unwrap_or("<unknown>").to_string()
+                };
                 eprintln!(
-                    "[INDEX_SELECT] table={}, index={}, first_col={}, can_use_for_where={}",
-                    table_name, index_name, column_name, can_use_for_where
+                    "[INDEX_SELECT] table={}, index={}, first_col={}, can_use_for_where={}, is_expr_idx={}",
+                    table_name, index_name, col_desc, can_use_for_where, is_expression_index
                 );
             }
 
@@ -591,6 +904,21 @@ pub(crate) fn cost_based_index_selection(
                     index_name
                 );
             }
+
+            // For expression indexes, we don't have column statistics
+            // Fall back to rule-based selection for them
+            if is_expression_index {
+                if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                    eprintln!(
+                        "[INDEX_SELECT] {} is expression index, will use rule-based selection",
+                        index_name
+                    );
+                }
+                has_applicable_index_without_stats = true;
+                continue;
+            }
+
+            let column_name = column_name_opt.unwrap();
 
             // Get column statistics for the indexed column (case-insensitive lookup)
             let col_stats = get_column_stats_ignore_case(&table_stats.columns, column_name);
