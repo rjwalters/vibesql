@@ -100,6 +100,11 @@ impl SelectExecutor<'_> {
                 None => continue,
             };
 
+            // Skip expression indexes - they require expression evaluation, not column lookup
+            if metadata.columns.iter().any(|c| c.is_expression()) {
+                continue;
+            }
+
             // Get index column names in order
             let index_columns: Vec<&str> =
                 metadata.columns.iter().map(|c| c.expect_column_name()).collect();
@@ -259,6 +264,11 @@ impl SelectExecutor<'_> {
                 Some(m) => m,
                 None => continue,
             };
+
+            // Skip expression indexes - they require expression evaluation, not column lookup
+            if metadata.columns.iter().any(|c| c.is_expression()) {
+                continue;
+            }
 
             // Get index column names in order
             let index_columns: Vec<&str> =
@@ -447,6 +457,11 @@ impl SelectExecutor<'_> {
                 Some(m) => m,
                 None => continue,
             };
+
+            // Skip expression indexes - they require expression evaluation, not column lookup
+            if metadata.columns.iter().any(|c| c.is_expression()) {
+                continue;
+            }
 
             // Get index column names
             let index_column_names: Vec<&str> =

@@ -113,6 +113,10 @@ name = "complex_where_clauses"
 path = "tests/executor/complex_where_clauses.rs"
 
 [[test]]
+name = "expression_index_optimizer"
+path = "tests/executor/expression_index_optimizer.rs"
+
+[[test]]
 name = "count_star_parsing"
 path = "tests/executor/count_star_parsing.rs"
 

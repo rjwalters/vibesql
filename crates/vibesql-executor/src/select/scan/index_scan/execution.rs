@@ -8,10 +8,11 @@ use vibesql_ast::Expression;
 use vibesql_storage::{Database, Row};
 
 use super::predicate::{
-    build_residual_where_clause, extract_composite_predicates_with_in, extract_index_predicate,
-    extract_prefix_equality_predicates, extract_prefix_with_trailing_range,
-    generate_composite_keys, where_clause_fully_satisfied_by_composite_key, CompositePredicateType,
-    IndexPredicate, PrefixPredicateResult, PrefixWithRangeResult,
+    build_residual_where_clause, extract_composite_predicates_with_in,
+    extract_index_predicate_for_indexed_column, extract_prefix_equality_predicates,
+    extract_prefix_with_trailing_range, generate_composite_keys,
+    where_clause_fully_satisfied_by_composite_key, where_clause_fully_satisfied_by_indexed_column,
+    CompositePredicateType, IndexPredicate, PrefixPredicateResult, PrefixWithRangeResult,
 };
 use crate::{
     errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSchema, select::cte::CteResult,
@@ -67,12 +68,25 @@ pub(crate) fn execute_index_scan(
     // Determine if this is a multi-column index
     let is_multi_column_index = index_metadata.columns.len() > 1;
 
-    // Get column names for the index (in order)
-    let index_column_names: Vec<&str> =
-        index_metadata.columns.iter().map(|col| col.expect_column_name()).collect();
-
     // Get the first indexed column (for single-column predicate extraction fallback)
-    let first_indexed_column = index_column_names.first().copied().unwrap_or("");
+    let first_indexed_column = index_metadata.columns.first();
+
+    // Check if this is an expression index (first column is an expression, not a column name)
+    let is_expression_index =
+        first_indexed_column.map(|col| col.is_expression()).unwrap_or(false);
+
+    // Get column names for the index (in order) - only for column-based indexes
+    // For expression indexes, we cannot use composite key lookups (requires column names)
+    let index_column_names: Vec<&str> = if is_expression_index {
+        // Expression indexes don't have simple column names for composite lookups
+        vec![]
+    } else {
+        index_metadata
+            .columns
+            .iter()
+            .filter_map(|col| col.column_name())
+            .collect()
+    };
 
     // Try composite key lookup first (for multi-column indexes with full predicates)
     // This handles queries like:
@@ -130,7 +144,9 @@ pub(crate) fn execute_index_scan(
     {
         None // Don't need single-column predicate - using composite/prefix key
     } else {
-        where_clause.and_then(|expr| extract_index_predicate(expr, first_indexed_column))
+        // Use the unified function that handles both column and expression indexes
+        first_indexed_column
+            .and_then(|idx_col| where_clause.and_then(|expr| extract_index_predicate_for_indexed_column(expr, idx_col)))
     };
 
     // Build residual WHERE clause for prefix lookups
@@ -182,18 +198,20 @@ pub(crate) fn execute_index_scan(
                                                                 * prefix - skip filtering */
         }
     } else {
-        match (&where_clause, &index_predicate) {
-            (Some(where_expr), Some(_)) => {
+        match (&where_clause, &index_predicate, first_indexed_column) {
+            (Some(where_expr), Some(_), Some(idx_col)) => {
                 // Only skip WHERE filtering if we're certain the index handles everything
-                let need_filter = !where_clause_fully_satisfied_by_index(
+                // Use the unified function that handles both column and expression indexes
+                let need_filter = !where_clause_fully_satisfied_by_indexed_column(
                     where_expr,
-                    first_indexed_column,
+                    idx_col,
                     &index_predicate,
                 );
                 (need_filter, if need_filter { Some((*where_expr).clone()) } else { None })
             }
-            (Some(where_expr), None) => (true, Some((*where_expr).clone())), /* WHERE present but no index predicate extracted */
-            (None, _) => (false, None),                                      // No WHERE clause
+            (Some(where_expr), None, _) => (true, Some((*where_expr).clone())), /* WHERE present but no index predicate extracted */
+            (Some(where_expr), Some(_), None) => (true, Some((*where_expr).clone())), /* No indexed column found */
+            (None, _, _) => (false, None),                                      // No WHERE clause
         }
     };
 
@@ -237,12 +255,17 @@ pub(crate) fn execute_index_scan(
 
                 // Get column index for NULL filtering if needed
                 // SQL semantics: NULL < X returns NULL (not true), so NULLs shouldn't match
+                // Note: For expression indexes, we can't easily determine the column to filter
                 let null_filter_col_idx = if range.exclude_nulls {
-                    table
-                        .schema
-                        .columns
-                        .iter()
-                        .position(|c| c.name.eq_ignore_ascii_case(first_indexed_column))
+                    first_indexed_column
+                        .and_then(|idx_col| idx_col.column_name())
+                        .and_then(|col_name| {
+                            table
+                                .schema
+                                .columns
+                                .iter()
+                                .position(|c| c.name.eq_ignore_ascii_case(col_name))
+                        })
                 } else {
                     None
                 };
@@ -506,13 +529,18 @@ pub(crate) fn execute_index_scan(
 
     // Get column index for NULL filtering if we have a range predicate with exclude_nulls
     // SQL semantics: NULL < X returns NULL (not true), so NULLs shouldn't match range predicates
+    // Note: For expression indexes, we can't easily determine the column to filter
     let null_filter_col_idx = if let Some(IndexPredicate::Range(ref range)) = index_predicate {
         if range.exclude_nulls {
-            table
-                .schema
-                .columns
-                .iter()
-                .position(|c| c.name.eq_ignore_ascii_case(first_indexed_column))
+            first_indexed_column
+                .and_then(|idx_col| idx_col.column_name())
+                .and_then(|col_name| {
+                    table
+                        .schema
+                        .columns
+                        .iter()
+                        .position(|c| c.name.eq_ignore_ascii_case(col_name))
+                })
         } else {
             None
         }
