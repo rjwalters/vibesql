@@ -128,6 +128,14 @@ impl SelectExecutor<'_> {
 
         let optimized_stmt = crate::optimizer::rewrite_subquery_optimizations(stmt);
 
+        // Apply scalar subquery decorrelation (#4760)
+        // Transforms correlated scalar subqueries with aggregates (e.g., AVG, SUM, MIN)
+        // into CTE + JOIN patterns for O(n) instead of O(n²) execution.
+        // Example: WHERE x > 1.2 * (SELECT AVG(y) FROM t WHERE t.c = outer.c)
+        // Becomes: WITH _cte AS (SELECT c, AVG(y) FROM t GROUP BY c)
+        //          ... JOIN _cte ON outer.c = _cte.c WHERE x > 1.2 * _cte._avg
+        let optimized_stmt = crate::optimizer::apply_scalar_decorrelation(&optimized_stmt);
+
         #[cfg(feature = "profile-q6")]
         let _optimizer_time = optimizer_start.elapsed();
 
