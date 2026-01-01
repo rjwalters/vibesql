@@ -1269,11 +1269,13 @@ fn is_covering_index(
         return false;
     };
 
-    // Get index columns
+    // Get index columns - only include column indexes, not expression indexes
+    // Expression indexes cannot directly cover columns for covering index detection
     let index_columns: HashSet<String> = index
         .columns
         .iter()
-        .map(|c| c.expect_column_name().to_lowercase())
+        .filter_map(|c| c.column_name())
+        .map(|name| name.to_lowercase())
         .collect();
 
     // Check if all needed columns are in the index
@@ -1285,17 +1287,35 @@ fn is_covering_index(
 /// Returns a list of (column_name, operator) tuples for predicates that can
 /// use the index. The operator is one of "=", ">", "<", ">=", "<=".
 /// Predicates are sorted by their position in the index column order.
+/// For expression indexes, the expression name is used (e.g., "lower(name)").
 fn extract_index_predicates(
     expr: &Expression,
     index_name: &str,
     database: &Database,
 ) -> Vec<(String, String)> {
+    use vibesql_ast::pretty_print::ToSql;
+
     let mut predicates = Vec::new();
 
-    // Get the index columns
+    // Get the index columns - for column indexes, use the column name
+    // For expression indexes, use the expression as a string for display
     let index_columns: Vec<String> = database
         .get_index(index_name)
-        .map(|idx| idx.columns.iter().map(|c| c.expect_column_name().to_lowercase()).collect())
+        .map(|idx| {
+            idx.columns
+                .iter()
+                .map(|c| {
+                    if let Some(name) = c.column_name() {
+                        name.to_lowercase()
+                    } else if let Some(expr) = c.get_expression() {
+                        // For expression indexes, use the expression string
+                        expr.to_sql().to_lowercase()
+                    } else {
+                        String::new()
+                    }
+                })
+                .collect()
+        })
         .unwrap_or_default();
 
     extract_predicates_recursive(expr, &index_columns, &mut predicates);
@@ -1314,7 +1334,32 @@ fn extract_predicates_recursive(
     index_columns: &[String],
     predicates: &mut Vec<(String, String)>,
 ) {
+    use vibesql_ast::pretty_print::ToSql;
     use vibesql_ast::BinaryOperator;
+
+    /// Check if an expression matches any index column (column ref or expression index)
+    fn expr_matches_index(expr: &Expression, index_columns: &[String]) -> Option<String> {
+        match expr {
+            Expression::ColumnRef(col_id) => {
+                let col_name = col_id.column_canonical().to_lowercase();
+                if index_columns.iter().any(|c| c == &col_name) {
+                    Some(col_id.column_canonical().to_string())
+                } else {
+                    None
+                }
+            }
+            // Check if the expression matches an expression index
+            Expression::Function { .. } | Expression::BinaryOp { .. } => {
+                let expr_str = expr.to_sql().to_lowercase();
+                if index_columns.iter().any(|c| c == &expr_str) {
+                    Some(expr.to_sql())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
 
     match expr {
         Expression::BinaryOp { op, left, right } => {
@@ -1336,30 +1381,22 @@ fn extract_predicates_recursive(
             };
 
             if let Some(op_str) = op_str {
-                // Check if left side is a column reference that matches index columns
-                if let Expression::ColumnRef(col_id) = left.as_ref() {
-                    let col_name = col_id.column_canonical().to_lowercase();
-                    if index_columns.iter().any(|c| c == &col_name) {
-                        predicates
-                            .push((col_id.column_canonical().to_string(), op_str.to_string()));
-                    }
+                // Check if left side matches an index column or expression index
+                if let Some(expr_name) = expr_matches_index(left, index_columns) {
+                    predicates.push((expr_name, op_str.to_string()));
                 }
-                // Check if right side is a column reference (for reversed comparisons)
-                else if let Expression::ColumnRef(col_id) = right.as_ref() {
-                    let col_name = col_id.column_canonical().to_lowercase();
-                    if index_columns.iter().any(|c| c == &col_name) {
-                        // Reverse the operator for column on right side
-                        let reversed_op = match op {
-                            BinaryOperator::Equal => "=",
-                            BinaryOperator::LessThan => ">",
-                            BinaryOperator::LessThanOrEqual => ">=",
-                            BinaryOperator::GreaterThan => "<",
-                            BinaryOperator::GreaterThanOrEqual => "<=",
-                            _ => return,
-                        };
-                        predicates
-                            .push((col_id.column_canonical().to_string(), reversed_op.to_string()));
-                    }
+                // Check if right side matches (for reversed comparisons)
+                else if let Some(expr_name) = expr_matches_index(right, index_columns) {
+                    // Reverse the operator for column on right side
+                    let reversed_op = match op {
+                        BinaryOperator::Equal => "=",
+                        BinaryOperator::LessThan => ">",
+                        BinaryOperator::LessThanOrEqual => ">=",
+                        BinaryOperator::GreaterThan => "<",
+                        BinaryOperator::GreaterThanOrEqual => "<=",
+                        _ => return,
+                    };
+                    predicates.push((expr_name, reversed_op.to_string()));
                 }
             }
         }
