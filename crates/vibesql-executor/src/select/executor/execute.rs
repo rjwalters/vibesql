@@ -94,9 +94,13 @@ impl SelectExecutor<'_> {
         // Fast path for simple point-lookup queries (TPC-C optimization)
         // This bypasses expensive optimizer passes for queries like:
         // SELECT col FROM table WHERE pk = value
+        // Skip fast path if reverse_unordered_selects is ON and no ORDER BY (needs reversal)
+        let skip_fast_path_for_reversal =
+            self.database.reverse_unordered_selects() && stmt.order_by.is_none();
         if self.subquery_depth == 0
             && self.outer_row.is_none()
             && self.cte_context.is_none()
+            && !skip_fast_path_for_reversal
             && super::fast_path::is_simple_point_query(stmt)
         {
             return self.execute_fast_path(stmt);
@@ -108,6 +112,7 @@ impl SelectExecutor<'_> {
         if self.subquery_depth == 0
             && self.outer_row.is_none()
             && self.cte_context.is_none()
+            && !skip_fast_path_for_reversal
             && super::fast_path::is_streaming_aggregate_query(stmt)
         {
             if let Ok(result) = self.execute_streaming_aggregate(stmt) {
@@ -173,11 +178,17 @@ impl SelectExecutor<'_> {
         let _pre_execute_time = execute_start.elapsed();
 
         // Execute the main query with CTE context
-        let result = self.execute_with_ctes(&optimized_stmt, &cte_results)?;
+        let mut result = self.execute_with_ctes(&optimized_stmt, &cte_results)?;
 
         #[cfg(feature = "profile-q6")]
         {
             let _total_execute = execute_start.elapsed();
+        }
+
+        // Apply PRAGMA reverse_unordered_selects if enabled
+        // Only reverse if there's no ORDER BY clause in the original statement
+        if stmt.order_by.is_none() && self.database.reverse_unordered_selects() {
+            result.reverse();
         }
 
         Ok(result)

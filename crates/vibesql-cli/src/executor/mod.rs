@@ -785,6 +785,16 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "REVERSE_UNORDERED_SELECTS" => {
+                    self.db.set_reverse_unordered_selects(bool_value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 _ => {
                     // Unknown pragma - silently ignore for SQLite compatibility
                     Ok(QueryResult {
@@ -823,6 +833,16 @@ impl SqlExecutor {
                     let value = if self.db.case_sensitive_like() { "1" } else { "0" };
                     Ok(QueryResult {
                         columns: vec!["case_sensitive_like".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "REVERSE_UNORDERED_SELECTS" => {
+                    let value = if self.db.reverse_unordered_selects() { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["reverse_unordered_selects".to_string()],
                         rows: vec![vec![Some(value.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,

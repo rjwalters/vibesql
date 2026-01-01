@@ -124,6 +124,26 @@ impl Database {
         );
     }
 
+    /// Get the reverse_unordered_selects PRAGMA setting
+    ///
+    /// When ON, the order of output rows from SELECT statements that do not have
+    /// an ORDER BY clause is reversed. This is useful for testing to ensure that
+    /// applications do not depend on an implicit row ordering.
+    pub fn reverse_unordered_selects(&self) -> bool {
+        match self.get_session_variable("REVERSE_UNORDERED_SELECTS") {
+            Some(vibesql_types::SqlValue::Integer(n)) => *n != 0,
+            _ => false, // Default: OFF
+        }
+    }
+
+    /// Set the reverse_unordered_selects PRAGMA setting
+    pub fn set_reverse_unordered_selects(&mut self, value: bool) {
+        self.set_session_variable(
+            "REVERSE_UNORDERED_SELECTS",
+            vibesql_types::SqlValue::Integer(if value { 1 } else { 0 }),
+        );
+    }
+
     // ============================================================================
     // SQLite stat1 Storage (SQLite Compatibility)
     // ============================================================================
