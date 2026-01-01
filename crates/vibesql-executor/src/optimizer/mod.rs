@@ -6,6 +6,7 @@
 //! - Cost-based predicate ordering for optimal filter performance
 //! - Centralized index planning and strategy selection
 //! - Subquery rewriting for IN predicate optimization
+//! - Scalar subquery decorrelation for aggregate patterns (issue #4760)
 //! - Adaptive execution model selection (row-oriented vs columnar)
 //! - Aggregate-aware query optimization for GROUP BY/HAVING performance
 //! - Unused table elimination for cross join optimization
@@ -32,6 +33,7 @@ pub use column_pruning::{
 pub use expressions::*;
 pub use predicate_plan::PredicatePlan;
 pub use subquery_rewrite::rewrite_subquery_optimizations;
+pub use subquery_rewrite::scalar_decorrelation::apply_scalar_decorrelation;
 pub use subquery_to_join::transform_subqueries_to_joins;
 pub use table_elimination::eliminate_unused_tables;
 pub use where_pushdown::combine_with_and;
