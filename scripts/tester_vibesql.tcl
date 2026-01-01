@@ -1574,8 +1574,6 @@ array set vibesql_skip_tests {
     selectA-4.1.2 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     selectA-4.1.3 "Uses custom function f registered via db func"
     selectA-4.2.2 "Uses custom function f registered via db func"
-    selectA-7.2 "Correlated subquery inside INTERSECT - column resolution bug"
-    selectA-7.3 "Correlated subquery inside INTERSECT - column resolution bug"
     selectH-1.2 "Uses custom counter() function for optimizer testing"
     selectH-1.3 "Checks TCL counter variable set by counter() function"
     selectH-2.1 "Uses custom counter() function for optimizer testing"
@@ -1605,8 +1603,6 @@ array set vibesql_skip_tests {
     join5-7.4c "EXPLAIN QUERY PLAN output format is SQLite-specific"
     join5-7.4d "EXPLAIN QUERY PLAN output format is SQLite-specific"
     join5-8.1 "Column resolution differs from SQLite in complex self-joins"
-    join5-9.2 "Row value constructor (rowid, 1) syntax not supported"
-    join5-10.1 "BETWEEN with row value constructor not supported"
     join5-11.1 "Uses sqlite_stat1 internal statistics table"
     join5-11.2 "Cascades from join5-11.1 sqlite_stat1 failure"
     join5-11.3 "Cascades from join5-11.1 sqlite_stat1 failure"
@@ -1615,7 +1611,6 @@ array set vibesql_skip_tests {
     where-1.4.4 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     where-16.4 "Uses TEMP TABLE created in ifcapable tempdb block"
     where-19.0 "Column reference in correlated subquery differs from SQLite"
-    where-21.1 "Row value constructor in WHERE clause not fully supported"
     where-24.2.1 "reset_db clears tables needed by this test"
     where-24.2.2 "reset_db clears tables needed by this test"
     where-24.2.3 "reset_db clears tables needed by this test"
@@ -1693,7 +1688,6 @@ array set vibesql_skip_tests {
     orderby1-3.2b "EXPLAIN QUERY PLAN output format is SQLite-specific"
     orderby1-3.3b "EXPLAIN QUERY PLAN output format is SQLite-specific"
     orderby1-5.0 "EXPLAIN QUERY PLAN output format is SQLite-specific"
-    orderby1-7.0 "VALUES syntax not supported"
     orderby1-8.1 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     orderby1-8.3 "Cascades from earlier EQP test failure"
     insert2-1.2.1 "Uses PRAGMA count_changes which returns row count - SQLite-specific"
@@ -1825,7 +1819,6 @@ array set vibesql_skip_tests {
     where9-9.1 "Uses INDEXED BY hint - SQLite-specific"
     where9-10.1 "Uses INDEXED BY hint - SQLite-specific"
     where9-10.2 "Uses INDEXED BY hint - SQLite-specific"
-    join6-1.1 "N-way USING join column resolution - known limitation"
 }
 
 # Check if a test should be skipped based on VibeSQL-specific exclusions
