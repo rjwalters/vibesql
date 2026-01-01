@@ -381,45 +381,49 @@ impl CreateTableExecutor {
         let mut autoindex_counter = 1;
 
         // Auto-create PRIMARY KEY index
+        // Skip autoindex for INTEGER PRIMARY KEY - it's an alias for rowid
+        // and doesn't need a separate B-tree index (matches SQLite behavior)
         if let Some(pk_cols) = &table_schema.primary_key {
-            let index_name = format!("sqlite_autoindex_{}_{}", table_name, autoindex_counter);
-            autoindex_counter += 1;
+            if table_schema.rowid_alias_column.is_none() {
+                let index_name = format!("sqlite_autoindex_{}_{}", table_name, autoindex_counter);
+                autoindex_counter += 1;
 
-            // Create IndexColumn specs for the PRIMARY KEY columns
-            let index_columns: Vec<IndexColumn> = pk_cols
-                .iter()
-                .map(|col_name| IndexColumn::Column {
-                    column_name: col_name.to_string(),
-                    direction: OrderDirection::Asc,
-                    prefix_length: None,
-                })
-                .collect();
-
-            // Add to catalog first
-            let index_metadata = vibesql_catalog::IndexMetadata::new(
-                index_name.clone(),
-                table_name.to_string(),
-                vibesql_catalog::IndexType::BTree,
-                index_columns
+                // Create IndexColumn specs for the PRIMARY KEY columns
+                let index_columns: Vec<IndexColumn> = pk_cols
                     .iter()
-                    .map(|col| {
-                        vibesql_catalog::IndexedColumn::new_column(
-                            col.expect_column_name().to_string(),
-                            vibesql_catalog::SortOrder::Ascending,
-                        )
+                    .map(|col_name| IndexColumn::Column {
+                        column_name: col_name.to_string(),
+                        direction: OrderDirection::Asc,
+                        prefix_length: None,
                     })
-                    .collect(),
-                true, // unique
-            );
-            database
-                .catalog
-                .add_index(index_metadata)
-                .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+                    .collect();
 
-            // Create the actual B-tree index
-            database
-                .create_index(index_name, table_name.to_string(), true, index_columns)
-                .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+                // Add to catalog first
+                let index_metadata = vibesql_catalog::IndexMetadata::new(
+                    index_name.clone(),
+                    table_name.to_string(),
+                    vibesql_catalog::IndexType::BTree,
+                    index_columns
+                        .iter()
+                        .map(|col| {
+                            vibesql_catalog::IndexedColumn::new_column(
+                                col.expect_column_name().to_string(),
+                                vibesql_catalog::SortOrder::Ascending,
+                            )
+                        })
+                        .collect(),
+                    true, // unique
+                );
+                database
+                    .catalog
+                    .add_index(index_metadata)
+                    .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+
+                // Create the actual B-tree index
+                database
+                    .create_index(index_name, table_name.to_string(), true, index_columns)
+                    .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+            }
         }
 
         // Auto-create UNIQUE constraint indexes

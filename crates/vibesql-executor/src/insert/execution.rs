@@ -341,6 +341,21 @@ fn execute_insert_internal(
             // Type check and coerce: ensure value matches column type
             let coerced_value = super::validation::coerce_value(value, data_type)?;
 
+            // INTEGER PRIMARY KEY validation: only accept Integer or Null (for auto-generation)
+            // SQLite rejects non-integer values with "datatype mismatch"
+            if ipk_col_idx == Some(*col_idx) {
+                match &coerced_value {
+                    vibesql_types::SqlValue::Integer(_) | vibesql_types::SqlValue::Null => {
+                        // Valid for INTEGER PRIMARY KEY
+                    }
+                    _ => {
+                        return Err(crate::errors::ExecutorError::SqliteCompatError(
+                            "datatype mismatch".to_string(),
+                        ));
+                    }
+                }
+            }
+
             full_row_values[*col_idx] = coerced_value;
         }
 
@@ -365,9 +380,16 @@ fn execute_insert_internal(
         }
 
         // Update batch_max_ipk if this row has an INTEGER PRIMARY KEY value
+        // Also track explicit INTEGER PRIMARY KEY values for last_insert_rowid()
+        // SQLite semantics: last_insert_rowid() returns the rowid of the most recently
+        // inserted row, whether auto-generated or explicitly provided
         if let Some(idx) = ipk_col_idx {
             if let Some(vibesql_types::SqlValue::Integer(val)) = full_row_values.get(idx) {
                 batch_max_ipk = Some(batch_max_ipk.map_or(*val, |prev| prev.max(*val)));
+                // Track first explicit INTEGER PRIMARY KEY value for last_insert_rowid()
+                if first_generated_id.is_none() {
+                    first_generated_id = Some(*val);
+                }
             }
         }
 

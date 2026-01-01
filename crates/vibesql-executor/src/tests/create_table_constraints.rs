@@ -297,12 +297,15 @@ fn test_create_table_with_check_constraint() {
 #[test]
 fn test_auto_index_for_single_column_primary_key() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt { temporary: false,
+    // Use TEXT PRIMARY KEY to verify autoindex is created
+    // Note: INTEGER PRIMARY KEY is a rowid alias and does NOT get an autoindex (SQLite behavior)
+    let stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "t1".to_string(),
         columns: vec![ColumnDef {
             name: "id".to_string(),
-            data_type: DataType::Integer,
+            data_type: DataType::Varchar { max_length: Some(255) }, // Non-INTEGER PRIMARY KEY gets autoindex
             nullable: false,
             constraints: vec![ColumnConstraint {
                 name: None,
@@ -322,7 +325,10 @@ fn test_auto_index_for_single_column_primary_key() {
     assert!(result.is_ok());
 
     // Verify sqlite_autoindex_t1_1 index was auto-created (SQLite naming convention)
-    assert!(db.index_exists("sqlite_autoindex_t1_1"), "Expected sqlite_autoindex_t1_1 index to be auto-created");
+    assert!(
+        db.index_exists("sqlite_autoindex_t1_1"),
+        "Expected sqlite_autoindex_t1_1 index to be auto-created"
+    );
 
     // Verify index metadata in catalog
     let index_meta = db.catalog.get_index("t1", "sqlite_autoindex_t1_1");
@@ -332,6 +338,48 @@ fn test_auto_index_for_single_column_primary_key() {
     assert!(index_meta.is_unique);
     assert_eq!(index_meta.columns.len(), 1);
     assert_eq!(index_meta.columns[0].column_name(), Some("id"));
+}
+
+/// Verify that INTEGER PRIMARY KEY does NOT create an autoindex (SQLite behavior)
+/// INTEGER PRIMARY KEY is an alias for the rowid, so no separate B-tree index is needed
+#[test]
+fn test_integer_primary_key_no_autoindex() {
+    let mut db = Database::new();
+    let stmt = CreateTableStmt {
+        temporary: false,
+        if_not_exists: false,
+        table_name: "ipk_test".to_string(),
+        columns: vec![ColumnDef {
+            name: "id".to_string(),
+            data_type: DataType::Integer, // INTEGER PRIMARY KEY = rowid alias
+            nullable: false,
+            constraints: vec![ColumnConstraint {
+                name: None,
+                kind: ColumnConstraintKind::PrimaryKey { on_conflict: None },
+            }],
+            default_value: None,
+            comment: None,
+            generated_expr: None,
+        }],
+        table_constraints: vec![],
+        table_options: vec![],
+        quoted: false,
+        as_query: None,
+    };
+
+    let result = CreateTableExecutor::execute(&stmt, &mut db);
+    assert!(result.is_ok());
+
+    // INTEGER PRIMARY KEY should NOT create an autoindex
+    // The rowid itself enforces uniqueness
+    assert!(
+        !db.index_exists("sqlite_autoindex_ipk_test_1"),
+        "INTEGER PRIMARY KEY should NOT create autoindex"
+    );
+
+    // Verify no indexes exist for this table
+    let indexes = db.catalog.get_table_indexes("ipk_test");
+    assert!(indexes.is_empty(), "INTEGER PRIMARY KEY table should have no indexes");
 }
 
 #[test]
@@ -565,13 +613,16 @@ fn test_auto_index_for_composite_unique_constraint() {
 #[test]
 fn test_auto_index_for_primary_key_plus_unique() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt { temporary: false,
+    // Use TEXT PRIMARY KEY to ensure autoindex is created
+    // Note: INTEGER PRIMARY KEY is a rowid alias and does NOT get an autoindex
+    let stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "t6".to_string(),
         columns: vec![
             ColumnDef {
                 name: "id".to_string(),
-                data_type: DataType::Integer,
+                data_type: DataType::Varchar { max_length: Some(255) }, // Non-INTEGER PRIMARY KEY gets autoindex
                 nullable: false,
                 constraints: vec![ColumnConstraint {
                     name: None,
@@ -605,20 +656,29 @@ fn test_auto_index_for_primary_key_plus_unique() {
 
     // Verify both indexes were auto-created
     // PK gets _1, UNIQUE gets _2 (SQLite naming convention)
-    assert!(db.index_exists("sqlite_autoindex_t6_1"), "Expected sqlite_autoindex_t6_1 (PK) index to be auto-created");
-    assert!(db.index_exists("sqlite_autoindex_t6_2"), "Expected sqlite_autoindex_t6_2 (UNIQUE) index to be auto-created");
+    assert!(
+        db.index_exists("sqlite_autoindex_t6_1"),
+        "Expected sqlite_autoindex_t6_1 (PK) index to be auto-created"
+    );
+    assert!(
+        db.index_exists("sqlite_autoindex_t6_2"),
+        "Expected sqlite_autoindex_t6_2 (UNIQUE) index to be auto-created"
+    );
 }
 
 #[test]
 fn test_auto_index_visible_in_catalog() {
     let mut db = Database::new();
-    let stmt = CreateTableStmt { temporary: false,
+    // Use TEXT PRIMARY KEY to ensure autoindex is created
+    // Note: INTEGER PRIMARY KEY is a rowid alias and does NOT get an autoindex
+    let stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
             ColumnDef {
                 name: "id".to_string(),
-                data_type: DataType::Integer,
+                data_type: DataType::Varchar { max_length: Some(255) }, // Non-INTEGER PRIMARY KEY gets autoindex
                 nullable: false,
                 constraints: vec![ColumnConstraint {
                     name: None,
@@ -656,6 +716,12 @@ fn test_auto_index_visible_in_catalog() {
 
     // Index names should follow SQLite naming convention
     let index_names: Vec<&str> = indexes.iter().map(|i| i.name.as_str()).collect();
-    assert!(index_names.contains(&"sqlite_autoindex_users_1"), "sqlite_autoindex_users_1 (PK) should be in catalog");
-    assert!(index_names.contains(&"sqlite_autoindex_users_2"), "sqlite_autoindex_users_2 (UNIQUE) should be in catalog");
+    assert!(
+        index_names.contains(&"sqlite_autoindex_users_1"),
+        "sqlite_autoindex_users_1 (PK) should be in catalog"
+    );
+    assert!(
+        index_names.contains(&"sqlite_autoindex_users_2"),
+        "sqlite_autoindex_users_2 (UNIQUE) should be in catalog"
+    );
 }

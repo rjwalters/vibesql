@@ -367,8 +367,10 @@ fn test_last_insert_rowid_no_auto_increment() {
     let result = InsertExecutor::execute(&mut db, &insert1);
     assert!(result.is_ok(), "Failed to insert: {:?}", result.err());
 
-    // LAST_INSERT_ROWID should still be 0 (no auto-generated values)
-    assert_eq!(db.last_insert_rowid(), 0);
+    // LAST_INSERT_ROWID should be 100 (the explicit INTEGER PRIMARY KEY value)
+    // SQLite semantics: last_insert_rowid() returns the rowid of the most recently
+    // inserted row, whether auto-generated or explicitly provided
+    assert_eq!(db.last_insert_rowid(), 100);
 }
 
 #[test]

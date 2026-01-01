@@ -304,7 +304,11 @@ fn test_show_columns_nonexistent_table() {
 #[test]
 fn test_show_index() {
     let mut executor = SqlExecutor::new(None).unwrap();
-    executor.execute("CREATE TABLE users (id INT PRIMARY KEY, email VARCHAR(100))").unwrap();
+    // Use TEXT PRIMARY KEY to ensure an autoindex is created
+    // Note: INTEGER PRIMARY KEY is a rowid alias and doesn't create a separate index
+    executor
+        .execute("CREATE TABLE users (id TEXT PRIMARY KEY, email VARCHAR(100))")
+        .unwrap();
 
     let result = executor.execute("SHOW INDEX FROM users").unwrap();
     assert_eq!(result.columns[0], "Table");
