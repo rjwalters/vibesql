@@ -275,6 +275,78 @@ impl Database {
     }
 
     // ============================================================================
+    // Expression Index Methods
+    // ============================================================================
+
+    /// Add row to expression indexes after insert with pre-computed keys
+    ///
+    /// This method handles expression indexes which require pre-computed key values
+    /// since the storage layer cannot evaluate expressions.
+    pub fn add_to_expression_indexes_for_insert(
+        &mut self,
+        table_name: &str,
+        row_index: usize,
+        expression_keys: &std::collections::HashMap<String, Vec<vibesql_types::SqlValue>>,
+    ) {
+        self.operations.add_to_expression_indexes_for_insert(
+            table_name,
+            row_index,
+            expression_keys,
+        );
+    }
+
+    /// Update expression indexes for update operation with pre-computed keys
+    pub fn update_expression_indexes_for_update(
+        &mut self,
+        table_name: &str,
+        row_index: usize,
+        old_expression_keys: &std::collections::HashMap<String, Vec<vibesql_types::SqlValue>>,
+        new_expression_keys: &std::collections::HashMap<String, Vec<vibesql_types::SqlValue>>,
+    ) {
+        self.operations.update_expression_indexes_for_update(
+            table_name,
+            row_index,
+            old_expression_keys,
+            new_expression_keys,
+        );
+    }
+
+    /// Update expression indexes for delete operation with pre-computed keys
+    pub fn update_expression_indexes_for_delete(
+        &mut self,
+        table_name: &str,
+        row_index: usize,
+        expression_keys: &std::collections::HashMap<String, Vec<vibesql_types::SqlValue>>,
+    ) {
+        self.operations.update_expression_indexes_for_delete(
+            table_name,
+            row_index,
+            expression_keys,
+        );
+    }
+
+    /// Get expression indexes for a specific table
+    ///
+    /// Returns metadata for all expression indexes on the table. Used by executor
+    /// to determine which indexes need expression evaluation during DML operations.
+    pub fn get_expression_indexes_for_table(
+        &self,
+        table_name: &str,
+    ) -> Vec<(String, &crate::database::indexes::IndexMetadata)> {
+        self.operations.get_expression_indexes_for_table(table_name)
+    }
+
+    /// Check if a table has any expression indexes
+    pub fn has_expression_indexes(&self, table_name: &str) -> bool {
+        self.operations.has_expression_indexes(table_name)
+    }
+
+    /// Clear expression index data for a table (for rebuilding after compaction)
+    pub fn clear_expression_index_data(&mut self, table_name: &str) {
+        self.operations.clear_expression_index_data(table_name);
+    }
+
+    // ============================================================================
     // Spatial Index Methods
     // ============================================================================
 

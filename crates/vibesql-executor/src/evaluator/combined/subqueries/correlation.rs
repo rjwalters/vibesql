@@ -176,9 +176,26 @@ fn collect_correlation_refs_from_expr(
                 // Unqualified reference - check if it's in outer schema
                 // If subquery_tables is empty (no FROM clause), any column ref
                 // MUST be from the outer schema since there's no internal schema
-                if outer_schema.get_column_index(None, column).is_some() {
-                    refs.insert((None, column.to_string()));
+                //
+                // FIX for issue #4761: If subquery has tables in its FROM clause, and any
+                // of those table names also exist in the outer schema, we must check if the
+                // column could belong to the subquery's own tables. If the column exists in
+                // a table that both the subquery and outer query reference (same table name),
+                // the column resolves to the subquery's scope first (innermost scope wins).
+                // We should NOT add it as a correlation reference.
+                let column_exists_in_subquery_tables = subquery_tables.iter().any(|t| {
+                    // Check if this table exists in outer_schema and has this column
+                    outer_schema.get_column_index(Some(t), column).is_some()
+                });
+
+                if !column_exists_in_subquery_tables {
+                    // Column doesn't exist in any subquery table, might be from outer
+                    if outer_schema.get_column_index(None, column).is_some() {
+                        refs.insert((None, column.to_string()));
+                    }
                 }
+                // If column_exists_in_subquery_tables is true, the column resolves to
+                // the subquery's own scope, not a correlation reference
             }
         }
         vibesql_ast::Expression::BinaryOp { left, right, .. } => {

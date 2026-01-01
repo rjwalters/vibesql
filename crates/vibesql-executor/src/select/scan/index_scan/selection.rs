@@ -3,14 +3,16 @@
 //! Determines when and which index to use for query optimization.
 //! Supports both rule-based (simple) and cost-based (statistics-aware) selection.
 //! Also includes skip-scan optimization for queries filtering on non-prefix columns.
-//! Supports expression indexes (functional indexes) like `CREATE INDEX idx ON t(LOWER(name))`.
+//! Supports expression indexes (functional indexes) like CREATE INDEX idx ON t(lower(name)).
 
-use vibesql_ast::Expression;
+use vibesql_ast::{Expression, IndexColumn};
 use vibesql_catalog::TableSchema;
 use vibesql_storage::{
     statistics::{AccessMethod, CostEstimator},
     Database,
 };
+
+use crate::evaluator::expression_hash::ExpressionHasher;
 
 use crate::optimizer::index_planner::{IndexPlanner, SkipScanInfo};
 
@@ -96,9 +98,9 @@ pub(crate) fn should_use_index_scan(
             let first_indexed_column = index_metadata.columns.first()?;
 
             // Check if this index can be used for WHERE clause
-            // Supports both column-based and expression-based indexes
+            // Supports both column indexes and expression indexes
             let can_use_for_where = where_clause
-                .map(|expr| expression_filters_indexed_column(expr, first_indexed_column))
+                .map(|expr| index_column_can_filter(expr, first_indexed_column))
                 .unwrap_or(false);
 
             // Count how many leading index columns are pinned by equality predicates
@@ -250,6 +252,98 @@ pub(crate) fn expression_filters_column(expr: &Expression, column_name: &str) ->
             exprs.iter().any(|e| expression_filters_column(e, column_name))
         }
         _ => false,
+    }
+}
+
+/// Check if an expression matches an expression index
+///
+/// For expression indexes like `CREATE INDEX idx ON t(lower(name))`, this function
+/// checks if the WHERE clause contains a predicate on the indexed expression.
+/// For example: `WHERE lower(name) = 'john'` matches the index.
+///
+/// Uses structural hashing to compare expressions - two expressions are considered
+/// equivalent if they have the same structure (same operations on same columns).
+pub(crate) fn expression_filters_index_expression(
+    where_expr: &Expression,
+    index_expr: &Expression,
+) -> bool {
+    let index_hash = ExpressionHasher::hash(index_expr);
+    expression_contains_matching_predicate(where_expr, index_hash)
+}
+
+/// Check if an expression contains a predicate on a specific expression (by hash)
+///
+/// Recursively searches through AND/OR combinations to find predicates.
+fn expression_contains_matching_predicate(expr: &Expression, target_hash: u64) -> bool {
+    match expr {
+        Expression::BinaryOp { left, op, right } => {
+            match op {
+                vibesql_ast::BinaryOperator::Equal
+                | vibesql_ast::BinaryOperator::GreaterThan
+                | vibesql_ast::BinaryOperator::GreaterThanOrEqual
+                | vibesql_ast::BinaryOperator::LessThan
+                | vibesql_ast::BinaryOperator::LessThanOrEqual => {
+                    // Check if left or right side matches the indexed expression
+                    let left_hash = ExpressionHasher::hash(left);
+                    let right_hash = ExpressionHasher::hash(right);
+                    let left_is_literal = is_literal(left);
+                    let right_is_literal = is_literal(right);
+
+                    // expr op literal OR literal op expr
+                    if (left_hash == target_hash && right_is_literal)
+                        || (right_hash == target_hash && left_is_literal)
+                    {
+                        return true;
+                    }
+                }
+                vibesql_ast::BinaryOperator::And | vibesql_ast::BinaryOperator::Or => {
+                    return expression_contains_matching_predicate(left, target_hash)
+                        || expression_contains_matching_predicate(right, target_hash);
+                }
+                _ => {}
+            }
+            false
+        }
+        // IS / IS NOT (NULL-safe comparison)
+        Expression::IsDistinctFrom { left, right, negated: true } => {
+            let left_hash = ExpressionHasher::hash(left);
+            let right_hash = ExpressionHasher::hash(right);
+            let left_is_literal = is_literal(left);
+            let right_is_literal = is_literal(right);
+            (left_hash == target_hash && right_is_literal)
+                || (right_hash == target_hash && left_is_literal)
+        }
+        // IN with value list: expr IN (1, 2, 3)
+        Expression::InList { expr, .. } => ExpressionHasher::hash(expr) == target_hash,
+        // IN with subquery: expr IN (SELECT ...)
+        Expression::In { expr, .. } => ExpressionHasher::hash(expr) == target_hash,
+        // BETWEEN: expr BETWEEN low AND high
+        Expression::Between { expr, .. } => ExpressionHasher::hash(expr) == target_hash,
+        // Conjunction: AND
+        Expression::Conjunction(exprs) => exprs
+            .iter()
+            .any(|e| expression_contains_matching_predicate(e, target_hash)),
+        // Disjunction: OR
+        Expression::Disjunction(exprs) => exprs
+            .iter()
+            .any(|e| expression_contains_matching_predicate(e, target_hash)),
+        _ => false,
+    }
+}
+
+/// Check if an IndexColumn can be used for the given WHERE clause
+///
+/// This function handles both column indexes and expression indexes:
+/// - For column indexes: delegates to `expression_filters_column`
+/// - For expression indexes: uses `expression_filters_index_expression`
+pub(crate) fn index_column_can_filter(where_expr: &Expression, index_col: &IndexColumn) -> bool {
+    match index_col {
+        IndexColumn::Column { column_name, .. } => {
+            expression_filters_column(where_expr, column_name)
+        }
+        IndexColumn::Expression { expr, .. } => {
+            expression_filters_index_expression(where_expr, expr)
+        }
     }
 }
 
@@ -840,29 +934,24 @@ pub(crate) fn cost_based_index_selection(
         if let Some(index_metadata) = database.get_index(index_name) {
             let first_indexed_column = index_metadata.columns.first()?;
 
-            // For expression indexes, we may not have column stats, so extract column name if available
-            let column_name_opt = first_indexed_column.column_name();
-            let is_expression_index = first_indexed_column.is_expression();
-
             // Check if this index can be used for WHERE or ORDER BY
-            // Supports both column-based and expression-based indexes
+            // Supports both column indexes and expression indexes
             let can_use_for_where = where_clause
-                .map(|expr| expression_filters_indexed_column(expr, first_indexed_column))
+                .map(|expr| index_column_can_filter(expr, first_indexed_column))
                 .unwrap_or(false);
 
             // Count how many leading index columns are pinned by equality predicates
             let pinned_columns = count_pinned_index_columns(where_clause, &index_metadata.columns);
 
+            // Get column name for stats lookup (only for column indexes)
+            let column_name = first_indexed_column.column_name();
+
             // Debug: trace index selection
             if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
-                let col_desc = if is_expression_index {
-                    "<expression>".to_string()
-                } else {
-                    column_name_opt.unwrap_or("<unknown>").to_string()
-                };
+                let col_debug = column_name.unwrap_or("<expression>");
                 eprintln!(
-                    "[INDEX_SELECT] table={}, index={}, first_col={}, can_use_for_where={}, is_expr_idx={}",
-                    table_name, index_name, col_desc, can_use_for_where, is_expression_index
+                    "[INDEX_SELECT] table={}, index={}, first_col={}, can_use_for_where={}",
+                    table_name, index_name, col_debug, can_use_for_where
                 );
             }
 
@@ -907,7 +996,7 @@ pub(crate) fn cost_based_index_selection(
 
             // For expression indexes, we don't have column statistics
             // Fall back to rule-based selection for them
-            if is_expression_index {
+            if first_indexed_column.is_expression() {
                 if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
                     eprintln!(
                         "[INDEX_SELECT] {} is expression index, will use rule-based selection",
@@ -918,23 +1007,27 @@ pub(crate) fn cost_based_index_selection(
                 continue;
             }
 
-            let column_name = column_name_opt.unwrap();
-
             // Get column statistics for the indexed column (case-insensitive lookup)
-            let col_stats = get_column_stats_ignore_case(&table_stats.columns, column_name);
+            // For expression indexes, we don't have direct column stats - fall back to rule-based
+            let col_stats = column_name.and_then(|cn| {
+                get_column_stats_ignore_case(&table_stats.columns, cn)
+            });
             if col_stats.is_none() {
                 // Track that we found an applicable index without column stats
                 // We'll fall back to rule-based selection if cost-based fails
                 if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                    let col_debug = column_name.unwrap_or("<expression>");
                     eprintln!(
                         "[INDEX_SELECT] {} no column stats for {}, will fallback",
-                        index_name, column_name
+                        index_name, col_debug
                     );
                 }
                 has_applicable_index_without_stats = true;
                 continue; // No stats for this column, try next index
             }
             let col_stats = col_stats.unwrap();
+            // At this point, column_name must be Some since we got col_stats
+            let column_name = column_name.unwrap();
 
             if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
                 eprintln!("[INDEX_SELECT] {} has column stats for {}", index_name, column_name);

@@ -7,8 +7,8 @@ use vibesql_storage::Database;
 use super::integrity::check_no_child_references;
 use crate::{
     dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
-    privilege_checker::PrivilegeChecker, sqlite_schema::is_sqlite_schema_table,
-    truncate_validation::can_use_truncate,
+    expression_index_maintenance, privilege_checker::PrivilegeChecker,
+    sqlite_schema::is_sqlite_schema_table, truncate_validation::can_use_truncate,
 };
 
 /// Executor for DELETE statements
@@ -194,8 +194,10 @@ impl DeleteExecutor {
                                 .unwrap_or(false)
                         });
 
-                    if !has_triggers && !has_referencing_fks {
-                        // Use the fast path - no triggers, no FKs, single row PK delete
+                    // Also skip fast path if there are expression indexes that need maintenance
+                    let has_expression_indexes = database.has_expression_indexes(table_name);
+                    if !has_triggers && !has_referencing_fks && !has_expression_indexes {
+                        // Use the fast path - no triggers, no FKs, no expression indexes, single row PK delete
                         match database.delete_by_pk_fast(table_name, &pk_values) {
                             Ok(deleted) => {
                                 let count = if deleted { 1 } else { 0 };
@@ -371,6 +373,16 @@ impl DeleteExecutor {
             rows_and_indices_to_delete.iter().map(|(idx, row)| (*idx, row)).collect();
         database.batch_update_indexes_for_delete(table_name, &rows_refs);
 
+        // Maintain expression indexes for each deleted row
+        for (row_index, row) in &rows_and_indices_to_delete {
+            expression_index_maintenance::maintain_expression_indexes_for_delete(
+                database,
+                table_name,
+                row,
+                *row_index,
+            );
+        }
+
         // Step 5b: Actually delete the rows using fast path (no table scan needed)
         let table_mut = database
             .get_table_mut(table_name)
@@ -387,6 +399,10 @@ impl DeleteExecutor {
         // If compaction occurred, rebuild user-defined indexes since all row indices changed
         if delete_result.compacted {
             database.rebuild_indexes(table_name);
+            // Expression indexes need special handling (expression evaluation)
+            expression_index_maintenance::rebuild_expression_indexes_after_compaction(
+                database, table_name,
+            );
         }
 
         // Invalidate the database-level columnar cache since table data changed.

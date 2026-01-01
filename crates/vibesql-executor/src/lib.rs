@@ -17,6 +17,7 @@ mod domain_ddl;
 mod drop_table;
 pub mod errors;
 pub mod evaluator;
+pub mod expression_index_maintenance;
 mod explain;
 mod grant;
 pub mod index_ddl;
