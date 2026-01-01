@@ -1591,8 +1591,6 @@ array set vibesql_skip_tests {
     insert-5.4 "Cascades from insert-5.1 TEMP TABLE failure"
     insert-5.5 "Uses TEMP TABLE which requires session isolation"
     insert-5.6 "Cascades from TEMP TABLE failure"
-    insert-17.14 "Error message format differs from SQLite"
-    insert-17.15 "Error message format differs from SQLite"
     join2-1.7-rj "EXPLAIN QUERY PLAN output format is SQLite-specific"
     join5-7.2 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     join5-7.3 "Uses sqlite_stat1 internal statistics table"

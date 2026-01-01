@@ -178,7 +178,8 @@ impl<'a> RowValidator<'a> {
                     .iter()
                     .map(|col| format!("{}.{}", self.table_name, col))
                     .collect();
-                return Err(ExecutorError::ConstraintViolation(format!(
+                // SQLite-compatible: output the message as-is without prefix
+                return Err(ExecutorError::SqliteCompatError(format!(
                     "UNIQUE constraint failed: {}",
                     qualified_cols.join(", ")
                 )));
@@ -199,7 +200,8 @@ impl<'a> RowValidator<'a> {
                         .iter()
                         .map(|col| format!("{}.{}", self.table_name, col))
                         .collect();
-                    return Err(ExecutorError::ConstraintViolation(format!(
+                    // SQLite-compatible: output the message as-is without prefix
+                    return Err(ExecutorError::SqliteCompatError(format!(
                         "UNIQUE constraint failed: {}",
                         qualified_cols.join(", ")
                     )));
@@ -233,7 +235,8 @@ impl<'a> RowValidator<'a> {
                     .iter()
                     .map(|col| format!("{}.{}", self.table_name, col))
                     .collect();
-                return Err(ExecutorError::ConstraintViolation(format!(
+                // SQLite-compatible: output the message as-is without prefix
+                return Err(ExecutorError::SqliteCompatError(format!(
                     "UNIQUE constraint failed: {}",
                     qualified_cols.join(", ")
                 )));
@@ -255,7 +258,8 @@ impl<'a> RowValidator<'a> {
                         .iter()
                         .map(|col| format!("{}.{}", self.table_name, col))
                         .collect();
-                    return Err(ExecutorError::ConstraintViolation(format!(
+                    // SQLite-compatible: output the message as-is without prefix
+                    return Err(ExecutorError::SqliteCompatError(format!(
                         "UNIQUE constraint failed: {}",
                         qualified_cols.join(", ")
                     )));
@@ -282,7 +286,8 @@ impl<'a> RowValidator<'a> {
                             .iter()
                             .map(|col| format!("{}.{}", self.table_name, col))
                             .collect();
-                        return Err(ExecutorError::ConstraintViolation(format!(
+                        // SQLite-compatible: output the message as-is without prefix
+                        return Err(ExecutorError::SqliteCompatError(format!(
                             "UNIQUE constraint failed: {}",
                             qualified_cols.join(", ")
                         )));

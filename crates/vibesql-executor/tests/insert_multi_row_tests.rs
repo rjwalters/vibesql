@@ -310,7 +310,13 @@ fn test_multi_row_insert_primary_key_violation() {
 
     let result = InsertExecutor::execute(&mut db, &stmt);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), ExecutorError::ConstraintViolation(_)));
+    // UNIQUE constraint violations can be either ConstraintViolation or SqliteCompatError
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, ExecutorError::ConstraintViolation(_) | ExecutorError::SqliteCompatError(_)),
+        "Expected ConstraintViolation or SqliteCompatError, got {:?}",
+        err
+    );
 
     // No rows should be inserted due to atomicity
     let table = db.get_table("users").unwrap();
