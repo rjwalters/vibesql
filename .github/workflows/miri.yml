@@ -1,17 +1,13 @@
 name: MIRI Undefined Behavior Detection
 
+# Weekly schedule + manual dispatch only (reduced from path-triggered to save CI resources)
+# Run manually before releases or when modifying unsafe code:
+#   gh workflow run miri.yml
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'crates/vibesql-storage/src/row.rs'
-      - 'crates/vibesql-executor/src/**'
-      - '.github/workflows/miri.yml'
-  pull_request:
-    paths:
-      - 'crates/vibesql-storage/src/row.rs'
-      - 'crates/vibesql-executor/src/**'
-      - '.github/workflows/miri.yml'
+  schedule:
+    # Run weekly on Sunday at 4 AM UTC (after fuzz testing)
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
 
 jobs:
   miri:

@@ -1,17 +1,10 @@
 # i18n Validation Workflow
 # Validates Fluent translation files for syntax and completeness
+# Only runs on PRs (not on push to main) - changes validated in PR don't need re-validation
 
 name: i18n Validation
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'crates/vibesql-l10n/**'
-      - 'web-demo/src/i18n/resources/**'
-      - 'scripts/check-translations.py'
-      - 'scripts/check-web-translations.py'
-      - '.github/workflows/i18n-check.yml'
   pull_request:
     paths:
       - 'crates/vibesql-l10n/**'
