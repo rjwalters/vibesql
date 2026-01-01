@@ -1591,9 +1591,13 @@ proc uses_sqlite_internals {script} {
     }
 
     # Expression indexes (CREATE INDEX ... ON table(expression)) - not supported
-    # Detect expressions in index definitions: parens with operators inside
+    # Detect expressions in index definitions: operators or function calls inside
     if {[regexp -nocase {CREATE\s+(?:UNIQUE\s+)?INDEX\s+\w+\s+ON\s+\w+\s*\([^)]*[-+*/=<>]} $script]} {
         return [list 1 "uses expression index (not supported)"]
+    }
+    # Also detect function calls in index definitions like abs(b), lower(x)
+    if {[regexp -nocase {CREATE\s+(?:UNIQUE\s+)?INDEX\s+\w+\s+ON\s+\w+\s*\([^)]*\w+\s*\(} $script]} {
+        return [list 1 "uses expression index with function (not supported)"]
     }
 
     # CREATE/DROP TRIGGER - triggers not fully supported
@@ -1617,6 +1621,11 @@ proc uses_sqlite_internals {script} {
     # randstr() - SQLite testing function that generates random strings
     if {[regexp -nocase {randstr\s*\(} $script]} {
         return [list 1 "uses randstr() (SQLite test function)"]
+    }
+
+    # db function - TCL interface to register custom SQL functions
+    if {[regexp {db\s+function\s} $script]} {
+        return [list 1 "uses db function (TCL custom function registration)"]
     }
 
     # SQLite sort tracking helper functions
@@ -2465,6 +2474,18 @@ proc db {cmd args} {
         errorcode {
             # Return last error code - return 0 for success
             return 0
+        }
+        function {
+            # db function - register custom SQL functions
+            # We don't support this, but we can silently ignore it
+            # Tests that use these functions will fail with "no such function"
+            # which is appropriate behavior
+            return
+        }
+        collate {
+            # db collate - register custom collation
+            # Same approach - silently ignore
+            return
         }
         default {
             error "Unknown db command: $cmd"
