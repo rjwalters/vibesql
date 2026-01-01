@@ -156,90 +156,91 @@ mod tests {
         );
     }
 
-    // SQLite type affinity tests: TEXT and NUMERIC are never equal
-    // Per SQLite docs: "An INTEGER or REAL value is less than any TEXT or BLOB value."
+    // String-to-numeric coercion tests
+    // VibeSQL coerces numeric-looking strings to numbers for practical query support
+    // (e.g., WHERE column = '123' works when column contains integer 123)
 
     #[test]
-    fn test_text_integer_not_equal() {
-        // '10' = 10 should be FALSE (different types)
+    fn test_text_integer_coercion() {
+        // '10' = 10 should be TRUE (string coerced to number)
         assert_eq!(
             equal(
                 &SqlValue::Varchar(arcstr::ArcStr::from("10")),
                 &SqlValue::Integer(10)
             )
             .unwrap(),
-            SqlValue::Boolean(false)
+            SqlValue::Boolean(true)
         );
-        // Symmetric: 10 = '10' should also be FALSE
+        // Symmetric: 10 = '10' should also be TRUE
         assert_eq!(
             equal(
                 &SqlValue::Integer(10),
                 &SqlValue::Varchar(arcstr::ArcStr::from("10"))
             )
             .unwrap(),
-            SqlValue::Boolean(false)
+            SqlValue::Boolean(true)
         );
     }
 
     #[test]
-    fn test_text_real_not_equal() {
-        // '10' = 10.0 should be FALSE (different types)
+    fn test_text_real_coercion() {
+        // '10' = 10.0 should be TRUE (string coerced to number)
         assert_eq!(
             equal(
                 &SqlValue::Varchar(arcstr::ArcStr::from("10")),
                 &SqlValue::Double(10.0)
             )
             .unwrap(),
-            SqlValue::Boolean(false)
+            SqlValue::Boolean(true)
         );
-        // Symmetric: 10.0 = '10' should also be FALSE
+        // Symmetric: 10.0 = '10' should also be TRUE
         assert_eq!(
             equal(
                 &SqlValue::Double(10.0),
                 &SqlValue::Varchar(arcstr::ArcStr::from("10"))
             )
             .unwrap(),
-            SqlValue::Boolean(false)
+            SqlValue::Boolean(true)
         );
     }
 
     #[test]
-    fn test_text_numeric_not_equal_all_types() {
+    fn test_text_numeric_coercion_all_types() {
         let text_10 = SqlValue::Varchar(arcstr::ArcStr::from("10"));
 
-        // TEXT is never equal to any numeric type
+        // Numeric-looking TEXT is coerced to number for comparison
         assert_eq!(
             equal(&text_10, &SqlValue::Integer(10)).unwrap(),
-            SqlValue::Boolean(false)
+            SqlValue::Boolean(true)
         );
         assert_eq!(
             equal(&text_10, &SqlValue::Smallint(10)).unwrap(),
-            SqlValue::Boolean(false)
+            SqlValue::Boolean(true)
         );
         assert_eq!(
             equal(&text_10, &SqlValue::Bigint(10)).unwrap(),
-            SqlValue::Boolean(false)
+            SqlValue::Boolean(true)
         );
         assert_eq!(
             equal(&text_10, &SqlValue::Float(10.0)).unwrap(),
-            SqlValue::Boolean(false)
+            SqlValue::Boolean(true)
         );
         assert_eq!(
             equal(&text_10, &SqlValue::Real(10.0)).unwrap(),
-            SqlValue::Boolean(false)
+            SqlValue::Boolean(true)
         );
         assert_eq!(
             equal(&text_10, &SqlValue::Double(10.0)).unwrap(),
-            SqlValue::Boolean(false)
+            SqlValue::Boolean(true)
         );
         assert_eq!(
             equal(&text_10, &SqlValue::Numeric(10.0)).unwrap(),
-            SqlValue::Boolean(false)
+            SqlValue::Boolean(true)
         );
     }
 
     #[test]
-    fn test_text_numeric_not_equal_character_type() {
+    fn test_text_numeric_coercion_character_type() {
         // Character type should behave the same as Varchar
         assert_eq!(
             equal(
@@ -247,12 +248,33 @@ mod tests {
                 &SqlValue::Integer(10)
             )
             .unwrap(),
-            SqlValue::Boolean(false)
+            SqlValue::Boolean(true)
         );
         assert_eq!(
             equal(
                 &SqlValue::Integer(10),
                 &SqlValue::Character(arcstr::ArcStr::from("10"))
+            )
+            .unwrap(),
+            SqlValue::Boolean(true)
+        );
+    }
+
+    #[test]
+    fn test_non_numeric_text_not_equal() {
+        // Non-numeric strings should not equal numbers (type ordering applies)
+        assert_eq!(
+            equal(
+                &SqlValue::Varchar(arcstr::ArcStr::from("hello")),
+                &SqlValue::Integer(10)
+            )
+            .unwrap(),
+            SqlValue::Boolean(false)
+        );
+        assert_eq!(
+            equal(
+                &SqlValue::Integer(10),
+                &SqlValue::Varchar(arcstr::ArcStr::from("hello"))
             )
             .unwrap(),
             SqlValue::Boolean(false)

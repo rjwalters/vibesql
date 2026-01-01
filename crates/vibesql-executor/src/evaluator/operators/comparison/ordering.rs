@@ -181,25 +181,34 @@ mod tests {
         );
     }
 
-    // SQLite type ordering tests: TEXT > INTEGER/REAL
-    // Per SQLite docs: "An INTEGER or REAL value is less than any TEXT or BLOB value."
+    // String-to-numeric coercion tests for ordering
+    // VibeSQL coerces numeric-looking strings to numbers for practical query support
 
     #[test]
     fn test_text_greater_than_integer() {
-        // '10' > 10 = true (TEXT > INTEGER in SQLite type ordering)
+        // '10' > 10 = false (string coerced to number, they're equal)
         assert_eq!(
             greater_than(
                 &SqlValue::Varchar(arcstr::ArcStr::from("10")),
                 &SqlValue::Integer(10)
             )
             .unwrap(),
-            SqlValue::Boolean(true)
+            SqlValue::Boolean(false)
         );
-        // 10 < '10' = true (INTEGER < TEXT)
+        // 10 < '10' = false (equal after coercion)
         assert_eq!(
             less_than(
                 &SqlValue::Integer(10),
                 &SqlValue::Varchar(arcstr::ArcStr::from("10"))
+            )
+            .unwrap(),
+            SqlValue::Boolean(false)
+        );
+        // '20' > 10 = true (20 > 10 after coercion)
+        assert_eq!(
+            greater_than(
+                &SqlValue::Varchar(arcstr::ArcStr::from("20")),
+                &SqlValue::Integer(10)
             )
             .unwrap(),
             SqlValue::Boolean(true)
@@ -208,20 +217,29 @@ mod tests {
 
     #[test]
     fn test_text_greater_than_real() {
-        // '10' > 10.0 = true (TEXT > REAL in SQLite type ordering)
+        // '10' > 10.0 = false (string coerced to number, they're equal)
         assert_eq!(
             greater_than(
                 &SqlValue::Varchar(arcstr::ArcStr::from("10")),
                 &SqlValue::Double(10.0)
             )
             .unwrap(),
-            SqlValue::Boolean(true)
+            SqlValue::Boolean(false)
         );
-        // 10.0 < '10' = true (REAL < TEXT)
+        // 10.0 < '10' = false (equal after coercion)
         assert_eq!(
             less_than(
                 &SqlValue::Double(10.0),
                 &SqlValue::Varchar(arcstr::ArcStr::from("10"))
+            )
+            .unwrap(),
+            SqlValue::Boolean(false)
+        );
+        // '10.5' > 10.0 = true (10.5 > 10.0 after coercion)
+        assert_eq!(
+            greater_than(
+                &SqlValue::Varchar(arcstr::ArcStr::from("10.5")),
+                &SqlValue::Double(10.0)
             )
             .unwrap(),
             SqlValue::Boolean(true)
@@ -229,8 +247,8 @@ mod tests {
     }
 
     #[test]
-    fn test_text_not_less_than_numeric() {
-        // '10' < 10 = false (TEXT is never less than INTEGER)
+    fn test_numeric_text_equality_comparisons() {
+        // '10' < 10 = false (equal after coercion)
         assert_eq!(
             less_than(
                 &SqlValue::Varchar(arcstr::ArcStr::from("10")),
@@ -239,7 +257,7 @@ mod tests {
             .unwrap(),
             SqlValue::Boolean(false)
         );
-        // 10 > '10' = false (INTEGER is never greater than TEXT)
+        // 10 > '10' = false (equal after coercion)
         assert_eq!(
             greater_than(
                 &SqlValue::Integer(10),
@@ -247,6 +265,15 @@ mod tests {
             )
             .unwrap(),
             SqlValue::Boolean(false)
+        );
+        // '5' < 10 = true (5 < 10 after coercion)
+        assert_eq!(
+            less_than(
+                &SqlValue::Varchar(arcstr::ArcStr::from("5")),
+                &SqlValue::Integer(10)
+            )
+            .unwrap(),
+            SqlValue::Boolean(true)
         );
     }
 

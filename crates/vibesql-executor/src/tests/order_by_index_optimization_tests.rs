@@ -550,7 +550,8 @@ fn test_order_by_with_nulls_asc() {
 
     let executor = SelectExecutor::new(&db);
 
-    // Query with ORDER BY on nullable column - NULLs should come last
+    // Query with ORDER BY on nullable column
+    // SQLite semantics: NULL is smallest, so NULLs come first in ASC order
     let query = "SELECT id, value FROM items ORDER BY value ASC";
     let stmt = Parser::parse_sql(query).unwrap();
 
@@ -559,7 +560,7 @@ fn test_order_by_with_nulls_asc() {
 
         assert_eq!(result.len(), 5);
 
-        // Values should be ordered: 5, 10, 15, NULL, NULL
+        // SQLite: NULL is smallest, so ASC order is: NULL, NULL, 5, 10, 15
         let values: Vec<Option<i64>> = result
             .iter()
             .map(|row| match &row.values[1] {
@@ -569,11 +570,11 @@ fn test_order_by_with_nulls_asc() {
             })
             .collect();
 
-        assert_eq!(values[0], Some(5));
-        assert_eq!(values[1], Some(10));
-        assert_eq!(values[2], Some(15));
-        assert_eq!(values[3], None); // NULL
-        assert_eq!(values[4], None); // NULL
+        assert_eq!(values[0], None); // NULL (smallest)
+        assert_eq!(values[1], None); // NULL (smallest)
+        assert_eq!(values[2], Some(5));
+        assert_eq!(values[3], Some(10));
+        assert_eq!(values[4], Some(15));
     } else {
         panic!("Expected SELECT statement");
     }
