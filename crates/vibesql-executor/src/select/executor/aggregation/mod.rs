@@ -583,15 +583,25 @@ impl SelectExecutor<'_> {
         let hidden_col_count = group_by_exprs.len() + order_by_aggregates.len();
 
         // Apply ORDER BY if present
+        // Note: For scalar aggregates (no GROUP BY), ORDER BY is skipped because:
+        // 1. Scalar aggregates always return exactly one row, making ordering meaningless
+        // 2. ORDER BY may reference source columns that don't exist in the result schema
+        // This matches SQLite's behavior for queries like:
+        //   SELECT avg(y) FROM (SELECT DISTINCT y FROM t1) ORDER BY y
         let result_rows = if let Some(order_by) = &stmt.order_by {
-            self.apply_order_by_to_aggregates(
-                result_rows,
-                stmt,
-                order_by,
-                &expanded_select_list,
-                &group_by_exprs,
-                &order_by_aggregates,
-            )?
+            if stmt.group_by.is_none() {
+                // Scalar aggregate - skip ORDER BY (single row, ordering is meaningless)
+                result_rows
+            } else {
+                self.apply_order_by_to_aggregates(
+                    result_rows,
+                    stmt,
+                    order_by,
+                    &expanded_select_list,
+                    &group_by_exprs,
+                    &order_by_aggregates,
+                )?
+            }
         } else {
             result_rows
         };

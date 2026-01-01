@@ -609,6 +609,35 @@ impl Parser {
             None
         };
 
+        // Check for ORDER BY appearing before a set operation (SQLite-compatible error)
+        // This catches: VALUES(...) ORDER BY ... UNION VALUES(...)
+        if order_by.is_some() {
+            let op_name = if self.peek_keyword(Keyword::Union) {
+                // Check for UNION ALL vs UNION
+                let saved = self.position;
+                self.consume_keyword(Keyword::Union)?;
+                let all = self.peek_keyword(Keyword::All);
+                self.position = saved; // restore position
+                if all {
+                    Some("UNION ALL")
+                } else {
+                    Some("UNION")
+                }
+            } else if self.peek_keyword(Keyword::Intersect) {
+                Some("INTERSECT")
+            } else if self.peek_keyword(Keyword::Except) {
+                Some("EXCEPT")
+            } else {
+                None
+            };
+
+            if let Some(op) = op_name {
+                return Err(ParseError {
+                    message: format!("ORDER BY clause should come after {} not before", op),
+                });
+            }
+        }
+
         // Parse LIMIT (supports comma syntax: LIMIT offset,count)
         let (limit, offset_from_limit) = if allow_order_limit && self.peek_keyword(Keyword::Limit) {
             self.consume_keyword(Keyword::Limit)?;

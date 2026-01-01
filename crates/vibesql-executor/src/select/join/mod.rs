@@ -28,7 +28,7 @@ mod tests;
 use hash_anti_join::{hash_anti_join, hash_anti_join_with_filter};
 use hash_join::{
     hash_join_inner, hash_join_inner_arithmetic, hash_join_inner_multi, hash_join_left_outer,
-    hash_join_left_outer_multi,
+    hash_join_left_outer_multi, hash_join_left_outer_with_filter,
 };
 // Re-export hash join iterator for public use
 pub use hash_join_iterator::HashJoinIterator;
@@ -935,18 +935,41 @@ pub(super) fn nested_loop_join(
                         (None, None)
                     };
 
+                // Build the remaining filter expression (if any)
+                let remaining_filter = combine_with_and(multi_result.remaining_conditions);
+
                 // Use multi-column hash join when there are multiple equi-join columns
-                // This ensures all equi-join conditions are matched during hash lookup,
-                // not filtered afterward (which breaks LEFT JOIN semantics for NULL columns)
+                // For remaining conditions, use hash_join_left_outer_with_filter which
+                // applies the filter DURING the join (not as post-filter) to preserve
+                // LEFT JOIN semantics: rows that match equi-join but fail filter get NULLs
                 let mut result = if multi_result.equi_joins.left_col_indices.len() > 1 {
-                    hash_join_left_outer_multi(
+                    // Multi-column equi-join (remaining conditions not yet supported)
+                    // TODO: Add hash_join_left_outer_multi_with_filter
+                    let mut r = hash_join_left_outer_multi(
                         left,
                         right,
                         &multi_result.equi_joins.left_col_indices,
                         &multi_result.equi_joins.right_col_indices,
+                    )?;
+                    // For now, apply as post-filter (known issue for multi-column)
+                    if let Some(ref filter_expr) = remaining_filter {
+                        r = apply_post_join_filter(r, filter_expr, database, cte_results)?;
+                    }
+                    r
+                } else if let Some(ref filter_expr) = remaining_filter {
+                    // Single column with additional filter - use LEFT JOIN-aware filter
+                    // This applies the filter DURING the join to preserve unmatched rows
+                    hash_join_left_outer_with_filter(
+                        left,
+                        right,
+                        multi_result.equi_joins.left_col_indices[0],
+                        multi_result.equi_joins.right_col_indices[0],
+                        filter_expr,
+                        &temp_schema,
+                        database,
                     )?
                 } else {
-                    // Single column - use optimized single-column hash join
+                    // Single column without additional filter
                     hash_join_left_outer(
                         left,
                         right,
@@ -954,17 +977,6 @@ pub(super) fn nested_loop_join(
                         multi_result.equi_joins.right_col_indices[0],
                     )?
                 };
-
-                // Apply remaining NON-equi-join conditions as post-join filter
-                // Note: For LEFT JOIN, remaining conditions on right columns may evaluate
-                // to NULL for unmatched rows. These rows should be preserved.
-                // TODO: Consider a LEFT JOIN-aware post-filter that preserves NULL results
-                if !multi_result.remaining_conditions.is_empty() {
-                    if let Some(filter_expr) = combine_with_and(multi_result.remaining_conditions) {
-                        result =
-                            apply_post_join_filter(result, &filter_expr, database, cte_results)?;
-                    }
-                }
 
                 // For NATURAL JOIN or USING clause, remove duplicate columns from the result
                 if natural {
@@ -1230,6 +1242,68 @@ pub(super) fn nested_loop_join(
     }
 
     Ok(result)
+}
+
+/// Coalesce common column values for RIGHT/FULL OUTER JOIN
+///
+/// For NATURAL RIGHT JOIN and NATURAL FULL JOIN, when a left row is NULL (unmatched),
+/// the common column value should come from the right side, not the left.
+///
+/// SQL standard semantics: NATURAL JOIN common columns use COALESCE(left.col, right.col)
+/// - INNER JOIN: values are equal, doesn't matter
+/// - LEFT OUTER JOIN: unmatched rows have right=NULL, so left value is used (no change needed)
+/// - RIGHT OUTER JOIN: unmatched rows have left=NULL, so right value should be used
+/// - FULL OUTER JOIN: COALESCE(left, right) is used for both unmatched cases
+///
+/// This function updates left column values to COALESCE(left, right) for common columns.
+fn coalesce_common_columns_for_outer_join(
+    result: &mut FromResult,
+    left_schema: &CombinedSchema,
+    right_schema: &CombinedSchema,
+) {
+    use std::collections::HashMap;
+
+    // Find common column names (case-insensitive)
+    // Build a map: lowercase column name -> list of left column indices
+    let mut left_column_map: HashMap<String, Vec<usize>> = HashMap::new();
+    for (table_start_idx, table_schema) in left_schema.table_schemas.values() {
+        for (col_idx, col) in table_schema.columns.iter().enumerate() {
+            let lowercase = col.name.to_lowercase();
+            left_column_map
+                .entry(lowercase)
+                .or_default()
+                .push(table_start_idx + col_idx);
+        }
+    }
+
+    // Build pairs of (left_idx, right_idx) for common columns
+    let left_col_count = left_schema.total_columns;
+    let mut coalesce_pairs: Vec<(usize, usize)> = Vec::new();
+
+    for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
+        for (col_idx, col) in table_schema.columns.iter().enumerate() {
+            let lowercase = col.name.to_lowercase();
+            if let Some(left_indices) = left_column_map.get(&lowercase) {
+                let right_idx = left_col_count + table_start_idx + col_idx;
+                // For each left column with this name, create a coalesce pair
+                for &left_idx in left_indices {
+                    coalesce_pairs.push((left_idx, right_idx));
+                }
+            }
+        }
+    }
+
+    // Apply COALESCE to each row: if left value is NULL, use right value
+    if !coalesce_pairs.is_empty() {
+        let rows = result.rows_mut();
+        for row in rows {
+            for &(left_idx, right_idx) in &coalesce_pairs {
+                if row.values[left_idx] == vibesql_types::SqlValue::Null {
+                    row.values[left_idx] = row.values[right_idx].clone();
+                }
+            }
+        }
+    }
 }
 
 /// Mark duplicate columns as hidden for NATURAL JOIN

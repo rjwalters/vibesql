@@ -183,6 +183,74 @@ pub(crate) fn string_to_number(s: &str) -> (i64, f64, bool) {
     }
 }
 
+/// SQLite-compatible string-to-integer coercion for CAST to INTEGER
+///
+/// According to SQLite documentation (R-24225-46995):
+/// "When casting to INTEGER, if the text looks like a floating point value
+/// with an exponent, the exponent will be ignored because it is no part of
+/// the integer prefix. For example, CAST('123e+5' AS INTEGER) results in 123."
+///
+/// For overflow handling (R-06028-16857):
+/// "If the prefix integer is greater than +9223372036854775807 then the
+/// result of the cast is exactly +9223372036854775807. Similarly, if the
+/// prefix integer is less than -9223372036854775808 then the result is
+/// exactly -9223372036854775808."
+///
+/// Rules:
+/// 1. Leading whitespace is ignored
+/// 2. Optional sign (+/-)
+/// 3. Integer prefix is extracted (digits before any non-digit)
+/// 4. Exponents are NOT part of the integer prefix and are ignored
+/// 5. Decimal point terminates the integer prefix
+/// 6. Overflow clamps to i64::MAX or i64::MIN
+pub(crate) fn string_to_integer(s: &str) -> i64 {
+    let trimmed = s.trim_start();
+
+    if trimmed.is_empty() {
+        return 0;
+    }
+
+    // Check for sign
+    let (is_negative, rest) = match trimmed.chars().next() {
+        Some('-') => (true, &trimmed[1..]),
+        Some('+') => (false, &trimmed[1..]),
+        _ => (false, trimmed),
+    };
+
+    // Find the integer prefix - stops at any non-digit (including '.', 'e', 'E')
+    let mut end_idx = 0;
+    let chars: Vec<char> = rest.chars().collect();
+    let len = chars.len();
+
+    while end_idx < len && chars[end_idx].is_ascii_digit() {
+        end_idx += 1;
+    }
+
+    if end_idx == 0 {
+        return 0;
+    }
+
+    let int_str: String = chars[..end_idx].iter().collect();
+
+    match int_str.parse::<i64>() {
+        Ok(n) => {
+            if is_negative {
+                n.checked_neg().unwrap_or(i64::MIN)
+            } else {
+                n
+            }
+        }
+        Err(_) => {
+            // Overflow - clamp to bounds (SQLite behavior)
+            if is_negative {
+                i64::MIN
+            } else {
+                i64::MAX
+            }
+        }
+    }
+}
+
 /// Helper function to convert float to integer based on SQL mode
 /// MySQL mode: rounds to nearest integer
 /// SQLite mode: truncates toward zero
@@ -236,9 +304,14 @@ pub(crate) fn cast_value(
             SqlValue::Double(f) => Ok(SqlValue::Integer(float_to_int(*f, sql_mode))),
             SqlValue::Boolean(b) => Ok(SqlValue::Integer(if *b { 1 } else { 0 })),
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                // SQLite: Permissive conversion - extract leading numeric portion, default to 0
-                let (int_val, _, _) = string_to_number(s);
-                Ok(SqlValue::Integer(int_val))
+                // SQLite: Extract integer prefix, ignoring exponent (R-24225-46995)
+                // '123e+5' -> 123, not 12300000
+                Ok(SqlValue::Integer(string_to_integer(s)))
+            }
+            SqlValue::Blob(bytes) => {
+                // SQLite: CAST BLOB to INTEGER interprets bytes as UTF-8 text first
+                let text = std::str::from_utf8(bytes).unwrap_or("");
+                Ok(SqlValue::Integer(string_to_integer(text)))
             }
             _ => Ok(SqlValue::Integer(0)), // SQLite: Default to 0 for unknown types
         },
@@ -255,9 +328,12 @@ pub(crate) fn cast_value(
             SqlValue::Double(f) => Ok(SqlValue::Smallint(float_to_int(*f, sql_mode) as i16)),
             SqlValue::Boolean(b) => Ok(SqlValue::Smallint(if *b { 1 } else { 0 })),
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                // SQLite: Permissive conversion - extract leading numeric portion, default to 0
-                let (int_val, _, _) = string_to_number(s);
-                Ok(SqlValue::Smallint(int_val as i16))
+                // SQLite: Extract integer prefix, ignoring exponent
+                Ok(SqlValue::Smallint(string_to_integer(s) as i16))
+            }
+            SqlValue::Blob(bytes) => {
+                let text = std::str::from_utf8(bytes).unwrap_or("");
+                Ok(SqlValue::Smallint(string_to_integer(text) as i16))
             }
             _ => Ok(SqlValue::Smallint(0)), // SQLite: Default to 0 for unknown types
         },
@@ -274,9 +350,12 @@ pub(crate) fn cast_value(
             SqlValue::Double(f) => Ok(SqlValue::Bigint(float_to_int(*f, sql_mode))),
             SqlValue::Boolean(b) => Ok(SqlValue::Bigint(if *b { 1 } else { 0 })),
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                // SQLite: Permissive conversion - extract leading numeric portion, default to 0
-                let (int_val, _, _) = string_to_number(s);
-                Ok(SqlValue::Bigint(int_val))
+                // SQLite: Extract integer prefix, ignoring exponent
+                Ok(SqlValue::Bigint(string_to_integer(s)))
+            }
+            SqlValue::Blob(bytes) => {
+                let text = std::str::from_utf8(bytes).unwrap_or("");
+                Ok(SqlValue::Bigint(string_to_integer(text)))
             }
             _ => Ok(SqlValue::Bigint(0)), // SQLite: Default to 0 for unknown types
         },
@@ -317,46 +396,64 @@ pub(crate) fn cast_value(
                 Ok(SqlValue::Unsigned(if *b { 1 } else { 0 }))
             }
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                // SQLite: Permissive conversion - extract leading numeric portion, default to 0
-                let (int_val, _, _) = string_to_number(s);
-                Ok(SqlValue::Unsigned(int_val as u64))
+                // SQLite: Extract integer prefix, ignoring exponent
+                Ok(SqlValue::Unsigned(string_to_integer(s) as u64))
+            }
+            SqlValue::Blob(bytes) => {
+                let text = std::str::from_utf8(bytes).unwrap_or("");
+                Ok(SqlValue::Unsigned(string_to_integer(text) as u64))
             }
             _ => Ok(SqlValue::Unsigned(0)), // SQLite: Default to 0 for unknown types
         },
 
         // Cast to NUMERIC
-        // SQLite NUMERIC affinity: return INTEGER if value is exact integer, REAL otherwise
+        // SQLite NUMERIC affinity preserves storage class from source:
+        // - Integer types stay INTEGER
+        // - Floating-point types stay REAL (even if whole number like 1.0)
+        // - String/blob: INTEGER if exact integer representation, else REAL
         Numeric { .. } => {
-            // Short-circuit for integer types to avoid precision loss through f64
             match value {
-                SqlValue::Integer(n) => return Ok(SqlValue::Integer(*n)),
-                SqlValue::Smallint(n) => return Ok(SqlValue::Integer(*n as i64)),
-                SqlValue::Bigint(n) => return Ok(SqlValue::Integer(*n)),
-                SqlValue::Unsigned(n) => return Ok(SqlValue::Integer(*n as i64)),
-                SqlValue::Boolean(b) => return Ok(SqlValue::Integer(if *b { 1 } else { 0 })),
-                _ => {}
-            }
-            // For non-integer types, convert through f64
-            let float_val = match value {
-                SqlValue::Numeric(f) => *f,
-                SqlValue::Float(n) => *n as f64,
-                SqlValue::Real(n) => *n as f64,
-                SqlValue::Double(n) => *n,
+                // Integer types stay as INTEGER
+                SqlValue::Integer(n) => Ok(SqlValue::Integer(*n)),
+                SqlValue::Smallint(n) => Ok(SqlValue::Integer(*n as i64)),
+                SqlValue::Bigint(n) => Ok(SqlValue::Integer(*n)),
+                SqlValue::Unsigned(n) => Ok(SqlValue::Integer(*n as i64)),
+                SqlValue::Boolean(b) => Ok(SqlValue::Integer(if *b { 1 } else { 0 })),
+
+                // Floating-point types stay as REAL (Numeric)
+                // SQLite: CAST(1.0 AS NUMERIC) returns 1.0 (type real), not 1 (type integer)
+                SqlValue::Numeric(f) => Ok(SqlValue::Numeric(*f)),
+                SqlValue::Float(n) => Ok(SqlValue::Numeric(*n as f64)),
+                SqlValue::Real(n) => Ok(SqlValue::Numeric(*n)),
+                SqlValue::Double(n) => Ok(SqlValue::Numeric(*n)),
+
+                // String/blob: convert to most appropriate type
+                // SQLite NUMERIC affinity: use INTEGER if value is exact integer
+                // '1.0' -> 1 (integer), '1.5' -> 1.5 (real)
                 SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                    // SQLite: Permissive conversion - extract leading numeric portion
-                    let (_, fval, _) = string_to_number(s);
-                    fval
+                    let (int_val, float_val, _) = string_to_number(s);
+                    if float_val.fract() == 0.0
+                        && float_val >= i64::MIN as f64
+                        && float_val <= i64::MAX as f64
+                    {
+                        Ok(SqlValue::Integer(int_val))
+                    } else {
+                        Ok(SqlValue::Numeric(float_val))
+                    }
                 }
-                _ => 0.0, // SQLite: Default to 0.0 for unknown types
-            };
-            // SQLite NUMERIC affinity: return INTEGER if value is exact integer
-            if float_val.fract() == 0.0
-                && float_val >= i64::MIN as f64
-                && float_val <= i64::MAX as f64
-            {
-                Ok(SqlValue::Integer(float_val as i64))
-            } else {
-                Ok(SqlValue::Numeric(float_val))
+                SqlValue::Blob(bytes) => {
+                    let text = std::str::from_utf8(bytes).unwrap_or("");
+                    let (int_val, float_val, _) = string_to_number(text);
+                    if float_val.fract() == 0.0
+                        && float_val >= i64::MIN as f64
+                        && float_val <= i64::MAX as f64
+                    {
+                        Ok(SqlValue::Integer(int_val))
+                    } else {
+                        Ok(SqlValue::Numeric(float_val))
+                    }
+                }
+                _ => Ok(SqlValue::Integer(0)), // SQLite: Default to 0 for unknown types
             }
         }
 
@@ -374,6 +471,12 @@ pub(crate) fn cast_value(
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
                 // SQLite: Permissive conversion - extract leading numeric portion, default to 0.0
                 let (_, float_val, _) = string_to_number(s);
+                Ok(SqlValue::Float(float_val as f32))
+            }
+            SqlValue::Blob(bytes) => {
+                // SQLite: CAST BLOB to FLOAT interprets bytes as UTF-8 text first
+                let text = std::str::from_utf8(bytes).unwrap_or("");
+                let (_, float_val, _) = string_to_number(text);
                 Ok(SqlValue::Float(float_val as f32))
             }
             _ => Ok(SqlValue::Float(0.0)), // SQLite: Default to 0.0 for unknown types
@@ -395,6 +498,12 @@ pub(crate) fn cast_value(
                 let (_, float_val, _) = string_to_number(s);
                 Ok(SqlValue::Real(float_val))
             }
+            SqlValue::Blob(bytes) => {
+                // SQLite: CAST BLOB to REAL interprets bytes as UTF-8 text first
+                let text = std::str::from_utf8(bytes).unwrap_or("");
+                let (_, float_val, _) = string_to_number(text);
+                Ok(SqlValue::Real(float_val))
+            }
             _ => Ok(SqlValue::Real(0.0)), // SQLite: Default to 0.0 for unknown types
         },
 
@@ -412,6 +521,12 @@ pub(crate) fn cast_value(
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
                 // SQLite: Permissive conversion - extract leading numeric portion, default to 0.0
                 let (_, float_val, _) = string_to_number(s);
+                Ok(SqlValue::Double(float_val))
+            }
+            SqlValue::Blob(bytes) => {
+                // SQLite: CAST BLOB to DOUBLE interprets bytes as UTF-8 text first
+                let text = std::str::from_utf8(bytes).unwrap_or("");
+                let (_, float_val, _) = string_to_number(text);
                 Ok(SqlValue::Double(float_val))
             }
             _ => Ok(SqlValue::Double(0.0)), // SQLite: Default to 0.0 for unknown types

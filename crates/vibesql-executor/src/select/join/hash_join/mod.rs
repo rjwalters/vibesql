@@ -26,7 +26,9 @@ mod tests;
 // Re-export existence hash table builders for semi-join and anti-join
 pub(super) use build::build_existence_hash_table_parallel;
 pub(super) use inner::{hash_join_inner, hash_join_inner_arithmetic, hash_join_inner_multi};
-pub(super) use outer::{hash_join_left_outer, hash_join_left_outer_multi};
+pub(super) use outer::{
+    hash_join_left_outer, hash_join_left_outer_multi, hash_join_left_outer_with_filter,
+};
 
 // columnar hash join is used directly in inner.rs
 

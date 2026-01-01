@@ -366,7 +366,22 @@ where
             )))
         }
 
-        // Type mismatch
+        // SQLite type affinity: Temporal vs Numeric returns false (not an error)
+        // In SQLite, comparing DATETIME with INTEGER returns 0/1 based on type ordering,
+        // not a type mismatch error. Different types are considered unequal.
+        // This enables queries like: WHERE datetime(x) = y where y might be an integer
+        (Timestamp(_) | Date(_) | Time(_), Integer(_) | Smallint(_) | Bigint(_) | Float(_) | Real(_) | Double(_) | Numeric(_)) => {
+            // For = comparison, different types are never equal
+            // For < / > comparisons, SQLite uses type ordering (TEXT < INTEGER)
+            // We follow SQLite's behavior: temporal types != numeric types
+            Ok(Boolean(false))
+        }
+        (Integer(_) | Smallint(_) | Bigint(_) | Float(_) | Real(_) | Double(_) | Numeric(_), Timestamp(_) | Date(_) | Time(_)) => {
+            // Symmetric case
+            Ok(Boolean(false))
+        }
+
+        // Type mismatch - for other incompatible types, still raise error
         _ => Err(ExecutorError::TypeMismatch {
             left: left.clone(),
             op: op_str.to_string(),

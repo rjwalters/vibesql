@@ -293,3 +293,127 @@ pub(in crate::select::join) fn hash_join_left_outer_multi(
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
 }
+
+/// Hash join LEFT OUTER JOIN with additional filter conditions
+///
+/// This implementation applies non-equi-join ON conditions DURING the join,
+/// not as a post-filter. This is critical for correct LEFT JOIN semantics.
+///
+/// For queries like:
+/// ```sql
+/// SELECT * FROM t1 LEFT JOIN t2 ON t1.a = t2.x AND t2.z = 'ok'
+/// ```
+///
+/// When t1.a = t2.x matches but t2.z != 'ok':
+/// - Incorrect (post-filter): Row is filtered out entirely
+/// - Correct (this impl): Emit t1 columns + NULLs for t2 columns
+///
+/// Algorithm:
+/// 1. Build phase: Hash the right table (O(m))
+/// 2. Probe phase: For each left row (O(n)):
+///    a. If no equi-join match: emit left + NULLs
+///    b. If equi-join match: check additional filter for each match
+///       - If any match passes filter: emit left + right for each passing match
+///       - If ALL matches fail filter: emit left + NULLs (preserves left row!)
+///
+/// Total: O(n + m) with correct LEFT JOIN semantics
+pub(in crate::select::join) fn hash_join_left_outer_with_filter(
+    left: FromResult,
+    right: FromResult,
+    left_col_idx: usize,
+    right_col_idx: usize,
+    additional_filter: &vibesql_ast::Expression,
+    combined_schema: &CombinedSchema,
+    database: &vibesql_storage::Database,
+) -> Result<FromResult, ExecutorError> {
+    // Get column counts
+    let right_col_count = right.schema.total_columns;
+    let left_col_count = left.schema.total_columns;
+
+    // Use as_slice() for zero-cost access
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
+
+    // Build hash table on the RIGHT side
+    let hash_table = build_hash_table_parallel(right_slice, right_col_idx);
+
+    // Pre-compute combined row size for efficient allocation
+    let combined_size = left_col_count + right_col_count;
+
+    // Create evaluator for filter conditions
+    let evaluator = CombinedExpressionEvaluator::with_database(combined_schema, database);
+
+    // Pre-create null values for unmatched/filtered rows
+    let null_values = vec![vibesql_types::SqlValue::Null; right_col_count];
+
+    // Estimate result size - at least left_slice.len() since we preserve all left rows
+    let mut result_rows = Vec::with_capacity(left_slice.len());
+
+    for left_row in left_slice {
+        let key = &left_row.values[left_col_idx];
+
+        // For NULL keys in left, emit left + NULLs (NULL never matches in equi-join)
+        if key == &vibesql_types::SqlValue::Null {
+            let mut combined = Vec::with_capacity(combined_size);
+            combined.extend_from_slice(&left_row.values);
+            combined.extend_from_slice(&null_values);
+            result_rows.push(vibesql_storage::Row::new(combined));
+            continue;
+        }
+
+        if let Some(right_indices) = hash_table.get(key) {
+            // Found equi-join matches - check additional filter for each
+            let mut any_match_passed = false;
+
+            for &right_idx in right_indices {
+                let right_row = &right_slice[right_idx];
+
+                // Create combined row for filter evaluation
+                let combined_row = combine_rows(left_row, right_row);
+
+                // Clear CSE cache before evaluation
+                evaluator.clear_cse_cache();
+
+                // Evaluate the additional filter
+                match evaluator.eval(additional_filter, &combined_row) {
+                    Ok(vibesql_types::SqlValue::Boolean(true)) => {
+                        // Filter passed - emit this combination
+                        any_match_passed = true;
+                        let mut combined = Vec::with_capacity(combined_size);
+                        combined.extend_from_slice(&left_row.values);
+                        combined.extend_from_slice(&right_row.values);
+                        result_rows.push(vibesql_storage::Row::new(combined));
+                    }
+                    Ok(vibesql_types::SqlValue::Boolean(false))
+                    | Ok(vibesql_types::SqlValue::Null) => {
+                        // Filter didn't pass - continue checking other matches
+                        continue;
+                    }
+                    Ok(_) | Err(_) => {
+                        // Non-boolean result or error - treat as non-match
+                        continue;
+                    }
+                }
+            }
+
+            // If NO matches passed the filter, emit left + NULLs
+            // This preserves LEFT JOIN semantics: all left rows must appear
+            if !any_match_passed {
+                let mut combined = Vec::with_capacity(combined_size);
+                combined.extend_from_slice(&left_row.values);
+                combined.extend_from_slice(&null_values);
+                result_rows.push(vibesql_storage::Row::new(combined));
+            }
+        } else {
+            // No equi-join match - emit left + NULLs
+            let mut combined = Vec::with_capacity(combined_size);
+            combined.extend_from_slice(&left_row.values);
+            combined.extend_from_slice(&null_values);
+            result_rows.push(vibesql_storage::Row::new(combined));
+        }
+    }
+
+    // Re-create combined schema (we consumed left/right)
+    let result_schema = combined_schema.clone();
+    Ok(FromResult::from_rows(result_schema, result_rows))
+}
