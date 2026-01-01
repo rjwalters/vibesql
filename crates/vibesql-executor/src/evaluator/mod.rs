@@ -10,7 +10,7 @@ pub(crate) mod compiled_case;
 pub(crate) mod compiled_pivot;
 mod core;
 pub mod date_format;
-mod expression_hash;
+pub(crate) mod expression_hash;
 mod expressions;
 pub(crate) mod functions;
 pub(crate) mod operators;

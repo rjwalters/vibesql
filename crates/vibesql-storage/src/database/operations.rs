@@ -459,6 +459,35 @@ impl Operations {
         )
     }
 
+    /// Create an index with pre-computed keys (for expression indexes)
+    ///
+    /// This method is used when the caller has already evaluated the expressions
+    /// and computed the key values for each row. This is necessary for expression
+    /// indexes where the key values are derived from evaluating expressions on rows.
+    pub fn create_index_with_keys(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        index_name: String,
+        table_name: String,
+        unique: bool,
+        columns: Vec<vibesql_ast::IndexColumn>,
+        keys: Vec<(Vec<vibesql_types::SqlValue>, usize)>,
+    ) -> Result<(), StorageError> {
+        // Get the table schema for key type inference
+        let table_schema = catalog
+            .get_table(&table_name)
+            .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
+
+        self.index_manager.create_index_with_keys(
+            index_name,
+            table_name,
+            table_schema,
+            unique,
+            columns,
+            keys,
+        )
+    }
+
     /// Check if an index exists
     pub fn index_exists(&self, index_name: &str) -> bool {
         self.index_manager.index_exists(index_name)

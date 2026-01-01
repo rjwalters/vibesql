@@ -144,6 +144,36 @@ impl Database {
         )
     }
 
+    /// Create an index with pre-computed keys (for expression indexes)
+    ///
+    /// This method is used when the caller has already evaluated the expressions
+    /// and computed the key values for each row. This is necessary for expression
+    /// indexes where the key values are derived from evaluating expressions on rows.
+    ///
+    /// # Arguments
+    /// * `index_name` - Name of the index to create
+    /// * `table_name` - Name of the table this index is on
+    /// * `unique` - Whether this is a unique index
+    /// * `columns` - The index column definitions (for metadata storage)
+    /// * `keys` - Pre-computed (key_values, row_id) pairs
+    pub fn create_index_with_keys(
+        &mut self,
+        index_name: String,
+        table_name: String,
+        unique: bool,
+        columns: Vec<IndexColumn>,
+        keys: Vec<(Vec<vibesql_types::SqlValue>, usize)>,
+    ) -> Result<(), StorageError> {
+        self.operations.create_index_with_keys(
+            &self.catalog,
+            index_name,
+            table_name,
+            unique,
+            columns,
+            keys,
+        )
+    }
+
     /// Check if an index exists
     pub fn index_exists(&self, index_name: &str) -> bool {
         self.operations.index_exists(index_name)
