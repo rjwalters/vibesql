@@ -521,14 +521,14 @@ impl VibeSqlDB {
                 }
             }
             SqlValue::Numeric(_) => value.to_string(),
-            SqlValue::Float(f) | SqlValue::Real(f) => {
+            SqlValue::Float(f) => {
                 if f.fract() == 0.0 {
                     format!("{:.1}", f)
                 } else {
                     f.to_string()
                 }
             }
-            SqlValue::Double(f) => {
+            SqlValue::Real(f) | SqlValue::Double(f) => {
                 if f.fract() == 0.0 {
                     format!("{:.1}", f)
                 } else {
@@ -582,14 +582,14 @@ impl VibeSqlDB {
                 }
             }
             SqlValue::Numeric(_) => value.to_string(),
-            SqlValue::Float(f) | SqlValue::Real(f) => {
+            SqlValue::Float(f) => {
                 if f.fract() == 0.0 {
                     format!("{:.1}", f)
                 } else {
                     f.to_string()
                 }
             }
-            SqlValue::Double(f) => {
+            SqlValue::Real(f) | SqlValue::Double(f) => {
                 if f.fract() == 0.0 {
                     format!("{:.1}", f)
                 } else {

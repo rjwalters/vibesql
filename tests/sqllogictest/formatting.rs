@@ -52,7 +52,11 @@ pub fn format_sql_value(value: &SqlValue, expected_type: Option<&DefaultColumnTy
                 }
             }
         }
-        SqlValue::Float(f) | SqlValue::Real(f) => {
+        SqlValue::Float(f) => {
+            // Always format with 3 decimal places for SQLLogicTest compatibility
+            format!("{:.3}", f)
+        }
+        SqlValue::Real(f) => {
             // Always format with 3 decimal places for SQLLogicTest compatibility
             format!("{:.3}", f)
         }
@@ -125,7 +129,11 @@ pub fn format_sql_value_canonical(
                 }
             }
         }
-        SqlValue::Float(f) | SqlValue::Real(f) => {
+        SqlValue::Float(f) => {
+            // Always format with 3 decimal places for SQLLogicTest compatibility
+            format!("{:.3}", f)
+        }
+        SqlValue::Real(f) => {
             // Always format with 3 decimal places for SQLLogicTest compatibility
             format!("{:.3}", f)
         }

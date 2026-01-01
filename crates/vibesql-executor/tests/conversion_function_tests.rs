@@ -90,7 +90,7 @@ fn float_lit(value: f32) -> vibesql_ast::Expression {
 }
 
 /// Helper to create a real literal expression
-fn real_lit(value: f32) -> vibesql_ast::Expression {
+fn real_lit(value: f64) -> vibesql_ast::Expression {
     vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Real(value))
 }
 
