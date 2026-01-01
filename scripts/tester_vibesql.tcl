@@ -1553,8 +1553,6 @@ array set vibesql_skip_tests {
     select7-6.2 "VibeSQL does not enforce SQLite's 500-term compound SELECT limit"
     select7-6.6 "Tests SQLite-specific error message format for empty identifiers"
     select6-1.9 "Expression-based column names (min(x)+y) not supported as column references"
-    select6-4.4 "Aggregate on outer query referencing subquery column"
-    select6-4.5 "Aggregate on outer query referencing subquery column"
     selectB-3.8 "Tests internal VDBE transform optimization"
     selectB-4.8 "Tests internal VDBE transform optimization"
     selectB-5.8 "Tests internal VDBE transform optimization"
