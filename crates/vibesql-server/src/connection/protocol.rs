@@ -318,6 +318,39 @@ pub async fn send_query_result(
         ExecutionResult::Rollback => {
             send_command_complete(write_half, write_buf, "ROLLBACK").await?;
         }
+
+        ExecutionResult::Explain { plan_text, columns } => {
+            // Send row description
+            let fields: Vec<FieldDescription> = columns
+                .iter()
+                .enumerate()
+                .map(|(i, col)| FieldDescription {
+                    name: col.name.clone(),
+                    table_oid: 0,
+                    column_attr_number: i as i16,
+                    data_type_oid: 25,  // TEXT type
+                    data_type_size: -1, // Variable length
+                    type_modifier: -1,
+                    format_code: 0, // Text format
+                })
+                .collect();
+
+            BackendMessage::RowDescription { fields }.encode(write_buf);
+
+            // Split the plan text into lines and send each as a row
+            let lines: Vec<&str> = plan_text.lines().collect();
+            let row_count = lines.len();
+
+            for line in lines {
+                let values: Vec<Option<Vec<u8>>> = vec![Some(line.as_bytes().to_vec())];
+                BackendMessage::DataRow { values }.encode(write_buf);
+            }
+
+            BackendMessage::CommandComplete { tag: format!("EXPLAIN {}", row_count) }
+                .encode(write_buf);
+
+            flush_write_buffer(write_half, write_buf).await?;
+        }
     }
 
     Ok(())
