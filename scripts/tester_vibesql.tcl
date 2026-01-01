@@ -1182,13 +1182,6 @@ proc execsql {sql {db ""}} {
 
     set parsed [parse_raw_result $result]
 
-    # DEBUG: Check for precision issues
-    if {[string match "*r1/r2*" $sql]} {
-        puts stderr "DEBUG: raw_sql=$raw_sql"
-        puts stderr "DEBUG: result='$result'"
-        puts stderr "DEBUG: parsed='$parsed'"
-    }
-
     # If this was a DML statement, extract the changes count from the result
     if {$is_dml && [llength $parsed] > 0} {
         # The last value should be the changes() result
