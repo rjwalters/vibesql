@@ -332,6 +332,19 @@ impl ExpressionEvaluator<'_> {
                                 | vibesql_ast::BinaryOperator::GreaterThanOrEqual
                         );
 
+                        // Handle row value constructor comparisons
+                        // SQL:1999 Section 7.1: Row value constructor comparison
+                        // (a, b) op (c, d) uses lexicographic ordering
+                        if is_comparison {
+                            if let (
+                                vibesql_ast::Expression::RowValueConstructor(left_values),
+                                vibesql_ast::Expression::RowValueConstructor(right_values),
+                            ) = (left.as_ref(), right.as_ref())
+                            {
+                                return self.eval_row_value_comparison(left_values, op, right_values, row);
+                            }
+                        }
+
                         // Get effective collation from either side
                         // Priority: explicit COLLATE > column-level collation
                         // Check left side first, then right side
@@ -692,9 +705,11 @@ impl ExpressionEvaluator<'_> {
                 Ok(result)
             }
 
-            // Row value constructor - not supported in regular evaluation context
+            // Row value constructor - evaluate to a vector of values
+            // This is only reached when a row value appears outside a comparison context
+            // (e.g., in SELECT list which is not supported)
             vibesql_ast::Expression::RowValueConstructor(_) => Err(ExecutorError::UnsupportedExpression(
-                "Row value constructors are not supported in this context".to_string(),
+                "Row value constructors are only supported in comparison expressions".to_string(),
             )),
 
             // COLLATE expression - evaluate inner expression (collation affects string comparison)
@@ -960,5 +975,213 @@ impl ExpressionEvaluator<'_> {
             IntervalUnit::YearMonth => "YEAR_MONTH",
         }
         .to_string()
+    }
+
+    /// Evaluate row value constructor comparison
+    ///
+    /// SQL:1999 Section 7.1: Row value constructor comparison
+    /// Row values are compared element by element using lexicographic ordering:
+    /// - (a, b) < (c, d) is true if a < c OR (a = c AND b < d)
+    /// - (a, b) = (c, d) is true if a = c AND b = d
+    /// - (a, b) <> (c, d) is true if a <> c OR b <> d
+    ///
+    /// NULL handling: If any element comparison involves NULL, the result follows
+    /// SQL three-valued logic (NULL propagates unless short-circuited by a definite result).
+    fn eval_row_value_comparison(
+        &self,
+        left_exprs: &[vibesql_ast::Expression],
+        op: &vibesql_ast::BinaryOperator,
+        right_exprs: &[vibesql_ast::Expression],
+        row: &vibesql_storage::Row,
+    ) -> Result<SqlValue, ExecutorError> {
+        // Row values must have the same number of elements
+        if left_exprs.len() != right_exprs.len() {
+            return Err(ExecutorError::UnsupportedExpression(format!(
+                "Row value constructor size mismatch: left has {} elements, right has {}",
+                left_exprs.len(),
+                right_exprs.len()
+            )));
+        }
+
+        // Empty row values are not allowed
+        if left_exprs.is_empty() {
+            return Err(ExecutorError::UnsupportedExpression(
+                "Empty row value constructors are not allowed".to_string(),
+            ));
+        }
+
+        // Evaluate all elements
+        let mut left_values = Vec::with_capacity(left_exprs.len());
+        let mut right_values = Vec::with_capacity(right_exprs.len());
+
+        for (left_expr, right_expr) in left_exprs.iter().zip(right_exprs.iter()) {
+            left_values.push(self.eval(left_expr, row)?);
+            right_values.push(self.eval(right_expr, row)?);
+        }
+
+        // Perform comparison based on operator
+        match op {
+            vibesql_ast::BinaryOperator::Equal => {
+                // (a, b) = (c, d) → a = c AND b = d
+                // If any comparison is NULL, result is NULL (unless a definite FALSE)
+                let mut has_null = false;
+                for (left_val, right_val) in left_values.iter().zip(right_values.iter()) {
+                    let cmp_result = self.eval_binary_op(left_val, op, right_val)?;
+                    match cmp_result {
+                        SqlValue::Boolean(false) => return Ok(SqlValue::Boolean(false)),
+                        SqlValue::Null => has_null = true,
+                        SqlValue::Boolean(true) => {}
+                        _ => {
+                            return Err(ExecutorError::TypeError(format!(
+                                "Comparison returned non-boolean: {:?}",
+                                cmp_result
+                            )))
+                        }
+                    }
+                }
+                if has_null {
+                    Ok(SqlValue::Null)
+                } else {
+                    Ok(SqlValue::Boolean(true))
+                }
+            }
+
+            vibesql_ast::BinaryOperator::NotEqual => {
+                // (a, b) <> (c, d) → a <> c OR b <> d
+                // If any comparison is TRUE, result is TRUE
+                // If any comparison is NULL and no TRUE found, result is NULL
+                let mut has_null = false;
+                for (left_val, right_val) in left_values.iter().zip(right_values.iter()) {
+                    let eq_result =
+                        self.eval_binary_op(left_val, &vibesql_ast::BinaryOperator::Equal, right_val)?;
+                    match eq_result {
+                        SqlValue::Boolean(false) => return Ok(SqlValue::Boolean(true)), // Not equal found
+                        SqlValue::Null => has_null = true,
+                        SqlValue::Boolean(true) => {} // Equal, continue checking
+                        _ => {
+                            return Err(ExecutorError::TypeError(format!(
+                                "Comparison returned non-boolean: {:?}",
+                                eq_result
+                            )))
+                        }
+                    }
+                }
+                if has_null {
+                    Ok(SqlValue::Null)
+                } else {
+                    Ok(SqlValue::Boolean(false)) // All elements were equal
+                }
+            }
+
+            vibesql_ast::BinaryOperator::LessThan
+            | vibesql_ast::BinaryOperator::LessThanOrEqual
+            | vibesql_ast::BinaryOperator::GreaterThan
+            | vibesql_ast::BinaryOperator::GreaterThanOrEqual => {
+                // Lexicographic ordering: compare element by element
+                // (a, b) < (c, d) → a < c OR (a = c AND b < d)
+                self.eval_row_value_ordering(&left_values, op, &right_values)
+            }
+
+            _ => Err(ExecutorError::UnsupportedExpression(format!(
+                "Unsupported operator for row value comparison: {:?}",
+                op
+            ))),
+        }
+    }
+
+    /// Helper for lexicographic ordering comparison of row values
+    ///
+    /// For < and <=:
+    /// (a, b) < (c, d) → a < c OR (a = c AND b < d)
+    ///
+    /// For > and >=:
+    /// (a, b) > (c, d) → a > c OR (a = c AND b > d)
+    fn eval_row_value_ordering(
+        &self,
+        left_values: &[SqlValue],
+        op: &vibesql_ast::BinaryOperator,
+        right_values: &[SqlValue],
+    ) -> Result<SqlValue, ExecutorError> {
+        let is_less = matches!(
+            op,
+            vibesql_ast::BinaryOperator::LessThan | vibesql_ast::BinaryOperator::LessThanOrEqual
+        );
+        let is_or_equal = matches!(
+            op,
+            vibesql_ast::BinaryOperator::LessThanOrEqual
+                | vibesql_ast::BinaryOperator::GreaterThanOrEqual
+        );
+
+        // The strict comparison operator (without the equality part)
+        let strict_op = if is_less {
+            vibesql_ast::BinaryOperator::LessThan
+        } else {
+            vibesql_ast::BinaryOperator::GreaterThan
+        };
+
+        let eq_op = vibesql_ast::BinaryOperator::Equal;
+
+        // Track if we've seen NULL in any comparison
+        let mut has_null = false;
+
+        // Compare element by element
+        for i in 0..left_values.len() {
+            let left_val = &left_values[i];
+            let right_val = &right_values[i];
+
+            // First check if this element satisfies the strict inequality
+            let strict_result = self.eval_binary_op(left_val, &strict_op, right_val)?;
+            match strict_result {
+                SqlValue::Boolean(true) => {
+                    // Strict inequality satisfied at this position → result is TRUE
+                    return Ok(SqlValue::Boolean(true));
+                }
+                SqlValue::Null => {
+                    // NULL comparison - we can't determine result yet
+                    has_null = true;
+                }
+                SqlValue::Boolean(false) => {
+                    // Not strictly less/greater - check if equal
+                    let eq_result = self.eval_binary_op(left_val, &eq_op, right_val)?;
+                    match eq_result {
+                        SqlValue::Boolean(true) => {
+                            // Equal at this position - continue to next element
+                        }
+                        SqlValue::Boolean(false) => {
+                            // Not equal and not strictly less/greater means strictly greater/less
+                            // So the comparison fails
+                            return Ok(SqlValue::Boolean(false));
+                        }
+                        SqlValue::Null => {
+                            has_null = true;
+                        }
+                        _ => {
+                            return Err(ExecutorError::TypeError(format!(
+                                "Comparison returned non-boolean: {:?}",
+                                eq_result
+                            )))
+                        }
+                    }
+                }
+                _ => {
+                    return Err(ExecutorError::TypeError(format!(
+                        "Comparison returned non-boolean: {:?}",
+                        strict_result
+                    )))
+                }
+            }
+        }
+
+        // We've compared all elements and they were all equal (no strict inequality found)
+        if has_null {
+            // NULL was encountered somewhere
+            Ok(SqlValue::Null)
+        } else if is_or_equal {
+            // For <= or >=, all equal means TRUE
+            Ok(SqlValue::Boolean(true))
+        } else {
+            // For < or >, all equal means FALSE
+            Ok(SqlValue::Boolean(false))
+        }
     }
 }
