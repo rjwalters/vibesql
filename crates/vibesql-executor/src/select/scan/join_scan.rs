@@ -201,6 +201,7 @@ where
             on_condition,
             &left_result.schema,
             &right_result.schema,
+            database,
         )?;
     }
 
@@ -1550,7 +1551,8 @@ fn generate_using_join_condition(
 ///
 /// This validation checks two cases:
 /// 1. Table-qualified references (e.g., `t3.x`) - the table must exist in left or right schema
-/// 2. Unqualified references (e.g., `b`) - the column must exist in some table in left or right schema
+/// 2. Unqualified references (e.g., `b`) - if the column doesn't exist in left/right schemas but
+///    DOES exist in some table in the database, it's referencing a table to the right
 ///
 /// Example that should fail:
 /// ```sql
@@ -1561,6 +1563,7 @@ fn validate_on_clause_table_references(
     on_condition: &vibesql_ast::Expression,
     left_schema: &CombinedSchema,
     right_schema: &CombinedSchema,
+    database: &vibesql_storage::Database,
 ) -> Result<(), ExecutorError> {
     // Collect all table names from both schemas (lowercase for case-insensitive comparison)
     let mut valid_tables: HashSet<String> = HashSet::new();
@@ -1584,22 +1587,42 @@ fn validate_on_clause_table_references(
         }
     }
 
+    // Collect all column names from all tables in the database (for detecting right-table references)
+    let mut all_db_columns: HashSet<String> = HashSet::new();
+    for table_name in database.list_tables() {
+        if let Some(table) = database.get_table(&table_name) {
+            for col in &table.schema.columns {
+                all_db_columns.insert(col.name.to_lowercase());
+            }
+        }
+    }
+
     // Check if the ON condition references any tables/columns not in valid sets
-    if on_clause_references_unknown_table_or_column(on_condition, &valid_tables, &valid_columns) {
+    if on_clause_references_unknown_table_or_column(
+        on_condition,
+        &valid_tables,
+        &valid_columns,
+        &all_db_columns,
+    ) {
         return Err(ExecutorError::OnClauseReferencesRightTable);
     }
 
     Ok(())
 }
 
-/// Recursively check if an expression references a table or column not in the valid sets.
+/// Recursively check if an expression references a table not in the valid set.
 ///
 /// For table-qualified references (e.g., `t3.x`): checks if the table is in valid_tables.
-/// For unqualified references (e.g., `b`): checks if the column name is in valid_columns.
+/// For unqualified references (e.g., `b`): checks if the column exists in valid_columns.
+///   - If it exists in valid_columns, it's OK (column is in current join)
+///   - If it doesn't exist in valid_columns BUT exists in all_db_columns, it's referencing
+///     a table to the right (error)
+///   - If it doesn't exist in either, it might be a SELECT alias (allow, will fail later if invalid)
 fn on_clause_references_unknown_table_or_column(
     expr: &vibesql_ast::Expression,
     valid_tables: &HashSet<String>,
     valid_columns: &HashSet<String>,
+    all_db_columns: &HashSet<String>,
 ) -> bool {
     match expr {
         vibesql_ast::Expression::ColumnRef(col_id) => {
@@ -1608,78 +1631,90 @@ fn on_clause_references_unknown_table_or_column(
                 let table_lower = table_name.to_lowercase();
                 !valid_tables.contains(&table_lower)
             } else {
-                // Unqualified: check if the column exists in any valid table
+                // Unqualified column: check if it references a table to the right
                 let col_lower = col_id.column_canonical().to_lowercase();
-                !valid_columns.contains(&col_lower)
+                if valid_columns.contains(&col_lower) {
+                    // Column exists in current join schemas - OK
+                    false
+                } else if all_db_columns.contains(&col_lower) {
+                    // Column doesn't exist in current schemas but exists in some DB table
+                    // This means it's referencing a table to the right
+                    true
+                } else {
+                    // Column doesn't exist anywhere - might be a SELECT alias
+                    // Allow it through, will fail later if truly invalid
+                    false
+                }
             }
         }
         vibesql_ast::Expression::BinaryOp { left, right, .. } => {
-            on_clause_references_unknown_table_or_column(left, valid_tables, valid_columns)
-                || on_clause_references_unknown_table_or_column(right, valid_tables, valid_columns)
+            on_clause_references_unknown_table_or_column(left, valid_tables, valid_columns, all_db_columns)
+                || on_clause_references_unknown_table_or_column(right, valid_tables, valid_columns, all_db_columns)
         }
         vibesql_ast::Expression::UnaryOp { expr, .. } => {
-            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns)
+            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns, all_db_columns)
         }
         vibesql_ast::Expression::IsNull { expr, .. } => {
-            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns)
+            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns, all_db_columns)
         }
         vibesql_ast::Expression::Between { expr, low, high, .. } => {
-            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns)
-                || on_clause_references_unknown_table_or_column(low, valid_tables, valid_columns)
-                || on_clause_references_unknown_table_or_column(high, valid_tables, valid_columns)
+            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns, all_db_columns)
+                || on_clause_references_unknown_table_or_column(low, valid_tables, valid_columns, all_db_columns)
+                || on_clause_references_unknown_table_or_column(high, valid_tables, valid_columns, all_db_columns)
         }
         vibesql_ast::Expression::InList { expr, values, .. } => {
-            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns)
+            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns, all_db_columns)
                 || values
                     .iter()
-                    .any(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns))
+                    .any(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns))
         }
         vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
             operand
                 .as_ref()
-                .map(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns))
+                .map(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns))
                 .unwrap_or(false)
                 || when_clauses.iter().any(|case_when| {
                     case_when.conditions.iter().any(|c| {
-                        on_clause_references_unknown_table_or_column(c, valid_tables, valid_columns)
+                        on_clause_references_unknown_table_or_column(c, valid_tables, valid_columns, all_db_columns)
                     }) || on_clause_references_unknown_table_or_column(
                         &case_when.result,
                         valid_tables,
                         valid_columns,
+                        all_db_columns,
                     )
                 })
                 || else_result
                     .as_ref()
-                    .map(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns))
+                    .map(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns))
                     .unwrap_or(false)
         }
         vibesql_ast::Expression::Function { args, .. } => args
             .iter()
-            .any(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns)),
+            .any(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns)),
         vibesql_ast::Expression::AggregateFunction { args, filter, .. } => {
             args.iter()
-                .any(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns))
+                .any(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns))
                 || filter
                     .as_ref()
-                    .map(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns))
+                    .map(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns))
                     .unwrap_or(false)
         }
         vibesql_ast::Expression::WindowFunction { function, over } => {
             let func_refs = match function {
                 vibesql_ast::WindowFunctionSpec::Aggregate { args, filter, .. } => {
                     args.iter().any(|e| {
-                        on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns)
+                        on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns)
                     }) || filter
                         .as_ref()
                         .map(|e| {
-                            on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns)
+                            on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns)
                         })
                         .unwrap_or(false)
                 }
                 vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
                 | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args
                     .iter()
-                    .any(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns)),
+                    .any(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns)),
             };
             func_refs
                 || over
@@ -1687,7 +1722,7 @@ fn on_clause_references_unknown_table_or_column(
                     .as_ref()
                     .map(|exprs| {
                         exprs.iter().any(|e| {
-                            on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns)
+                            on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns)
                         })
                     })
                     .unwrap_or(false)
@@ -1700,16 +1735,17 @@ fn on_clause_references_unknown_table_or_column(
                                 &item.expr,
                                 valid_tables,
                                 valid_columns,
+                                all_db_columns,
                             )
                         })
                     })
                     .unwrap_or(false)
         }
         vibesql_ast::Expression::Collate { expr, .. } => {
-            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns)
+            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns, all_db_columns)
         }
         vibesql_ast::Expression::Cast { expr, .. } => {
-            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns)
+            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns, all_db_columns)
         }
         // Literals, Null, Subquery, etc. don't reference tables in the join
         _ => false,
