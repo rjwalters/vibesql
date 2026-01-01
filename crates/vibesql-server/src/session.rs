@@ -86,6 +86,12 @@ pub enum ExecutionResult {
     Commit,
     /// Transaction rolled back
     Rollback,
+    /// EXPLAIN query plan output
+    Explain {
+        plan_text: String,
+        /// Column headers for the result
+        columns: Vec<Column>,
+    },
     Other {
         message: String,
     },
@@ -115,6 +121,7 @@ impl ExecutionResult {
             ExecutionResult::Begin => "BEGIN",
             ExecutionResult::Commit => "COMMIT",
             ExecutionResult::Rollback => "ROLLBACK",
+            ExecutionResult::Explain { .. } => "EXPLAIN",
             ExecutionResult::Other { .. } => "OTHER",
         }
     }
@@ -419,6 +426,28 @@ impl Session {
             // We parse them for compatibility but treat them as no-ops
             Statement::Pragma(_pragma_stmt) => {
                 Ok(ExecutionResult::Other { message: "PRAGMA".to_string() })
+            }
+
+            // EXPLAIN and EXPLAIN QUERY PLAN
+            Statement::Explain(explain_stmt) => {
+                let db = self.db.read().await;
+                let result = vibesql_executor::ExplainExecutor::execute(explain_stmt, &db)?;
+
+                // Format based on the statement options
+                let plan_text = if explain_stmt.query_plan {
+                    // SQLite-style EXPLAIN QUERY PLAN output
+                    result.to_sqlite_eqp()
+                } else {
+                    match explain_stmt.format {
+                        vibesql_ast::ExplainFormat::Json => result.to_json(),
+                        vibesql_ast::ExplainFormat::Text => result.to_text(),
+                    }
+                };
+
+                Ok(ExecutionResult::Explain {
+                    plan_text,
+                    columns: vec![Column { name: "QUERY PLAN".to_string() }],
+                })
             }
 
             _ => {
@@ -842,5 +871,120 @@ mod tests {
             }
             _ => panic!("Expected Select result"),
         }
+    }
+
+    // =========================================================================
+    // EXPLAIN QUERY PLAN Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_explain_query_plan_basic() {
+        let db = create_shared_db();
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string(), db);
+
+        // Create a table
+        session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").await.unwrap();
+
+        // Test EXPLAIN QUERY PLAN
+        let result = session.execute("EXPLAIN QUERY PLAN SELECT * FROM users").await.unwrap();
+
+        match result {
+            ExecutionResult::Explain { plan_text, columns } => {
+                // Should have the QUERY PLAN column header
+                assert_eq!(columns.len(), 1);
+                assert_eq!(columns[0].name, "QUERY PLAN");
+
+                // Should contain expected plan output
+                assert!(
+                    plan_text.contains("SCAN") || plan_text.contains("Scan"),
+                    "Expected scan operation in plan: {}",
+                    plan_text
+                );
+            }
+            other => panic!("Expected Explain result, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_explain_text_format() {
+        let db = create_shared_db();
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string(), db);
+
+        // Create a table
+        session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").await.unwrap();
+
+        // Test EXPLAIN (default text format)
+        let result = session.execute("EXPLAIN SELECT * FROM users").await.unwrap();
+
+        match result {
+            ExecutionResult::Explain { plan_text, .. } => {
+                // PostgreSQL-style text output
+                assert!(plan_text.contains("Select"), "Expected Select in plan: {}", plan_text);
+            }
+            other => panic!("Expected Explain result, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_explain_json_format() {
+        let db = create_shared_db();
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string(), db);
+
+        // Create a table
+        session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").await.unwrap();
+
+        // Test EXPLAIN FORMAT JSON
+        let result = session.execute("EXPLAIN FORMAT JSON SELECT * FROM users").await.unwrap();
+
+        match result {
+            ExecutionResult::Explain { plan_text, .. } => {
+                // Should be valid JSON structure
+                assert!(plan_text.starts_with('{'), "JSON should start with {{: {}", plan_text);
+                assert!(plan_text.ends_with('}'), "JSON should end with }}: {}", plan_text);
+                assert!(
+                    plan_text.contains("\"operation\""),
+                    "JSON should have operation field: {}",
+                    plan_text
+                );
+            }
+            other => panic!("Expected Explain result, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_explain_with_index() {
+        let db = create_shared_db();
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string(), db);
+
+        // Create a table with an index
+        session.execute("CREATE TABLE users (id INT, email VARCHAR(100))").await.unwrap();
+        session.execute("CREATE INDEX idx_email ON users(email)").await.unwrap();
+
+        // Test EXPLAIN with index usage
+        let result = session
+            .execute("EXPLAIN SELECT * FROM users WHERE email = 'test@example.com'")
+            .await
+            .unwrap();
+
+        match result {
+            ExecutionResult::Explain { plan_text, .. } => {
+                // Should show some scan operation (index or seq scan depending on optimizer)
+                assert!(
+                    plan_text.contains("Scan") || plan_text.contains("Select"),
+                    "Expected scan or select in plan: {}",
+                    plan_text
+                );
+            }
+            other => panic!("Expected Explain result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_explain_statement_type() {
+        let result = ExecutionResult::Explain {
+            plan_text: "QUERY PLAN\n`--SCAN users".to_string(),
+            columns: vec![Column { name: "QUERY PLAN".to_string() }],
+        };
+        assert_eq!(result.statement_type(), "EXPLAIN");
     }
 }
