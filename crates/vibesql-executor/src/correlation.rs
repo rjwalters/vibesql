@@ -64,6 +64,18 @@ fn extract_table_names_recursive(from: &FromClause, tables: &mut Vec<String>) {
     }
 }
 
+/// Helper to extract table names from a SelectStmt's FROM clause
+/// Used for set operation traversal (issue #4749)
+fn extract_table_names_recursive_from_select(stmt: &SelectStmt, tables: &mut Vec<String>) {
+    if let Some(from_clause) = &stmt.from {
+        extract_table_names_recursive(from_clause, tables);
+    }
+    // Recursively handle chained set operations
+    if let Some(set_op) = &stmt.set_operation {
+        extract_table_names_recursive_from_select(&set_op.right, tables);
+    }
+}
+
 /// Check if a SELECT statement references columns from outer schema
 fn is_select_stmt_correlated_impl(
     stmt: &SelectStmt,
@@ -128,9 +140,14 @@ fn is_select_stmt_correlated_impl(
     }
 
     // Check set operations (UNION, INTERSECT, EXCEPT)
+    // FIX for issue #4749: Collect tables from all branches of the set operation
+    // Each branch has its own FROM clause, so we need to include those tables
+    // when checking for correlation to distinguish inner vs outer columns.
     if let Some(set_op) = &stmt.set_operation {
-        // Set operations combine results, but both sides should use same subquery tables
-        if is_select_stmt_correlated_impl(&set_op.right, outer_schema, subquery_tables) {
+        // Collect tables from the set operation's right side
+        let mut all_subquery_tables = subquery_tables.to_vec();
+        extract_table_names_recursive_from_select(&set_op.right, &mut all_subquery_tables);
+        if is_select_stmt_correlated_impl(&set_op.right, outer_schema, &all_subquery_tables) {
             return true;
         }
     }

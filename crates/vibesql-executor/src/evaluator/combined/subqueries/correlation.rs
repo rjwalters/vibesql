@@ -125,6 +125,31 @@ fn collect_correlation_refs(
             collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
         }
     }
+
+    // FIX for issue #4749: Also check set operations (INTERSECT, UNION, EXCEPT)
+    // When a subquery contains a set operation, the right side may reference
+    // outer columns that need to be included in correlation detection.
+    // For example: SELECT 123 INTERSECT SELECT c2 FROM t4
+    // where c2 references an outer table t2, not t4.
+    if let Some(set_op) = &subquery.set_operation {
+        // Collect tables from the set operation's right side to know what's "inner"
+        let mut all_subquery_tables = subquery_tables.to_vec();
+        extract_table_names_recursive_from_select(&set_op.right, &mut all_subquery_tables);
+
+        // Recursively collect correlation refs from the right side of the set operation
+        collect_correlation_refs(&set_op.right, outer_schema, &all_subquery_tables, refs);
+    }
+}
+
+/// Helper to extract table names from a SelectStmt's FROM clause
+fn extract_table_names_recursive_from_select(stmt: &vibesql_ast::SelectStmt, tables: &mut Vec<String>) {
+    if let Some(from_clause) = &stmt.from {
+        extract_table_names_recursive(from_clause, tables);
+    }
+    // Recursively handle chained set operations
+    if let Some(set_op) = &stmt.set_operation {
+        extract_table_names_recursive_from_select(&set_op.right, tables);
+    }
 }
 
 /// Collect correlation column references from an expression
