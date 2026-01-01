@@ -28,7 +28,8 @@ pub fn enforce_primary_key_constraint(
                 .iter()
                 .map(|col| format!("{}.{}", table_name, col))
                 .collect();
-            return Err(ExecutorError::ConstraintViolation(format!(
+            // SQLite-compatible: output the message as-is without prefix
+            return Err(ExecutorError::SqliteCompatError(format!(
                 "UNIQUE constraint failed: {}",
                 qualified_cols.join(", ")
             )));
@@ -54,7 +55,8 @@ pub fn enforce_primary_key_constraint(
                     .iter()
                     .map(|col| format!("{}.{}", table_name, col))
                     .collect();
-                return Err(ExecutorError::ConstraintViolation(format!(
+                // SQLite-compatible: output the message as-is without prefix
+                return Err(ExecutorError::SqliteCompatError(format!(
                     "UNIQUE constraint failed: {}",
                     qualified_cols.join(", ")
                 )));
@@ -72,7 +74,8 @@ pub fn enforce_primary_key_constraint(
                         .iter()
                         .map(|col| format!("{}.{}", table_name, col))
                         .collect();
-                    return Err(ExecutorError::ConstraintViolation(format!(
+                    // SQLite-compatible: output the message as-is without prefix
+                    return Err(ExecutorError::SqliteCompatError(format!(
                         "UNIQUE constraint failed: {}",
                         qualified_cols.join(", ")
                     )));
@@ -114,7 +117,8 @@ pub fn enforce_unique_constraints(
                 .iter()
                 .map(|col| format!("{}.{}", table_name, col))
                 .collect();
-            return Err(ExecutorError::ConstraintViolation(format!(
+            // SQLite-compatible: output the message as-is without prefix
+            return Err(ExecutorError::SqliteCompatError(format!(
                 "UNIQUE constraint failed: {}",
                 qualified_cols.join(", ")
             )));
@@ -136,7 +140,8 @@ pub fn enforce_unique_constraints(
                     .iter()
                     .map(|col| format!("{}.{}", table_name, col))
                     .collect();
-                return Err(ExecutorError::ConstraintViolation(format!(
+                // SQLite-compatible: output the message as-is without prefix
+                return Err(ExecutorError::SqliteCompatError(format!(
                     "UNIQUE constraint failed: {}",
                     qualified_cols.join(", ")
                 )));
@@ -162,7 +167,8 @@ pub fn enforce_unique_constraints(
                         .iter()
                         .map(|col| format!("{}.{}", table_name, col))
                         .collect();
-                    return Err(ExecutorError::ConstraintViolation(format!(
+                    // SQLite-compatible: output the message as-is without prefix
+                    return Err(ExecutorError::SqliteCompatError(format!(
                         "UNIQUE constraint failed: {}",
                         qualified_cols.join(", ")
                     )));
@@ -256,7 +262,8 @@ pub fn enforce_unique_indexes(
                         .map(|col| format!("{}.{}", table_name, col.expect_column_name()))
                         .collect::<Vec<_>>()
                         .join(", ");
-                    return Err(ExecutorError::ConstraintViolation(format!(
+                    // SQLite-compatible: output the message as-is without prefix
+                    return Err(ExecutorError::SqliteCompatError(format!(
                         "UNIQUE constraint failed: {}",
                         columns_str
                     )));

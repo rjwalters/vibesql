@@ -1288,7 +1288,9 @@ impl From<vibesql_storage::StorageError> for ExecutorError {
                 ))
             }
             vibesql_storage::StorageError::UniqueConstraintViolation(msg) => {
-                ExecutorError::ConstraintViolation(msg)
+                // SQLite-compatible: output the message as-is without prefix
+                // Format: "UNIQUE constraint failed: table.column"
+                ExecutorError::SqliteCompatError(msg)
             }
             vibesql_storage::StorageError::InvalidIndexColumn(msg) => {
                 ExecutorError::StorageError(msg)
