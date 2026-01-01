@@ -58,7 +58,7 @@ impl Catalog {
     ) -> Result<IndexMetadata, CatalogError> {
         let qualified_name = format!("{}.{}", table_name, index_name);
 
-        self.indexes.remove(&qualified_name).ok_or_else(|| CatalogError::IndexNotFound {
+        self.indexes.shift_remove(&qualified_name).ok_or_else(|| CatalogError::IndexNotFound {
             index_name: index_name.to_string(),
             table_name: table_name.to_string(),
         })
@@ -91,7 +91,7 @@ impl Catalog {
 
         indexes_to_remove
             .into_iter()
-            .filter_map(|qualified_name| self.indexes.remove(&qualified_name))
+            .filter_map(|qualified_name| self.indexes.shift_remove(&qualified_name))
             .collect()
     }
 }

@@ -632,7 +632,7 @@ fn test_json_special_floats() {
         .insert(crate::Row::new(vec![
             SqlValue::Integer(1),
             SqlValue::Float(f32::NAN),
-            SqlValue::Real(f32::INFINITY),
+            SqlValue::Real(f64::INFINITY),
             SqlValue::Double(f64::NEG_INFINITY),
         ]))
         .unwrap();

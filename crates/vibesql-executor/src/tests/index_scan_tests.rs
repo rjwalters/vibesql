@@ -361,9 +361,9 @@ fn test_index_scan_where_order_by_no_double_filtering() {
             "tab1",
             Row::new(vec![
                 SqlValue::Integer(pk),
-                SqlValue::Real(pk as f32 * 10.0),
-                SqlValue::Real(pk as f32 * 20.0),
-                SqlValue::Real(col3_val as f32),
+                SqlValue::Real(pk as f64 * 10.0),
+                SqlValue::Real(pk as f64 * 20.0),
+                SqlValue::Real(col3_val as f64),
             ]),
         )
         .unwrap();

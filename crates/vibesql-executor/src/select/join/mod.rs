@@ -1256,6 +1256,7 @@ pub(super) fn nested_loop_join(
 /// - FULL OUTER JOIN: COALESCE(left, right) is used for both unmatched cases
 ///
 /// This function updates left column values to COALESCE(left, right) for common columns.
+#[allow(dead_code)]
 fn coalesce_common_columns_for_outer_join(
     result: &mut FromResult,
     left_schema: &CombinedSchema,

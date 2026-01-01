@@ -1297,6 +1297,7 @@ pub fn validate_having_aliased_aggregates(
 /// (not the subquery's own tables)
 ///
 /// Returns Some(column_name) if an outer column is found, None otherwise.
+#[allow(dead_code)]
 fn find_outer_column_in_expression(
     expr: &Expression,
     subquery_tables: &[String],
@@ -1430,6 +1431,7 @@ fn find_outer_column_in_expression(
 /// Check if an aggregate function's arguments reference columns from the outer schema
 ///
 /// Returns Some(aggregate_name) if misuse is found, None otherwise.
+#[allow(dead_code)]
 fn find_aggregate_with_outer_column(
     expr: &Expression,
     subquery_tables: &[String],
@@ -1566,6 +1568,7 @@ fn find_aggregate_with_outer_column(
 }
 
 /// Extract table names from a FROM clause
+#[allow(dead_code)]
 fn extract_table_names(from: Option<&vibesql_ast::FromClause>) -> Vec<String> {
     let mut tables = Vec::new();
     if let Some(from_clause) = from {
@@ -1575,6 +1578,7 @@ fn extract_table_names(from: Option<&vibesql_ast::FromClause>) -> Vec<String> {
 }
 
 /// Recursively extract table names from a FROM clause
+#[allow(dead_code)]
 fn extract_table_names_recursive(from: &vibesql_ast::FromClause, tables: &mut Vec<String>) {
     match from {
         vibesql_ast::FromClause::Table { name, alias, .. } => {
@@ -1596,6 +1600,7 @@ fn extract_table_names_recursive(from: &vibesql_ast::FromClause, tables: &mut Ve
 /// Build a CombinedSchema from table names in a FROM clause
 ///
 /// Looks up each table in the database and builds a schema containing all columns.
+#[allow(dead_code)]
 fn build_schema_from_tables(
     tables: &[String],
     database: &vibesql_storage::Database,
@@ -1650,6 +1655,7 @@ fn build_schema_from_tables(
 /// Note: This validation is skipped if the subquery's FROM clause contains CTEs or
 /// subquery aliases, since we can't reliably determine the inner schema without
 /// executing the CTE/subquery first.
+#[allow(dead_code)]
 pub fn validate_no_aggregate_with_outer_column(
     stmt: &vibesql_ast::SelectStmt,
     outer_schema: &CombinedSchema,

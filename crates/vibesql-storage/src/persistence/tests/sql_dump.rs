@@ -370,7 +370,7 @@ fn test_sql_dump_all_data_types() {
             SqlValue::Null,
             SqlValue::Null,
             SqlValue::Float(f32::NAN),
-            SqlValue::Real(f32::INFINITY),
+            SqlValue::Real(f64::INFINITY),
             SqlValue::Double(f64::NEG_INFINITY),
             SqlValue::Null,
             SqlValue::Null,

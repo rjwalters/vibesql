@@ -1283,6 +1283,7 @@ impl SelectExecutor<'_> {
     }
 
     /// Extract collation information from a SELECT list (legacy version without schema lookup).
+    #[allow(dead_code)]
     fn extract_collations_from_select_list(
         select_list: &[vibesql_ast::SelectItem],
     ) -> Vec<Option<String>> {

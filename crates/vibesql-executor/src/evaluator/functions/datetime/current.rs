@@ -230,7 +230,7 @@ pub fn datetime(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 /// Julian Day 0 is November 24, 4714 BC in the proleptic Gregorian calendar
 /// SQLite uses this for datetime(julianday) conversions
 fn julian_day_to_timestamp(jd: f64) -> Result<SqlValue, ExecutorError> {
-    use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
+    use chrono::{DateTime, Datelike, Timelike, Utc};
 
     // Julian Day epoch: November 24, 4714 BC = JD 0
     // We use the algorithm from the U.S. Naval Observatory
@@ -249,7 +249,7 @@ fn julian_day_to_timestamp(jd: f64) -> Result<SqlValue, ExecutorError> {
     }
 
     // Convert to Unix timestamp and then to datetime
-    let naive = NaiveDateTime::from_timestamp_opt(seconds_since_unix as i64, 0);
+    let naive = DateTime::<Utc>::from_timestamp(seconds_since_unix as i64, 0).map(|dt| dt.naive_utc());
 
     match naive {
         Some(dt) => {
