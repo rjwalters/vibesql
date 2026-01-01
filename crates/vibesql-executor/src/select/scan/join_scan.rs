@@ -196,13 +196,25 @@ where
     // Validate ON clause doesn't reference tables not yet introduced (to the right)
     // This is a SQLite-specific semantic check: ON clause can only reference tables
     // in the current join, not tables that appear later in the FROM clause.
-    if let Some(on_condition) = condition {
-        validate_on_clause_table_references(
-            on_condition,
-            &left_result.schema,
-            &right_result.schema,
-            database,
-        )?;
+    //
+    // IMPORTANT: This check only applies to OUTER joins (LEFT, RIGHT, FULL).
+    // For INNER joins, SQLite allows referencing tables to the right because
+    // INNER joins are commutative and SQLite can reorder them during optimization.
+    let is_outer_join = matches!(
+        join_type,
+        vibesql_ast::JoinType::LeftOuter
+            | vibesql_ast::JoinType::RightOuter
+            | vibesql_ast::JoinType::FullOuter
+    );
+    if is_outer_join {
+        if let Some(on_condition) = condition {
+            validate_on_clause_table_references(
+                on_condition,
+                &left_result.schema,
+                &right_result.schema,
+                database,
+            )?;
+        }
     }
 
     // For NATURAL JOIN, generate the implicit join condition based on common column names
