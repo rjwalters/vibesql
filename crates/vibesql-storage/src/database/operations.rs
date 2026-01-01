@@ -615,6 +615,73 @@ impl Operations {
         self.batch_update_spatial_indexes_for_insert(catalog, table_name, rows_to_insert);
     }
 
+    // ============================================================================
+    // Expression Index Methods
+    // ============================================================================
+
+    /// Add row to expression indexes after insert with pre-computed keys
+    ///
+    /// This method handles expression indexes which require pre-computed key values
+    /// since the storage layer cannot evaluate expressions.
+    pub fn add_to_expression_indexes_for_insert(
+        &mut self,
+        table_name: &str,
+        row_index: usize,
+        expression_keys: &std::collections::HashMap<String, Vec<vibesql_types::SqlValue>>,
+    ) {
+        self.index_manager.add_to_expression_indexes_for_insert(
+            table_name,
+            row_index,
+            expression_keys,
+        );
+    }
+
+    /// Update expression indexes for update operation with pre-computed keys
+    pub fn update_expression_indexes_for_update(
+        &mut self,
+        table_name: &str,
+        row_index: usize,
+        old_expression_keys: &std::collections::HashMap<String, Vec<vibesql_types::SqlValue>>,
+        new_expression_keys: &std::collections::HashMap<String, Vec<vibesql_types::SqlValue>>,
+    ) {
+        self.index_manager.update_expression_indexes_for_update(
+            table_name,
+            row_index,
+            old_expression_keys,
+            new_expression_keys,
+        );
+    }
+
+    /// Update expression indexes for delete operation with pre-computed keys
+    pub fn update_expression_indexes_for_delete(
+        &mut self,
+        table_name: &str,
+        row_index: usize,
+        expression_keys: &std::collections::HashMap<String, Vec<vibesql_types::SqlValue>>,
+    ) {
+        self.index_manager.update_expression_indexes_for_delete(
+            table_name,
+            row_index,
+            expression_keys,
+        );
+    }
+
+    /// Get expression indexes for a specific table
+    ///
+    /// Returns metadata for all expression indexes on the table. Used by executor
+    /// to determine which indexes need expression evaluation during DML operations.
+    pub fn get_expression_indexes_for_table(
+        &self,
+        table_name: &str,
+    ) -> Vec<(String, &super::indexes::IndexMetadata)> {
+        self.index_manager.get_expression_indexes_for_table(table_name)
+    }
+
+    /// Check if a table has any expression indexes
+    pub fn has_expression_indexes(&self, table_name: &str) -> bool {
+        self.index_manager.has_expression_indexes(table_name)
+    }
+
     /// Rebuild user-defined indexes after bulk operations that change row indices
     pub fn rebuild_indexes(
         &mut self,
