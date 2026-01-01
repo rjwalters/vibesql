@@ -265,7 +265,7 @@ impl<'a> IntrospectionExecutor<'a> {
         for index in indexes {
             for (seq, col) in index.columns.iter().enumerate() {
                 let non_unique = if index.is_unique { 0 } else { 1 };
-                let collation = match col.order {
+                let collation = match col.order() {
                     SortOrder::Ascending => "A",
                     SortOrder::Descending => "D",
                 };
@@ -278,23 +278,29 @@ impl<'a> IntrospectionExecutor<'a> {
                     IndexType::Hnsw { .. } => "HNSW",
                 };
 
+                // Get column name or expression representation
+                let column_name = col
+                    .column_name()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "(expression)".to_string());
+
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(arcstr::ArcStr::from(stmt.table_name.clone())), // Table
                     SqlValue::Integer(non_unique),                                    // Non_unique
                     SqlValue::Varchar(arcstr::ArcStr::from(index.name.clone())),      // Key_name
-                    SqlValue::Integer((seq + 1) as i64), // Seq_in_index
-                    SqlValue::Varchar(arcstr::ArcStr::from(col.column_name.clone())), // Column_name
-                    SqlValue::Varchar(collation.into()), // Collation
-                    SqlValue::Null,                      // Cardinality
-                    col.prefix_length
+                    SqlValue::Integer((seq + 1) as i64),                              // Seq_in_index
+                    SqlValue::Varchar(arcstr::ArcStr::from(column_name)),             // Column_name
+                    SqlValue::Varchar(collation.into()),                              // Collation
+                    SqlValue::Null,                                                   // Cardinality
+                    col.prefix_length()
                         .map(|l| SqlValue::Integer(l as i64))
                         .unwrap_or(SqlValue::Null), // Sub_part
-                    SqlValue::Null,                      // Packed
-                    SqlValue::Varchar("".into()),        // Null
-                    SqlValue::Varchar(index_type.into()), // Index_type
-                    SqlValue::Varchar("".into()),        // Comment
-                    SqlValue::Varchar("".into()),        // Index_comment
-                    SqlValue::Varchar("YES".into()),     // Visible
+                    SqlValue::Null,                                                   // Packed
+                    SqlValue::Varchar("".into()),                                     // Null
+                    SqlValue::Varchar(index_type.into()),                             // Index_type
+                    SqlValue::Varchar("".into()),                                     // Comment
+                    SqlValue::Varchar("".into()),                                     // Index_comment
+                    SqlValue::Varchar("YES".into()),                                  // Visible
                 ]));
             }
         }
