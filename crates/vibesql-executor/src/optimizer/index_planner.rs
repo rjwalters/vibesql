@@ -162,13 +162,18 @@ impl<'a> IndexPlanner<'a> {
 
         // Determine if WHERE clause is fully satisfied by the index
         let fully_satisfies_where = if let Some(where_expr) = where_clause {
-            // Get the indexed column name
+            // Get the indexed column
             if let Some(index_metadata) = self.database.get_index(&index_name) {
                 if let Some(first_col) = index_metadata.columns.first() {
-                    crate::select::scan::index_scan::predicate::where_clause_fully_satisfied_by_index(
-                        where_expr,
-                        first_col.expect_column_name(),
-                    )
+                    // For column indexes, use existing logic
+                    // For expression indexes, conservatively return false
+                    // (full satisfaction check would need expression-aware logic)
+                    first_col.column_name().map(|col_name| {
+                        crate::select::scan::index_scan::predicate::where_clause_fully_satisfied_by_index(
+                            where_expr,
+                            col_name,
+                        )
+                    }).unwrap_or(false)
                 } else {
                     false
                 }
@@ -407,6 +412,8 @@ impl<'a> IndexPlanner<'a> {
     /// the estimated fraction of rows that will match the index predicate.
     ///
     /// Uses column statistics when available, falls back to conservative defaults.
+    /// For expression indexes, uses a conservative default since we don't have
+    /// direct statistics for computed values.
     fn estimate_selectivity(&self, index_name: &str, where_clause: Option<&Expression>) -> f64 {
         // If no WHERE clause, selectivity is 1.0 (all rows)
         let where_expr = match where_clause {
@@ -425,6 +432,13 @@ impl<'a> IndexPlanner<'a> {
             None => return 0.33,
         };
 
+        // For expression indexes, we don't have column statistics
+        // Use a conservative default selectivity
+        let column_name = match first_col.column_name() {
+            Some(name) => name,
+            None => return 0.33, // Expression index - conservative default
+        };
+
         // Get table statistics
         let table_name = &index_metadata.table_name;
         let table = match self.database.get_table(table_name) {
@@ -438,7 +452,7 @@ impl<'a> IndexPlanner<'a> {
         };
 
         // Get column statistics
-        let col_stats = match table_stats.columns.get(first_col.expect_column_name()) {
+        let col_stats = match table_stats.columns.get(column_name) {
             Some(stats) => stats,
             None => return 0.33,
         };
@@ -446,7 +460,7 @@ impl<'a> IndexPlanner<'a> {
         // Use the existing selectivity estimation logic
         crate::select::scan::index_scan::selection::estimate_selectivity(
             where_expr,
-            first_col.expect_column_name(),
+            column_name,
             col_stats,
         )
     }
@@ -455,6 +469,7 @@ impl<'a> IndexPlanner<'a> {
     ///
     /// This is a lower-level API for checking individual indexes.
     /// Most callers should use `plan_index_usage()` instead.
+    /// Supports both column indexes and expression indexes.
     pub fn can_use_index(
         &self,
         index_name: &str,
@@ -472,11 +487,12 @@ impl<'a> IndexPlanner<'a> {
         };
 
         // Check if index can be used for WHERE
+        // Supports both column indexes and expression indexes
         let can_use_for_where = where_clause
             .map(|expr| {
-                crate::select::scan::index_scan::selection::expression_filters_column(
+                crate::select::scan::index_scan::selection::index_column_can_filter(
                     expr,
-                    first_col.expect_column_name(),
+                    first_col,
                 )
             })
             .unwrap_or(false);

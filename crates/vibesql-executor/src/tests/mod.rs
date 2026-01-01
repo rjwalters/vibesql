@@ -78,6 +78,7 @@ mod cte_scalar_subquery_tests;
 mod error_display;
 mod expression_eval;
 mod expression_index_dml_tests;
+mod expression_index_tests;
 mod fulltext_search;
 mod function_tests;
 mod index_optimization;
