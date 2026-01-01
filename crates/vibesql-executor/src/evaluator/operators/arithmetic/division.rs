@@ -91,9 +91,10 @@ impl Division {
                 let result = ((a as f64) / (b as f64)).trunc() as i64;
                 Ok(Integer(result))
             }
-            // ApproximateNumeric division - always returns Float
+            // ApproximateNumeric division - returns Real (f64) for SQLite compatibility
+            // SQLite's REAL type is 8-byte IEEE floating point (f64), not 4-byte (f32)
             (super::CoercedValues::ApproximateNumeric(a, b), ValueType::Float) => {
-                Ok(Float((a / b) as f32))
+                Ok(Real(a / b))
             }
             // Numeric division - always returns Numeric
             (super::CoercedValues::Numeric(a, b), ValueType::Numeric) => Ok(Numeric(a / b)),

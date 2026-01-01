@@ -32,13 +32,39 @@ fn format_f64(n: f64) -> String {
         return format_scientific_sqlite(&s);
     }
 
-    // Use ryu for shortest round-trip representation
-    let mut buffer = ryu::Buffer::new();
-    let s = buffer.format(n);
+    // SQLite uses 15 significant digits for floating-point display (like printf's %.15g)
+    // We need to format with at most 15 significant digits, then strip trailing zeros
+    format_with_significant_digits(n, 15)
+}
 
-    // SQLite behavior: KEEP ".0" suffix for whole numbers to distinguish REAL from INTEGER
-    // Example: SUM on mixed-type column returns 44.0 (REAL), not 44 (INTEGER)
-    s.to_string()
+/// Format a f64 with a specified number of significant digits, SQLite-style
+/// - Strip trailing zeros (but keep at least one decimal place for whole numbers)
+/// - Handle the distinction between REAL and INTEGER types
+fn format_with_significant_digits(n: f64, sig_digits: usize) -> String {
+    if n == 0.0 {
+        return "0.0".to_string();
+    }
+
+    // Calculate the number of decimal places needed for sig_digits significant digits
+    let log10_abs = n.abs().log10();
+    let integer_digits = if log10_abs >= 0.0 { log10_abs.floor() as i32 + 1 } else { 0 };
+    let decimal_places = (sig_digits as i32 - integer_digits).max(0) as usize;
+
+    // Format with calculated decimal places
+    let formatted = format!("{:.prec$}", n, prec = decimal_places);
+
+    // Strip trailing zeros after decimal point, but keep at least one digit
+    if formatted.contains('.') {
+        let trimmed = formatted.trim_end_matches('0');
+        if trimmed.ends_with('.') {
+            format!("{}0", trimmed)
+        } else {
+            trimmed.to_string()
+        }
+    } else {
+        // Add .0 suffix for whole numbers (SQLite REAL distinction)
+        format!("{}.0", formatted)
+    }
 }
 
 /// Format scientific notation like SQLite: 1.0e+15, 1.0e-05
