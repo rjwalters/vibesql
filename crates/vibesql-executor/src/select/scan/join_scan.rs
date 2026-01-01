@@ -398,16 +398,33 @@ fn generate_natural_join_condition(
 
     // Get all column names from left schema (normalized to lowercase for case-insensitive
     // comparison)
-    // Store: lowercase_name -> [(table, actual_name, collation)]
-    let mut left_columns: HashMap<String, Vec<(String, String, Option<String>)>> = HashMap::new();
-    for (table_name, (_table_idx, table_schema)) in &left_schema.table_schemas {
-        for col in &table_schema.columns {
+    // Store: lowercase_name -> (table, actual_name, absolute_index, collation)
+    // IMPORTANT: For chained NATURAL JOINs (e.g., t1 NATURAL LEFT JOIN t2 NATURAL LEFT JOIN t3),
+    // the left_schema may contain multiple tables with the same column name.
+    // We must pick the LEFTMOST table (lowest absolute_index) to ensure we use the correct
+    // value for the join condition. This matches SQLite's COALESCE semantics where
+    // the leftmost non-NULL value is used for NATURAL JOIN columns.
+    // Issue #4753: HashMap iteration order is non-deterministic, so we need to track
+    // the absolute index and pick the leftmost occurrence.
+    let mut left_columns: HashMap<String, (String, String, usize, Option<String>)> = HashMap::new();
+    for (table_name, (table_start_idx, table_schema)) in &left_schema.table_schemas {
+        for (col_offset, col) in table_schema.columns.iter().enumerate() {
             let lowercase_name = col.name.to_lowercase();
-            left_columns.entry(lowercase_name).or_default().push((
-                table_name.to_string(),
-                col.name.clone(),
-                col.collation.clone(),
-            ));
+            let absolute_idx = table_start_idx + col_offset;
+            // Only keep the leftmost occurrence (lowest absolute_idx)
+            if !left_columns.contains_key(&lowercase_name)
+                || absolute_idx < left_columns.get(&lowercase_name).unwrap().2
+            {
+                left_columns.insert(
+                    lowercase_name,
+                    (
+                        table_name.to_string(),
+                        col.name.clone(),
+                        absolute_idx,
+                        col.collation.clone(),
+                    ),
+                );
+            }
         }
     }
 
@@ -420,20 +437,19 @@ fn generate_natural_join_condition(
     for (table_name, (table_idx, table_schema)) in &right_schema.table_schemas {
         for col in &table_schema.columns {
             let lowercase_name = col.name.to_lowercase();
-            if let Some(left_occurrences) = left_columns.get(&lowercase_name) {
-                // Found a common column
-                for (left_table, left_col, left_collation) in left_occurrences {
-                    // Use left column's collation if present, otherwise use right column's
-                    let collation = left_collation.clone().or_else(|| col.collation.clone());
-                    common_columns.push((
-                        left_table.clone(),
-                        left_col.clone(),
-                        table_name.to_string(),
-                        col.name.clone(),
-                        *table_idx,
-                        collation,
-                    ));
-                }
+            if let Some((left_table, left_col, _absolute_idx, left_collation)) =
+                left_columns.get(&lowercase_name)
+            {
+                // Found a common column - only use the leftmost occurrence from left schema
+                let collation = left_collation.clone().or_else(|| col.collation.clone());
+                common_columns.push((
+                    left_table.clone(),
+                    left_col.clone(),
+                    table_name.to_string(),
+                    col.name.clone(),
+                    *table_idx,
+                    collation,
+                ));
             }
         }
     }
@@ -1442,30 +1458,43 @@ fn generate_using_join_condition(
         let col_lower = col_name.to_lowercase();
 
         // Find column in left schema (case-insensitive) - also get absolute index and collation
-        let left_col = left_schema
-            .table_schemas
-            .iter()
-            .find_map(|(table_name, (start_idx, table_schema))| {
-                table_schema
-                    .columns
-                    .iter()
-                    .enumerate()
-                    .find_map(|(col_offset, col)| {
-                        if col.name.to_lowercase() == col_lower {
-                            Some((
+        // IMPORTANT: For chained USING joins (e.g., t1 LEFT JOIN t2 USING(a) LEFT JOIN t3 USING(a)),
+        // the left_schema may contain multiple tables with the same column name.
+        // We must pick the LEFTMOST table (lowest start_idx) to ensure we use the correct
+        // value for the join condition. This matches SQLite's COALESCE semantics where
+        // the leftmost non-NULL value is used for USING columns.
+        // Issue #4753: HashMap iteration order is non-deterministic, so using find_map()
+        // could pick t2.a (NULL from LEFT JOIN) instead of t1.a (actual value).
+        let left_col = {
+            let mut best_match: Option<(
+                vibesql_catalog::TableIdentifier,
+                String,
+                usize,
+                Option<String>,
+            )> = None;
+            for (table_name, (start_idx, table_schema)) in &left_schema.table_schemas {
+                for (col_offset, col) in table_schema.columns.iter().enumerate() {
+                    if col.name.to_lowercase() == col_lower {
+                        let absolute_idx = start_idx + col_offset;
+                        // Pick the column with the lowest absolute index (leftmost table)
+                        if best_match.is_none()
+                            || absolute_idx < best_match.as_ref().unwrap().2
+                        {
+                            best_match = Some((
                                 table_name.clone(),
                                 col.name.clone(),
-                                start_idx + col_offset,
+                                absolute_idx,
                                 col.collation.clone(),
-                            ))
-                        } else {
-                            None
+                            ));
                         }
-                    })
-            })
-            .ok_or_else(|| ExecutorError::JoinUsingColumnNotPresent {
-                column_name: col_name.to_string(),
-            })?;
+                    }
+                }
+            }
+            best_match
+        }
+        .ok_or_else(|| ExecutorError::JoinUsingColumnNotPresent {
+            column_name: col_name.to_string(),
+        })?;
 
         // Find column in right schema (case-insensitive) - get absolute index, table start, collation
         let right_col = right_schema
