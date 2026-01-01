@@ -2,8 +2,9 @@ use vibesql_catalog::TableIdentifier;
 use vibesql_storage::statistics::CostEstimator;
 
 use crate::{
-    dml_cost::DmlOptimizer, errors::ExecutorError, privilege_checker::PrivilegeChecker,
-    sqlite_schema::is_sqlite_schema_table, sqlite_stat::is_sqlite_stat1_table,
+    dml_cost::DmlOptimizer, errors::ExecutorError, expression_index_maintenance,
+    privilege_checker::PrivilegeChecker, sqlite_schema::is_sqlite_schema_table,
+    sqlite_stat::is_sqlite_stat1_table,
 };
 
 /// Execute an INSERT statement
@@ -474,25 +475,55 @@ fn execute_insert_internal(
         let optimizer = DmlOptimizer::new(db, table_name);
         let optimal_batch_size = optimizer.optimal_insert_batch_size(validated_rows.len());
 
+        // Track initial row count for expression index maintenance
+        let initial_row_count = db
+            .get_table(&storage_table_name)
+            .map(|t| t.row_count())
+            .unwrap_or(0);
+
         // If optimal batch size is smaller than total rows, insert in batches
         if optimal_batch_size < validated_rows.len() {
             // Chunked batch insert for high-cost tables
+            let mut row_offset = initial_row_count;
             for chunk in validated_rows.chunks(optimal_batch_size) {
                 let rows: Vec<vibesql_storage::Row> =
                     chunk.iter().map(|(v, rowid)| make_row((v.clone(), *rowid))).collect();
 
-                rows_inserted += db.insert_rows_batch(&storage_table_name, rows).map_err(|e| {
-                    ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
-                })?;
+                let chunk_inserted =
+                    db.insert_rows_batch(&storage_table_name, rows.clone()).map_err(|e| {
+                        ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
+                    })?;
+
+                // Maintain expression indexes for each inserted row
+                for (i, row) in rows.iter().enumerate() {
+                    expression_index_maintenance::maintain_expression_indexes_for_insert(
+                        db,
+                        &storage_table_name,
+                        row,
+                        row_offset + i,
+                    );
+                }
+                row_offset += chunk_inserted;
+                rows_inserted += chunk_inserted;
             }
         } else {
             // Single batch insert for low-cost tables
             let rows: Vec<vibesql_storage::Row> =
                 validated_rows.into_iter().map(make_row).collect();
 
-            rows_inserted = db.insert_rows_batch(&storage_table_name, rows).map_err(|e| {
+            rows_inserted = db.insert_rows_batch(&storage_table_name, rows.clone()).map_err(|e| {
                 ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
             })?;
+
+            // Maintain expression indexes for each inserted row
+            for (i, row) in rows.iter().enumerate() {
+                expression_index_maintenance::maintain_expression_indexes_for_insert(
+                    db,
+                    &storage_table_name,
+                    row,
+                    initial_row_count + i,
+                );
+            }
         }
     } else {
         // Slow path: Insert rows one by one (needed for triggers, special clauses)
@@ -547,6 +578,14 @@ fn execute_insert_internal(
             db.insert_row(&storage_table_name, row.clone()).map_err(|e| {
                 ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
             })?;
+
+            // Maintain expression indexes for this insert
+            expression_index_maintenance::maintain_expression_indexes_for_insert(
+                db,
+                &storage_table_name,
+                &row,
+                row_count_before,
+            );
 
             // Fire AFTER INSERT triggers only if triggers exist
             // If AFTER triggers fail, we need to rollback the insert

@@ -1155,6 +1155,11 @@ impl IndexManager {
     }
 
     /// Rebuild user-defined indexes after bulk operations that change row indices
+    ///
+    /// Note: Expression indexes are SKIPPED by this method because they require
+    /// expression evaluation which the storage layer cannot perform. Expression
+    /// indexes must be rebuilt by the executor layer calling
+    /// `maintain_expression_indexes_for_insert` for each row.
     pub fn rebuild_indexes(
         &mut self,
         table_name: &str,
@@ -1163,10 +1168,14 @@ impl IndexManager {
     ) {
         // Collect index names that need rebuilding
         // Case-insensitive comparison for table name matching
+        // Skip expression indexes - they need to be rebuilt by executor with expression evaluation
         let indexes_to_rebuild: Vec<String> = self
             .indexes
             .iter()
-            .filter(|(_, metadata)| metadata.table_name.eq_ignore_ascii_case(table_name))
+            .filter(|(_, metadata)| {
+                metadata.table_name.eq_ignore_ascii_case(table_name)
+                    && !metadata.columns.iter().any(|col| col.is_expression())
+            })
             .map(|(name, _)| name.clone())
             .collect();
 
@@ -1931,5 +1940,55 @@ impl IndexManager {
             (stored_lower == search_name_lower || stored_table_only == search_table_only)
                 && metadata.columns.iter().any(|col| col.is_expression())
         })
+    }
+
+    /// Clear expression index data for a table (for rebuilding after compaction)
+    ///
+    /// This clears the index data (but keeps metadata) for all expression indexes
+    /// on the given table. Used before rebuilding expression indexes.
+    pub fn clear_expression_index_data(&mut self, table_name: &str) {
+        let search_name_lower = table_name.to_lowercase();
+        let search_table_only = search_name_lower.rsplit('.').next().unwrap_or(&search_name_lower);
+
+        // Find expression indexes for this table
+        let indexes_to_clear: Vec<String> = self
+            .indexes
+            .iter()
+            .filter_map(|(name, metadata)| {
+                let stored_lower = metadata.table_name.to_lowercase();
+                let stored_table_only = stored_lower.rsplit('.').next().unwrap_or(&stored_lower);
+
+                if (stored_lower == search_name_lower || stored_table_only == search_table_only)
+                    && metadata.columns.iter().any(|col| col.is_expression())
+                {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Clear the data for each expression index
+        for index_name in indexes_to_clear {
+            if let Some(index_data) = self.index_data.get_mut(&index_name) {
+                match index_data {
+                    IndexData::InMemory { data, pending_deletions } => {
+                        data.clear();
+                        pending_deletions.clear();
+                    }
+                    IndexData::DiskBacked { .. } => {
+                        // Expression indexes currently use InMemory storage
+                        // Disk-backed clearing would need BTreeIndex::clear() implementation
+                        log::warn!(
+                            "Disk-backed expression index '{}' clearing not yet supported",
+                            index_name
+                        );
+                    }
+                    IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => {
+                        // Vector indexes don't support expression indexing
+                    }
+                }
+            }
+        }
     }
 }

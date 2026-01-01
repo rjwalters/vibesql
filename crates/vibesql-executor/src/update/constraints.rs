@@ -60,13 +60,27 @@ impl<'a> ConstraintValidator<'a> {
                 }
 
                 // Build the key values from the new row for this index
+                // Skip expression indexes - they are handled separately by expression_index_maintenance
                 let mut new_key_values = Vec::new();
+                let mut is_expression_index = false;
                 for index_col in &index_metadata.columns {
+                    if index_col.get_expression().is_some() {
+                        // This is an expression index, skip column-based validation
+                        is_expression_index = true;
+                        break;
+                    }
+                    let col_name = match index_col.column_name() {
+                        Some(name) => name,
+                        None => {
+                            is_expression_index = true;
+                            break;
+                        }
+                    };
                     let col_idx = self
                         .schema
-                        .get_column_index(index_col.expect_column_name())
+                        .get_column_index(col_name)
                         .ok_or_else(|| ExecutorError::ColumnNotFound {
-                            column_name: index_col.expect_column_name().to_string(),
+                            column_name: col_name.to_string(),
                             table_name: table_name.to_string(),
                             searched_tables: vec![table_name.to_string()],
                             available_columns: self
@@ -78,6 +92,10 @@ impl<'a> ConstraintValidator<'a> {
                         })?;
                     new_key_values.push(new_row.values[col_idx].clone());
                 }
+                // Skip expression indexes - their uniqueness is handled by expression index maintenance
+                if is_expression_index {
+                    continue;
+                }
 
                 // Skip if any value in the unique index is NULL
                 // (NULL != NULL in SQL, so multiple NULLs are allowed)
@@ -88,8 +106,9 @@ impl<'a> ConstraintValidator<'a> {
                 // Build the original key values to check if they changed
                 let mut original_key_values = Vec::new();
                 for index_col in &index_metadata.columns {
-                    let col_idx =
-                        self.schema.get_column_index(index_col.expect_column_name()).unwrap();
+                    // We already filtered out expression indexes above, so this should be a column
+                    let col_name = index_col.column_name().unwrap();
+                    let col_idx = self.schema.get_column_index(col_name).unwrap();
                     original_key_values.push(original_row.values[col_idx].clone());
                 }
 
@@ -102,10 +121,13 @@ impl<'a> ConstraintValidator<'a> {
                 if let Some(index_data) = db.get_index_data(&index_name) {
                     if index_data.contains_key(&new_key_values) {
                         // SQLite format: "UNIQUE constraint failed: table.col1, table.col2"
+                        // We already filtered out expression indexes, so column_name() should be Some
                         let columns_str = index_metadata
                             .columns
                             .iter()
-                            .map(|col| format!("{}.{}", table_name, col.expect_column_name()))
+                            .map(|col| {
+                                format!("{}.{}", table_name, col.column_name().unwrap_or("?"))
+                            })
                             .collect::<Vec<_>>()
                             .join(", ");
                         return Err(ExecutorError::ConstraintViolation(format!(
