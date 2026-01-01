@@ -199,17 +199,27 @@ impl CreateIndexExecutor {
                     vibesql_catalog::IndexType::BTree,
                     stmt.columns
                         .iter()
-                        .map(|col| vibesql_catalog::IndexedColumn {
-                            column_name: col.expect_column_name().to_string(),
-                            order: match col.direction() {
+                        .map(|col| {
+                            let order = match col.direction() {
                                 vibesql_ast::OrderDirection::Asc => {
                                     vibesql_catalog::SortOrder::Ascending
                                 }
                                 vibesql_ast::OrderDirection::Desc => {
                                     vibesql_catalog::SortOrder::Descending
                                 }
-                            },
-                            prefix_length: col.prefix_length(),
+                            };
+                            if let Some(prefix_len) = col.prefix_length() {
+                                vibesql_catalog::IndexedColumn::new_column_with_prefix(
+                                    col.expect_column_name().to_string(),
+                                    order,
+                                    prefix_len,
+                                )
+                            } else {
+                                vibesql_catalog::IndexedColumn::new_column(
+                                    col.expect_column_name().to_string(),
+                                    order,
+                                )
+                            }
                         })
                         .collect(),
                     *unique,
@@ -291,11 +301,10 @@ impl CreateIndexExecutor {
                     index_name.clone(),
                     table_name.clone(),
                     vibesql_catalog::IndexType::RTree,
-                    vec![vibesql_catalog::IndexedColumn {
-                        column_name: column_name.to_string(),
-                        order: vibesql_catalog::SortOrder::Ascending,
-                        prefix_length: None, // Spatial indexes don't support prefix indexing
-                    }],
+                    vec![vibesql_catalog::IndexedColumn::new_column(
+                        column_name.to_string(),
+                        vibesql_catalog::SortOrder::Ascending,
+                    )],
                     false,
                 );
                 database.catalog.add_index(index_metadata)?;
@@ -378,12 +387,10 @@ impl CreateIndexExecutor {
                     index_name.clone(),
                     table_name.clone(),
                     vibesql_catalog::IndexType::IVFFlat { metric: catalog_metric, lists: *lists },
-                    vec![vibesql_catalog::IndexedColumn {
-                        column_name: column_name.to_string(),
-                        order: vibesql_catalog::SortOrder::Ascending, /* Not meaningful for
-                                                                       * vector indexes */
-                        prefix_length: None,
-                    }],
+                    vec![vibesql_catalog::IndexedColumn::new_column(
+                        column_name.to_string(),
+                        vibesql_catalog::SortOrder::Ascending, // Not meaningful for vector indexes
+                    )],
                     false, // IVFFlat indexes are never unique
                 );
                 database.catalog.add_index(index_metadata)?;
@@ -471,12 +478,10 @@ impl CreateIndexExecutor {
                         m: *m,
                         ef_construction: *ef_construction,
                     },
-                    vec![vibesql_catalog::IndexedColumn {
-                        column_name: column_name.to_string(),
-                        order: vibesql_catalog::SortOrder::Ascending, /* Not meaningful for
-                                                                       * vector indexes */
-                        prefix_length: None,
-                    }],
+                    vec![vibesql_catalog::IndexedColumn::new_column(
+                        column_name.to_string(),
+                        vibesql_catalog::SortOrder::Ascending, // Not meaningful for vector indexes
+                    )],
                     false, // HNSW indexes are never unique
                 );
                 database.catalog.add_index(index_metadata)?;

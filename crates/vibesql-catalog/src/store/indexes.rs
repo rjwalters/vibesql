@@ -30,7 +30,8 @@ impl Catalog {
             return Err(CatalogError::TableNotFound { table_name: index.table_name.clone() });
         }
 
-        // Verify all columns exist in the table
+        // Verify all column-based index columns exist in the table
+        // Expression indexes skip this validation (they reference expressions, not specific columns)
         let table = self
             .schemas
             .get(&self.current_schema)
@@ -38,12 +39,17 @@ impl Catalog {
             .unwrap(); // Safe because we checked above
 
         for col in &index.columns {
-            if !table.columns.iter().any(|c| c.name == col.column_name) {
-                return Err(CatalogError::ColumnNotFound {
-                    column_name: col.column_name.clone(),
-                    table_name: index.table_name.clone(),
-                });
+            // Only validate column existence for non-expression index columns
+            if let Some(column_name) = col.column_name() {
+                if !table.columns.iter().any(|c| c.name == column_name) {
+                    return Err(CatalogError::ColumnNotFound {
+                        column_name: column_name.to_string(),
+                        table_name: index.table_name.clone(),
+                    });
+                }
             }
+            // Expression index columns are allowed without column validation
+            // (they may reference multiple columns or use literals)
         }
 
         self.indexes.insert(qualified_name, index);
@@ -142,11 +148,7 @@ mod tests {
             "idx_name".to_string(),
             "users".to_string(),
             IndexType::BTree,
-            vec![IndexedColumn {
-                column_name: "name".to_string(),
-                order: SortOrder::Ascending,
-                prefix_length: None,
-            }],
+            vec![IndexedColumn::new_column("name".to_string(), SortOrder::Ascending)],
             false,
         );
 
@@ -162,11 +164,7 @@ mod tests {
             "idx_name".to_string(),
             "users".to_string(),
             IndexType::BTree,
-            vec![IndexedColumn {
-                column_name: "name".to_string(),
-                order: SortOrder::Ascending,
-                prefix_length: None,
-            }],
+            vec![IndexedColumn::new_column("name".to_string(), SortOrder::Ascending)],
             false,
         );
 
@@ -184,11 +182,7 @@ mod tests {
             "idx_name".to_string(),
             "nonexistent".to_string(),
             IndexType::BTree,
-            vec![IndexedColumn {
-                column_name: "name".to_string(),
-                order: SortOrder::Ascending,
-                prefix_length: None,
-            }],
+            vec![IndexedColumn::new_column("name".to_string(), SortOrder::Ascending)],
             false,
         );
 
@@ -204,11 +198,7 @@ mod tests {
             "idx_age".to_string(),
             "users".to_string(),
             IndexType::BTree,
-            vec![IndexedColumn {
-                column_name: "age".to_string(), // Column doesn't exist
-                order: SortOrder::Ascending,
-                prefix_length: None,
-            }],
+            vec![IndexedColumn::new_column("age".to_string(), SortOrder::Ascending)], // Column doesn't exist
             false,
         );
 
@@ -224,11 +214,7 @@ mod tests {
             "idx_name".to_string(),
             "users".to_string(),
             IndexType::BTree,
-            vec![IndexedColumn {
-                column_name: "name".to_string(),
-                order: SortOrder::Ascending,
-                prefix_length: None,
-            }],
+            vec![IndexedColumn::new_column("name".to_string(), SortOrder::Ascending)],
             false,
         );
 
@@ -245,11 +231,7 @@ mod tests {
             "idx_name".to_string(),
             "users".to_string(),
             IndexType::BTree,
-            vec![IndexedColumn {
-                column_name: "name".to_string(),
-                order: SortOrder::Ascending,
-                prefix_length: None,
-            }],
+            vec![IndexedColumn::new_column("name".to_string(), SortOrder::Ascending)],
             false,
         );
 
@@ -257,11 +239,7 @@ mod tests {
             "idx_email".to_string(),
             "users".to_string(),
             IndexType::BTree,
-            vec![IndexedColumn {
-                column_name: "email".to_string(),
-                order: SortOrder::Ascending,
-                prefix_length: None,
-            }],
+            vec![IndexedColumn::new_column("email".to_string(), SortOrder::Ascending)],
             true,
         );
 
@@ -280,11 +258,7 @@ mod tests {
             "idx_name".to_string(),
             "users".to_string(),
             IndexType::BTree,
-            vec![IndexedColumn {
-                column_name: "name".to_string(),
-                order: SortOrder::Ascending,
-                prefix_length: None,
-            }],
+            vec![IndexedColumn::new_column("name".to_string(), SortOrder::Ascending)],
             false,
         );
 
@@ -292,11 +266,7 @@ mod tests {
             "idx_email".to_string(),
             "users".to_string(),
             IndexType::BTree,
-            vec![IndexedColumn {
-                column_name: "email".to_string(),
-                order: SortOrder::Ascending,
-                prefix_length: None,
-            }],
+            vec![IndexedColumn::new_column("email".to_string(), SortOrder::Ascending)],
             true,
         );
 
@@ -306,5 +276,59 @@ mod tests {
         let dropped = catalog.drop_table_indexes("users");
         assert_eq!(dropped.len(), 2);
         assert!(catalog.get_table_indexes("users").is_empty());
+    }
+
+    #[test]
+    fn test_add_expression_index() {
+        let mut catalog = create_test_catalog();
+
+        // Expression indexes can be added without column validation
+        // Use a simple binary expression for testing: 1 + 1
+        let expr = vibesql_ast::Expression::BinaryOp {
+            op: vibesql_ast::BinaryOperator::Plus,
+            left: Box::new(vibesql_ast::Expression::Literal(
+                vibesql_types::SqlValue::Integer(1),
+            )),
+            right: Box::new(vibesql_ast::Expression::Literal(
+                vibesql_types::SqlValue::Integer(1),
+            )),
+        };
+        let index = IndexMetadata::new(
+            "idx_expr".to_string(),
+            "users".to_string(),
+            IndexType::BTree,
+            vec![IndexedColumn::new_expression(expr, SortOrder::Ascending)],
+            false,
+        );
+
+        // Expression index should be added successfully
+        assert!(catalog.add_index(index).is_ok());
+        assert!(catalog.get_index("users", "idx_expr").is_some());
+    }
+
+    #[test]
+    fn test_add_mixed_column_expression_index() {
+        let mut catalog = create_test_catalog();
+
+        // Index with both column and expression
+        // Use a simple literal expression for testing
+        let expr = vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(42));
+        let index = IndexMetadata::new(
+            "idx_mixed".to_string(),
+            "users".to_string(),
+            IndexType::BTree,
+            vec![
+                IndexedColumn::new_column("name".to_string(), SortOrder::Ascending),
+                IndexedColumn::new_expression(expr, SortOrder::Descending),
+            ],
+            false,
+        );
+
+        // Mixed index should be added successfully (column validation for 'name', skip for expression)
+        assert!(catalog.add_index(index).is_ok());
+
+        let retrieved = catalog.get_index("users", "idx_mixed").unwrap();
+        assert!(retrieved.has_expression_columns());
+        assert!(!retrieved.is_expression_index()); // Not purely expression
     }
 }

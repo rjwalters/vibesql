@@ -16,6 +16,7 @@
 //!
 //! Reference: https://www.sqlite.org/schematab.html
 
+use vibesql_ast::pretty_print::ToSql;
 use vibesql_catalog::{ColumnSchema, ReferentialAction, SortOrder, TableSchema};
 use vibesql_storage::Row;
 use vibesql_types::{DataType, SqlValue};
@@ -182,12 +183,20 @@ fn generate_create_index_sql(index: &vibesql_catalog::IndexMetadata) -> String {
         .columns
         .iter()
         .map(|col| {
-            let order_str = match col.order {
+            let order_str = match col.order() {
                 SortOrder::Ascending => "",
                 SortOrder::Descending => " DESC",
             };
-            let prefix_str = col.prefix_length.map(|l| format!("({})", l)).unwrap_or_default();
-            format!("{}{}{}", col.column_name, prefix_str, order_str)
+            match col {
+                vibesql_catalog::IndexedColumn::Column { column_name, prefix_length, .. } => {
+                    let prefix_str = prefix_length.map(|l| format!("({})", l)).unwrap_or_default();
+                    format!("{}{}{}", column_name, prefix_str, order_str)
+                }
+                vibesql_catalog::IndexedColumn::Expression { expr, .. } => {
+                    // For expression indexes, wrap the expression in parentheses
+                    format!("({}){}", expr.to_sql(), order_str)
+                }
+            }
         })
         .collect();
 
@@ -456,11 +465,7 @@ mod tests {
             "idx_email".to_string(),
             "users".to_string(),
             IndexType::BTree,
-            vec![IndexedColumn {
-                column_name: "email".to_string(),
-                order: SortOrder::Ascending,
-                prefix_length: None,
-            }],
+            vec![IndexedColumn::new_column("email".to_string(), SortOrder::Ascending)],
             true, // unique
         );
         catalog.add_index(index).unwrap();
@@ -498,12 +503,8 @@ mod tests {
             "users".to_string(),
             IndexType::BTree,
             vec![
-                IndexedColumn {
-                    column_name: "last_name".to_string(),
-                    order: SortOrder::Ascending,
-                    prefix_length: None,
-                },
-                IndexedColumn {
+                IndexedColumn::new_column("last_name".to_string(), SortOrder::Ascending),
+                IndexedColumn::Column {
                     column_name: "first_name".to_string(),
                     order: SortOrder::Descending,
                     prefix_length: None,
@@ -522,11 +523,11 @@ mod tests {
             "idx_email".to_string(),
             "users".to_string(),
             IndexType::BTree,
-            vec![IndexedColumn {
-                column_name: "email".to_string(),
-                order: SortOrder::Ascending,
-                prefix_length: Some(50),
-            }],
+            vec![IndexedColumn::new_column_with_prefix(
+                "email".to_string(),
+                SortOrder::Ascending,
+                50,
+            )],
             true, // unique
         );
 

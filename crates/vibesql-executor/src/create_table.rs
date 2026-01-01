@@ -402,10 +402,11 @@ impl CreateTableExecutor {
                 vibesql_catalog::IndexType::BTree,
                 index_columns
                     .iter()
-                    .map(|col| vibesql_catalog::IndexedColumn {
-                        column_name: col.expect_column_name().to_string(),
-                        order: vibesql_catalog::SortOrder::Ascending,
-                        prefix_length: None,
+                    .map(|col| {
+                        vibesql_catalog::IndexedColumn::new_column(
+                            col.expect_column_name().to_string(),
+                            vibesql_catalog::SortOrder::Ascending,
+                        )
                     })
                     .collect(),
                 true, // unique
@@ -443,10 +444,11 @@ impl CreateTableExecutor {
                 vibesql_catalog::IndexType::BTree,
                 index_columns
                     .iter()
-                    .map(|col| vibesql_catalog::IndexedColumn {
-                        column_name: col.expect_column_name().to_string(),
-                        order: vibesql_catalog::SortOrder::Ascending,
-                        prefix_length: None,
+                    .map(|col| {
+                        vibesql_catalog::IndexedColumn::new_column(
+                            col.expect_column_name().to_string(),
+                            vibesql_catalog::SortOrder::Ascending,
+                        )
                     })
                     .collect(),
                 true, // unique

@@ -331,7 +331,7 @@ fn test_auto_index_for_single_column_primary_key() {
     assert_eq!(index_meta.table_name, "t1");
     assert!(index_meta.is_unique);
     assert_eq!(index_meta.columns.len(), 1);
-    assert_eq!(index_meta.columns[0].column_name, "id");
+    assert_eq!(index_meta.columns[0].column_name(), Some("id"));
 }
 
 #[test]
@@ -392,8 +392,8 @@ fn test_auto_index_for_composite_primary_key() {
     // Verify index has both columns
     let index_meta = db.catalog.get_index("t2", "sqlite_autoindex_t2_1").unwrap();
     assert_eq!(index_meta.columns.len(), 2);
-    assert_eq!(index_meta.columns[0].column_name, "a");
-    assert_eq!(index_meta.columns[1].column_name, "b");
+    assert_eq!(index_meta.columns[0].column_name(), Some("a"));
+    assert_eq!(index_meta.columns[1].column_name(), Some("b"));
 }
 
 #[test]
@@ -442,7 +442,7 @@ fn test_auto_index_for_single_unique_constraint() {
     assert_eq!(index_meta.table_name, "t3");
     assert!(index_meta.is_unique);
     assert_eq!(index_meta.columns.len(), 1);
-    assert_eq!(index_meta.columns[0].column_name, "email");
+    assert_eq!(index_meta.columns[0].column_name(), Some("email"));
 }
 
 #[test]
@@ -558,8 +558,8 @@ fn test_auto_index_for_composite_unique_constraint() {
     // Verify index has both columns
     let index_meta = db.catalog.get_index("t5", "sqlite_autoindex_t5_1").unwrap();
     assert_eq!(index_meta.columns.len(), 2);
-    assert_eq!(index_meta.columns[0].column_name, "a");
-    assert_eq!(index_meta.columns[1].column_name, "b");
+    assert_eq!(index_meta.columns[0].column_name(), Some("a"));
+    assert_eq!(index_meta.columns[1].column_name(), Some("b"));
 }
 
 #[test]
