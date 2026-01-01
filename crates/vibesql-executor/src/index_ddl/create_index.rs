@@ -167,6 +167,20 @@ impl CreateIndexExecutor {
             }
         }
 
+        // SQLite namespace check: tables and indexes share a namespace
+        // Cannot create an index with the same name as an existing table
+        let normalized_index_name = index_name.to_lowercase();
+        for schema in database.catalog.list_schemas() {
+            let qualified_name = format!("{}.{}", schema, normalized_index_name);
+            if database.catalog.table_exists(&qualified_name) {
+                // Use SQLite-compatible error message (exact format required for TCL tests)
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "there is already a table named {}",
+                    index_name
+                )));
+            }
+        }
+
         // Create the index based on type
         match &stmt.index_type {
             vibesql_ast::IndexType::BTree { unique } => {

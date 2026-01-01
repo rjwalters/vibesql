@@ -83,6 +83,9 @@ pub enum ExecutorError {
     },
     UnsupportedExpression(String),
     UnsupportedFeature(String),
+    /// SQLite-compatible error message (output as-is without prefix)
+    /// Used when we need to match SQLite's exact error message format
+    SqliteCompatError(String),
     StorageError(String),
     SubqueryReturnedMultipleRows {
         expected: usize,
@@ -327,6 +330,11 @@ pub enum ExecutorError {
     JoinUsingColumnNotPresent {
         column_name: String,
     },
+    /// ON clause references a table that appears to the right (SQLite-compatible error)
+    /// Format: "ON clause references tables to its right"
+    /// This error occurs when a JOIN ON clause references a table that hasn't been
+    /// introduced yet (appears later in the FROM clause).
+    OnClauseReferencesRightTable,
     /// No such column (SQLite-compatible error)
     /// Format: "no such column: X" or "no such column: table.column"
     NoSuchColumn {
@@ -602,6 +610,10 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::UnsupportedFeature(msg) => {
                 write!(f, "{}", vibe_msg!("executor-unsupported-feature", message = msg.as_str()))
+            }
+            ExecutorError::SqliteCompatError(msg) => {
+                // Output the message as-is without any prefix (for SQLite compatibility)
+                write!(f, "{}", msg)
             }
             ExecutorError::StorageError(msg) => {
                 write!(f, "{}", vibe_msg!("executor-storage-error", message = msg.as_str()))
@@ -1204,6 +1216,10 @@ impl std::fmt::Display for ExecutorError {
                         column_name = column_name.as_str()
                     )
                 )
+            }
+            ExecutorError::OnClauseReferencesRightTable => {
+                // SQLite-compatible error message format
+                write!(f, "ON clause references tables to its right")
             }
             ExecutorError::NoSuchColumn { column_ref } => {
                 write!(
