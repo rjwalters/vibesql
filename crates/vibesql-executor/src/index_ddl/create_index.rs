@@ -6,7 +6,12 @@ use vibesql_storage::{
     Database, SpatialIndexMetadata,
 };
 
-use crate::{errors::ExecutorError, privilege_checker::PrivilegeChecker, sqlite_schema::is_sqlite_schema_table};
+use crate::{
+    errors::ExecutorError,
+    evaluator::ExpressionEvaluator,
+    privilege_checker::PrivilegeChecker,
+    sqlite_schema::is_sqlite_schema_table,
+};
 
 /// Executor for CREATE INDEX statements
 pub struct CreateIndexExecutor;
@@ -80,50 +85,70 @@ impl CreateIndexExecutor {
             return Err(ExecutorError::TableNotFound(qualified_table_name.clone()));
         }
 
-        // Get table schema to validate columns
+        // Get table schema to validate columns (clone to avoid borrow issues)
         let table_schema = database
             .catalog
             .get_table(&qualified_table_name)
-            .ok_or_else(|| ExecutorError::TableNotFound(qualified_table_name.clone()))?;
+            .ok_or_else(|| ExecutorError::TableNotFound(qualified_table_name.clone()))?
+            .clone();
 
-        // Check for expression indexes (not yet fully supported)
+        // Expression index validation: check for non-deterministic expressions
+        // Expression indexes must use deterministic expressions (no RANDOM(), NOW(), etc.)
         for index_col in &stmt.columns {
-            if index_col.is_expression() {
-                // Expression indexes are parsed but not yet fully executed
-                // Return an unsupported error instead of panicking
-                return Err(ExecutorError::UnsupportedFeature(
-                    "Expression indexes are not yet supported".to_string(),
-                ));
+            if let Some(expr) = index_col.get_expression() {
+                if !crate::evaluator::expression_hash::ExpressionHasher::is_deterministic_for_index(expr) {
+                    return Err(ExecutorError::UnsupportedFeature(
+                        "Expression indexes must use deterministic expressions. \
+                         Non-deterministic functions like RANDOM(), CURRENT_TIMESTAMP, etc. \
+                         are not allowed."
+                            .to_string(),
+                    ));
+                }
             }
         }
 
-        // Validate that all indexed columns exist in the table
+        // Validate that all indexed columns exist in the table (for column-based indexes)
         for index_col in &stmt.columns {
-            if table_schema.get_column(index_col.expect_column_name()).is_none() {
-                let available_columns =
-                    table_schema.columns.iter().map(|c| c.name.clone()).collect();
-                return Err(ExecutorError::ColumnNotFound {
-                    column_name: index_col.expect_column_name().to_string(),
-                    table_name: qualified_table_name.clone(),
-                    searched_tables: vec![qualified_table_name.clone()],
-                    available_columns,
-                });
+            if let Some(col_name) = index_col.column_name() {
+                if table_schema.get_column(col_name).is_none() {
+                    let available_columns =
+                        table_schema.columns.iter().map(|c| c.name.clone()).collect();
+                    return Err(ExecutorError::ColumnNotFound {
+                        column_name: col_name.to_string(),
+                        table_name: qualified_table_name.clone(),
+                        searched_tables: vec![qualified_table_name.clone()],
+                        available_columns,
+                    });
+                }
+            }
+            // For expression indexes, validate that all column references in the expression exist
+            if let Some(expr) = index_col.get_expression() {
+                validate_expression_columns(expr, &table_schema, &qualified_table_name)?;
             }
         }
 
-        // Validate prefix length specifications
+        // Validate prefix length specifications (only for column-based indexes)
         for index_col in &stmt.columns {
             if let Some(prefix_len) = index_col.prefix_length() {
+                // Expression indexes don't support prefix lengths
+                if index_col.is_expression() {
+                    return Err(ExecutorError::InvalidIndexDefinition(
+                        "Prefix length cannot be specified for expression indexes".to_string(),
+                    ));
+                }
+
+                let col_name = index_col.column_name().unwrap(); // Safe: not an expression
+
                 // Prefix length must be positive
                 if prefix_len == 0 {
                     return Err(ExecutorError::InvalidIndexDefinition(format!(
                         "Prefix length must be greater than 0 for column '{}'",
-                        index_col.expect_column_name()
+                        col_name
                     )));
                 }
 
                 // Prefix length should only be used with string columns
-                let column = table_schema.get_column(index_col.expect_column_name()).unwrap(); // Safe: already validated above
+                let column = table_schema.get_column(col_name).unwrap(); // Safe: already validated above
                 match column.data_type {
                     vibesql_types::DataType::Varchar { .. }
                     | vibesql_types::DataType::Character { .. } => {
@@ -133,7 +158,7 @@ impl CreateIndexExecutor {
                         return Err(ExecutorError::InvalidIndexDefinition(
                             format!(
                                 "Prefix length can only be specified for string columns, but column '{}' has type {:?}",
-                                index_col.expect_column_name(), column.data_type
+                                col_name, column.data_type
                             ),
                         ));
                     }
@@ -146,7 +171,7 @@ impl CreateIndexExecutor {
                     return Err(ExecutorError::InvalidIndexDefinition(format!(
                         "Prefix length {} is too large for column '{}' (maximum: {})",
                         prefix_len,
-                        index_col.expect_column_name(),
+                        col_name,
                         MAX_PREFIX_LENGTH
                     )));
                 }
@@ -184,12 +209,59 @@ impl CreateIndexExecutor {
         // Create the index based on type
         match &stmt.index_type {
             vibesql_ast::IndexType::BTree { unique } => {
+                // Check if this is an expression index
+                let has_expression = stmt.columns.iter().any(|col| col.is_expression());
+
                 // Compute column indices early (before mutable borrows)
+                // For expression indexes, we use 0xFFFFFFFF to indicate computed columns
                 let column_indices: Vec<u32> = stmt
                     .columns
                     .iter()
-                    .filter_map(|col| table_schema.get_column_index(col.expect_column_name()))
-                    .map(|idx| idx as u32)
+                    .map(|col| {
+                        if let Some(name) = col.column_name() {
+                            table_schema
+                                .get_column_index(name)
+                                .map(|idx| idx as u32)
+                                .unwrap_or(0xFFFFFFFF)
+                        } else {
+                            0xFFFFFFFF // Expression column marker
+                        }
+                    })
+                    .collect();
+
+                // Convert AST IndexColumn to catalog IndexedColumn
+                let catalog_columns: Vec<vibesql_catalog::IndexedColumn> = stmt
+                    .columns
+                    .iter()
+                    .map(|col| {
+                        let order = match col.direction() {
+                            vibesql_ast::OrderDirection::Asc => {
+                                vibesql_catalog::SortOrder::Ascending
+                            }
+                            vibesql_ast::OrderDirection::Desc => {
+                                vibesql_catalog::SortOrder::Descending
+                            }
+                        };
+
+                        if let Some(expr) = col.get_expression() {
+                            // Expression index: store the expression for later use
+                            vibesql_catalog::IndexedColumn::new_expression(
+                                expr.clone(),
+                                order,
+                            )
+                        } else if let Some(prefix_len) = col.prefix_length() {
+                            vibesql_catalog::IndexedColumn::new_column_with_prefix(
+                                col.column_name().unwrap().to_string(),
+                                order,
+                                prefix_len,
+                            )
+                        } else {
+                            vibesql_catalog::IndexedColumn::new_column(
+                                col.column_name().unwrap().to_string(),
+                                order,
+                            )
+                        }
+                    })
                     .collect();
 
                 // Add to catalog first (use unqualified table name as stored in catalog)
@@ -197,43 +269,31 @@ impl CreateIndexExecutor {
                     index_name.clone(),
                     table_name.clone(),
                     vibesql_catalog::IndexType::BTree,
-                    stmt.columns
-                        .iter()
-                        .map(|col| {
-                            let order = match col.direction() {
-                                vibesql_ast::OrderDirection::Asc => {
-                                    vibesql_catalog::SortOrder::Ascending
-                                }
-                                vibesql_ast::OrderDirection::Desc => {
-                                    vibesql_catalog::SortOrder::Descending
-                                }
-                            };
-                            if let Some(prefix_len) = col.prefix_length() {
-                                vibesql_catalog::IndexedColumn::new_column_with_prefix(
-                                    col.expect_column_name().to_string(),
-                                    order,
-                                    prefix_len,
-                                )
-                            } else {
-                                vibesql_catalog::IndexedColumn::new_column(
-                                    col.expect_column_name().to_string(),
-                                    order,
-                                )
-                            }
-                        })
-                        .collect(),
+                    catalog_columns,
                     *unique,
                 );
                 database.catalog.add_index(index_metadata)?;
 
-                // B-tree index (use unqualified name for storage, database handles qualification
-                // internally)
-                database.create_index(
-                    index_name.clone(),
-                    table_name.clone(),
-                    *unique,
-                    stmt.columns.clone(),
-                )?;
+                // Create the B-tree index
+                if has_expression {
+                    // Expression index: pre-compute keys using ExpressionEvaluator
+                    create_expression_index(
+                        database,
+                        &table_name,
+                        index_name,
+                        &table_schema,
+                        &stmt.columns,
+                        *unique,
+                    )?;
+                } else {
+                    // Column-only index: use existing storage API
+                    database.create_index(
+                        index_name.clone(),
+                        table_name.clone(),
+                        *unique,
+                        stmt.columns.clone(),
+                    )?;
+                }
 
                 // Emit WAL entry for persistence
                 database.emit_wal_create_index(
@@ -522,6 +582,187 @@ fn index_name_to_id(name: &str) -> u32 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     name.hash(&mut hasher);
     hasher.finish() as u32
+}
+
+/// Validate that all column references in an expression exist in the table schema.
+fn validate_expression_columns(
+    expr: &vibesql_ast::Expression,
+    table_schema: &vibesql_catalog::TableSchema,
+    qualified_table_name: &str,
+) -> Result<(), ExecutorError> {
+    use vibesql_ast::Expression;
+
+    match expr {
+        Expression::ColumnRef(col_id) => {
+            let col_name = col_id.column_canonical();
+            if table_schema.get_column(col_name).is_none() {
+                let available_columns =
+                    table_schema.columns.iter().map(|c| c.name.clone()).collect();
+                return Err(ExecutorError::ColumnNotFound {
+                    column_name: col_name.to_string(),
+                    table_name: qualified_table_name.to_string(),
+                    searched_tables: vec![qualified_table_name.to_string()],
+                    available_columns,
+                });
+            }
+            Ok(())
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            validate_expression_columns(left, table_schema, qualified_table_name)?;
+            validate_expression_columns(right, table_schema, qualified_table_name)
+        }
+        Expression::UnaryOp { expr, .. } => {
+            validate_expression_columns(expr, table_schema, qualified_table_name)
+        }
+        Expression::Function { args, .. } => {
+            for arg in args {
+                validate_expression_columns(arg, table_schema, qualified_table_name)?;
+            }
+            Ok(())
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                validate_expression_columns(op, table_schema, qualified_table_name)?;
+            }
+            for clause in when_clauses {
+                for cond in &clause.conditions {
+                    validate_expression_columns(cond, table_schema, qualified_table_name)?;
+                }
+                validate_expression_columns(&clause.result, table_schema, qualified_table_name)?;
+            }
+            if let Some(else_expr) = else_result {
+                validate_expression_columns(else_expr, table_schema, qualified_table_name)?;
+            }
+            Ok(())
+        }
+        Expression::Cast { expr, .. } => {
+            validate_expression_columns(expr, table_schema, qualified_table_name)
+        }
+        Expression::Collate { expr, .. } => {
+            validate_expression_columns(expr, table_schema, qualified_table_name)
+        }
+        Expression::IsNull { expr, .. } => {
+            validate_expression_columns(expr, table_schema, qualified_table_name)
+        }
+        Expression::Between { expr, low, high, .. } => {
+            validate_expression_columns(expr, table_schema, qualified_table_name)?;
+            validate_expression_columns(low, table_schema, qualified_table_name)?;
+            validate_expression_columns(high, table_schema, qualified_table_name)
+        }
+        Expression::InList { expr, values, .. } => {
+            validate_expression_columns(expr, table_schema, qualified_table_name)?;
+            for item in values {
+                validate_expression_columns(item, table_schema, qualified_table_name)?;
+            }
+            Ok(())
+        }
+        Expression::Like { expr, pattern, .. } => {
+            validate_expression_columns(expr, table_schema, qualified_table_name)?;
+            validate_expression_columns(pattern, table_schema, qualified_table_name)
+        }
+        // Literals and other self-contained expressions don't reference columns
+        Expression::Literal(_)
+        | Expression::Wildcard
+        | Expression::Placeholder(_)
+        | Expression::NumberedPlaceholder(_)
+        | Expression::NamedPlaceholder(_) => Ok(()),
+        // For other expression types, conservatively allow them
+        // (they may be validated during evaluation)
+        _ => Ok(()),
+    }
+}
+
+/// Create an expression index by evaluating expressions for each row.
+///
+/// This function:
+/// 1. Scans all rows in the table
+/// 2. Evaluates the expression(s) for each row to compute index key values
+/// 3. Builds the B-tree index with the computed keys
+/// 4. Enforces UNIQUE constraint if specified
+fn create_expression_index(
+    database: &mut Database,
+    table_name: &str,
+    index_name: &str,
+    table_schema: &vibesql_catalog::TableSchema,
+    columns: &[vibesql_ast::IndexColumn],
+    unique: bool,
+) -> Result<(), ExecutorError> {
+    use std::collections::HashSet;
+
+    // Get table for scanning
+    let table = database
+        .get_table(table_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+    // Create expression evaluator for this table's schema
+    let evaluator = ExpressionEvaluator::new(table_schema);
+
+    // Collect all key-value pairs (key, row_id)
+    let mut keys: Vec<(Vec<vibesql_types::SqlValue>, usize)> = Vec::new();
+    let mut unique_keys: HashSet<Vec<vibesql_types::SqlValue>> = HashSet::new();
+
+    // Scan all live rows
+    for (row_idx, row) in table.scan_live() {
+        // Evaluate each expression/column to build the key
+        let mut key_values: Vec<vibesql_types::SqlValue> = Vec::new();
+
+        for col in columns {
+            let value = if let Some(expr) = col.get_expression() {
+                // Expression: evaluate it
+                evaluator.eval(expr, row)?
+            } else if let Some(col_name) = col.column_name() {
+                // Column reference: extract value directly
+                let col_idx = table_schema
+                    .get_column_index(col_name)
+                    .ok_or_else(|| ExecutorError::ColumnNotFound {
+                        column_name: col_name.to_string(),
+                        table_name: table_name.to_string(),
+                        searched_tables: vec![table_name.to_string()],
+                        available_columns: table_schema
+                            .columns
+                            .iter()
+                            .map(|c| c.name.clone())
+                            .collect(),
+                    })?;
+                row.values[col_idx].clone()
+            } else {
+                // Should not happen: validated earlier
+                return Err(ExecutorError::InvalidIndexDefinition(
+                    "Index column must be either a column name or an expression".to_string(),
+                ));
+            };
+
+            key_values.push(value);
+        }
+
+        // UNIQUE constraint validation
+        // NULL values are excluded from uniqueness checks (SQL standard)
+        if unique {
+            let has_null = key_values.iter().any(|v| matches!(v, vibesql_types::SqlValue::Null));
+            if !has_null {
+                if unique_keys.contains(&key_values) {
+                    return Err(ExecutorError::ConstraintViolation(format!(
+                        "UNIQUE constraint failed: duplicate key in expression index '{}'",
+                        index_name
+                    )));
+                }
+                unique_keys.insert(key_values.clone());
+            }
+        }
+
+        keys.push((key_values, row_idx));
+    }
+
+    // Create the index in storage using the pre-computed keys
+    database.create_index_with_keys(
+        index_name.to_string(),
+        table_name.to_string(),
+        unique,
+        columns.to_vec(),
+        keys,
+    )?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1203,5 +1444,261 @@ mod tests {
         let query_vector = vec![0.5, 0.5, 0.5];
         let search_result = db.search_ivfflat_index("idx_probes", &query_vector, 3);
         assert!(search_result.is_ok());
+    }
+
+    // ========================================================================
+    // Expression Index Tests
+    // ========================================================================
+
+    #[test]
+    fn test_create_expression_index_lower() {
+        let mut db = Database::new();
+        create_test_table(&mut db);
+
+        // Insert some test data
+        db.insert_row(
+            "users",
+            Row::new(vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar(arcstr::ArcStr::from("Test@Example.COM")),
+                SqlValue::Varchar(arcstr::ArcStr::from("John")),
+            ]),
+        )
+        .unwrap();
+
+        // Create expression index on LOWER(email)
+        let stmt = CreateIndexStmt {
+            index_name: "idx_users_email_lower".to_string(),
+            if_not_exists: false,
+            table_name: "users".to_string(),
+            index_type: vibesql_ast::IndexType::BTree { unique: false },
+            columns: vec![IndexColumn::new_expression(
+                vibesql_ast::Expression::Function {
+                    name: vibesql_ast::FunctionIdentifier::new("lower"),
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("email", false),
+                    )],
+                    character_unit: None,
+                },
+                OrderDirection::Asc,
+            )],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_ok(), "Expression index creation failed: {:?}", result.err());
+        assert!(db.index_exists("idx_users_email_lower"));
+    }
+
+    #[test]
+    fn test_create_expression_index_arithmetic() {
+        let mut db = Database::new();
+
+        // Create a table with numeric columns
+        let table_stmt = vibesql_ast::CreateTableStmt {
+            temporary: false,
+            if_not_exists: false,
+            table_name: "products".to_string(),
+            columns: vec![
+                vibesql_ast::ColumnDef {
+                    name: "id".to_string(),
+                    data_type: DataType::Integer,
+                    nullable: false,
+                    constraints: vec![],
+                    default_value: None,
+                    comment: None,
+                    generated_expr: None,
+                },
+                vibesql_ast::ColumnDef {
+                    name: "price".to_string(),
+                    data_type: DataType::Integer,
+                    nullable: false,
+                    constraints: vec![],
+                    default_value: None,
+                    comment: None,
+                    generated_expr: None,
+                },
+                vibesql_ast::ColumnDef {
+                    name: "discount".to_string(),
+                    data_type: DataType::Integer,
+                    nullable: false,
+                    constraints: vec![],
+                    default_value: None,
+                    comment: None,
+                    generated_expr: None,
+                },
+            ],
+            table_constraints: vec![],
+            table_options: vec![],
+            quoted: false,
+            as_query: None,
+        };
+        crate::CreateTableExecutor::execute(&table_stmt, &mut db).unwrap();
+
+        // Insert test data
+        db.insert_row(
+            "products",
+            Row::new(vec![
+                SqlValue::Integer(1),
+                SqlValue::Integer(100),
+                SqlValue::Integer(10),
+            ]),
+        )
+        .unwrap();
+
+        // Create expression index on (price - discount)
+        let stmt = CreateIndexStmt {
+            index_name: "idx_products_net_price".to_string(),
+            if_not_exists: false,
+            table_name: "products".to_string(),
+            index_type: vibesql_ast::IndexType::BTree { unique: false },
+            columns: vec![IndexColumn::new_expression(
+                vibesql_ast::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::Minus,
+                    left: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("price", false),
+                    )),
+                    right: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("discount", false),
+                    )),
+                },
+                OrderDirection::Asc,
+            )],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_ok(), "Arithmetic expression index creation failed: {:?}", result.err());
+        assert!(db.index_exists("idx_products_net_price"));
+    }
+
+    #[test]
+    fn test_create_unique_expression_index() {
+        let mut db = Database::new();
+        create_test_table(&mut db);
+
+        // Insert data with different emails but same lowercase
+        db.insert_row(
+            "users",
+            Row::new(vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar(arcstr::ArcStr::from("user@example.com")),
+                SqlValue::Varchar(arcstr::ArcStr::from("John")),
+            ]),
+        )
+        .unwrap();
+
+        // Create unique expression index on LOWER(email)
+        let stmt = CreateIndexStmt {
+            index_name: "idx_users_email_lower_unique".to_string(),
+            if_not_exists: false,
+            table_name: "users".to_string(),
+            index_type: vibesql_ast::IndexType::BTree { unique: true },
+            columns: vec![IndexColumn::new_expression(
+                vibesql_ast::Expression::Function {
+                    name: vibesql_ast::FunctionIdentifier::new("lower"),
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("email", false),
+                    )],
+                    character_unit: None,
+                },
+                OrderDirection::Asc,
+            )],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_ok(), "Unique expression index creation failed: {:?}", result.err());
+        assert!(db.index_exists("idx_users_email_lower_unique"));
+    }
+
+    #[test]
+    fn test_create_expression_index_rejects_non_deterministic() {
+        let mut db = Database::new();
+        create_test_table(&mut db);
+
+        // Try to create expression index on RANDOM() - should fail
+        let stmt = CreateIndexStmt {
+            index_name: "idx_users_random".to_string(),
+            if_not_exists: false,
+            table_name: "users".to_string(),
+            index_type: vibesql_ast::IndexType::BTree { unique: false },
+            columns: vec![IndexColumn::new_expression(
+                vibesql_ast::Expression::Function {
+                    name: vibesql_ast::FunctionIdentifier::new("random"),
+                    args: vec![],
+                    character_unit: None,
+                },
+                OrderDirection::Asc,
+            )],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_err(), "Non-deterministic expression index should fail");
+        assert!(matches!(result, Err(ExecutorError::UnsupportedFeature(_))));
+    }
+
+    #[test]
+    fn test_create_expression_index_validates_column_references() {
+        let mut db = Database::new();
+        create_test_table(&mut db);
+
+        // Try to create expression index with non-existent column
+        let stmt = CreateIndexStmt {
+            index_name: "idx_users_bad_col".to_string(),
+            if_not_exists: false,
+            table_name: "users".to_string(),
+            index_type: vibesql_ast::IndexType::BTree { unique: false },
+            columns: vec![IndexColumn::new_expression(
+                vibesql_ast::Expression::Function {
+                    name: vibesql_ast::FunctionIdentifier::new("lower"),
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("nonexistent_column", false),
+                    )],
+                    character_unit: None,
+                },
+                OrderDirection::Asc,
+            )],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_err(), "Expression index with non-existent column should fail");
+        assert!(matches!(result, Err(ExecutorError::ColumnNotFound { .. })));
+    }
+
+    #[test]
+    fn test_create_expression_index_handles_null() {
+        let mut db = Database::new();
+        create_test_table(&mut db);
+
+        // Insert row with NULL name
+        db.insert_row(
+            "users",
+            Row::new(vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar(arcstr::ArcStr::from("user@example.com")),
+                SqlValue::Null, // NULL name
+            ]),
+        )
+        .unwrap();
+
+        // Create expression index on LOWER(name) - should handle NULL
+        let stmt = CreateIndexStmt {
+            index_name: "idx_users_name_lower".to_string(),
+            if_not_exists: false,
+            table_name: "users".to_string(),
+            index_type: vibesql_ast::IndexType::BTree { unique: false },
+            columns: vec![IndexColumn::new_expression(
+                vibesql_ast::Expression::Function {
+                    name: vibesql_ast::FunctionIdentifier::new("lower"),
+                    args: vec![vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("name", false),
+                    )],
+                    character_unit: None,
+                },
+                OrderDirection::Asc,
+            )],
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_ok(), "Expression index with NULL should succeed: {:?}", result.err());
+        assert!(db.index_exists("idx_users_name_lower"));
     }
 }

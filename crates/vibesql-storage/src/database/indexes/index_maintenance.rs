@@ -240,6 +240,85 @@ impl IndexManager {
         Ok(())
     }
 
+    /// Create an index with pre-computed keys (for expression indexes)
+    ///
+    /// This method is used when the caller has already evaluated the expressions
+    /// and computed the key values for each row. This is necessary for expression
+    /// indexes where the key values are derived from evaluating expressions on rows.
+    pub fn create_index_with_keys(
+        &mut self,
+        index_name: String,
+        table_name: String,
+        _table_schema: &vibesql_catalog::TableSchema,
+        unique: bool,
+        columns: Vec<vibesql_ast::IndexColumn>,
+        keys: Vec<(Vec<SqlValue>, usize)>,
+    ) -> Result<(), StorageError> {
+        use std::collections::BTreeMap;
+
+        // Normalize index name for case-insensitive comparison
+        let normalized_name = normalize_index_name(&index_name);
+
+        // Check if index already exists
+        if self.indexes.contains_key(&normalized_name) {
+            return Err(StorageError::IndexAlreadyExists(index_name));
+        }
+
+        // Store index metadata (use normalized name as key)
+        let metadata = IndexMetadata {
+            index_name: index_name.clone(),
+            table_name: table_name.clone(),
+            unique,
+            columns: columns.clone(),
+        };
+
+        self.indexes.insert(normalized_name.clone(), metadata);
+
+        // For expression indexes, always use in-memory storage for now
+        // (disk-backed expression index support can be added later)
+        let mut entries: Vec<(Key, usize)> = Vec::new();
+
+        for (key_values, row_idx) in keys {
+            // Normalize key values for consistent comparison
+            let normalized_key: Vec<SqlValue> = key_values
+                .iter()
+                .map(|v| super::index_operations::normalize_for_comparison(v))
+                .collect();
+            entries.push((normalized_key, row_idx));
+        }
+
+        // Sort by key for optimal BTreeMap construction
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Group entries by key and build BTreeMap
+        let mut index_data_map: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
+        for (key, row_idx) in entries {
+            index_data_map.entry(key).or_default().push(row_idx);
+        }
+
+        // Estimate memory usage
+        let key_size = std::mem::size_of::<Vec<SqlValue>>(); // Rough estimate
+        let memory_bytes = self.estimate_index_memory(index_data_map.len(), key_size);
+
+        let index_data =
+            IndexData::InMemory { data: index_data_map, pending_deletions: Vec::new() };
+
+        // Register the index with resource tracker
+        self.resource_tracker.register_index(
+            normalized_name.clone(),
+            memory_bytes,
+            0, // No disk usage for in-memory
+            crate::database::IndexBackend::InMemory,
+        );
+
+        self.index_data.insert(normalized_name.clone(), index_data);
+
+        // Enforce memory budget after creating index
+        self.enforce_memory_budget()?;
+
+        Ok(())
+    }
+
     /// Add row to user-defined indexes after insert
     /// This should be called AFTER the row has been added to the table
     pub fn add_to_indexes_for_insert(

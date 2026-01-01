@@ -30,11 +30,30 @@ impl ExpressionHasher {
         hasher.finish()
     }
 
+    /// Check if an expression is deterministic for index creation.
+    ///
+    /// For expression indexes, an expression is deterministic if it produces
+    /// the same output for the same input row values. This is different from
+    /// CSE caching where column references are considered non-deterministic.
+    ///
+    /// Non-deterministic expressions like RAND() or CURRENT_TIMESTAMP cannot
+    /// be used in expression indexes because they may produce different values
+    /// for the same row on each evaluation.
+    pub fn is_deterministic_for_index(expr: &vibesql_ast::Expression) -> bool {
+        Self::is_deterministic_impl(expr, true)
+    }
+
     /// Check if an expression is deterministic (safe to cache)
     ///
     /// Non-deterministic expressions like RAND() or CURRENT_TIMESTAMP should
     /// not be cached as they may produce different values on each evaluation.
     pub fn is_deterministic(expr: &vibesql_ast::Expression) -> bool {
+        Self::is_deterministic_impl(expr, false)
+    }
+
+    /// Internal implementation for determinism checking
+    /// `allow_column_refs`: if true, column references are considered deterministic
+    fn is_deterministic_impl(expr: &vibesql_ast::Expression, allow_column_refs: bool) -> bool {
         match expr {
             // Non-deterministic datetime functions
             vibesql_ast::Expression::CurrentDate
@@ -63,7 +82,7 @@ impl ExpressionHasher {
                     return false;
                 }
                 // Recursively check arguments
-                args.iter().all(Self::is_deterministic)
+                args.iter().all(|arg| Self::is_deterministic_impl(arg, allow_column_refs))
             }
 
             // Sequence functions are non-deterministic
@@ -77,15 +96,18 @@ impl ExpressionHasher {
 
             // Recursively check sub-expressions
             vibesql_ast::Expression::BinaryOp { left, right, .. } => {
-                Self::is_deterministic(left) && Self::is_deterministic(right)
+                Self::is_deterministic_impl(left, allow_column_refs)
+                    && Self::is_deterministic_impl(right, allow_column_refs)
             }
 
-            vibesql_ast::Expression::UnaryOp { expr, .. } => Self::is_deterministic(expr),
+            vibesql_ast::Expression::UnaryOp { expr, .. } => {
+                Self::is_deterministic_impl(expr, allow_column_refs)
+            }
 
             vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
                 // Check operand
                 if let Some(op) = operand {
-                    if !Self::is_deterministic(op) {
+                    if !Self::is_deterministic_impl(op, allow_column_refs) {
                         return false;
                     }
                 }
@@ -93,17 +115,17 @@ impl ExpressionHasher {
                 for clause in when_clauses {
                     // Check all conditions (there can be multiple per clause)
                     for condition in &clause.conditions {
-                        if !Self::is_deterministic(condition) {
+                        if !Self::is_deterministic_impl(condition, allow_column_refs) {
                             return false;
                         }
                     }
-                    if !Self::is_deterministic(&clause.result) {
+                    if !Self::is_deterministic_impl(&clause.result, allow_column_refs) {
                         return false;
                     }
                 }
                 // Check else result
                 if let Some(else_expr) = else_result {
-                    if !Self::is_deterministic(else_expr) {
+                    if !Self::is_deterministic_impl(else_expr, allow_column_refs) {
                         return false;
                     }
                 }
@@ -111,56 +133,73 @@ impl ExpressionHasher {
             }
 
             vibesql_ast::Expression::Between { expr, low, high, .. } => {
-                Self::is_deterministic(expr)
-                    && Self::is_deterministic(low)
-                    && Self::is_deterministic(high)
+                Self::is_deterministic_impl(expr, allow_column_refs)
+                    && Self::is_deterministic_impl(low, allow_column_refs)
+                    && Self::is_deterministic_impl(high, allow_column_refs)
             }
 
-            vibesql_ast::Expression::Cast { expr, .. } => Self::is_deterministic(expr),
+            vibesql_ast::Expression::Cast { expr, .. } => {
+                Self::is_deterministic_impl(expr, allow_column_refs)
+            }
 
-            vibesql_ast::Expression::Interval { value, .. } => Self::is_deterministic(value),
+            vibesql_ast::Expression::Interval { value, .. } => {
+                Self::is_deterministic_impl(value, allow_column_refs)
+            }
 
             vibesql_ast::Expression::InList { expr, values, .. } => {
-                Self::is_deterministic(expr) && values.iter().all(Self::is_deterministic)
+                Self::is_deterministic_impl(expr, allow_column_refs)
+                    && values
+                        .iter()
+                        .all(|v| Self::is_deterministic_impl(v, allow_column_refs))
             }
 
             vibesql_ast::Expression::Like { expr, pattern, .. }
             | vibesql_ast::Expression::Glob { expr, pattern, .. } => {
-                Self::is_deterministic(expr) && Self::is_deterministic(pattern)
+                Self::is_deterministic_impl(expr, allow_column_refs)
+                    && Self::is_deterministic_impl(pattern, allow_column_refs)
             }
 
-            vibesql_ast::Expression::IsNull { expr, .. } => Self::is_deterministic(expr),
+            vibesql_ast::Expression::IsNull { expr, .. } => {
+                Self::is_deterministic_impl(expr, allow_column_refs)
+            }
 
             vibesql_ast::Expression::IsDistinctFrom { left, right, .. } => {
-                Self::is_deterministic(left) && Self::is_deterministic(right)
+                Self::is_deterministic_impl(left, allow_column_refs)
+                    && Self::is_deterministic_impl(right, allow_column_refs)
             }
 
-            vibesql_ast::Expression::IsTruthValue { expr, .. } => Self::is_deterministic(expr),
+            vibesql_ast::Expression::IsTruthValue { expr, .. } => {
+                Self::is_deterministic_impl(expr, allow_column_refs)
+            }
 
             vibesql_ast::Expression::Position { substring, string, .. } => {
-                Self::is_deterministic(substring) && Self::is_deterministic(string)
+                Self::is_deterministic_impl(substring, allow_column_refs)
+                    && Self::is_deterministic_impl(string, allow_column_refs)
             }
 
             vibesql_ast::Expression::Trim { string, removal_char, .. } => {
-                Self::is_deterministic(string)
-                    && removal_char.as_ref().is_none_or(|c| Self::is_deterministic(c))
+                Self::is_deterministic_impl(string, allow_column_refs)
+                    && removal_char
+                        .as_ref()
+                        .is_none_or(|c| Self::is_deterministic_impl(c, allow_column_refs))
             }
 
-            vibesql_ast::Expression::Extract { expr, .. } => Self::is_deterministic(expr),
+            vibesql_ast::Expression::Extract { expr, .. } => {
+                Self::is_deterministic_impl(expr, allow_column_refs)
+            }
 
-            // Literals and placeholders are deterministic, but column references, pseudo-variables,
-            // and session variables are NOT Column references and pseudo-variables
-            // depend on the current row data, so they should not be cached
-            // across multiple rows in row-iteration contexts
-            // Session variables can change during execution, so they should not be cached
-            // Placeholders should be bound to values before evaluation, so treat them as
-            // deterministic
+            // Literals and placeholders are deterministic
             vibesql_ast::Expression::Literal(_)
             | vibesql_ast::Expression::Placeholder(_)
             | vibesql_ast::Expression::NumberedPlaceholder(_)
             | vibesql_ast::Expression::NamedPlaceholder(_) => true,
-            vibesql_ast::Expression::ColumnRef(_)
-            | vibesql_ast::Expression::PseudoVariable { .. }
+
+            // Column references are deterministic for index expressions (same row = same value),
+            // but not for CSE caching (which operates across rows).
+            vibesql_ast::Expression::ColumnRef(_) => allow_column_refs,
+
+            // Pseudo-variables and session variables are always non-deterministic
+            vibesql_ast::Expression::PseudoVariable { .. }
             | vibesql_ast::Expression::SessionVariable { .. } => false,
 
             // Window and aggregate functions should not be cached at this level
@@ -175,11 +214,13 @@ impl ExpressionHasher {
             // Conjunction, Disjunction, and RowValueConstructor - check all children
             vibesql_ast::Expression::Conjunction(children)
             | vibesql_ast::Expression::Disjunction(children)
-            | vibesql_ast::Expression::RowValueConstructor(children) => {
-                children.iter().all(Self::is_deterministic)
-            }
+            | vibesql_ast::Expression::RowValueConstructor(children) => children
+                .iter()
+                .all(|c| Self::is_deterministic_impl(c, allow_column_refs)),
 
-            vibesql_ast::Expression::Collate { expr, .. } => Self::is_deterministic(expr),
+            vibesql_ast::Expression::Collate { expr, .. } => {
+                Self::is_deterministic_impl(expr, allow_column_refs)
+            }
 
             // MATCH AGAINST is deterministic if the search term is constant
             vibesql_ast::Expression::MatchAgainst { .. } => {
