@@ -40,13 +40,13 @@ export class NavigationComponent extends Component<NavigationState> {
       {
         id: 'challenge',
         label: t('nav-challenge'),
-        href: 'challenge.html',
+        href: './',
         icon: this.getChallengeIcon(),
       },
       {
         id: 'terminal',
         label: t('nav-terminal'),
-        href: './',
+        href: 'demo.html',
         icon: this.getTerminalIcon(),
       },
       {

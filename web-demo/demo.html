@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title data-i18n="page-title">VibeSQL - AI-Powered SQL:1999 Database</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <!-- Prevent flash of unstyled content by applying theme before page renders -->
+  <script>
+    (function() {
+      const savedTheme = localStorage.getItem('theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const theme = savedTheme ?? (prefersDark ? 'dark' : 'light');
+      if (theme === 'dark') {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+</head>
+<body>
+  <!-- Loading Progress Indicator -->
+  <div id="loading-progress"></div>
+
+  <div id="app" class="min-h-screen bg-white dark:bg-gray-800">
+    <!-- Header -->
+    <header class="bg-white dark:bg-gray-800 shadow-md border-b border-gray-300 dark:border-gray-600">
+      <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center flex-wrap gap-4">
+        <div class="flex items-center gap-4">
+          <h1 class="text-3xl font-bold text-blue-600 dark:text-blue-400" data-i18n="demo-title">
+            VibeSQL Demo
+          </h1>
+          <button
+            id="showcase-toggle"
+            class="px-4 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            aria-label="Toggle SQL:1999 Showcase"
+            data-i18n="nav-showcase"
+          >
+            SQL:1999 Showcase
+          </button>
+          <a
+            href="https://rjwalters.github.io/vibesql/conformance.html#sqltest"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="View sqltest Results"
+            class="transition-transform hover:scale-105"
+          >
+            <img
+              src="https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/sql1999-conformance.json"
+              alt="SQL:1999 Conformance"
+              class="h-5"
+            />
+          </a>
+          <a
+            href="https://rjwalters.github.io/vibesql/conformance.html#sqllogictest"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="View SQLLogicTest Results"
+            class="transition-transform hover:scale-105"
+          >
+            <img
+              src="https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/sqllogictest.json"
+              alt="SQLLogicTest"
+              class="h-5"
+            />
+          </a>
+        </div>
+        <div id="nav-container"></div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 py-6">
+      <!-- SQL:1999 Showcase Navigation -->
+      <div id="showcase-nav" class="hidden"></div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <!-- Sidebar: Examples -->
+        <aside class="lg:col-span-1" id="examples" aria-label="Example queries"></aside>
+
+        <!-- Main Area: Editor and Results -->
+        <section class="lg:col-span-3 space-y-6">
+          <!-- Editor -->
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-3">
+              <div class="flex items-center gap-3 flex-wrap">
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100" data-i18n="editor-title">
+                  SQL Editor
+                </h2>
+                <div id="database-selector"></div>
+                <div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                  <span class="font-medium" data-i18n="editor-storage">Storage:</span>
+                  <span id="storage-status" class="px-2 py-1 rounded bg-white dark:bg-gray-700">Initializing...</span>
+                </div>
+              </div>
+              <button id="execute-btn" class="btn-primary" aria-label="Execute query" data-i18n="editor-execute">
+                Execute Query
+              </button>
+            </div>
+            <div id="editor"></div>
+          </div>
+
+          <!-- Results -->
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
+            <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4" data-i18n="results-title">
+              Results
+            </h2>
+            <div id="results"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="mt-12 text-center text-sm text-muted pb-6 space-y-1">
+      <p data-i18n="footer-tagline">VibeSQL - SQL:1999 Database in WebAssembly</p>
+      <p id="build-timestamp" class="text-xs text-gray-400 dark:text-gray-500"></p>
+    </footer>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
