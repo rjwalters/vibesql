@@ -186,19 +186,78 @@ fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<Range
 
                     // Merge ranges if both sides have predicates on our column
                     match (left_range, right_range) {
-                        (Some(mut l), Some(r)) => {
-                            // Merge the bounds
-                            if l.start.is_none() {
-                                l.start = r.start;
-                                l.inclusive_start = r.inclusive_start;
+                        (Some(l), Some(r)) => {
+                            // Merge the bounds by taking the tighter constraint
+                            // For starts: take the greater value (tighter lower bound)
+                            // For ends: take the lesser value (tighter upper bound)
+                            let (merged_start, merged_inclusive_start) =
+                                match (&l.start, &r.start) {
+                                    (None, None) => (None, false),
+                                    (Some(v), None) => (Some(v.clone()), l.inclusive_start),
+                                    (None, Some(v)) => (Some(v.clone()), r.inclusive_start),
+                                    (Some(lv), Some(rv)) => {
+                                        if lv > rv {
+                                            (Some(lv.clone()), l.inclusive_start)
+                                        } else if rv > lv {
+                                            (Some(rv.clone()), r.inclusive_start)
+                                        } else {
+                                            // Equal values - take the more restrictive inclusivity
+                                            (
+                                                Some(lv.clone()),
+                                                l.inclusive_start && r.inclusive_start,
+                                            )
+                                        }
+                                    }
+                                };
+
+                            let (merged_end, merged_inclusive_end) = match (&l.end, &r.end) {
+                                (None, None) => (None, false),
+                                (Some(v), None) => (Some(v.clone()), l.inclusive_end),
+                                (None, Some(v)) => (Some(v.clone()), r.inclusive_end),
+                                (Some(lv), Some(rv)) => {
+                                    if lv < rv {
+                                        (Some(lv.clone()), l.inclusive_end)
+                                    } else if rv < lv {
+                                        (Some(rv.clone()), r.inclusive_end)
+                                    } else {
+                                        // Equal values - take the more restrictive inclusivity
+                                        (Some(lv.clone()), l.inclusive_end && r.inclusive_end)
+                                    }
+                                }
+                            };
+
+                            // Check for contradiction: start > end means no values can match
+                            // e.g., col = 33 AND col >= 881 → start=881, end=33 → contradiction
+                            if let (Some(ref start), Some(ref end)) = (&merged_start, &merged_end) {
+                                let is_contradiction = if start > end {
+                                    true
+                                } else if start == end {
+                                    // Equal bounds: contradiction if either is exclusive
+                                    !merged_inclusive_start || !merged_inclusive_end
+                                } else {
+                                    false
+                                };
+
+                                if is_contradiction {
+                                    // Return a range that will match nothing
+                                    // We use start > end to signal an impossible range
+                                    return Some(RangePredicate {
+                                        start: Some(SqlValue::Integer(1)),
+                                        end: Some(SqlValue::Integer(0)),
+                                        inclusive_start: true,
+                                        inclusive_end: true,
+                                        exclude_nulls: true,
+                                    });
+                                }
                             }
-                            if l.end.is_none() {
-                                l.end = r.end;
-                                l.inclusive_end = r.inclusive_end;
-                            }
-                            // If either side excludes NULLs, the merged range should too
-                            l.exclude_nulls = l.exclude_nulls || r.exclude_nulls;
-                            return Some(l);
+
+                            return Some(RangePredicate {
+                                start: merged_start,
+                                end: merged_end,
+                                inclusive_start: merged_inclusive_start,
+                                inclusive_end: merged_inclusive_end,
+                                exclude_nulls: l.exclude_nulls || r.exclude_nulls,
+                            });
                         }
                         (Some(l), None) => return Some(l),
                         (None, Some(r)) => return Some(r),
@@ -1211,17 +1270,70 @@ fn extract_range_predicate_for_expression(
                     let right_range = extract_range_predicate_for_expression(right, index_expr);
 
                     match (left_range, right_range) {
-                        (Some(mut l), Some(r)) => {
-                            if l.start.is_none() {
-                                l.start = r.start;
-                                l.inclusive_start = r.inclusive_start;
+                        (Some(l), Some(r)) => {
+                            // Merge the bounds by taking the tighter constraint
+                            let (merged_start, merged_inclusive_start) =
+                                match (&l.start, &r.start) {
+                                    (None, None) => (None, false),
+                                    (Some(v), None) => (Some(v.clone()), l.inclusive_start),
+                                    (None, Some(v)) => (Some(v.clone()), r.inclusive_start),
+                                    (Some(lv), Some(rv)) => {
+                                        if lv > rv {
+                                            (Some(lv.clone()), l.inclusive_start)
+                                        } else if rv > lv {
+                                            (Some(rv.clone()), r.inclusive_start)
+                                        } else {
+                                            (
+                                                Some(lv.clone()),
+                                                l.inclusive_start && r.inclusive_start,
+                                            )
+                                        }
+                                    }
+                                };
+
+                            let (merged_end, merged_inclusive_end) = match (&l.end, &r.end) {
+                                (None, None) => (None, false),
+                                (Some(v), None) => (Some(v.clone()), l.inclusive_end),
+                                (None, Some(v)) => (Some(v.clone()), r.inclusive_end),
+                                (Some(lv), Some(rv)) => {
+                                    if lv < rv {
+                                        (Some(lv.clone()), l.inclusive_end)
+                                    } else if rv < lv {
+                                        (Some(rv.clone()), r.inclusive_end)
+                                    } else {
+                                        (Some(lv.clone()), l.inclusive_end && r.inclusive_end)
+                                    }
+                                }
+                            };
+
+                            // Check for contradiction
+                            if let (Some(ref start), Some(ref end)) = (&merged_start, &merged_end) {
+                                let is_contradiction = if start > end {
+                                    true
+                                } else if start == end {
+                                    !merged_inclusive_start || !merged_inclusive_end
+                                } else {
+                                    false
+                                };
+
+                                if is_contradiction {
+                                    return Some(RangePredicate {
+                                        start: Some(SqlValue::Integer(1)),
+                                        end: Some(SqlValue::Integer(0)),
+                                        inclusive_start: true,
+                                        inclusive_end: true,
+                                        exclude_nulls: true,
+                                    });
+                                }
                             }
-                            if l.end.is_none() {
-                                l.end = r.end;
-                                l.inclusive_end = r.inclusive_end;
-                            }
-                            l.exclude_nulls = l.exclude_nulls || r.exclude_nulls;
-                            return Some(l);
+
+                            return Some(RangePredicate {
+                                start: merged_start,
+                                end: merged_end,
+                                inclusive_start: merged_inclusive_start,
+                                inclusive_end: merged_inclusive_end,
+                                exclude_nulls: l.exclude_nulls || r.exclude_nulls,
+                            });
                         }
                         (Some(l), None) => return Some(l),
                         (None, Some(r)) => return Some(r),
