@@ -100,16 +100,22 @@ function createProgressChart(data: ChallengeData): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  // Filter to only weeks with test data
-  const weeklyData = data.weekly_timeline.filter(w => w.pass_rate !== null);
+  // Only show data up to day 40 (the challenge completion window)
+  const MAX_DAYS = 40;
+  const firstCommitDate = new Date(data.project.first_commit);
 
-  // If no test data yet, show a message
+  const weeklyData = data.weekly_timeline.filter(w => {
+    const weekStart = new Date(w.week_start);
+    const daysDiff = Math.floor((weekStart.getTime() - firstCommitDate.getTime()) / (1000 * 60 * 60 * 24));
+    return daysDiff <= MAX_DAYS;
+  });
+
   if (weeklyData.length === 0) {
     const parent = canvas.parentElement;
     if (parent) {
       parent.innerHTML = `
         <div class="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
-          <p>Progress chart will appear when test data is available.</p>
+          <p>Progress chart will appear when data is available.</p>
         </div>
       `;
     }
@@ -122,12 +128,14 @@ function createProgressChart(data: ChallengeData): void {
   const textColor = isDark ? '#9CA3AF' : '#6B7280';
 
   // Calculate days from start for each data point
-  const firstCommitDate = new Date(data.project.first_commit);
   const labels = weeklyData.map(w => {
     const weekStart = new Date(w.week_start);
     const daysDiff = Math.floor((weekStart.getTime() - firstCommitDate.getTime()) / (1000 * 60 * 60 * 24));
     return `Day ${daysDiff}`;
   });
+
+  // Map pass_rate: null means no test infrastructure yet, show as 0
+  const passRates = weeklyData.map(w => w.pass_rate ?? 0);
 
   progressChart = new Chart(ctx, {
     type: 'line',
@@ -136,7 +144,7 @@ function createProgressChart(data: ChallengeData): void {
       datasets: [
         {
           label: 'Pass Rate (%)',
-          data: weeklyData.map(w => w.pass_rate),
+          data: passRates,
           backgroundColor: COLORS.passRate.bg,
           borderColor: COLORS.passRate.border,
           borderWidth: 3,
@@ -190,21 +198,17 @@ function createProgressChart(data: ChallengeData): void {
       },
       plugins: {
         legend: {
-          display: true,
-          position: 'top',
-          labels: {
-            color: textColor,
-          },
+          display: false,
         },
         tooltip: {
           callbacks: {
             label: (context: any) => {
               const value = context.parsed.y;
               const week = weeklyData[context.dataIndex];
-              if (context.dataset.label === 'Pass Rate (%)') {
-                return `Pass Rate: ${value.toFixed(1)}% (${week.passed}/${week.total_tests} tests)`;
+              if (week.pass_rate === null) {
+                return 'No test data yet';
               }
-              return `${context.dataset.label}: ${value}`;
+              return `Pass Rate: ${value.toFixed(1)}% (${week.passed}/${week.total_tests} tests)`;
             },
           },
         },
@@ -241,33 +245,6 @@ function updateStats(data: ChallengeData): void {
   }
 
   // Pass rate (already hardcoded as 100% in HTML)
-}
-
-function updateMilestones(data: ChallengeData): void {
-  const milestoneMap: Record<string, string> = {};
-  for (const m of data.test_milestones) {
-    milestoneMap[m.milestone] = `Day ${m.days_from_start}`;
-  }
-
-  const el50 = document.getElementById('milestone-50');
-  if (el50 && milestoneMap['50%']) {
-    el50.textContent = milestoneMap['50%'];
-  }
-
-  const el75 = document.getElementById('milestone-75');
-  if (el75 && milestoneMap['75%']) {
-    el75.textContent = milestoneMap['75%'];
-  }
-
-  const el90 = document.getElementById('milestone-90');
-  if (el90 && milestoneMap['90%']) {
-    el90.textContent = milestoneMap['90%'];
-  }
-
-  const el100 = document.getElementById('milestone-100');
-  if (el100 && milestoneMap['100%']) {
-    el100.textContent = milestoneMap['100%'];
-  }
 }
 
 // ============================================================================
@@ -315,9 +292,6 @@ async function init(): Promise<void> {
 
   // Update stats
   updateStats(data);
-
-  // Update milestones
-  updateMilestones(data);
 
   // Create progress chart
   createProgressChart(data);
