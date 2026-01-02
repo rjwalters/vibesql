@@ -108,6 +108,8 @@ array set ::sqlite_options {
     tclvar 0
     threadsafe 0
     wal 0
+    autovacuum 0
+    default_autovacuum 0
 }
 
 #-----------------------------------------------------------------------------
@@ -2452,12 +2454,36 @@ proc match_regex_pattern {result expected} {
 # Capability checking (stub implementations)
 #-----------------------------------------------------------------------------
 
+# Helper to check if a single capability is supported
+# Returns 1 if supported, 0 if not
+proc check_single_capability {cap} {
+    # Capabilities we don't support (unsupported_caps means NOT supported)
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab fts3 fts4 fts5 datetime datetime_time datetime_funcs trigger conflict tempdb}
+
+    # Handle negated capability (e.g., !autovacuum)
+    set negate 0
+    if {[string index $cap 0] eq "!"} {
+        set negate 1
+        set cap [string range $cap 1 end]
+    }
+
+    # Check if capability is supported
+    set is_supported [expr {$cap ni $unsupported_caps}]
+
+    if {$negate} {
+        return [expr {!$is_supported}]
+    }
+    return $is_supported
+}
+
 proc ifcapable {args} {
     # Handle various forms of ifcapable:
     # ifcapable cap script
     # ifcapable cap { script }
     # ifcapable cap { script } else { else_script }
     # ifcapable !cap script  (negated capability)
+    # ifcapable {cap1 || cap2} script  (compound expression)
+    # ifcapable {cap1 && cap2} script  (compound expression)
     if {[llength $args] < 2} {
         error "wrong # args: should be \"ifcapable capability script\""
     }
@@ -2470,34 +2496,58 @@ proc ifcapable {args} {
         set else_script [lindex $args 3]
     }
 
-    # Skip SQLite-specific capabilities that we don't support
-    set skip_caps {wal vacuum_incr stat4 stat3 tclvar vtab fts3 fts4 fts5 datetime datetime_time datetime_funcs trigger conflict tempdb}
+    # Evaluate capability expression (may be compound with || or &&)
+    set result [eval_capability_expr $capability]
 
-    # Handle negated capabilities (e.g., !floatingpoint)
-    set negate 0
-    if {[string index $capability 0] eq "!"} {
-        set negate 1
-        set capability [string range $capability 1 end]
+    if {$result} {
+        uplevel 1 $script
+    } elseif {$else_script ne ""} {
+        uplevel 1 $else_script
     }
+}
 
-    # Check if capability is in skip list
-    set should_skip [expr {$capability in $skip_caps}]
-    if {$negate} {
-        set should_skip [expr {!$should_skip}]
-    }
-
-    if {$should_skip} {
-        if {$else_script ne ""} {
-            uplevel 1 $else_script
+# Evaluate a capability expression that may contain || and &&
+proc eval_capability_expr {expr} {
+    # Handle || (OR) - split and check if any is true
+    if {[string first "||" $expr] >= 0} {
+        set parts [split $expr "||"]
+        foreach part $parts {
+            set part [string trim $part]
+            if {$part ne "" && [eval_capability_expr $part]} {
+                return 1
+            }
         }
-        return
+        return 0
     }
-    uplevel 1 $script
+
+    # Handle && (AND) - split and check if all are true
+    if {[string first "&&" $expr] >= 0} {
+        set parts [split $expr "&&"]
+        foreach part $parts {
+            set part [string trim $part]
+            if {$part ne "" && ![eval_capability_expr $part]} {
+                return 0
+            }
+        }
+        return 1
+    }
+
+    # Single capability - check it directly
+    set cap [string trim $expr]
+    if {$cap eq ""} {
+        return 1
+    }
+    return [check_single_capability $cap]
 }
 
 proc capable {capability} {
-    set skip_caps {wal vacuum_incr stat4 stat3}
+    set skip_caps {wal vacuum_incr autovacuum stat4 stat3}
     return [expr {$capability ni $skip_caps}]
+}
+
+# WAL capability check - VibeSQL doesn't support WAL
+proc wal_is_capable {} {
+    return 0
 }
 
 proc working_64bit_int {} {
