@@ -121,12 +121,18 @@ fn generate_create_table_sql(table: &TableSchema) -> String {
     for col in &table.columns {
         let mut col_def = format!("  {} {}", col.name, format_data_type(&col.data_type));
 
-        if !col.nullable {
-            col_def.push_str(" NOT NULL");
-        }
+        // Handle generated columns (AS expression syntax)
+        if let Some(ref generated_expr) = col.generated_expr {
+            col_def.push_str(&format!(" AS ({})", format_expression(generated_expr)));
+        } else {
+            // Only non-generated columns can have NOT NULL and DEFAULT
+            if !col.nullable {
+                col_def.push_str(" NOT NULL");
+            }
 
-        if let Some(ref default) = col.default_value {
-            col_def.push_str(&format!(" DEFAULT {}", format_expression(default)));
+            if let Some(ref default) = col.default_value {
+                col_def.push_str(&format!(" DEFAULT {}", format_expression(default)));
+            }
         }
 
         definitions.push(col_def);

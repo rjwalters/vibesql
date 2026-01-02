@@ -121,6 +121,11 @@ pub enum ExecutorError {
         table_name: String,
         column_name: String,
     },
+    /// Cannot INSERT into a generated column (SQLite-compatible error)
+    /// Format: "cannot INSERT into generated column \"C\""
+    CannotInsertIntoGeneratedColumn {
+        column_name: String,
+    },
     CastError {
         from_type: String,
         to_type: String,
@@ -674,6 +679,10 @@ impl std::fmt::Display for ExecutorError {
             ExecutorError::InsertNoSuchColumn { table_name, column_name } => {
                 // SQLite format: "table T has no column named C"
                 write!(f, "table {} has no column named {}", table_name, column_name)
+            }
+            ExecutorError::CannotInsertIntoGeneratedColumn { column_name } => {
+                // SQLite format: cannot INSERT into generated column "C"
+                write!(f, "cannot INSERT into generated column \"{}\"", column_name)
             }
             ExecutorError::CastError { from_type, to_type } => {
                 write!(

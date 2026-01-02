@@ -25,12 +25,14 @@ pub fn resolve_target_columns_with_rowid(
 ) -> Result<ResolvedInsertColumns, ExecutorError> {
     if specified_columns.is_empty() {
         // No columns specified: INSERT INTO t VALUES (...)
-        // Use all columns in schema order
+        // Use all non-generated columns in schema order
+        // Generated columns (those with generated_expr) are excluded per SQLite behavior
         Ok(ResolvedInsertColumns {
             columns: schema
                 .columns
                 .iter()
                 .enumerate()
+                .filter(|(_, col)| col.generated_expr.is_none())
                 .map(|(idx, col)| (idx, col.data_type.clone()))
                 .collect(),
             rowid_position: None,
@@ -45,6 +47,12 @@ pub fn resolve_target_columns_with_rowid(
             // First check if there's a real column with this name
             if let Some(schema_idx) = schema.get_column_index(col_name) {
                 let col = &schema.columns[schema_idx];
+                // Check if this is a generated column - cannot INSERT into generated columns
+                if col.generated_expr.is_some() {
+                    return Err(ExecutorError::CannotInsertIntoGeneratedColumn {
+                        column_name: col_name.to_string(),
+                    });
+                }
                 columns.push((schema_idx, col.data_type.clone()));
             } else if is_rowid_pseudo_column(col_name) {
                 // It's a rowid pseudo-column - record its position but don't add to columns
