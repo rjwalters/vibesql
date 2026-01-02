@@ -1235,6 +1235,38 @@ fn collect_column_predicates(
                 }
             }
         }
+        // BETWEEN: col BETWEEN low AND high
+        Expression::Between { expr: col_expr, low, high, negated, symmetric } => {
+            if !negated && is_column_reference(col_expr, column_name) {
+                if let (Expression::Literal(low_val), Expression::Literal(high_val)) =
+                    (low.as_ref(), high.as_ref())
+                {
+                    if !matches!(low_val, SqlValue::Null) && !matches!(high_val, SqlValue::Null) {
+                        // Handle SYMMETRIC: swap bounds if low > high
+                        let (effective_low, effective_high) = if *symmetric && low_val > high_val {
+                            (high_val.clone(), low_val.clone())
+                        } else {
+                            (low_val.clone(), high_val.clone())
+                        };
+
+                        let new_range = RangePredicate {
+                            start: Some(effective_low),
+                            end: Some(effective_high),
+                            inclusive_start: true,
+                            inclusive_end: true,
+                            exclude_nulls: true,
+                        };
+
+                        // Merge with existing range if any
+                        if let Some(existing) = range_pred.take() {
+                            *range_pred = Some(merge_range_predicates(existing, new_range));
+                        } else {
+                            *range_pred = Some(new_range);
+                        }
+                    }
+                }
+            }
+        }
         // Recurse into AND
         Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
             collect_column_predicates(left, column_name, equality_values, in_values, range_pred);
