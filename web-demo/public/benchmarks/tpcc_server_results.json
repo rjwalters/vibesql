@@ -3,10 +3,10 @@
     {
       "name": "tpcc_server_mixed_vibesql_server",
       "stats": {
-        "tps": 165.3176110056294,
-        "total_txns": 9926,
-        "successful_txns": 9926,
-        "duration_ms": 60042
+        "tps": 150.98260898480365,
+        "total_txns": 9081,
+        "successful_txns": 9081,
+        "duration_ms": 60146
       }
     }
   ],
@@ -14,7 +14,7 @@
     "suite": "tpcc-server",
     "scale_factor": 1,
     "duration_secs": 60,
-    "timestamp": "2025-12-31T22:27:43.975419",
-    "git_commit": "d93e0b98"
+    "timestamp": "2026-01-01T15:03:24.343811",
+    "git_commit": "621a6a5f"
   }
 }

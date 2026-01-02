@@ -152,8 +152,14 @@ pub fn coerce_value(
         }
         (SqlValue::Smallint(_), DataType::Smallint) => Ok(value),
         (SqlValue::Bigint(_), DataType::Bigint) => Ok(value),
-        (SqlValue::Numeric(_), DataType::Numeric { .. }) => Ok(value),
-        (SqlValue::Numeric(_), DataType::Decimal { .. }) => Ok(value),
+        // NUMERIC affinity: if the value is a whole number, store as integer
+        (SqlValue::Numeric(f), DataType::Numeric { .. } | DataType::Decimal { .. }) => {
+            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                Ok(SqlValue::Integer(*f as i64))
+            } else {
+                Ok(value)
+            }
+        }
 
         // Numeric literal → Float/Real/Double
         (SqlValue::Numeric(f), DataType::Float { .. }) => Ok(SqlValue::Float(*f as f32)),
@@ -299,12 +305,29 @@ pub fn coerce_value(
         (SqlValue::Bigint(i), DataType::Decimal { .. }) => Ok(SqlValue::Bigint(*i)),
 
         // Float/Real/Double → Numeric/Decimal (SQLite type affinity)
-        (SqlValue::Float(f), DataType::Numeric { .. }) => Ok(SqlValue::Double(*f as f64)),
-        (SqlValue::Float(f), DataType::Decimal { .. }) => Ok(SqlValue::Double(*f as f64)),
-        (SqlValue::Real(f), DataType::Numeric { .. }) => Ok(SqlValue::Double(*f)),
-        (SqlValue::Real(f), DataType::Decimal { .. }) => Ok(SqlValue::Double(*f)),
-        (SqlValue::Double(f), DataType::Numeric { .. }) => Ok(SqlValue::Double(*f)),
-        (SqlValue::Double(f), DataType::Decimal { .. }) => Ok(SqlValue::Double(*f)),
+        // SQLite NUMERIC affinity: if the value is a whole number, store as integer
+        (SqlValue::Float(f), DataType::Numeric { .. } | DataType::Decimal { .. }) => {
+            let f64_val = *f as f64;
+            if f64_val.fract() == 0.0 && f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
+                Ok(SqlValue::Integer(f64_val as i64))
+            } else {
+                Ok(SqlValue::Double(f64_val))
+            }
+        }
+        (SqlValue::Real(f), DataType::Numeric { .. } | DataType::Decimal { .. }) => {
+            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                Ok(SqlValue::Integer(*f as i64))
+            } else {
+                Ok(SqlValue::Double(*f))
+            }
+        }
+        (SqlValue::Double(f), DataType::Numeric { .. } | DataType::Decimal { .. }) => {
+            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                Ok(SqlValue::Integer(*f as i64))
+            } else {
+                Ok(SqlValue::Double(*f))
+            }
+        }
 
         // Integer widening conversions
         (SqlValue::Smallint(i), DataType::Integer) => Ok(SqlValue::Integer(*i as i64)),
@@ -537,9 +560,9 @@ pub fn coerce_value(
             Ok(SqlValue::Varchar(arcstr::ArcStr::from(if *b { "1" } else { "0" })))
         }
 
-        // Blob → Varchar (SQLite type affinity - blob data can be stored in TEXT columns)
-        // In SQLite, blobs can be stored in TEXT columns; they retain their blob type internally
-        (SqlValue::Blob(_), DataType::Varchar { .. }) => Ok(value),
+        // Blob → Any column type (SQLite stores blobs as-is regardless of column affinity)
+        // In SQLite, blobs can be stored in any column and retain their blob type
+        (SqlValue::Blob(_), _) => Ok(value),
 
         // Type mismatch
         _ => Err(ExecutorError::UnsupportedExpression(format!(
