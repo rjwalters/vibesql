@@ -97,6 +97,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
+        challenge: resolve(__dirname, 'challenge.html'),
         conformance: resolve(__dirname, 'conformance.html'),
         benchmarks: resolve(__dirname, 'benchmarks.html'),
         trends: resolve(__dirname, 'trends.html'),
