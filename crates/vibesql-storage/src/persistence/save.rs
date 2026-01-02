@@ -220,22 +220,51 @@ impl Database {
 
                 // INSERT statements for data (only live/non-deleted rows)
                 // Using scan_live() to skip rows marked as deleted in the deletion bitmap.
+                // Note: We must skip generated columns - they cannot be inserted directly.
                 if table.row_count() > 0 {
                     writeln!(writer)
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+                    // Find indices of non-generated columns
+                    let non_generated_indices: Vec<usize> = schema
+                        .columns
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, col)| col.generated_expr.is_none())
+                        .map(|(i, _)| i)
+                        .collect();
+
+                    // Build column list for INSERT if we have generated columns
+                    let has_generated_columns = non_generated_indices.len() < schema.columns.len();
+                    let column_list: String = if has_generated_columns {
+                        let col_names: Vec<&str> = non_generated_indices
+                            .iter()
+                            .map(|&i| schema.columns[i].name.as_str())
+                            .collect();
+                        format!(" ({})", col_names.join(", "))
+                    } else {
+                        String::new()
+                    };
+
                     for (_idx, row) in table.scan_live() {
-                        write!(writer, "INSERT INTO {} VALUES (", &output_name).map_err(|e| {
-                            StorageError::NotImplemented(format!("Write error: {}", e))
-                        })?;
-                        for (i, value) in row.values.iter().enumerate() {
-                            if i > 0 {
+                        write!(writer, "INSERT INTO {}{} VALUES (", &output_name, column_list)
+                            .map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+
+                        // Only include values for non-generated columns
+                        let mut first = true;
+                        for &col_idx in &non_generated_indices {
+                            if !first {
                                 write!(writer, ", ").map_err(|e| {
                                     StorageError::NotImplemented(format!("Write error: {}", e))
                                 })?;
                             }
-                            write!(writer, "{}", sql_value_to_literal(value)).map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
+                            first = false;
+                            write!(writer, "{}", sql_value_to_literal(&row.values[col_idx]))
+                                .map_err(|e| {
+                                    StorageError::NotImplemented(format!("Write error: {}", e))
+                                })?;
                         }
                         writeln!(writer, ");").map_err(|e| {
                             StorageError::NotImplemented(format!("Write error: {}", e))
