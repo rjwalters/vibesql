@@ -930,6 +930,17 @@ pub(crate) fn extract_index_predicate(
                 }
             }
         }
+
+        // Check for range + IN combined predicates (e.g., col IN (64, 4) AND col > 75)
+        // Filter IN values by the range predicate and return the filtered list
+        if let (Some(in_vals), Some(ref range)) = (&in_values, &range_pred) {
+            let satisfying_values: Vec<SqlValue> =
+                in_vals.iter().filter(|v| value_satisfies_range(v, range)).cloned().collect();
+
+            // Return the filtered IN list (may be empty for full contradiction)
+            // This ensures BOTH predicates are satisfied by using only IN values that pass the range
+            return Some(IndexPredicate::In(satisfying_values));
+        }
     }
 
     // Try to extract a range predicate
@@ -990,6 +1001,78 @@ pub(crate) fn extract_index_predicate(
     None
 }
 
+/// Check if a value satisfies a range predicate
+fn value_satisfies_range(value: &SqlValue, range: &RangePredicate) -> bool {
+    // Check lower bound
+    if let Some(ref start) = range.start {
+        let cmp = value.partial_cmp(start);
+        match cmp {
+            Some(std::cmp::Ordering::Less) => return false,
+            Some(std::cmp::Ordering::Equal) if !range.inclusive_start => return false,
+            None => return false, // Incomparable types
+            _ => {}
+        }
+    }
+
+    // Check upper bound
+    if let Some(ref end) = range.end {
+        let cmp = value.partial_cmp(end);
+        match cmp {
+            Some(std::cmp::Ordering::Greater) => return false,
+            Some(std::cmp::Ordering::Equal) if !range.inclusive_end => return false,
+            None => return false, // Incomparable types
+            _ => {}
+        }
+    }
+
+    true
+}
+
+/// Merge two range predicates by taking the tighter constraints
+fn merge_range_predicates(a: RangePredicate, b: RangePredicate) -> RangePredicate {
+    // Merge starts: take the greater value (tighter lower bound)
+    let (merged_start, merged_inclusive_start) = match (&a.start, &b.start) {
+        (None, None) => (None, false),
+        (Some(v), None) => (Some(v.clone()), a.inclusive_start),
+        (None, Some(v)) => (Some(v.clone()), b.inclusive_start),
+        (Some(av), Some(bv)) => {
+            if av > bv {
+                (Some(av.clone()), a.inclusive_start)
+            } else if bv > av {
+                (Some(bv.clone()), b.inclusive_start)
+            } else {
+                // Equal values - take the more restrictive inclusivity
+                (Some(av.clone()), a.inclusive_start && b.inclusive_start)
+            }
+        }
+    };
+
+    // Merge ends: take the lesser value (tighter upper bound)
+    let (merged_end, merged_inclusive_end) = match (&a.end, &b.end) {
+        (None, None) => (None, false),
+        (Some(v), None) => (Some(v.clone()), a.inclusive_end),
+        (None, Some(v)) => (Some(v.clone()), b.inclusive_end),
+        (Some(av), Some(bv)) => {
+            if av < bv {
+                (Some(av.clone()), a.inclusive_end)
+            } else if bv < av {
+                (Some(bv.clone()), b.inclusive_end)
+            } else {
+                // Equal values - take the more restrictive inclusivity
+                (Some(av.clone()), a.inclusive_end && b.inclusive_end)
+            }
+        }
+    };
+
+    RangePredicate {
+        start: merged_start,
+        end: merged_end,
+        inclusive_start: merged_inclusive_start,
+        inclusive_end: merged_inclusive_end,
+        exclude_nulls: a.exclude_nulls || b.exclude_nulls,
+    }
+}
+
 /// Helper to collect equality values, IN values, and range predicates for a column
 fn collect_column_predicates(
     expr: &Expression,
@@ -1029,6 +1112,106 @@ fn collect_column_predicates(
                                 inclusive_end: true,
                                 exclude_nulls: false,
                             });
+                        }
+                    }
+                }
+            }
+        }
+        // Range predicates: col > value, col < value, etc.
+        Expression::BinaryOp {
+            left,
+            op:
+                op @ (BinaryOperator::GreaterThan
+                | BinaryOperator::GreaterThanOrEqual
+                | BinaryOperator::LessThan
+                | BinaryOperator::LessThanOrEqual),
+            right,
+        } => {
+            // Check if left side is our column and right side is a literal
+            if is_column_reference(left, column_name) {
+                if let Expression::Literal(value) = right.as_ref() {
+                    if !matches!(value, SqlValue::Null) {
+                        let new_range = match op {
+                            BinaryOperator::GreaterThan => RangePredicate {
+                                start: Some(value.clone()),
+                                end: None,
+                                inclusive_start: false,
+                                inclusive_end: false,
+                                exclude_nulls: true,
+                            },
+                            BinaryOperator::GreaterThanOrEqual => RangePredicate {
+                                start: Some(value.clone()),
+                                end: None,
+                                inclusive_start: true,
+                                inclusive_end: false,
+                                exclude_nulls: true,
+                            },
+                            BinaryOperator::LessThan => RangePredicate {
+                                start: None,
+                                end: Some(value.clone()),
+                                inclusive_start: false,
+                                inclusive_end: false,
+                                exclude_nulls: true,
+                            },
+                            BinaryOperator::LessThanOrEqual => RangePredicate {
+                                start: None,
+                                end: Some(value.clone()),
+                                inclusive_start: false,
+                                inclusive_end: true,
+                                exclude_nulls: true,
+                            },
+                            _ => unreachable!(),
+                        };
+                        // Merge with existing range if any
+                        if let Some(existing) = range_pred.take() {
+                            *range_pred = Some(merge_range_predicates(existing, new_range));
+                        } else {
+                            *range_pred = Some(new_range);
+                        }
+                    }
+                }
+            }
+            // Check if right side is our column (flipped comparison)
+            else if is_column_reference(right, column_name) {
+                if let Expression::Literal(value) = left.as_ref() {
+                    if !matches!(value, SqlValue::Null) {
+                        // Flip the comparison: value > col means col < value
+                        let new_range = match op {
+                            BinaryOperator::GreaterThan => RangePredicate {
+                                start: None,
+                                end: Some(value.clone()),
+                                inclusive_start: false,
+                                inclusive_end: false,
+                                exclude_nulls: true,
+                            },
+                            BinaryOperator::GreaterThanOrEqual => RangePredicate {
+                                start: None,
+                                end: Some(value.clone()),
+                                inclusive_start: false,
+                                inclusive_end: true,
+                                exclude_nulls: true,
+                            },
+                            BinaryOperator::LessThan => RangePredicate {
+                                start: Some(value.clone()),
+                                end: None,
+                                inclusive_start: false,
+                                inclusive_end: false,
+                                exclude_nulls: true,
+                            },
+                            BinaryOperator::LessThanOrEqual => RangePredicate {
+                                start: Some(value.clone()),
+                                end: None,
+                                inclusive_start: true,
+                                inclusive_end: false,
+                                exclude_nulls: true,
+                            },
+                            _ => unreachable!(),
+                        };
+                        // Merge with existing range if any
+                        if let Some(existing) = range_pred.take() {
+                            *range_pred = Some(merge_range_predicates(existing, new_range));
+                        } else {
+                            *range_pred = Some(new_range);
                         }
                     }
                 }
