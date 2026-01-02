@@ -210,3 +210,37 @@ fn test_parse_create_table_mixed_backtick_and_regular() {
         _ => panic!("Expected CREATE TABLE statement"),
     }
 }
+
+#[test]
+fn test_parse_generated_column_short_form() {
+    // Test generated column with short form: AS (expression)
+    let sql = "CREATE TABLE t1 (\n  a REAL,\n  b BLOB AS (a * 2)\n)";
+    let result = Parser::parse_sql(sql);
+    if let Err(ref e) = result {
+        eprintln!("Parse error: {}", e);
+    }
+    assert!(result.is_ok());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert_eq!(create.table_name, "t1");
+            assert_eq!(create.columns.len(), 2);
+
+            // First column - not generated
+            assert_eq!(create.columns[0].name, "a");
+            assert!(
+                create.columns[0].generated_expr.is_none(),
+                "First column should not be generated"
+            );
+
+            // Second column - should be generated
+            assert_eq!(create.columns[1].name, "b");
+            assert!(
+                create.columns[1].generated_expr.is_some(),
+                "Expected generated_expr to be Some, but it was None"
+            );
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}

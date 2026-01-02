@@ -173,23 +173,33 @@ impl Database {
                     }
                     write!(writer, "{} {}", col.name, format_data_type(&col.data_type))
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-                    // Add DEFAULT clause if present
-                    if let Some(ref default_expr) = col.default_value {
+
+                    // Handle generated columns (AS expression syntax)
+                    if let Some(ref generated_expr) = col.generated_expr {
                         use vibesql_ast::pretty_print::ToSql;
-                        write!(writer, " DEFAULT {}", default_expr.to_sql()).map_err(|e| {
+                        write!(writer, " AS ({})", generated_expr.to_sql()).map_err(|e| {
                             StorageError::NotImplemented(format!("Write error: {}", e))
                         })?;
-                    }
-                    // Add COLLATE clause if present
-                    if let Some(ref collation) = col.collation {
-                        write!(writer, " COLLATE {}", collation).map_err(|e| {
-                            StorageError::NotImplemented(format!("Write error: {}", e))
-                        })?;
-                    }
-                    if !col.nullable {
-                        write!(writer, " NOT NULL").map_err(|e| {
-                            StorageError::NotImplemented(format!("Write error: {}", e))
-                        })?;
+                    } else {
+                        // Only non-generated columns can have DEFAULT, COLLATE, NOT NULL
+                        // Add DEFAULT clause if present
+                        if let Some(ref default_expr) = col.default_value {
+                            use vibesql_ast::pretty_print::ToSql;
+                            write!(writer, " DEFAULT {}", default_expr.to_sql()).map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                        }
+                        // Add COLLATE clause if present
+                        if let Some(ref collation) = col.collation {
+                            write!(writer, " COLLATE {}", collation).map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                        }
+                        if !col.nullable {
+                            write!(writer, " NOT NULL").map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                        }
                     }
                 }
 

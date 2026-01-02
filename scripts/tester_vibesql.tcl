@@ -46,6 +46,7 @@ set ::pragma_full_column_names 0   ;# Default: OFF
 set ::pragma_short_column_names 1  ;# Default: ON
 set ::pragma_case_sensitive_like 0 ;# Default: OFF (case-insensitive LIKE)
 set ::pragma_count_changes 0       ;# Default: OFF (UPDATE/DELETE return nothing)
+set ::pragma_reverse_unordered_selects 0  ;# Default: OFF (normal row order)
 
 # DQS (Double-Quoted Strings) mode tracking
 # When enabled, double-quoted strings are treated as string literals instead of identifiers
@@ -804,6 +805,10 @@ proc build_pragma_prefix {} {
     if {$::pragma_case_sensitive_like != 0} {
         append prefix "PRAGMA case_sensitive_like=$::pragma_case_sensitive_like;\n"
     }
+    # Include reverse_unordered_selects if it's been set to ON
+    if {$::pragma_reverse_unordered_selects != 0} {
+        append prefix "PRAGMA reverse_unordered_selects=$::pragma_reverse_unordered_selects;\n"
+    }
     return $prefix
 }
 
@@ -859,6 +864,19 @@ proc track_pragma_setting {sql} {
             set ::pragma_count_changes 1
         } else {
             set ::pragma_count_changes 0
+        }
+        set found 1
+    }
+
+    # Look for reverse_unordered_selects settings (find all occurrences, use last one)
+    # This pragma reverses the order of rows from SELECT without ORDER BY
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?reverse_unordered_selects\s*[=(]\s*(\w+)\s*[)]?} $sql]
+    foreach {match value} $matches {
+        set upper [string toupper $value]
+        if {$upper eq "ON" || $upper eq "TRUE" || $upper eq "YES" || $value eq "1"} {
+            set ::pragma_reverse_unordered_selects 1
+        } else {
+            set ::pragma_reverse_unordered_selects 0
         }
         set found 1
     }
@@ -2669,9 +2687,11 @@ proc sqlite3 {db args} {
     set ::db_file $new_file
 
     # Reset PRAGMA state to defaults for new database
+    # (session-only PRAGMAs like reverse_unordered_selects are reset on new connections)
     set ::pragma_full_column_names 0
     set ::pragma_short_column_names 1
     set ::pragma_case_sensitive_like 0
+    set ::pragma_reverse_unordered_selects 0
     set ::dqs_dml_mode 0  ;# Reset DQS mode for new database
 
     # Create db command alias - if name is not "db" (which already exists)
@@ -2926,6 +2946,7 @@ proc reset_db {} {
     set ::pragma_full_column_names 0
     set ::pragma_short_column_names 1
     set ::pragma_case_sensitive_like 0
+    set ::pragma_reverse_unordered_selects 0
 }
 
 proc forcedelete {args} {
