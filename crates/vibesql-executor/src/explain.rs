@@ -910,6 +910,7 @@ impl ExplainExecutor {
                 condition,
                 using_columns,
                 natural,
+                ..
             } => {
                 let join_name = match join_type {
                     vibesql_ast::JoinType::Inner => "Inner Join",

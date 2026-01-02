@@ -9,16 +9,12 @@ use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator};
 /// Handles WHERE clause evaluation and primary key index optimization
 pub struct RowSelector<'a> {
     schema: &'a vibesql_catalog::TableSchema,
-    evaluator: &'a ExpressionEvaluator<'a>,
 }
 
 impl<'a> RowSelector<'a> {
     /// Create a new row selector
-    pub fn new(
-        schema: &'a vibesql_catalog::TableSchema,
-        evaluator: &'a ExpressionEvaluator<'a>,
-    ) -> Self {
-        Self { schema, evaluator }
+    pub fn new(schema: &'a vibesql_catalog::TableSchema) -> Self {
+        Self { schema }
     }
 
     /// Select rows to update based on WHERE clause
@@ -28,6 +24,7 @@ impl<'a> RowSelector<'a> {
         &self,
         table: &vibesql_storage::Table,
         where_clause: &Option<vibesql_ast::WhereClause>,
+        evaluator: &mut ExpressionEvaluator,
     ) -> Result<Vec<(usize, vibesql_storage::Row)>, ExecutorError> {
         // Try to use primary key index for fast lookup
         if let Some(vibesql_ast::WhereClause::Condition(where_expr)) = where_clause {
@@ -52,7 +49,7 @@ impl<'a> RowSelector<'a> {
         }
 
         // Fall back to table scan
-        Self::collect_candidate_rows(table, where_clause, self.evaluator)
+        Self::collect_candidate_rows(table, where_clause, evaluator)
     }
 
     /// Analyze WHERE expression to see if it can use primary key index for fast lookup
@@ -185,7 +182,7 @@ impl<'a> RowSelector<'a> {
     fn collect_candidate_rows(
         table: &vibesql_storage::Table,
         where_clause: &Option<vibesql_ast::WhereClause>,
-        evaluator: &ExpressionEvaluator,
+        evaluator: &mut ExpressionEvaluator,
     ) -> Result<Vec<(usize, vibesql_storage::Row)>, ExecutorError> {
         let mut candidate_rows = Vec::new();
 
@@ -194,6 +191,12 @@ impl<'a> RowSelector<'a> {
             // Clear CSE cache before evaluating each row to prevent column values
             // from being incorrectly cached across different rows
             evaluator.clear_cse_cache();
+
+            // Set row_id for ROWID pseudo-column support (SQLite compatibility)
+            // SQLite uses 1-indexed rowids, so add 1 to the physical index
+            // This allows WHERE rowid = N to work correctly
+            let row_id = row.row_id.unwrap_or((row_index + 1) as u64);
+            evaluator.set_row_index(row_id);
 
             // Check WHERE clause
             let should_update = if let Some(ref where_clause) = where_clause {

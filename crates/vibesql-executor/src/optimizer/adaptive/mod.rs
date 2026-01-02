@@ -296,7 +296,7 @@ mod tests {
                         join_type: JoinType::Inner,
                         condition: None,
                         using_columns: None,
-                        natural: false,
+                        natural: false, alias: None,
                     }),
                     right: Box::new(FromClause::Table {
                         name: "t3".to_string(),
@@ -307,7 +307,7 @@ mod tests {
                     join_type: JoinType::Inner,
                     condition: None,
                     using_columns: None,
-                    natural: false,
+                    natural: false, alias: None,
                 }),
                 right: Box::new(FromClause::Table {
                     name: "t4".to_string(),
@@ -318,7 +318,7 @@ mod tests {
                 join_type: JoinType::Inner,
                 condition: None,
                 using_columns: None,
-                natural: false,
+                natural: false, alias: None,
             }),
             where_clause: None,
             group_by: None,

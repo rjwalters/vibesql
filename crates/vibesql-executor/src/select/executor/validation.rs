@@ -2259,7 +2259,7 @@ mod tests {
                 join_type: vibesql_ast::JoinType::Cross,
                 condition: None,
                 using_columns: None,
-                natural: false,
+                natural: false, alias: None,
             };
         }
         let stmt = SelectStmt {
@@ -2303,7 +2303,7 @@ mod tests {
                 join_type: vibesql_ast::JoinType::Cross,
                 condition: None,
                 using_columns: None,
-                natural: false,
+                natural: false, alias: None,
             };
         }
         let stmt = SelectStmt {

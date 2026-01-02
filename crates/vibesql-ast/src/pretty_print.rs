@@ -973,7 +973,7 @@ impl ToSql for FromClause {
                 }
                 result
             }
-            FromClause::Join { left, right, join_type, condition, using_columns, natural } => {
+            FromClause::Join { left, right, join_type, condition, using_columns, natural, alias } => {
                 let mut result = left.to_sql();
 
                 if *natural {
@@ -988,6 +988,10 @@ impl ToSql for FromClause {
 
                 if let Some(cols) = using_columns {
                     result.push_str(&format!(" USING ({})", cols.join(", ")));
+                }
+
+                if let Some(a) = alias {
+                    result.push_str(&format!(" AS {}", format_identifier(a)));
                 }
 
                 result
@@ -1336,6 +1340,7 @@ mod tests {
             }),
             using_columns: None,
             natural: false,
+            alias: None,
         };
 
         assert_eq!(from.to_sql(), "orders AS o INNER JOIN customers AS c ON o.customer_id = c.id");

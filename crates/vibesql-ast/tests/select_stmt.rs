@@ -410,6 +410,7 @@ fn test_inner_join() {
         }),
         using_columns: None,
         natural: false,
+        alias: None,
     };
     match from {
         FromClause::Join { join_type: JoinType::Inner, .. } => {} // Success
@@ -436,6 +437,7 @@ fn test_left_outer_join() {
         condition: None,
         using_columns: None,
         natural: false,
+        alias: None,
     };
     match from {
         FromClause::Join { join_type: JoinType::LeftOuter, .. } => {} // Success
@@ -462,6 +464,7 @@ fn test_right_outer_join() {
         condition: None,
         using_columns: None,
         natural: false,
+        alias: None,
     };
     match from {
         FromClause::Join { join_type: JoinType::RightOuter, .. } => {} // Success
@@ -488,6 +491,7 @@ fn test_full_outer_join() {
         condition: None,
         using_columns: None,
         natural: false,
+        alias: None,
     };
     match from {
         FromClause::Join { join_type: JoinType::FullOuter, .. } => {} // Success
@@ -514,6 +518,7 @@ fn test_cross_join() {
         condition: None,
         using_columns: None,
         natural: false,
+        alias: None,
     };
     match from {
         FromClause::Join { join_type: JoinType::Cross, .. } => {} // Success

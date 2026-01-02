@@ -80,6 +80,7 @@ impl Parser {
                 condition,
                 using_columns,
                 natural,
+                alias: None,
             };
         }
 
@@ -277,7 +278,7 @@ impl Parser {
                 } else {
                     // Parenthesized table reference or JOIN expression
                     // Parse as a FROM clause (which handles JOINs)
-                    let from_clause = self.parse_from_clause()?;
+                    let mut from_clause = self.parse_from_clause()?;
 
                     // Expect closing ')'
                     match self.peek() {
@@ -289,6 +290,35 @@ impl Parser {
                                 message: "Expected ')' after parenthesized table reference"
                                     .to_string(),
                             })
+                        }
+                    }
+
+                    // Parse optional alias for parenthesized join expressions
+                    // Example: FROM t1 JOIN (t2 JOIN t3 USING(id)) AS j1 ON j1.id=t1.id
+                    if self.peek_keyword(Keyword::As) {
+                        self.consume_keyword(Keyword::As)?;
+                        // Parse alias - must be an identifier or keyword usable as identifier
+                        let alias = self.parse_alias_name()?;
+                        // Set alias on the outermost Join node
+                        if let vibesql_ast::FromClause::Join {
+                            left,
+                            right,
+                            join_type,
+                            condition,
+                            using_columns,
+                            natural,
+                            ..
+                        } = from_clause
+                        {
+                            from_clause = vibesql_ast::FromClause::Join {
+                                left,
+                                right,
+                                join_type,
+                                condition,
+                                using_columns,
+                                natural,
+                                alias: Some(alias),
+                            };
                         }
                     }
 

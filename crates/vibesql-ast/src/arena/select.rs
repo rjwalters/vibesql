@@ -118,6 +118,8 @@ pub enum FromClause<'arena> {
         /// USING clause columns - joins on these named columns from both tables
         using_columns: Option<BumpVec<'arena, Symbol>>,
         natural: bool,
+        /// Optional alias for parenthesized join expressions
+        alias: Option<Symbol>,
     },
     Subquery {
         query: &'arena SelectStmt<'arena>,

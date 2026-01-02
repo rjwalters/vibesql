@@ -257,6 +257,7 @@ pub(super) fn try_convert_in_to_join(
         condition: final_condition.clone(),
         using_columns: None,
         natural: false,
+                alias: None,
     };
 
     if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
@@ -346,6 +347,7 @@ fn try_convert_aggregate_in_to_join(
         condition: Some(join_condition.clone()),
         using_columns: None,
         natural: false,
+                alias: None,
     };
 
     if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {

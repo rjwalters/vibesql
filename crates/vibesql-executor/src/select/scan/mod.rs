@@ -153,6 +153,7 @@ where
             condition,
             using_columns,
             natural,
+            ..
         } => join_scan::execute_join(
             left,
             right,

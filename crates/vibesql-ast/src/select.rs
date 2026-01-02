@@ -288,6 +288,9 @@ pub enum FromClause {
         using_columns: Option<Vec<String>>,
         /// True for NATURAL JOIN (joins on common column names)
         natural: bool,
+        /// Optional alias for parenthesized join expressions
+        /// Example: `FROM t1 JOIN (t2 JOIN t3 USING(id)) AS j1 ON j1.id=t1.id`
+        alias: Option<String>,
     },
     /// Subquery in FROM clause (derived table)
     /// SQL:1999 requires AS alias for derived tables

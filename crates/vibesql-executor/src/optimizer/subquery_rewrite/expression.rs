@@ -437,6 +437,7 @@ pub(super) fn rewrite_from_clause(
             condition,
             using_columns,
             natural,
+            alias,
         } => vibesql_ast::FromClause::Join {
             left: Box::new(rewrite_from_clause(left, rewrite_subquery_fn)),
             right: Box::new(rewrite_from_clause(right, rewrite_subquery_fn)),
@@ -444,6 +445,7 @@ pub(super) fn rewrite_from_clause(
             condition: condition.as_ref().map(|c| rewrite_expression(c, rewrite_subquery_fn)),
             using_columns: using_columns.clone(),
             natural: *natural,
+            alias: alias.clone(),
         },
         vibesql_ast::FromClause::Subquery { query, alias, .. } => {
             vibesql_ast::FromClause::Subquery {

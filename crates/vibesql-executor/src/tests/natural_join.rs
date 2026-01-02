@@ -137,6 +137,7 @@ fn test_natural_join_single_common_column() {
             condition: None,
             using_columns: None,
             natural: true, // NATURAL JOIN
+            alias: None,
         }),
         where_clause: None,
         group_by: None,
@@ -283,6 +284,7 @@ fn test_natural_join_respects_collation() {
             condition: None,
             using_columns: None,
             natural: true, // NATURAL JOIN
+            alias: None,
         }),
         where_clause: None,
         group_by: None,
@@ -391,7 +393,7 @@ fn test_using_join_respects_collation() {
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
             using_columns: Some(vec!["NAME".to_string()]), // USING (NAME)
-            natural: false,
+            natural: false, alias: None,
         }),
         where_clause: None,
         group_by: None,

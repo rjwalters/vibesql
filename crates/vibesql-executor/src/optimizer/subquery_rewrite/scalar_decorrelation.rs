@@ -461,6 +461,7 @@ pub fn apply_scalar_decorrelation(stmt: &SelectStmt) -> SelectStmt {
                     condition: Some(decorrelation.join_on.clone()),
                     using_columns: None,
                     natural: false,
+                alias: None,
                 };
             }
             result.from = Some(new_from);

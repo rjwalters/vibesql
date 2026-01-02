@@ -499,6 +499,7 @@ impl<'arena> ArenaParser<'arena> {
                     condition,
                     using_columns,
                     natural,
+                    alias: None,
                 };
             } else {
                 break;

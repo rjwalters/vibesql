@@ -236,7 +236,7 @@ impl DeleteExecutor {
 
         // Create evaluator with database reference for subquery support (EXISTS, NOT EXISTS, IN
         // with subquery, etc.) and optional procedural/trigger context for variable resolution
-        let evaluator = if let Some(ctx) = trigger_context {
+        let mut evaluator = if let Some(ctx) = trigger_context {
             // Trigger context takes precedence (trigger statements can't have procedural context)
             ExpressionEvaluator::with_trigger_context(&schema, database, ctx)
         } else if let Some(ctx) = procedural_context {
@@ -279,7 +279,7 @@ impl DeleteExecutor {
                     Self::collect_rows_with_scan(
                         table,
                         &stmt.where_clause,
-                        &evaluator,
+                        &mut evaluator,
                         &mut rows_and_indices_to_delete,
                     )?;
                 }
@@ -288,7 +288,7 @@ impl DeleteExecutor {
                 Self::collect_rows_with_scan(
                     table,
                     &stmt.where_clause,
-                    &evaluator,
+                    &mut evaluator,
                     &mut rows_and_indices_to_delete,
                 )?;
             }
@@ -297,7 +297,7 @@ impl DeleteExecutor {
             Self::collect_rows_with_scan(
                 table,
                 &stmt.where_clause,
-                &evaluator,
+                &mut evaluator,
                 &mut rows_and_indices_to_delete,
             )?;
         }
@@ -584,7 +584,7 @@ impl DeleteExecutor {
     fn collect_rows_with_scan(
         table: &vibesql_storage::Table,
         where_clause: &Option<vibesql_ast::WhereClause>,
-        evaluator: &ExpressionEvaluator,
+        evaluator: &mut ExpressionEvaluator,
         rows_and_indices: &mut Vec<(usize, vibesql_storage::Row)>,
     ) -> Result<(), ExecutorError> {
         // Use scan_live() to skip already-deleted rows
@@ -592,6 +592,13 @@ impl DeleteExecutor {
             // Clear CSE cache before evaluating each row to prevent column values
             // from being incorrectly cached across different rows
             evaluator.clear_cse_cache();
+
+            // Set row_id for ROWID pseudo-column support (SQLite compatibility)
+            // SQLite uses 1-indexed rowids, so add 1 to the physical index
+            // This allows WHERE rowid = N to work correctly
+            // Use the row's explicit row_id if set, otherwise compute from physical index
+            let row_id = row.row_id.unwrap_or((index + 1) as u64);
+            evaluator.set_row_index(row_id);
 
             let should_delete = if let Some(ref where_clause) = where_clause {
                 match where_clause {

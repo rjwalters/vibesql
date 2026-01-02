@@ -277,8 +277,8 @@ impl UpdateExecutor {
         validate_set_expressions(schema, &stmt.assignments, database)?;
 
         // Step 4: Select rows to update using RowSelector
-        let row_selector = RowSelector::new(schema, &evaluator);
-        let candidate_rows = row_selector.select_rows(table, &stmt.where_clause)?;
+        let row_selector = RowSelector::new(schema);
+        let candidate_rows = row_selector.select_rows(table, &stmt.where_clause, &mut evaluator)?;
 
         // Estimate DML cost for query analysis and optimization decisions
         if std::env::var("DML_COST_DEBUG").is_ok() && !candidate_rows.is_empty() {

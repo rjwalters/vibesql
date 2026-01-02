@@ -284,7 +284,7 @@ fn test_order_by_with_join_issue_4552() {
             join_type: vibesql_ast::JoinType::Cross,
             condition: None,
             using_columns: None,
-            natural: false,
+            natural: false, alias: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef(

@@ -36,7 +36,7 @@ pub(super) fn is_inner_or_cross_join_only(from: &FromClause) -> bool {
 pub(super) fn has_cross_join_with_on_condition(from: &FromClause) -> bool {
     match from {
         FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => false,
-        FromClause::Join { left, right, join_type, condition, using_columns, natural } => {
+        FromClause::Join { left, right, join_type, condition, using_columns, natural, .. } => {
             // CROSS JOIN with any join condition (ON, USING, or NATURAL) should fall back
             // to regular execution path which handles filtering and column deduplication
             if matches!(join_type, JoinType::Cross)

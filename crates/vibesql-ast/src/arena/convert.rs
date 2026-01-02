@@ -507,6 +507,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 condition,
                 using_columns,
                 natural,
+                alias,
             } => FromClause::Join {
                 left: Box::new(self.convert_from_clause(left)),
                 right: Box::new(self.convert_from_clause(right)),
@@ -516,6 +517,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                     .as_ref()
                     .map(|cols| cols.iter().map(|s| self.resolve(*s)).collect()),
                 natural: *natural,
+                alias: alias.map(|s| self.resolve(s)),
             },
             arena_select::FromClause::Subquery { query, alias, column_aliases } => {
                 FromClause::Subquery {

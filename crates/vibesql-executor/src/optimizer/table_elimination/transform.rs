@@ -55,6 +55,7 @@ pub(super) fn rebuild_from_clause(tables: &[TableInfo]) -> Option<FromClause> {
             condition: None,
             using_columns: None,
             natural: false,
+                alias: None,
         };
     }
 

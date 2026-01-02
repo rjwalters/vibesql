@@ -306,6 +306,7 @@ pub(super) fn try_convert_scalar_comparison_to_join(
         condition: Some(join_condition),
         using_columns: None,
         natural: false,
+                alias: None,
     };
 
     // Create the replacement expression: left op COALESCE(alias.__scalar_agg, 0)
