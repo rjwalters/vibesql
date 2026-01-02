@@ -197,29 +197,21 @@ where
         _ => {} // Fall through to regular comparison logic
     }
 
-    // SQLite type affinity rules for comparison:
-    // When comparing a column with NUMERIC affinity to a TEXT value, SQLite converts
-    // the TEXT to a number if it looks like a number. This is how WHERE col='123' works
-    // when col is an integer column containing 123.
+    // SQLite type ordering for comparison:
+    // When comparing values of different storage classes, SQLite uses type ordering:
+    // NULL < INTEGER/REAL < TEXT < BLOB
     //
-    // For pure literal-literal comparisons (like '10' = 10), SQLite uses type ordering:
-    // NULL < INTEGER < REAL < TEXT < BLOB, and types don't match.
+    // Type coercion (converting TEXT '99' to INTEGER 99) only happens when:
+    // 1. One operand has NUMERIC/INTEGER/REAL affinity AND
+    // 2. The other operand has NONE or BLOB affinity
     //
-    // Since we can't distinguish column vs literal at this point, we implement the
-    // column-style coercion (more common in real queries like WHERE clauses).
-
-    // Helper to try parsing a string as a number
-    fn try_parse_string_as_number(s: &str) -> Option<f64> {
-        let trimmed = s.trim();
-        // Try to parse as number - SQLite is lenient about this
-        trimmed.parse::<f64>().ok()
-    }
-
-    // Helper to try parsing a string as integer (exact match)
-    fn try_parse_string_as_i64(s: &str) -> Option<i64> {
-        let trimmed = s.trim();
-        trimmed.parse::<i64>().ok()
-    }
+    // Since we can't distinguish expression affinity at the SqlValue level,
+    // we use strict type ordering here. Affinity-based coercion should be
+    // handled at a higher level (expression evaluation) where column types are known.
+    //
+    // This matches SQLite's behavior for the whereB.test cases where:
+    // - INTEGER 99 compared to TEXT '99' returns NOT EQUAL
+    // - Neither side has NUMERIC affinity, so no type conversion occurs
 
     let is_string = |v: &SqlValue| matches!(v, Varchar(_) | Character(_));
     let is_numeric = |v: &SqlValue| {
@@ -229,63 +221,15 @@ where
         )
     };
 
-    // SQLite type affinity: when one side is numeric and other is string,
-    // try to coerce the string to a number. If coercion fails, fall back to type ordering.
+    // SQLite type ordering: INTEGER/REAL < TEXT
+    // No coercion - different storage classes are NOT equal
     if is_numeric(left) && is_string(right) {
-        let string_val = match right {
-            Varchar(s) | Character(s) => s.as_str(),
-            _ => unreachable!(),
-        };
-
-        // First try integer coercion for exact comparisons
-        if let Some(parsed_i64) = try_parse_string_as_i64(string_val) {
-            let left_i64 = to_i64(left).ok();
-            if let Some(l) = left_i64 {
-                return Ok(Boolean(predicate(l.cmp(&parsed_i64))));
-            }
-        }
-
-        // Try floating point coercion
-        if let Some(parsed_f64) = try_parse_string_as_number(string_val) {
-            let left_f64 = to_f64(left).ok();
-            if let Some(l) = left_f64 {
-                return Ok(Boolean(predicate(
-                    l.partial_cmp(&parsed_f64).unwrap_or(std::cmp::Ordering::Equal),
-                )));
-            }
-        }
-
-        // String can't be coerced to number - use SQLite type ordering
-        // Numeric < TEXT, so left (numeric) < right (text)
+        // Numeric < TEXT in SQLite type ordering
         return Ok(Boolean(predicate(std::cmp::Ordering::Less)));
     }
 
     if is_string(left) && is_numeric(right) {
-        let string_val = match left {
-            Varchar(s) | Character(s) => s.as_str(),
-            _ => unreachable!(),
-        };
-
-        // First try integer coercion for exact comparisons
-        if let Some(parsed_i64) = try_parse_string_as_i64(string_val) {
-            let right_i64 = to_i64(right).ok();
-            if let Some(r) = right_i64 {
-                return Ok(Boolean(predicate(parsed_i64.cmp(&r))));
-            }
-        }
-
-        // Try floating point coercion
-        if let Some(parsed_f64) = try_parse_string_as_number(string_val) {
-            let right_f64 = to_f64(right).ok();
-            if let Some(r) = right_f64 {
-                return Ok(Boolean(predicate(
-                    parsed_f64.partial_cmp(&r).unwrap_or(std::cmp::Ordering::Equal),
-                )));
-            }
-        }
-
-        // String can't be coerced to number - use SQLite type ordering
-        // TEXT > Numeric, so left (text) > right (numeric)
+        // TEXT > Numeric in SQLite type ordering
         return Ok(Boolean(predicate(std::cmp::Ordering::Greater)));
     }
 

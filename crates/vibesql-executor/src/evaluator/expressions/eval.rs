@@ -197,9 +197,40 @@ impl ExpressionEvaluator<'_> {
             return (left_coerced, right_val);
         }
 
+        // Case 5: Left is NUMERIC/INTEGER/REAL column, right is NONE/TEXT column with TEXT value
+        // Per SQLite: when one operand has NUMERIC affinity and the other has TEXT or NONE affinity,
+        // try to convert the TEXT value to a number for comparison.
+        // This handles column-to-column comparisons like: NUMERIC_col = NONE_col
+        let is_right_non_numeric_affinity = matches!(
+            right_affinity,
+            Some(TypeAffinity::None) | Some(TypeAffinity::Text) | None
+        );
+        if is_left_numeric_affinity
+            && is_right_non_numeric_affinity
+            && matches!(right_val, SqlValue::Varchar(_) | SqlValue::Character(_))
+        {
+            let right_coerced = Self::try_coerce_string_to_numeric(&right_val);
+            return (left_val, right_coerced);
+        }
+
+        // Case 6: Right is NUMERIC/INTEGER/REAL column, left is NONE/TEXT column with TEXT value
+        // Symmetric case of Case 5
+        let is_left_non_numeric_affinity = matches!(
+            left_affinity,
+            Some(TypeAffinity::None) | Some(TypeAffinity::Text) | None
+        );
+        if is_right_numeric_affinity
+            && is_left_non_numeric_affinity
+            && matches!(left_val, SqlValue::Varchar(_) | SqlValue::Character(_))
+        {
+            let left_coerced = Self::try_coerce_string_to_numeric(&left_val);
+            return (left_coerced, right_val);
+        }
+
         // No affinity conversion needed - use original values
         // This includes:
-        // - Bare columns (NONE affinity) vs numeric → type ordering (handled in compare)
+        // - Bare columns (NONE affinity) vs bare columns (NONE affinity) → type ordering
+        // - TEXT column vs NONE column → type ordering (no numeric affinity involved)
         // - Literal vs literal → type ordering (handled in compare)
         // - Same-type comparisons → direct comparison
         (left_val, right_val)
