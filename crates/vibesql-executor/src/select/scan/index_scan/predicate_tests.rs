@@ -1166,3 +1166,94 @@ fn test_composite_key_satisfaction_null_value() {
     let columns = vec!["c_id"];
     assert!(!where_clause_fully_satisfied_by_composite_key(&expr, &columns));
 }
+
+// ============================================================================
+// Tests for range contradiction detection
+// ============================================================================
+
+/// Regression test for nested range contradiction with type-preserving merge.
+///
+/// The query `col4 < 21.13 AND (col4 >= 20.80 AND col4 <= 6.25)` contains
+/// an impossible inner condition (col4 >= 20.80 AND col4 <= 6.25 has no solution).
+///
+/// Previously, the contradiction marker used Integer(1)/Integer(0) which caused
+/// type mismatch issues when merged with Real values, leading to incorrect results.
+/// Now we preserve the original contradictory values and let the storage layer
+/// handle the inverted range detection.
+#[test]
+fn test_range_contradiction_nested_with_real_types() {
+    // (col4 < 21.13) AND ((col4 >= 20.80 AND col4 <= 6.25))
+    // The inner condition is a contradiction: no value can be >= 20.80 AND <= 6.25
+    let inner_contradiction = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::GreaterThanOrEqual,
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col4", false,
+            ))),
+            right: Box::new(Expression::Literal(SqlValue::Real(20.80))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::LessThanOrEqual,
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col4", false,
+            ))),
+            right: Box::new(Expression::Literal(SqlValue::Real(6.25))),
+        }),
+    };
+
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::LessThan,
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col4", false,
+            ))),
+            right: Box::new(Expression::Literal(SqlValue::Real(21.13))),
+        }),
+        right: Box::new(inner_contradiction),
+    };
+
+    let range = extract_range_predicate(&expr, "col4").unwrap();
+
+    // The merged range should have start > end (indicating contradiction)
+    // start should be 20.80 (from >= 20.80)
+    // end should be 6.25 (from <= 6.25, which is more restrictive than < 21.13)
+    assert_eq!(range.start, Some(SqlValue::Real(20.80)));
+    assert_eq!(range.end, Some(SqlValue::Real(6.25)));
+
+    // The storage layer will detect start > end and return empty results
+    // This is the correct behavior - we preserve the contradictory values
+    // rather than using a type-mismatched marker
+}
+
+/// Test that simple range contradictions are preserved correctly
+#[test]
+fn test_range_contradiction_simple() {
+    // col0 > 100 AND col0 < 50 -- impossible
+    let expr = Expression::BinaryOp {
+        op: BinaryOperator::And,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::GreaterThan,
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
+            right: Box::new(Expression::Literal(SqlValue::Integer(100))),
+        }),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::LessThan,
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "col0", false,
+            ))),
+            right: Box::new(Expression::Literal(SqlValue::Integer(50))),
+        }),
+    };
+
+    let range = extract_range_predicate(&expr, "col0").unwrap();
+
+    // Should preserve the contradictory range: start=100, end=50
+    assert_eq!(range.start, Some(SqlValue::Integer(100)));
+    assert_eq!(range.end, Some(SqlValue::Integer(50)));
+    assert!(!range.inclusive_start); // > 100
+    assert!(!range.inclusive_end); // < 50
+}
