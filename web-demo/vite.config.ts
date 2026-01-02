@@ -91,7 +91,8 @@ export default defineConfig({
       },
     },
   ],
-  base: '/vibesql/', // GitHub Pages path
+  // Use root path for Cloudflare Pages, '/vibesql/' for GitHub Pages
+  base: process.env.VITE_BASE_PATH || '/',
   build: {
     target: 'esnext', // Modern browsers only
     rollupOptions: {

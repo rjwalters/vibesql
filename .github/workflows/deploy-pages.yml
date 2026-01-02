@@ -90,6 +90,8 @@ jobs:
       - name: Build web demo
         if: inputs.rebuild-web-demo || github.event_name == 'workflow_dispatch'
         working-directory: web-demo
+        env:
+          VITE_BASE_PATH: '/vibesql/'  # GitHub Pages requires subdirectory path
         run: |
           # Use --ignore-workspace to prevent pnpm from using root workspace
           # web-demo has its own package.json and pnpm-lock.yaml
