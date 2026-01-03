@@ -44,11 +44,14 @@
               Build a SQL database from scratch. Pass 6 million tests. Win the trophy.
             </p>
             <div class="flex flex-wrap justify-center md:justify-start gap-4">
-              <a href="#the-challenge" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors">
-                View Challenge
+              <a href="#get-started" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors">
+                Start Building
               </a>
               <a href="#trophy" class="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-lg transition-colors">
                 See The Trophy
+              </a>
+              <a href="https://github.com/vibesql-challenge/submissions" target="_blank" rel="noopener" class="px-6 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-semibold rounded-lg transition-colors">
+                Leaderboard
               </a>
             </div>
           </div>
@@ -370,52 +373,102 @@
       </section>
 
       <!-- Getting Started -->
-      <section class="bg-gray-50 dark:bg-gray-900 rounded-lg p-8">
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6">Getting Started</h2>
+      <section id="get-started" class="scroll-mt-8">
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6">Get Started</h2>
 
-        <div class="space-y-6">
-          <div class="flex items-start gap-4">
-            <span class="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">1</span>
-            <div>
-              <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Download the Test Suite</h3>
-              <p class="text-gray-600 dark:text-gray-300 mt-1">
-                Get the SQLLogicTest suite from the
-                <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLite project</a>.
-                The test files define expected inputs and outputs for SQL queries.
-              </p>
+        <p class="text-lg text-gray-600 dark:text-gray-300 mb-8 max-w-3xl">
+          Start from scratch in any language, or use one of our seed repos for convenience.
+          Each seed includes the SQLLogicTest suite, a test runner, and CI workflow.
+        </p>
+
+        <!-- Language Cards -->
+        <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-4">Seed Repos <span class="text-sm font-normal text-gray-500 dark:text-gray-400">(optional)</span></h3>
+        <div class="grid md:grid-cols-3 gap-6 mb-10">
+          <a href="https://github.com/vibesql-challenge/challenge-seed-rust" target="_blank" rel="noopener"
+             class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border-2 border-orange-200 dark:border-orange-800 hover:border-orange-500 dark:hover:border-orange-400 transition-colors">
+            <div class="flex items-center gap-3 mb-3">
+              <svg class="w-8 h-8 text-orange-600 dark:text-orange-400" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M23.687 11.709l-.995-.616a13.559 13.559 0 0 0-.028-.29l.855-.797a.344.344 0 0 0-.114-.571l-1.093-.409a8.392 8.392 0 0 0-.086-.282l.682-.947a.342.342 0 0 0-.205-.535l-1.149-.198a6.682 6.682 0 0 0-.14-.261l.483-1.063a.344.344 0 0 0-.287-.478l-1.17.018a4.267 4.267 0 0 0-.187-.227l.265-1.138a.343.343 0 0 0-.358-.411l-1.15.216a3.922 3.922 0 0 0-.227-.182l.034-1.17a.343.343 0 0 0-.416-.333l-1.097.399c-.084-.05-.169-.098-.256-.144l-.197-1.155a.344.344 0 0 0-.46-.248l-1.019.562a6.072 6.072 0 0 0-.278-.097l-.415-1.093a.344.344 0 0 0-.491-.157l-.912.703a8.474 8.474 0 0 0-.29-.043l-.614-.995a.344.344 0 0 0-.506-.064l-.782.818c-.1-.006-.199-.01-.3-.013l-.792-.87a.344.344 0 0 0-.505.024l-.633.909a8.26 8.26 0 0 0-.298.03l-.945-.724a.344.344 0 0 0-.489.104l-.466.985c-.096.027-.19.056-.283.087l-1.065-.55a.344.344 0 0 0-.458.21l-.285 1.04a6.578 6.578 0 0 0-.26.136l-1.15-.353a.344.344 0 0 0-.41.303l-.096 1.065a5.102 5.102 0 0 0-.228.18l-1.2-.14a.344.344 0 0 0-.348.381l.1 1.053c-.066.072-.13.145-.192.22l-1.21.088a.343.343 0 0 0-.272.443l.285 1.006a5.55 5.55 0 0 0-.148.254l-1.182.305a.344.344 0 0 0-.185.488l.458.93c-.04.09-.077.18-.113.272l-1.12.508a.344.344 0 0 0-.09.514l.61.827c-.024.092-.046.185-.066.278l-1.02.692a.343.343 0 0 0 .01.52l.744.7c-.008.093-.013.186-.017.28l-.89.85a.343.343 0 0 0 .113.516l.855.546c.009.093.019.186.03.278l-.727.98a.344.344 0 0 0 .21.492l.94.372c.027.088.055.175.085.262l-.54 1.08a.344.344 0 0 0 .3.448l.997.18c.046.083.093.165.142.246l-.332 1.143a.344.344 0 0 0 .38.392l1.02-.028c.062.076.127.15.193.223l-.108 1.17a.343.343 0 0 0 .448.326l1.006-.224c.077.065.156.128.237.188l.13 1.157a.344.344 0 0 0 .496.249l.962-.407c.086.05.174.097.263.142l.362 1.104a.344.344 0 0 0 .528.166l.887-.57c.092.033.185.063.28.09l.578 1.01a.344.344 0 0 0 .538.077l.785-.71c.096.016.193.03.29.04l.775.877a.343.343 0 0 0 .53-.016l.66-.822c.097-.002.194-.006.29-.013l.948.707a.344.344 0 0 0 .505-.113l.514-.9c.093-.02.186-.043.278-.067l1.095.502a.343.343 0 0 0 .463-.21l.353-.948c.088-.038.175-.077.261-.118l1.21.264a.344.344 0 0 0 .403-.3l.178-.968c.08-.054.16-.11.238-.168l1.288.006a.343.343 0 0 0 .33-.377l-.007-.952c.07-.07.14-.14.207-.213l1.327-.267a.344.344 0 0 0 .244-.44l-.19-.896c.057-.083.111-.167.163-.253l1.326-.546a.343.343 0 0 0 .148-.477l-.36-.804c.04-.092.078-.186.113-.28l1.281-.816a.344.344 0 0 0 .047-.492l-.515-.68c.023-.096.043-.193.06-.29l1.196-1.066a.344.344 0 0 0-.054-.488l-.65-.529c.006-.097.01-.194.011-.291l1.074-1.29a.345.345 0 0 0-.153-.462zM12 19.295a7.294 7.294 0 1 1 0-14.59 7.294 7.294 0 0 1 0 14.59z"/>
+              </svg>
+              <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 group-hover:text-orange-600 dark:group-hover:text-orange-400">Rust</h3>
             </div>
-          </div>
+            <p class="text-gray-600 dark:text-gray-300 text-sm mb-3">
+              Cargo build system, zero-cost abstractions, memory safety without GC.
+            </p>
+            <span class="text-orange-600 dark:text-orange-400 text-sm font-medium group-hover:underline">
+              Fork on GitHub →
+            </span>
+          </a>
 
-          <div class="flex items-start gap-4">
-            <span class="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">2</span>
-            <div>
-              <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Start Your Timer</h3>
-              <p class="text-gray-600 dark:text-gray-300 mt-1">
-                Record your start date. The challenge measures calendar days from first commit
-                to 100% pass rate. Human intervention is allowed and encouraged.
-              </p>
+          <a href="https://github.com/vibesql-challenge/challenge-seed-cpp" target="_blank" rel="noopener"
+             class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border-2 border-blue-200 dark:border-blue-800 hover:border-blue-500 dark:hover:border-blue-400 transition-colors">
+            <div class="flex items-center gap-3 mb-3">
+              <svg class="w-8 h-8 text-blue-600 dark:text-blue-400" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M22.394 6c-.167-.29-.398-.543-.652-.69L12.926.22c-.509-.294-1.34-.294-1.848 0L2.26 5.31c-.508.293-.923 1.013-.923 1.6v10.18c0 .294.104.62.271.91.167.29.398.543.652.69l8.816 5.09c.508.293 1.34.293 1.848 0l8.816-5.09c.254-.147.485-.4.652-.69.167-.29.27-.616.27-.91V6.91c.003-.294-.1-.62-.268-.91zM12 19.11c-3.92 0-7.109-3.19-7.109-7.11 0-3.92 3.19-7.11 7.11-7.11a7.133 7.133 0 0 1 6.156 3.553l-3.076 1.78a3.567 3.567 0 0 0-3.08-1.78A3.56 3.56 0 0 0 8.444 12 3.56 3.56 0 0 0 12 15.555a3.57 3.57 0 0 0 3.08-1.778l3.078 1.78A7.135 7.135 0 0 1 12 19.11zm7.11-6.715h-.79v.79h-.79v-.79h-.79v-.79h.79v-.79h.79v.79h.79zm2.962 0h-.79v.79h-.79v-.79h-.79v-.79h.79v-.79h.79v.79h.79z"/>
+              </svg>
+              <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400">C++</h3>
             </div>
-          </div>
+            <p class="text-gray-600 dark:text-gray-300 text-sm mb-3">
+              CMake build system, maximum performance, full control over memory.
+            </p>
+            <span class="text-blue-600 dark:text-blue-400 text-sm font-medium group-hover:underline">
+              Fork on GitHub →
+            </span>
+          </a>
 
-          <div class="flex items-start gap-4">
-            <span class="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">3</span>
-            <div>
-              <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Build Your Database</h3>
-              <p class="text-gray-600 dark:text-gray-300 mt-1">
-                Use any language, any orchestration framework, any number of agents.
-                The only constraint: build the SQL parser and execution engine yourself.
-              </p>
+          <a href="https://github.com/vibesql-challenge/challenge-seed-go" target="_blank" rel="noopener"
+             class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border-2 border-cyan-200 dark:border-cyan-800 hover:border-cyan-500 dark:hover:border-cyan-400 transition-colors">
+            <div class="flex items-center gap-3 mb-3">
+              <svg class="w-8 h-8 text-cyan-600 dark:text-cyan-400" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M1.811 10.231c-.047 0-.058-.023-.035-.059l.246-.315c.023-.035.081-.058.128-.058h4.172c.046 0 .058.035.035.07l-.199.303c-.023.036-.082.07-.117.07zM.047 11.306c-.047 0-.059-.023-.035-.058l.245-.316c.023-.035.082-.058.129-.058h5.328c.047 0 .07.035.058.07l-.093.28c-.012.047-.058.07-.105.07zm2.828 1.075c-.047 0-.059-.035-.035-.07l.163-.292c.023-.035.07-.07.117-.07h2.337c.047 0 .07.035.07.082l-.023.28c0 .047-.047.082-.082.082zm12.129-2.36c-.736.187-1.239.327-1.963.514-.176.046-.187.058-.34-.117-.174-.199-.303-.327-.548-.444-.737-.362-1.45-.257-2.115.175-.795.514-1.204 1.274-1.192 2.22.011.935.654 1.706 1.577 1.835.795.105 1.46-.175 1.987-.771.105-.13.198-.27.315-.434H10.47c-.245 0-.304-.152-.222-.35.152-.362.432-.97.596-1.274a.315.315 0 0 1 .292-.187h4.253c-.023.316-.023.631-.07.947a4.983 4.983 0 0 1-.958 2.29c-.841 1.11-1.94 1.8-3.33 1.986-1.145.152-2.209-.07-3.143-.77-.865-.655-1.356-1.52-1.484-2.595-.152-1.274.222-2.419.993-3.424.83-1.086 1.928-1.776 3.272-2.02 1.098-.2 2.15-.07 3.096.571.62.41 1.063.97 1.356 1.648.07.105.023.164-.117.2z"/>
+              </svg>
+              <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 group-hover:text-cyan-600 dark:group-hover:text-cyan-400">Go</h3>
             </div>
-          </div>
+            <p class="text-gray-600 dark:text-gray-300 text-sm mb-3">
+              Simple toolchain, fast compilation, excellent concurrency primitives.
+            </p>
+            <span class="text-cyan-600 dark:text-cyan-400 text-sm font-medium group-hover:underline">
+              Fork on GitHub →
+            </span>
+          </a>
+        </div>
 
-          <div class="flex items-start gap-4">
-            <span class="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">4</span>
-            <div>
-              <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Report Your Results</h3>
-              <p class="text-gray-600 dark:text-gray-300 mt-1">
-                Share your completion time, agent configuration, and lessons learned.
-                Help the community understand what works at scale.
-              </p>
+        <!-- Steps -->
+        <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-8">
+          <div class="space-y-6">
+            <div class="flex items-start gap-4">
+              <span class="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">1</span>
+              <div>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Start Your Project</h3>
+                <p class="text-gray-600 dark:text-gray-300 mt-1">
+                  Create a new repo from scratch, or fork a seed above for a head start.
+                  Get the <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest suite</a>.
+                  Your first commit starts the clock.
+                </p>
+              </div>
+            </div>
+
+            <div class="flex items-start gap-4">
+              <span class="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">2</span>
+              <div>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Build Your Database</h3>
+                <p class="text-gray-600 dark:text-gray-300 mt-1">
+                  Implement a SQL parser, query executor, and storage engine. Use any AI tools&mdash;Claude,
+                  Copilot, or your own agents. Run <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> to track progress.
+                </p>
+              </div>
+            </div>
+
+            <div class="flex items-start gap-4">
+              <span class="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">3</span>
+              <div>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Hit 100% and Submit</h3>
+                <p class="text-gray-600 dark:text-gray-300 mt-1">
+                  When all 622 test files pass, open an issue at
+                  <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a>
+                  with your repo link and commit hashes. Beat 25 days to join the leaderboard.
+                </p>
+              </div>
             </div>
           </div>
         </div>
