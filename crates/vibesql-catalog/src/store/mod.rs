@@ -10,6 +10,7 @@
 //! - `advanced` - Advanced SQL objects (types, domains, sequences, views, triggers, etc.)
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use indexmap::IndexMap;
 
 use crate::{
@@ -36,9 +37,22 @@ mod tables;
 // Re-export types from submodules
 pub use advanced::ViewDropBehavior;
 
+/// Global counter for generating unique session IDs.
+/// This ensures each Catalog instance gets a unique session ID,
+/// even if created in the same process.
+static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
 /// Database catalog - manages all schemas and their objects.
 #[derive(Debug, Clone)]
 pub struct Catalog {
+    /// Session ID for temp table isolation.
+    /// Each Catalog instance gets a unique session ID, and temp tables
+    /// are stored in a session-specific schema (e.g., "temp_12345").
+    /// This ensures temp tables are isolated between database connections.
+    pub(crate) session_id: u64,
+    /// The name of this session's temp schema (e.g., "temp_12345").
+    /// Computed once on Catalog creation from the session_id.
+    pub(crate) temp_schema_name: String,
     pub(crate) schemas: HashMap<String, Schema>,
     pub(crate) current_schema: String,
     pub(crate) privilege_grants: Vec<PrivilegeGrant>,
@@ -70,9 +84,20 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// Create a new empty catalog.
+    /// Create a new empty catalog with a unique session ID.
+    ///
+    /// Each catalog instance gets a unique session ID, which is used to create
+    /// a session-specific temp schema for temporary table isolation.
+    /// This ensures temporary tables are isolated between database connections,
+    /// matching SQLite's behavior where temp tables are connection-local.
     pub fn new() -> Self {
+        // Generate unique session ID
+        let session_id = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
+        let temp_schema_name = format!("{}_{}", crate::TEMP_SCHEMA, session_id);
+
         let mut catalog = Catalog {
+            session_id,
+            temp_schema_name: temp_schema_name.clone(),
             schemas: HashMap::new(),
             current_schema: crate::DEFAULT_SCHEMA.to_string(),
             privilege_grants: Vec::new(),
@@ -106,14 +131,41 @@ impl Catalog {
             Schema::new(crate::DEFAULT_SCHEMA.to_string()),
         );
 
-        // Create the temp schema for temporary tables (SQLite compatibility)
-        // Temp tables are stored here and are not persisted
+        // Create the session-specific temp schema for temporary tables
+        // Each session gets its own temp schema (e.g., "temp_1", "temp_2", etc.)
+        // This provides session isolation for temp tables, matching SQLite semantics
         catalog.schemas.insert(
-            crate::TEMP_SCHEMA.to_string(),
-            Schema::new(crate::TEMP_SCHEMA.to_string()),
+            temp_schema_name.clone(),
+            Schema::new(temp_schema_name),
         );
 
         catalog
+    }
+
+    /// Get this session's temp schema name.
+    ///
+    /// Returns the session-specific temp schema name (e.g., "temp_12345").
+    /// Temporary tables created in this session will be stored in this schema.
+    #[inline]
+    pub fn temp_schema_name(&self) -> &str {
+        &self.temp_schema_name
+    }
+
+    /// Get this session's ID.
+    ///
+    /// Each Catalog instance has a unique session ID used for temp table isolation.
+    #[inline]
+    pub fn session_id(&self) -> u64 {
+        self.session_id
+    }
+
+    /// Check if a schema name is a temp schema (matches "temp_*" pattern).
+    ///
+    /// This is used to identify temp schemas for special handling (e.g., not persisting them).
+    #[inline]
+    pub fn is_temp_schema(schema_name: &str) -> bool {
+        schema_name.starts_with(crate::TEMP_SCHEMA) && schema_name.len() > crate::TEMP_SCHEMA.len()
+            && schema_name.as_bytes().get(crate::TEMP_SCHEMA.len()) == Some(&b'_')
     }
 
     /// Set whether identifier lookups should be case-sensitive

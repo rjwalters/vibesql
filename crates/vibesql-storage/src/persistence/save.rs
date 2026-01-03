@@ -107,8 +107,9 @@ impl Database {
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
         for schema_name in &self.catalog.list_schemas() {
             // Skip built-in schemas - they are recreated automatically on load
+            // Skip default schema and all temp schemas (temp_1, temp_2, etc.)
             if schema_name != vibesql_catalog::DEFAULT_SCHEMA
-                && schema_name != vibesql_catalog::TEMP_SCHEMA
+                && !vibesql_catalog::Catalog::is_temp_schema(schema_name)
             {
                 writeln!(writer, "CREATE SCHEMA {};", schema_name)
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
@@ -131,12 +132,12 @@ impl Database {
         writeln!(writer, "-- Tables and Data")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
-        // Iterate through all schemas except temp schema
+        // Iterate through all schemas except temp schemas
         // We must NOT use get_table() which follows shadowing rules - temp tables would
         // incorrectly override main schema tables in the dump.
         for schema_name in &self.catalog.list_schemas() {
-            // Skip temp schema - temp tables are session-scoped and should not be persisted
-            if schema_name == vibesql_catalog::TEMP_SCHEMA {
+            // Skip all temp schemas (temp_1, temp_2, etc.) - they are session-scoped
+            if vibesql_catalog::Catalog::is_temp_schema(schema_name) {
                 continue;
             }
 
