@@ -1563,6 +1563,8 @@ variable vibesql_skip_files
 array set vibesql_skip_files {
     insert4 "Tests SQLite's internal INSERT transfer optimization (sqlite3_xferopt_count)"
     insert5 "Tests SQLite's internal INSERT from SELECT optimization with xfer count"
+    intreal "Tests custom intreal() function registered via sqlite3_create_function"
+    where8 "Tests OR optimization via execsql_status2 internal statistics - query results correct"
 }
 
 # Tests to skip because they test SQLite-specific behavior that VibeSQL
@@ -1654,6 +1656,14 @@ array set vibesql_skip_tests {
     where2-2.5b "EXPLAIN bytecode output is SQLite-specific"
     where2-12.1 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     where2-14.1 "Cascades from earlier TEMP TABLE failure"
+    where3-3.0a "EXPLAIN QUERY PLAN output format is SQLite-specific"
+    where3-3.1 "EXPLAIN QUERY PLAN output format is SQLite-specific"
+    where3-5.0a "EXPLAIN QUERY PLAN output format is SQLite-specific"
+    where3-5.1 "EXPLAIN QUERY PLAN output format is SQLite-specific"
+    where3-5.2 "EXPLAIN QUERY PLAN output format is SQLite-specific"
+    where3-5.3 "EXPLAIN QUERY PLAN output format is SQLite-specific"
+    where3-8.2 "EXPLAIN QUERY PLAN output format is SQLite-specific"
+    where7-3.2 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     update-13.3 "sqlite3_limit API not implemented"
     update-15.1 "CAST syntax difference from SQLite"
     update-17.10 "Expression indexes are not yet supported"
