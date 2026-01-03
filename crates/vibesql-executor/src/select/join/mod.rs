@@ -510,6 +510,7 @@ pub(super) fn nested_loop_join(
                                 result,
                                 left_schema,
                                 right_schema_orig,
+                                join_type,
                             )?;
                         }
                     } else if let Some(using_cols) = using_columns {
@@ -564,6 +565,7 @@ pub(super) fn nested_loop_join(
                             result,
                             left_schema,
                             right_schema_orig,
+                            join_type,
                         )?;
                     }
                 } else if let Some(using_cols) = using_columns {
@@ -625,6 +627,7 @@ pub(super) fn nested_loop_join(
                             result,
                             left_schema,
                             right_schema_orig,
+                            join_type,
                         )?;
                     }
                 } else if let Some(using_cols) = using_columns {
@@ -678,6 +681,7 @@ pub(super) fn nested_loop_join(
                             result,
                             left_schema,
                             right_schema_orig,
+                            join_type,
                         )?;
                     }
                 } else if let Some(using_cols) = using_columns {
@@ -758,6 +762,7 @@ pub(super) fn nested_loop_join(
                             result,
                             left_schema,
                             right_schema_orig,
+                            join_type,
                         )?;
                     }
                 } else if let Some(using_cols) = using_columns {
@@ -826,6 +831,7 @@ pub(super) fn nested_loop_join(
                             result,
                             left_schema,
                             right_schema_orig,
+                            join_type,
                         )?;
                     }
                 } else if let Some(using_cols) = using_columns {
@@ -896,6 +902,7 @@ pub(super) fn nested_loop_join(
                             result,
                             left_schema,
                             right_schema_orig,
+                            join_type,
                         )?;
                     }
                 } else if let Some(using_cols) = using_columns {
@@ -996,6 +1003,7 @@ pub(super) fn nested_loop_join(
                             result,
                             left_schema,
                             right_schema_orig,
+                            join_type,
                         )?;
                     }
                 } else if let Some(using_cols) = using_columns {
@@ -1230,20 +1238,18 @@ pub(super) fn nested_loop_join(
     }?;
 
     // For NATURAL JOIN or USING clause, remove duplicate columns from the result
-    // For RIGHT/FULL OUTER JOINs, also coalesce common column values so unmatched rows
-    // use the right side's value for the common/USING column (issue #4781)
+    // For RIGHT/FULL OUTER JOINs, the updated remove_duplicate_columns_for_natural_join
+    // now handles hiding the correct side and adding coalesce pairs (issue #4781, #4802)
     if natural {
         if let (Some(ref left_schema), Some(ref right_schema)) =
             (&left_schema_for_dedup, &right_schema_for_dedup)
         {
-            // For RIGHT/FULL OUTER JOIN, coalesce common columns before hiding duplicates
-            if matches!(
+            result = remove_duplicate_columns_for_natural_join(
+                result,
+                left_schema,
+                right_schema,
                 join_type,
-                vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter
-            ) {
-                coalesce_common_columns_for_outer_join(&mut result, left_schema, right_schema);
-            }
-            result = remove_duplicate_columns_for_natural_join(result, left_schema, right_schema)?;
+            )?;
         }
     } else if let Some(using_cols) = using_columns {
         if let (Some(ref left_schema), Some(ref right_schema)) =
@@ -1272,68 +1278,6 @@ pub(super) fn nested_loop_join(
     }
 
     Ok(result)
-}
-
-/// Coalesce common column values for RIGHT/FULL OUTER JOIN
-///
-/// For NATURAL RIGHT JOIN and NATURAL FULL JOIN, when a left row is NULL (unmatched),
-/// the common column value should come from the right side, not the left.
-///
-/// SQL standard semantics: NATURAL JOIN common columns use COALESCE(left.col, right.col)
-/// - INNER JOIN: values are equal, doesn't matter
-/// - LEFT OUTER JOIN: unmatched rows have right=NULL, so left value is used (no change needed)
-/// - RIGHT OUTER JOIN: unmatched rows have left=NULL, so right value should be used
-/// - FULL OUTER JOIN: COALESCE(left, right) is used for both unmatched cases
-///
-/// This function updates left column values to COALESCE(left, right) for common columns.
-fn coalesce_common_columns_for_outer_join(
-    result: &mut FromResult,
-    left_schema: &CombinedSchema,
-    right_schema: &CombinedSchema,
-) {
-    use std::collections::HashMap;
-
-    // Find common column names (case-insensitive)
-    // Build a map: lowercase column name -> list of left column indices
-    let mut left_column_map: HashMap<String, Vec<usize>> = HashMap::new();
-    for (table_start_idx, table_schema) in left_schema.table_schemas.values() {
-        for (col_idx, col) in table_schema.columns.iter().enumerate() {
-            let lowercase = col.name.to_lowercase();
-            left_column_map
-                .entry(lowercase)
-                .or_default()
-                .push(table_start_idx + col_idx);
-        }
-    }
-
-    // Build pairs of (left_idx, right_idx) for common columns
-    let left_col_count = left_schema.total_columns;
-    let mut coalesce_pairs: Vec<(usize, usize)> = Vec::new();
-
-    for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
-        for (col_idx, col) in table_schema.columns.iter().enumerate() {
-            let lowercase = col.name.to_lowercase();
-            if let Some(left_indices) = left_column_map.get(&lowercase) {
-                let right_idx = left_col_count + table_start_idx + col_idx;
-                // For each left column with this name, create a coalesce pair
-                for &left_idx in left_indices {
-                    coalesce_pairs.push((left_idx, right_idx));
-                }
-            }
-        }
-    }
-
-    // Apply COALESCE to each row: if left value is NULL, use right value
-    if !coalesce_pairs.is_empty() {
-        let rows = result.rows_mut();
-        for row in rows {
-            for &(left_idx, right_idx) in &coalesce_pairs {
-                if row.values[left_idx] == vibesql_types::SqlValue::Null {
-                    row.values[left_idx] = row.values[right_idx].clone();
-                }
-            }
-        }
-    }
 }
 
 /// Coalesce USING column values for RIGHT/FULL OUTER JOIN
@@ -1419,8 +1363,16 @@ fn remove_duplicate_columns_for_natural_join(
     mut result: FromResult,
     left_schema: &CombinedSchema,
     right_schema: &CombinedSchema,
+    join_type: &vibesql_ast::JoinType,
 ) -> Result<FromResult, ExecutorError> {
     use std::collections::HashMap;
+
+    // For RIGHT/FULL OUTER JOINs, we need to hide left-side columns and add coalesce pairs
+    // For other join types, we hide right-side columns
+    let is_right_or_full = matches!(
+        join_type,
+        vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter
+    );
 
     // Find common column names (case-insensitive)
     // Use table_start_idx to compute correct absolute positions
@@ -1440,18 +1392,49 @@ fn remove_duplicate_columns_for_natural_join(
     // Identify which columns from the right side are duplicates
     // Use table_start_idx from right_schema to compute correct absolute positions
     let left_col_count = left_schema.total_columns;
-    for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
-        for (col_idx, col) in table_schema.columns.iter().enumerate() {
-            let lowercase = col.name.to_lowercase();
-            if left_column_map.contains_key(&lowercase) {
-                // This is a common column, mark it as hidden for SELECT * expansion
-                // Position in result = left_col_count + position_in_right_schema
-                let hidden_idx = left_col_count + table_start_idx + col_idx;
-                result.schema.hide_column(hidden_idx);
 
-                // Also mark this column as a "joined column" so it won't be
-                // considered ambiguous when referenced without table qualification (issue #4517)
-                result.schema.add_joined_column(&col.name);
+    if is_right_or_full {
+        // For RIGHT/FULL OUTER JOINs: hide left-side columns and add coalesce pairs
+        // This ensures SELECT * shows the right-side value (which is non-NULL for unmatched rows)
+        // while qualified references like t5.id still return the actual NULL value
+        for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
+            for (col_idx, col) in table_schema.columns.iter().enumerate() {
+                let lowercase = col.name.to_lowercase();
+                if let Some(left_entries) = left_column_map.get(&lowercase) {
+                    // Hide the left-side column(s)
+                    for (_, _, left_idx) in left_entries {
+                        result.schema.hide_column(*left_idx);
+                    }
+
+                    // Add coalesce pair for COALESCE(left, right) semantics on unqualified references
+                    // Use the first left column entry for the coalesce pair
+                    if let Some((_, actual_name, left_idx)) = left_entries.first() {
+                        let right_idx = left_col_count + table_start_idx + col_idx;
+                        result
+                            .schema
+                            .add_using_coalesce_pair(actual_name, *left_idx, right_idx);
+                    }
+
+                    // Mark as joined column for ambiguity resolution
+                    result.schema.add_joined_column(&col.name);
+                }
+            }
+        }
+    } else {
+        // For INNER/LEFT/CROSS JOINs: hide right-side columns (original behavior)
+        for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
+            for (col_idx, col) in table_schema.columns.iter().enumerate() {
+                let lowercase = col.name.to_lowercase();
+                if left_column_map.contains_key(&lowercase) {
+                    // This is a common column, mark it as hidden for SELECT * expansion
+                    // Position in result = left_col_count + position_in_right_schema
+                    let hidden_idx = left_col_count + table_start_idx + col_idx;
+                    result.schema.hide_column(hidden_idx);
+
+                    // Also mark this column as a "joined column" so it won't be
+                    // considered ambiguous when referenced without table qualification (issue #4517)
+                    result.schema.add_joined_column(&col.name);
+                }
             }
         }
     }
