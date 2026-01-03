@@ -47,9 +47,6 @@
               <a href="#get-started" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors" data-i18n="challenge-btn-start">
                 Start Building
               </a>
-              <a href="#trophy" class="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-lg transition-colors" data-i18n="challenge-btn-trophy">
-                See The Trophy
-              </a>
               <a href="https://github.com/vibesql-challenge/submissions" target="_blank" rel="noopener" class="px-6 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-semibold rounded-lg transition-colors" data-i18n="challenge-btn-leaderboard">
                 Leaderboard
               </a>
@@ -141,58 +138,161 @@
             </ul>
           </div>
 
-          <!-- Constraints -->
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
+          <!-- The Rule: Execution Boundary -->
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border-2 border-amber-300 dark:border-amber-600 md:col-span-2">
             <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-              <svg class="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
+              <svg class="w-6 h-6 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
               </svg>
-              <span data-i18n="challenge-constraints-title">Constraints</span>
+              <span data-i18n="challenge-rule-boundary-title">The Rule: Execution Boundary</span>
             </h3>
-            <ul class="text-gray-600 dark:text-gray-300 space-y-2">
-              <li class="flex items-start gap-2">
-                <span class="w-2 h-2 bg-red-500 rounded-full mt-2"></span>
-                <span data-i18n-html="challenge-constraint-parser"><strong>No existing SQL parser libraries</strong> — build your own parser</span>
-              </li>
-              <li class="flex items-start gap-2">
-                <span class="w-2 h-2 bg-red-500 rounded-full mt-2"></span>
-                <span data-i18n-html="challenge-constraint-engine"><strong>No existing query engines</strong> — implement execution from scratch</span>
-              </li>
-              <li class="flex items-start gap-2">
-                <span class="w-2 h-2 bg-red-500 rounded-full mt-2"></span>
-                <span data-i18n-html="challenge-constraint-libs"><strong>No database-specific libraries</strong> — use only general-purpose libraries</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- Allowed -->
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
-            <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-              <svg class="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
-              </svg>
-              <span data-i18n="challenge-allowed-title">Allowed</span>
-            </h3>
-            <ul class="text-gray-600 dark:text-gray-300 space-y-2">
-              <li class="flex items-center gap-2">
-                <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
-                <span data-i18n="challenge-allowed-lang">Any programming language</span>
-              </li>
-              <li class="flex items-center gap-2">
-                <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
-                <span data-i18n="challenge-allowed-ai">Any AI orchestration framework</span>
-              </li>
-              <li class="flex items-center gap-2">
-                <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
-                <span data-i18n="challenge-allowed-human">Human intervention (unlimited)</span>
-              </li>
-              <li class="flex items-center gap-2">
-                <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
-                <span data-i18n="challenge-allowed-libs">General-purpose libraries (data structures, I/O, etc.)</span>
-              </li>
-            </ul>
+            <p class="text-lg text-gray-700 dark:text-gray-200 mb-4 font-medium" data-i18n="challenge-rule-boundary-text">
+              Existing database systems may be studied, benchmarked, and used for external analysis, but they must never cross the execution boundary of your submitted system.
+            </p>
+            <div class="grid md:grid-cols-2 gap-6">
+              <div>
+                <h4 class="font-semibold text-green-700 dark:text-green-400 mb-2 flex items-center gap-2">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                  <span data-i18n="challenge-rule-outside-title">Outside the Boundary (Allowed)</span>
+                </h4>
+                <ul class="text-gray-600 dark:text-gray-300 space-y-1 text-sm">
+                  <li class="flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                    <span data-i18n="challenge-rule-study">Study source code and algorithms</span>
+                  </li>
+                  <li class="flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                    <span data-i18n="challenge-rule-benchmark">Benchmark to identify slow query classes</span>
+                  </li>
+                  <li class="flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                    <span data-i18n="challenge-rule-compare">Compare query plans and behaviors</span>
+                  </li>
+                  <li class="flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                    <span data-i18n="challenge-rule-guide">Use to guide design decisions</span>
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <h4 class="font-semibold text-red-700 dark:text-red-400 mb-2 flex items-center gap-2">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                  </svg>
+                  <span data-i18n="challenge-rule-inside-title">Inside the Boundary (Disqualified)</span>
+                </h4>
+                <ul class="text-gray-600 dark:text-gray-300 space-y-1 text-sm">
+                  <li class="flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
+                    <span data-i18n="challenge-rule-execute">Execute queries via existing engines</span>
+                  </li>
+                  <li class="flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
+                    <span data-i18n="challenge-rule-fallback">Use as fallback for unsupported features</span>
+                  </li>
+                  <li class="flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
+                    <span data-i18n="challenge-rule-oracle">Use as correctness oracle during tests</span>
+                  </li>
+                  <li class="flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
+                    <span data-i18n="challenge-rule-link">Link, embed, or invoke at runtime</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-4 italic" data-i18n="challenge-rule-test">
+              Key test: Removing SQLite must not change whether your engine builds, runs, or passes tests.
+            </p>
           </div>
         </div>
+
+        <!-- Collapsible Examples Section -->
+        <details class="mt-8 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
+          <summary class="cursor-pointer px-6 py-4 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
+            <span class="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <svg class="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <span data-i18n="challenge-examples-title">Do / Don't Examples</span>
+            </span>
+            <svg class="w-5 h-5 text-gray-500 dark:text-gray-400 transform transition-transform details-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+            </svg>
+          </summary>
+          <div class="px-6 pb-6 pt-2">
+            <div class="grid md:grid-cols-2 gap-6">
+              <!-- DO Examples -->
+              <div class="space-y-4">
+                <h4 class="font-bold text-green-700 dark:text-green-400 flex items-center gap-2 border-b border-green-200 dark:border-green-800 pb-2">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                  <span data-i18n="challenge-examples-do">DO (Allowed)</span>
+                </h4>
+                <div class="space-y-3 text-sm">
+                  <div class="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
+                    <p class="font-medium text-green-800 dark:text-green-200" data-i18n="challenge-do-1-title">Read SQLite source code to understand B-tree implementation</p>
+                    <p class="text-green-700 dark:text-green-300 text-xs mt-1" data-i18n="challenge-do-1-why">Study and learn from existing implementations</p>
+                  </div>
+                  <div class="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
+                    <p class="font-medium text-green-800 dark:text-green-200" data-i18n="challenge-do-2-title">Run DuckDB to benchmark JOIN performance and identify optimization targets</p>
+                    <p class="text-green-700 dark:text-green-300 text-xs mt-1" data-i18n="challenge-do-2-why">External analysis to guide your implementation</p>
+                  </div>
+                  <div class="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
+                    <p class="font-medium text-green-800 dark:text-green-200" data-i18n="challenge-do-3-title">Compare your query plan output against PostgreSQL's EXPLAIN</p>
+                    <p class="text-green-700 dark:text-green-300 text-xs mt-1" data-i18n="challenge-do-3-why">Learning tool that doesn't affect your execution</p>
+                  </div>
+                  <div class="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
+                    <p class="font-medium text-green-800 dark:text-green-200" data-i18n="challenge-do-4-title">Use scripts that call SQLite to pre-compute expected test outputs</p>
+                    <p class="text-green-700 dark:text-green-300 text-xs mt-1" data-i18n="challenge-do-4-why">Offline reference data, not runtime dependency</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- DON'T Examples -->
+              <div class="space-y-4">
+                <h4 class="font-bold text-red-700 dark:text-red-400 flex items-center gap-2 border-b border-red-200 dark:border-red-800 pb-2">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                  </svg>
+                  <span data-i18n="challenge-examples-dont">DON'T (Disqualified)</span>
+                </h4>
+                <div class="space-y-3 text-sm">
+                  <div class="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 border border-red-200 dark:border-red-800">
+                    <p class="font-medium text-red-800 dark:text-red-200" data-i18n="challenge-dont-1-title">Fall back to SQLite for window functions "temporarily"</p>
+                    <p class="text-red-700 dark:text-red-300 text-xs mt-1" data-i18n="challenge-dont-1-why">Crosses execution boundary, even if planned for removal</p>
+                  </div>
+                  <div class="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 border border-red-200 dark:border-red-800">
+                    <p class="font-medium text-red-800 dark:text-red-200" data-i18n="challenge-dont-2-title">Run queries through SQLite to verify correctness during tests</p>
+                    <p class="text-red-700 dark:text-red-300 text-xs mt-1" data-i18n="challenge-dont-2-why">Using as oracle means tests depend on external engine</p>
+                  </div>
+                  <div class="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 border border-red-200 dark:border-red-800">
+                    <p class="font-medium text-red-800 dark:text-red-200" data-i18n="challenge-dont-3-title">Link against libsqlite3 for "just the parser"</p>
+                    <p class="text-red-700 dark:text-red-300 text-xs mt-1" data-i18n="challenge-dont-3-why">Embedded dependency violates clean-room implementation</p>
+                  </div>
+                  <div class="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 border border-red-200 dark:border-red-800">
+                    <p class="font-medium text-red-800 dark:text-red-200" data-i18n="challenge-dont-4-title">Shell out to DuckDB for complex aggregation queries</p>
+                    <p class="text-red-700 dark:text-red-300 text-xs mt-1" data-i18n="challenge-dont-4-why">Delegation of execution, regardless of method</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- FAQ -->
+            <div class="mt-6 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
+              <h4 class="font-semibold text-blue-800 dark:text-blue-200 mb-2" data-i18n="challenge-faq-title">Common Question</h4>
+              <p class="text-blue-700 dark:text-blue-300 text-sm">
+                <strong data-i18n="challenge-faq-q">Q: Can I use SQLite during development?</strong>
+              </p>
+              <p class="text-blue-700 dark:text-blue-300 text-sm mt-1" data-i18n="challenge-faq-a">
+                A: Yes — for reading code, benchmarking, and analysis. No — for executing queries, validating correctness, or acting as part of your system.
+              </p>
+            </div>
+          </div>
+        </details>
       </section>
 
       <!-- The Trophy -->

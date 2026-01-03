@@ -756,15 +756,44 @@ challenge-success-title = Success Criteria
 challenge-success-pass-rate = 100% pass rate on SQLLogicTest suite
 challenge-success-assertions = ~6 million individual test assertions
 challenge-success-files = All 622 test files passing
-challenge-constraints-title = Constraints
-challenge-constraint-parser = <strong>No existing SQL parser libraries</strong> — build your own parser
-challenge-constraint-engine = <strong>No existing query engines</strong> — implement execution from scratch
-challenge-constraint-libs = <strong>No database-specific libraries</strong> — use only general-purpose libraries
-challenge-allowed-title = Allowed
-challenge-allowed-lang = Any programming language
-challenge-allowed-ai = Any AI orchestration framework
-challenge-allowed-human = Human intervention (unlimited)
-challenge-allowed-libs = General-purpose libraries (data structures, I/O, etc.)
+# Execution Boundary Rule
+challenge-rule-boundary-title = The Rule: Execution Boundary
+challenge-rule-boundary-text = Existing database systems may be studied, benchmarked, and used for external analysis, but they must never cross the execution boundary of your submitted system.
+challenge-rule-outside-title = Outside the Boundary (Allowed)
+challenge-rule-study = Study source code and algorithms
+challenge-rule-benchmark = Benchmark to identify slow query classes
+challenge-rule-compare = Compare query plans and behaviors
+challenge-rule-guide = Use to guide design decisions
+challenge-rule-inside-title = Inside the Boundary (Disqualified)
+challenge-rule-execute = Execute queries via existing engines
+challenge-rule-fallback = Use as fallback for unsupported features
+challenge-rule-oracle = Use as correctness oracle during tests
+challenge-rule-link = Link, embed, or invoke at runtime
+challenge-rule-test = Key test: Removing SQLite must not change whether your engine builds, runs, or passes tests.
+
+# Do/Don't Examples
+challenge-examples-title = Do / Don't Examples
+challenge-examples-do = DO (Allowed)
+challenge-examples-dont = DON'T (Disqualified)
+challenge-do-1-title = Read SQLite source code to understand B-tree implementation
+challenge-do-1-why = Study and learn from existing implementations
+challenge-do-2-title = Run DuckDB to benchmark JOIN performance and identify optimization targets
+challenge-do-2-why = External analysis to guide your implementation
+challenge-do-3-title = Compare your query plan output against PostgreSQL's EXPLAIN
+challenge-do-3-why = Learning tool that doesn't affect your execution
+challenge-do-4-title = Use scripts that call SQLite to pre-compute expected test outputs
+challenge-do-4-why = Offline reference data, not runtime dependency
+challenge-dont-1-title = Fall back to SQLite for window functions "temporarily"
+challenge-dont-1-why = Crosses execution boundary, even if planned for removal
+challenge-dont-2-title = Run queries through SQLite to verify correctness during tests
+challenge-dont-2-why = Using as oracle means tests depend on external engine
+challenge-dont-3-title = Link against libsqlite3 for "just the parser"
+challenge-dont-3-why = Embedded dependency violates clean-room implementation
+challenge-dont-4-title = Shell out to DuckDB for complex aggregation queries
+challenge-dont-4-why = Delegation of execution, regardless of method
+challenge-faq-title = Common Question
+challenge-faq-q = Q: Can I use SQLite during development?
+challenge-faq-a = A: Yes — for reading code, benchmarking, and analysis. No — for executing queries, validating correctness, or acting as part of your system.
 
 # The Trophy section
 challenge-trophy-title = The Trophy

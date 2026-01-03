@@ -233,4 +233,18 @@
   .benchmark-tab--active {
     @apply bg-primary-light dark:bg-primary-dark text-white hover:bg-primary-light dark:hover:bg-primary-dark;
   }
+
+  /* Details/Summary toggle icon rotation */
+  details[open] summary svg:last-child {
+    transform: rotate(180deg);
+  }
+
+  details summary::-webkit-details-marker {
+    display: none;
+  }
+
+  details summary::marker {
+    display: none;
+    content: '';
+  }
 }
