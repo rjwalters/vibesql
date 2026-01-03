@@ -283,7 +283,7 @@ def compute_milestones(test_results: list[dict], commits: list[dict], first_date
     """Find when each pass rate milestone was first reached."""
     print("Computing milestones...")
 
-    milestones_targets = [50, 75, 90, 95, 99]
+    milestones_targets = [50, 75, 90, 95, 99, 100]
     milestones = []
 
     # Create commit date index
@@ -310,6 +310,7 @@ def compute_milestones(test_results: list[dict], commits: list[dict], first_date
                     "milestone": f"{target}%",
                     "date": commit_date,
                     "commit": result["git_commit"][:12],
+                    "commit_full": result["git_commit"],
                     "days_from_start": days_from_start,
                     "passed": result["passed"],
                     "total": result["total"]
