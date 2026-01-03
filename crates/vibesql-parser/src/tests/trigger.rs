@@ -17,7 +17,7 @@ fn test_create_trigger_before_insert() {
             assert_eq!(trigger.timing, TriggerTiming::Before);
             assert_eq!(trigger.event, TriggerEvent::Insert);
             assert_eq!(trigger.table_name, "my_table");
-            assert_eq!(trigger.granularity, TriggerGranularity::Statement); // Default
+            assert_eq!(trigger.granularity, TriggerGranularity::Row); // Default (SQLite compatible)
         }
         _ => panic!("Expected CreateTrigger statement"),
     }

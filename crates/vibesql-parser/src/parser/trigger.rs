@@ -101,8 +101,9 @@ impl Parser {
                 });
             }
         } else {
-            // Default per SQL:1999
-            vibesql_ast::TriggerGranularity::Statement
+            // Default to ROW for SQLite compatibility
+            // SQLite doesn't support STATEMENT-level triggers - all triggers are FOR EACH ROW
+            vibesql_ast::TriggerGranularity::Row
         };
 
         // Parse optional WHEN condition
