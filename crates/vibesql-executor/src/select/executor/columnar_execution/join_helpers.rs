@@ -191,6 +191,7 @@ pub(super) fn build_combined_schema(
         outer_schema: None,
         duplicate_aliases: HashSet::new(),
         joined_columns: HashSet::new(),
+        using_coalesce_pairs: HashMap::new(),
     };
 
     for (table_name, alias, _batch, schema) in batches {

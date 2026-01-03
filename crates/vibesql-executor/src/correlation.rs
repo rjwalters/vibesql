@@ -590,6 +590,7 @@ mod tests {
             outer_schema: None,
             duplicate_aliases: std::collections::HashSet::new(),
             joined_columns: std::collections::HashSet::new(),
+            using_coalesce_pairs: std::collections::HashMap::new(),
         };
 
         let subquery = SelectStmt {

@@ -127,6 +127,12 @@ pub struct CombinedSchema {
     /// because they are logically the same column after the join.
     /// Stored as lowercase for case-insensitive matching.
     pub joined_columns: HashSet<String>,
+    /// For USING columns in RIGHT/FULL OUTER JOINs, maps the unqualified column name
+    /// (lowercase) to (left_col_index, right_col_index) for COALESCE resolution.
+    /// When an unqualified reference is made to a USING column, we apply COALESCE
+    /// semantics: if the left value is NULL, use the right value.
+    /// Issue #4783: USING column semantics differ from SQLite in OUTER JOINs
+    pub using_coalesce_pairs: HashMap<String, (usize, usize)>,
 }
 
 impl CombinedSchema {
@@ -142,6 +148,7 @@ impl CombinedSchema {
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
+            using_coalesce_pairs: HashMap::new(),
         }
     }
 
@@ -160,6 +167,7 @@ impl CombinedSchema {
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
+            using_coalesce_pairs: HashMap::new(),
         }
     }
 
@@ -198,6 +206,7 @@ impl CombinedSchema {
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
+            using_coalesce_pairs: HashMap::new(),
         }
     }
 
@@ -239,6 +248,7 @@ impl CombinedSchema {
             outer_schema: left.outer_schema,
             duplicate_aliases,
             joined_columns: left.joined_columns,
+            using_coalesce_pairs: left.using_coalesce_pairs,
         }
     }
 
@@ -298,6 +308,12 @@ impl CombinedSchema {
         let mut joined_columns = left.joined_columns;
         joined_columns.extend(right.joined_columns);
 
+        // Merge using_coalesce_pairs from both sides (adjusting right side indices)
+        let mut using_coalesce_pairs = left.using_coalesce_pairs;
+        for (col_name, (left_idx, right_idx)) in right.using_coalesce_pairs {
+            using_coalesce_pairs.insert(col_name, (left_total + left_idx, left_total + right_idx));
+        }
+
         CombinedSchema {
             table_schemas,
             total_columns: left_total + right.total_columns,
@@ -305,6 +321,7 @@ impl CombinedSchema {
             outer_schema: left.outer_schema,
             duplicate_aliases,
             joined_columns,
+            using_coalesce_pairs,
         }
     }
 
@@ -624,6 +641,34 @@ impl CombinedSchema {
     pub fn add_joined_column(&mut self, column: &str) {
         self.joined_columns.insert(column.to_lowercase());
     }
+
+    /// Add a USING column coalesce pair for RIGHT/FULL OUTER JOINs.
+    ///
+    /// For USING columns in OUTER JOINs, unqualified references should use
+    /// COALESCE(left.col, right.col) semantics. This method records the
+    /// column indices for later coalesce evaluation.
+    ///
+    /// # Arguments
+    /// * `column` - The column name (will be normalized to lowercase)
+    /// * `left_idx` - Index of the left-side column
+    /// * `right_idx` - Index of the right-side column
+    ///
+    /// Issue #4783: USING column semantics differ from SQLite in OUTER JOINs
+    pub fn add_using_coalesce_pair(&mut self, column: &str, left_idx: usize, right_idx: usize) {
+        self.using_coalesce_pairs
+            .insert(column.to_lowercase(), (left_idx, right_idx));
+    }
+
+    /// Get the coalesce pair for a USING column, if any.
+    ///
+    /// Returns Some((left_idx, right_idx)) if this column needs COALESCE
+    /// semantics for OUTER JOIN USING, None otherwise.
+    ///
+    /// # Arguments
+    /// * `column` - The column name (will be normalized to lowercase)
+    pub fn get_using_coalesce_pair(&self, column: &str) -> Option<(usize, usize)> {
+        self.using_coalesce_pairs.get(&column.to_lowercase()).copied()
+    }
 }
 
 /// Builder for incrementally constructing a CombinedSchema
@@ -637,6 +682,7 @@ pub struct SchemaBuilder {
     hidden_columns: HashSet<usize>,
     duplicate_aliases: HashSet<TableIdentifier>,
     joined_columns: HashSet<String>,
+    using_coalesce_pairs: HashMap<String, (usize, usize)>,
 }
 
 impl SchemaBuilder {
@@ -648,6 +694,7 @@ impl SchemaBuilder {
             hidden_columns: HashSet::new(),
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
+            using_coalesce_pairs: HashMap::new(),
         }
     }
 
@@ -662,6 +709,7 @@ impl SchemaBuilder {
             hidden_columns: schema.hidden_columns,
             duplicate_aliases: schema.duplicate_aliases,
             joined_columns: schema.joined_columns,
+            using_coalesce_pairs: schema.using_coalesce_pairs,
         }
     }
 
@@ -698,6 +746,7 @@ impl SchemaBuilder {
             outer_schema: None,
             duplicate_aliases: self.duplicate_aliases,
             joined_columns: self.joined_columns,
+            using_coalesce_pairs: self.using_coalesce_pairs,
         }
     }
 }

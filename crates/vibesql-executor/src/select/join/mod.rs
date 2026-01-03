@@ -521,6 +521,7 @@ pub(super) fn nested_loop_join(
                                 left_schema,
                                 right_schema_orig,
                                 using_cols,
+                                join_type,
                             )?;
                         }
                     }
@@ -574,6 +575,7 @@ pub(super) fn nested_loop_join(
                             left_schema,
                             right_schema_orig,
                             using_cols,
+                            join_type,
                         )?;
                     }
                 }
@@ -634,6 +636,7 @@ pub(super) fn nested_loop_join(
                             left_schema,
                             right_schema_orig,
                             using_cols,
+                            join_type,
                         )?;
                     }
                 }
@@ -686,6 +689,7 @@ pub(super) fn nested_loop_join(
                             left_schema,
                             right_schema_orig,
                             using_cols,
+                            join_type,
                         )?;
                     }
                 }
@@ -765,6 +769,7 @@ pub(super) fn nested_loop_join(
                             left_schema,
                             right_schema_orig,
                             using_cols,
+                            join_type,
                         )?;
                     }
                 }
@@ -832,6 +837,7 @@ pub(super) fn nested_loop_join(
                             left_schema,
                             right_schema_orig,
                             using_cols,
+                            join_type,
                         )?;
                     }
                 }
@@ -901,6 +907,7 @@ pub(super) fn nested_loop_join(
                             left_schema,
                             right_schema_orig,
                             using_cols,
+                            join_type,
                         )?;
                     }
                 }
@@ -1000,6 +1007,7 @@ pub(super) fn nested_loop_join(
                             left_schema,
                             right_schema_orig,
                             using_cols,
+                            join_type,
                         )?;
                     }
                 }
@@ -1258,6 +1266,7 @@ pub(super) fn nested_loop_join(
                 left_schema,
                 right_schema,
                 using_cols,
+                join_type,
             )?;
         }
     }
@@ -1466,6 +1475,7 @@ fn remove_duplicate_columns_for_using_join(
     left_schema: &CombinedSchema,
     right_schema: &CombinedSchema,
     using_cols: &[String],
+    join_type: &vibesql_ast::JoinType,
 ) -> Result<FromResult, ExecutorError> {
     use std::collections::HashSet;
 
@@ -1481,6 +1491,39 @@ fn remove_duplicate_columns_for_using_join(
     // Count columns in left schema
     let left_col_count = left_schema.total_columns;
 
+    // For RIGHT OUTER and FULL OUTER joins, we need COALESCE semantics:
+    // The USING column value should be COALESCE(left.col, right.col)
+    // - RIGHT OUTER: left can be NULL for unmatched rows from right
+    // - FULL OUTER: either side can be NULL for unmatched rows
+    // Issue #4783: USING column semantics differ from SQLite in OUTER JOINs
+    let needs_coalesce = matches!(
+        join_type,
+        vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter
+    );
+
+    // Build a map of column name -> leftmost left column index
+    // This is the index that unqualified references will resolve to
+    let mut leftmost_left_indices: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    if needs_coalesce {
+        for (table_start_idx, table_schema) in left_schema.table_schemas.values() {
+            for (col_idx, col) in table_schema.columns.iter().enumerate() {
+                let lowercase = col.name.to_lowercase();
+                if using_cols_lower.contains(&lowercase) {
+                    let absolute_idx = table_start_idx + col_idx;
+                    leftmost_left_indices
+                        .entry(lowercase)
+                        .and_modify(|e| {
+                            if absolute_idx < *e {
+                                *e = absolute_idx
+                            }
+                        })
+                        .or_insert(absolute_idx);
+                }
+            }
+        }
+    }
+
     // Identify which columns from the right side are USING columns to hide
     // Use table_start_idx from right_schema to compute correct absolute positions
     for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
@@ -1489,8 +1532,19 @@ fn remove_duplicate_columns_for_using_join(
             if using_cols_lower.contains(&lowercase) {
                 // This is a USING column, mark it as hidden for SELECT * expansion
                 // Position in result = left_col_count + position_in_right_schema
-                let hidden_idx = left_col_count + table_start_idx + col_idx;
-                result.schema.hide_column(hidden_idx);
+                let right_idx = left_col_count + table_start_idx + col_idx;
+                result.schema.hide_column(right_idx);
+
+                // If coalescing is needed, register the coalesce pair in the schema
+                // This maps the column name to (left_idx, right_idx) so the evaluator
+                // can apply COALESCE semantics for unqualified column references
+                if needs_coalesce {
+                    if let Some(&left_idx) = leftmost_left_indices.get(&lowercase) {
+                        result
+                            .schema
+                            .add_using_coalesce_pair(&col.name, left_idx, right_idx);
+                    }
+                }
             }
         }
     }

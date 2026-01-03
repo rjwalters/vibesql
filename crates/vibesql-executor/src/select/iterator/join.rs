@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::RowIterator;
 use crate::{
@@ -133,6 +133,7 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
+            using_coalesce_pairs: HashMap::new(),
         };
 
         let right_count = right_rows.len();

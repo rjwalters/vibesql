@@ -129,6 +129,7 @@ impl SelectExecutor<'_> {
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
+            using_coalesce_pairs: HashMap::new(),
         };
         let empty_row = Row::new(vec![]);
         let evaluator = ArenaExpressionEvaluator::new(&schema, params, interner);
