@@ -316,45 +316,13 @@ where
     if let (Some(using_cols), Some(ref left_schema), Some(ref right_schema)) =
         (using_columns.as_ref(), &left_schema_for_using, &right_schema_for_using)
     {
-        match join_type {
-            vibesql_ast::JoinType::RightOuter => {
-                // For RIGHT OUTER JOIN: hide LEFT-side USING columns (right side is primary)
-                // This way, unqualified USING column references pick up the right-side value
-                result = remove_duplicate_columns_for_using_join_right_outer(
-                    result,
-                    left_schema,
-                    right_schema,
-                    using_cols,
-                )?;
-            }
-            vibesql_ast::JoinType::FullOuter => {
-                // For FULL OUTER JOIN: hide LEFT-side USING columns (same as RIGHT OUTER)
-                // This ensures the unqualified USING column resolves to the right side,
-                // which preserves the value for "unmatched right" rows (where left is NULL).
-                //
-                // Note: For "unmatched left" rows (where right is NULL), the unqualified
-                // USING column will resolve to the right column which is NULL. This is
-                // a known limitation - true COALESCE semantics would require row-level
-                // evaluation or a virtual column.
-                //
-                // Qualified references (t1.a, t2.a) correctly return original values.
-                result = remove_duplicate_columns_for_using_join_right_outer(
-                    result,
-                    left_schema,
-                    right_schema,
-                    using_cols,
-                )?;
-            }
-            _ => {
-                // For INNER/LEFT OUTER/CROSS: hide right-side USING column (left is primary)
-                result = remove_duplicate_columns_for_using_join(
-                    result,
-                    left_schema,
-                    right_schema,
-                    using_cols,
-                )?;
-            }
-        }
+        result = remove_duplicate_columns_for_using_join(
+            result,
+            left_schema,
+            right_schema,
+            using_cols,
+            join_type,
+        )?;
     }
 
     Ok(result)
@@ -376,13 +344,53 @@ fn remove_duplicate_columns_for_using_join(
     left_schema: &CombinedSchema,
     right_schema: &CombinedSchema,
     using_columns: &[String],
+    join_type: &vibesql_ast::JoinType,
 ) -> Result<super::FromResult, crate::errors::ExecutorError> {
     // Create a set of USING column names (lowercase for case-insensitive comparison)
     let using_cols_lower: HashSet<String> =
         using_columns.iter().map(|c| c.to_lowercase()).collect();
 
+    // Mark all USING columns as "joined columns" so they won't be
+    // considered ambiguous when referenced without table qualification (issue #4517)
+    for col in using_columns {
+        result.schema.add_joined_column(col);
+    }
+
     // Count columns in left schema
     let left_col_count = left_schema.total_columns;
+
+    // For RIGHT OUTER and FULL OUTER joins, we need COALESCE semantics:
+    // The USING column value should be COALESCE(left.col, right.col)
+    // - RIGHT OUTER: left can be NULL for unmatched rows from right
+    // - FULL OUTER: either side can be NULL for unmatched rows
+    // Issue #4783: USING column semantics differ from SQLite in OUTER JOINs
+    let needs_coalesce = matches!(
+        join_type,
+        vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter
+    );
+
+    // Build a map of column name -> leftmost left column index
+    // This is the index that unqualified references will resolve to
+    let mut leftmost_left_indices: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    if needs_coalesce {
+        for (table_start_idx, table_schema) in left_schema.table_schemas.values() {
+            for (col_idx, col) in table_schema.columns.iter().enumerate() {
+                let lowercase = col.name.to_lowercase();
+                if using_cols_lower.contains(&lowercase) {
+                    let absolute_idx = table_start_idx + col_idx;
+                    leftmost_left_indices
+                        .entry(lowercase)
+                        .and_modify(|e| {
+                            if absolute_idx < *e {
+                                *e = absolute_idx
+                            }
+                        })
+                        .or_insert(absolute_idx);
+                }
+            }
+        }
+    }
 
     // Identify which columns from the right side are USING columns to hide
     // Use table_start_idx from right_schema to compute correct absolute positions
@@ -392,49 +400,19 @@ fn remove_duplicate_columns_for_using_join(
             if using_cols_lower.contains(&lowercase) {
                 // This is a USING column, mark it as hidden for SELECT * expansion
                 // Position in result = left_col_count + position_in_right_schema
-                let hidden_idx = left_col_count + table_start_idx + col_idx;
-                result.schema.hide_column(hidden_idx);
+                let right_idx = left_col_count + table_start_idx + col_idx;
+                result.schema.hide_column(right_idx);
 
-                // Mark as "joined column" so it won't be considered ambiguous
-                // when referenced without table qualification (issue #4517)
-                result.schema.add_joined_column(&col.name);
-            }
-        }
-    }
-
-    Ok(result)
-}
-
-/// Mark USING columns as hidden for RIGHT OUTER JOIN - hides LEFT-side columns
-///
-/// For RIGHT OUTER JOIN, we hide the LEFT-side USING columns instead of the right-side.
-/// This ensures that unqualified USING column references pick up the right-side value,
-/// which is non-NULL even for unmatched rows (where left columns are NULL).
-///
-/// Issue #4781: USING column coalescing incorrect for RIGHT/FULL JOIN
-fn remove_duplicate_columns_for_using_join_right_outer(
-    mut result: super::FromResult,
-    left_schema: &CombinedSchema,
-    _right_schema: &CombinedSchema,
-    using_columns: &[String],
-) -> Result<super::FromResult, crate::errors::ExecutorError> {
-    // Create a set of USING column names (lowercase for case-insensitive comparison)
-    let using_cols_lower: HashSet<String> =
-        using_columns.iter().map(|c| c.to_lowercase()).collect();
-
-    // Identify which columns from the LEFT side are USING columns to hide
-    // (opposite of standard behavior which hides right-side columns)
-    for (table_start_idx, table_schema) in left_schema.table_schemas.values() {
-        for (col_idx, col) in table_schema.columns.iter().enumerate() {
-            let lowercase = col.name.to_lowercase();
-            if using_cols_lower.contains(&lowercase) {
-                // This is a USING column from the left side, mark it as hidden
-                let hidden_idx = table_start_idx + col_idx;
-                result.schema.hide_column(hidden_idx);
-
-                // Mark as "joined column" so it won't be considered ambiguous
-                // when referenced without table qualification (issue #4517)
-                result.schema.add_joined_column(&col.name);
+                // If coalescing is needed, register the coalesce pair in the schema
+                // This maps the column name to (left_idx, right_idx) so the evaluator
+                // can apply COALESCE semantics for unqualified column references
+                if needs_coalesce {
+                    if let Some(&left_idx) = leftmost_left_indices.get(&lowercase) {
+                        result
+                            .schema
+                            .add_using_coalesce_pair(&col.name, left_idx, right_idx);
+                    }
+                }
             }
         }
     }

@@ -441,6 +441,30 @@ impl CombinedExpressionEvaluator<'_> {
 
                 // Try to resolve in inner schema first
                 if let Some(col_index) = self.get_column_index_cached(table, column) {
+                    // Issue #4783: USING column semantics differ from SQLite in OUTER JOINs
+                    // For unqualified references to USING columns in RIGHT/FULL OUTER JOINs,
+                    // apply COALESCE(left.col, right.col) semantics.
+                    // Qualified references (t1.col) should NOT use coalesce - they return the raw value.
+                    if table.is_none() {
+                        if let Some((left_idx, right_idx)) =
+                            self.schema.get_using_coalesce_pair(column)
+                        {
+                            // Get left value (at col_index, which equals left_idx for USING columns)
+                            let left_val = row
+                                .get(left_idx)
+                                .cloned()
+                                .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: left_idx })?;
+
+                            // Apply COALESCE: if left is NULL, use right value
+                            if left_val == vibesql_types::SqlValue::Null {
+                                return row.get(right_idx).cloned().ok_or(
+                                    ExecutorError::ColumnIndexOutOfBounds { index: right_idx },
+                                );
+                            }
+                            return Ok(left_val);
+                        }
+                    }
+
                     return row
                         .get(col_index)
                         .cloned()
