@@ -207,7 +207,13 @@ impl<'arena> ArenaParser<'arena> {
 
         self.consume_keyword(Keyword::As)?;
 
-        let query = self.parse_select_statement()?;
+        // Parse the query: can be SELECT or VALUES
+        // Example: CREATE VIEW dual AS VALUES('x')
+        let query = if self.peek_keyword(Keyword::Values) {
+            self.parse_values_statement()?
+        } else {
+            self.parse_select_statement()?
+        };
 
         // Check for WITH CHECK OPTION
         let with_check_option = if self.try_consume_keyword(Keyword::With) {
