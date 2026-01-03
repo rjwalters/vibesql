@@ -1589,7 +1589,6 @@ array set vibesql_skip_tests {
     select2-4.5 "CROSS JOIN row order differs without ORDER BY - result set is correct"
     select2-4.7 "CROSS JOIN row order differs without ORDER BY - result set is correct"
     selectD-4.1 "Complex aliased join syntax not fully supported"
-    2.2 "SQLite join reordering allows ON clause to reference tables appearing later for INNER joins"
     join2-2.2 "SQLite join reordering allows ON clause to reference tables appearing later for INNER joins"
     selectA-4.1.2 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     selectA-4.1.3 "Uses custom function f registered via db func"
@@ -2359,6 +2358,13 @@ proc do_eqp_test {name sql expected} {
     # Expected patterns use glob matching (e.g., *SEARCH t1 USING INDEX idx1*)
 
     global test_results
+
+    # Check if test should be skipped based on VibeSQL-specific exclusions
+    set skip_check [vibesql_should_skip $name]
+    if {[lindex $skip_check 0]} {
+        omit_test $name [lindex $skip_check 1]
+        return
+    }
 
     # Increment test count
     incr test_results(total)
