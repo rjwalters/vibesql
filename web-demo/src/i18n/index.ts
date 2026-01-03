@@ -147,15 +147,24 @@ export function onI18nChange(callback: () => void): () => void {
  * Update all data-i18n elements in the DOM
  *
  * Elements with data-i18n="message-id" will have their textContent updated.
+ * Elements with data-i18n-html="message-id" will have their innerHTML updated (for messages containing HTML).
  * Elements with data-i18n-attr="attr:message-id" will have the attribute updated.
  */
 export function updateDOM(): void {
-  // Update text content
+  // Update text content (plain text, escapes HTML)
   const elements = document.querySelectorAll('[data-i18n]')
   elements.forEach(el => {
     const id = el.getAttribute('data-i18n')
     if (id) {
       el.textContent = t(id)
+    }
+  })
+
+  // Update HTML content (allows HTML tags in translations)
+  document.querySelectorAll('[data-i18n-html]').forEach(el => {
+    const id = el.getAttribute('data-i18n-html')
+    if (id) {
+      el.innerHTML = t(id)
     }
   })
 

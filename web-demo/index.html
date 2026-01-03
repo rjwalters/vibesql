@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SQL Vibe Coding Challenge - VibeSQL</title>
+  <title data-i18n="challenge-page-title">SQL Vibe Coding Challenge - VibeSQL</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <!-- Prevent flash of unstyled content by applying theme before page renders -->
@@ -23,7 +23,7 @@
     <!-- Header -->
     <header class="bg-white dark:bg-gray-800 shadow-md border-b border-gray-300 dark:border-gray-600">
       <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center flex-wrap gap-4">
-        <h1 class="text-3xl font-bold text-primary-light dark:text-primary-dark">
+        <h1 class="text-3xl font-bold text-primary-light dark:text-primary-dark" data-i18n="challenge-header">
           SQL Vibe Coding Challenge
         </h1>
         <div id="nav-container"></div>
@@ -36,21 +36,21 @@
         <div class="grid md:grid-cols-2 gap-12 items-center">
           <!-- Left: Text -->
           <div class="text-center md:text-left">
-            <h2 class="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-6">
+            <h2 class="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-6" data-i18n="challenge-hero-title">
               The SQL Vibe Coding Challenge
             </h2>
-            <p class="text-xl text-gray-600 dark:text-gray-300 mb-8">
+            <p class="text-xl text-gray-600 dark:text-gray-300 mb-8" data-i18n="challenge-hero-subtitle">
               An objective benchmark for multi-agent software development.
               Build a SQL database from scratch. Pass 6 million tests. Win the trophy.
             </p>
             <div class="flex flex-wrap justify-center md:justify-start gap-4">
-              <a href="#get-started" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors">
+              <a href="#get-started" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors" data-i18n="challenge-btn-start">
                 Start Building
               </a>
-              <a href="#trophy" class="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-lg transition-colors">
+              <a href="#trophy" class="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-lg transition-colors" data-i18n="challenge-btn-trophy">
                 See The Trophy
               </a>
-              <a href="https://github.com/vibesql-challenge/submissions" target="_blank" rel="noopener" class="px-6 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-semibold rounded-lg transition-colors">
+              <a href="https://github.com/vibesql-challenge/submissions" target="_blank" rel="noopener" class="px-6 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-semibold rounded-lg transition-colors" data-i18n="challenge-btn-leaderboard">
                 Leaderboard
               </a>
             </div>
@@ -85,10 +85,10 @@
             </svg>
           </div>
           <div>
-            <h3 class="text-lg font-semibold text-amber-800 dark:text-amber-200 mb-2">
+            <h3 class="text-lg font-semibold text-amber-800 dark:text-amber-200 mb-2" data-i18n="challenge-insight-title">
               The Only Metric That Matters: Calendar Time
             </h3>
-            <p class="text-amber-700 dark:text-amber-300">
+            <p class="text-amber-700 dark:text-amber-300" data-i18n-html="challenge-insight-text">
               Commits and lines of code are proxies. What matters is <strong>days to completion</strong>.
               Can 1,000 agents working in parallel beat 100 agents? Does your orchestration framework
               maintain productivity as you scale? This benchmark will tell you.
@@ -99,7 +99,7 @@
 
       <!-- The Challenge -->
       <section id="the-challenge" class="scroll-mt-8">
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8">The Challenge</h2>
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8" data-i18n="challenge-section-title">The Challenge</h2>
 
         <div class="grid md:grid-cols-2 gap-8">
           <!-- Objective -->
@@ -108,9 +108,9 @@
               <svg class="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
               </svg>
-              Objective
+              <span data-i18n="challenge-objective-title">Objective</span>
             </h3>
-            <p class="text-gray-600 dark:text-gray-300">
+            <p class="text-gray-600 dark:text-gray-300" data-i18n-html="challenge-objective-text">
               Build a SQL database engine from scratch that passes the
               <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest suite</a>.
               This is the same test suite used to validate SQLite, DuckDB, and other production databases.
@@ -123,20 +123,20 @@
               <svg class="w-6 h-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
               </svg>
-              Success Criteria
+              <span data-i18n="challenge-success-title">Success Criteria</span>
             </h3>
             <ul class="text-gray-600 dark:text-gray-300 space-y-2">
               <li class="flex items-center gap-2">
                 <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                100% pass rate on SQLLogicTest suite
+                <span data-i18n="challenge-success-pass-rate">100% pass rate on SQLLogicTest suite</span>
               </li>
               <li class="flex items-center gap-2">
                 <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                ~6 million individual test assertions
+                <span data-i18n="challenge-success-assertions">~6 million individual test assertions</span>
               </li>
               <li class="flex items-center gap-2">
                 <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                All 622 test files passing
+                <span data-i18n="challenge-success-files">All 622 test files passing</span>
               </li>
             </ul>
           </div>
@@ -147,20 +147,20 @@
               <svg class="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
               </svg>
-              Constraints
+              <span data-i18n="challenge-constraints-title">Constraints</span>
             </h3>
             <ul class="text-gray-600 dark:text-gray-300 space-y-2">
               <li class="flex items-start gap-2">
                 <span class="w-2 h-2 bg-red-500 rounded-full mt-2"></span>
-                <span><strong>No existing SQL parser libraries</strong> &mdash; build your own parser</span>
+                <span data-i18n-html="challenge-constraint-parser"><strong>No existing SQL parser libraries</strong> — build your own parser</span>
               </li>
               <li class="flex items-start gap-2">
                 <span class="w-2 h-2 bg-red-500 rounded-full mt-2"></span>
-                <span><strong>No existing query engines</strong> &mdash; implement execution from scratch</span>
+                <span data-i18n-html="challenge-constraint-engine"><strong>No existing query engines</strong> — implement execution from scratch</span>
               </li>
               <li class="flex items-start gap-2">
                 <span class="w-2 h-2 bg-red-500 rounded-full mt-2"></span>
-                <span><strong>No database-specific libraries</strong> &mdash; use only general-purpose libraries</span>
+                <span data-i18n-html="challenge-constraint-libs"><strong>No database-specific libraries</strong> — use only general-purpose libraries</span>
               </li>
             </ul>
           </div>
@@ -171,24 +171,24 @@
               <svg class="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
               </svg>
-              Allowed
+              <span data-i18n="challenge-allowed-title">Allowed</span>
             </h3>
             <ul class="text-gray-600 dark:text-gray-300 space-y-2">
               <li class="flex items-center gap-2">
                 <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
-                Any programming language
+                <span data-i18n="challenge-allowed-lang">Any programming language</span>
               </li>
               <li class="flex items-center gap-2">
                 <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
-                Any AI orchestration framework
+                <span data-i18n="challenge-allowed-ai">Any AI orchestration framework</span>
               </li>
               <li class="flex items-center gap-2">
                 <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
-                Human intervention (unlimited)
+                <span data-i18n="challenge-allowed-human">Human intervention (unlimited)</span>
               </li>
               <li class="flex items-center gap-2">
                 <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
-                General-purpose libraries (data structures, I/O, etc.)
+                <span data-i18n="challenge-allowed-libs">General-purpose libraries (data structures, I/O, etc.)</span>
               </li>
             </ul>
           </div>
@@ -197,7 +197,7 @@
 
       <!-- The Trophy -->
       <section id="trophy" class="scroll-mt-8">
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8">The Trophy</h2>
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8" data-i18n="challenge-trophy-title">The Trophy</h2>
 
         <div class="grid md:grid-cols-2 gap-8 items-center">
           <!-- Trophy Image -->
@@ -208,56 +208,56 @@
           <!-- Trophy Info -->
           <div class="space-y-6">
             <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-6">
-              <h3 class="text-xl font-semibold text-amber-800 dark:text-amber-200 mb-3">
+              <h3 class="text-xl font-semibold text-amber-800 dark:text-amber-200 mb-3" data-i18n="challenge-trophy-name">
                 The Vibe Coding Trophy
               </h3>
-              <p class="text-amber-700 dark:text-amber-300 mb-4">
+              <p class="text-amber-700 dark:text-amber-300 mb-4" data-i18n="challenge-trophy-desc">
                 A physical trophy will be awarded to each record holder. The design reflects the
-                spirit of "vibe coding" &mdash; a gold-plated wand mounted on walnut with brass nameplates.
+                spirit of "vibe coding" — a gold-plated wand mounted on walnut with brass nameplates.
               </p>
-              <p class="text-amber-700 dark:text-amber-300">
+              <p class="text-amber-700 dark:text-amber-300" data-i18n-html="challenge-trophy-claim">
                 <strong>Your name goes on the trophy</strong> when you beat the current record by at least 5%.
               </p>
             </div>
 
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
-              <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Award Rules</h3>
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4" data-i18n="challenge-rules-title">Award Rules</h3>
               <ul class="space-y-3 text-gray-600 dark:text-gray-300">
                 <li class="flex items-start gap-3">
                   <svg class="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                   </svg>
-                  <span><strong>5% improvement required</strong> &mdash; beat the previous record by at least 5% (in calendar days) to claim the trophy</span>
+                  <span data-i18n-html="challenge-rule-improve"><strong>5% improvement required</strong> — beat the previous record by at least 5% (in calendar days) to claim the trophy</span>
                 </li>
                 <li class="flex items-start gap-3">
                   <svg class="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                   </svg>
-                  <span><strong>Public repository</strong> &mdash; your code must be publicly available for verification</span>
+                  <span data-i18n-html="challenge-rule-public"><strong>Public repository</strong> — your code must be publicly available for verification</span>
                 </li>
                 <li class="flex items-start gap-3">
                   <svg class="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                   </svg>
-                  <span><strong>100% pass rate</strong> &mdash; all 622 SQLLogicTest files must pass</span>
+                  <span data-i18n-html="challenge-rule-pass"><strong>100% pass rate</strong> — all 622 SQLLogicTest files must pass</span>
                 </li>
                 <li class="flex items-start gap-3">
                   <svg class="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                   </svg>
-                  <span><strong>Verifiable git history</strong> &mdash; first commit date to 100% pass rate determines your time</span>
+                  <span data-i18n-html="challenge-rule-git"><strong>Verifiable git history</strong> — first commit date to 100% pass rate determines your time</span>
                 </li>
               </ul>
             </div>
 
             <!-- Current Record Holder -->
             <div class="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-lg p-6 border border-blue-200 dark:border-blue-800">
-              <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Current Record Holder</h3>
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2" data-i18n="challenge-record-title">Current Record Holder</h3>
               <div class="flex items-center gap-4">
                 <div class="text-4xl font-bold text-blue-600 dark:text-blue-400">25 days</div>
                 <div class="text-gray-600 dark:text-gray-300">
-                  <p class="font-semibold">VibeSQL (Baseline)</p>
-                  <p class="text-sm">October - November 2025</p>
+                  <p class="font-semibold" data-i18n="challenge-record-name">VibeSQL (Baseline)</p>
+                  <p class="text-sm" data-i18n="challenge-record-date">October - November 2025</p>
                   <p class="text-xs mt-1">
                     <a href="https://github.com/rjwalters/vibesql/commit/275fb9253eca4c985ef76912d178bb361e5b25d8"
                        target="_blank"
@@ -268,7 +268,7 @@
                   </p>
                 </div>
               </div>
-              <p class="text-sm text-gray-500 dark:text-gray-400 mt-3">
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-3" data-i18n-html="challenge-record-beat">
                 Beat this by 5%? That's <strong>24 days or less</strong> to claim the trophy.
               </p>
             </div>
@@ -278,7 +278,7 @@
 
       <!-- Why This Challenge -->
       <section>
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8">Why This Challenge?</h2>
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8" data-i18n="challenge-why-title">Why This Challenge?</h2>
 
         <div class="grid md:grid-cols-3 gap-6">
           <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
@@ -287,10 +287,10 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2" data-i18n="challenge-why-objective-title">
               Objective Measurement
             </h3>
-            <p class="text-gray-600 dark:text-gray-300">
+            <p class="text-gray-600 dark:text-gray-300" data-i18n="challenge-why-objective-text">
               No subjective code reviews. Either the tests pass or they don't.
               6 million assertions leave no room for ambiguity.
             </p>
@@ -302,12 +302,12 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2" data-i18n="challenge-why-complexity-title">
               Real Complexity
             </h3>
-            <p class="text-gray-600 dark:text-gray-300">
+            <p class="text-gray-600 dark:text-gray-300" data-i18n="challenge-why-complexity-text">
               SQL databases require parsers, optimizers, and execution engines.
-              This isn't a toy problem&mdash;it's production-grade engineering.
+              This isn't a toy problem—it's production-grade engineering.
             </p>
           </div>
 
@@ -317,10 +317,10 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2" data-i18n="challenge-why-time-title">
               Time Is Truth
             </h3>
-            <p class="text-gray-600 dark:text-gray-300">
+            <p class="text-gray-600 dark:text-gray-300" data-i18n="challenge-why-time-text">
               Calendar days to completion is the ultimate metric.
               Does parallelizing to 1,000 agents help? Now you can find out.
             </p>
@@ -330,15 +330,15 @@
 
       <!-- Getting Started -->
       <section id="get-started" class="scroll-mt-8">
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6">Get Started</h2>
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6" data-i18n="challenge-start-title">Get Started</h2>
 
-        <p class="text-lg text-gray-600 dark:text-gray-300 mb-8 max-w-3xl">
+        <p class="text-lg text-gray-600 dark:text-gray-300 mb-8 max-w-3xl" data-i18n="challenge-start-intro">
           Start from scratch in any language, or use one of our seed repos for convenience.
           Each seed includes the SQLLogicTest suite, a test runner, and CI workflow.
         </p>
 
         <!-- Language Cards -->
-        <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-4">Seed Repos <span class="text-sm font-normal text-gray-500 dark:text-gray-400">(optional)</span></h3>
+        <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-4"><span data-i18n="challenge-seed-title">Seed Repos</span> <span class="text-sm font-normal text-gray-500 dark:text-gray-400" data-i18n="challenge-seed-optional">(optional)</span></h3>
         <div class="grid md:grid-cols-3 gap-6 mb-10">
           <a href="https://github.com/vibesql-challenge/challenge-seed-rust" target="_blank" rel="noopener"
              class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border-2 border-orange-200 dark:border-orange-800 hover:border-orange-500 dark:hover:border-orange-400 transition-colors">
@@ -348,10 +348,10 @@
               </svg>
               <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 group-hover:text-orange-600 dark:group-hover:text-orange-400">Rust</h3>
             </div>
-            <p class="text-gray-600 dark:text-gray-300 text-sm mb-3">
+            <p class="text-gray-600 dark:text-gray-300 text-sm mb-3" data-i18n="challenge-seed-rust-desc">
               Cargo build system, zero-cost abstractions, memory safety without GC.
             </p>
-            <span class="text-orange-600 dark:text-orange-400 text-sm font-medium group-hover:underline">
+            <span class="text-orange-600 dark:text-orange-400 text-sm font-medium group-hover:underline" data-i18n="challenge-seed-fork">
               Fork on GitHub →
             </span>
           </a>
@@ -364,10 +364,10 @@
               </svg>
               <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400">C++</h3>
             </div>
-            <p class="text-gray-600 dark:text-gray-300 text-sm mb-3">
+            <p class="text-gray-600 dark:text-gray-300 text-sm mb-3" data-i18n="challenge-seed-cpp-desc">
               CMake build system, maximum performance, full control over memory.
             </p>
-            <span class="text-blue-600 dark:text-blue-400 text-sm font-medium group-hover:underline">
+            <span class="text-blue-600 dark:text-blue-400 text-sm font-medium group-hover:underline" data-i18n="challenge-seed-fork">
               Fork on GitHub →
             </span>
           </a>
@@ -380,10 +380,10 @@
               </svg>
               <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 group-hover:text-cyan-600 dark:group-hover:text-cyan-400">Go</h3>
             </div>
-            <p class="text-gray-600 dark:text-gray-300 text-sm mb-3">
+            <p class="text-gray-600 dark:text-gray-300 text-sm mb-3" data-i18n="challenge-seed-go-desc">
               Simple toolchain, fast compilation, excellent concurrency primitives.
             </p>
-            <span class="text-cyan-600 dark:text-cyan-400 text-sm font-medium group-hover:underline">
+            <span class="text-cyan-600 dark:text-cyan-400 text-sm font-medium group-hover:underline" data-i18n="challenge-seed-fork">
               Fork on GitHub →
             </span>
           </a>
@@ -395,8 +395,8 @@
             <div class="flex items-start gap-4">
               <span class="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">1</span>
               <div>
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Start Your Project</h3>
-                <p class="text-gray-600 dark:text-gray-300 mt-1">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100" data-i18n="challenge-step1-title">Start Your Project</h3>
+                <p class="text-gray-600 dark:text-gray-300 mt-1" data-i18n-html="challenge-step1-text">
                   Create a new repo from scratch, or fork a seed above for a head start.
                   Get the <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest suite</a>.
                   Your first commit starts the clock.
@@ -407,9 +407,9 @@
             <div class="flex items-start gap-4">
               <span class="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">2</span>
               <div>
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Build Your Database</h3>
-                <p class="text-gray-600 dark:text-gray-300 mt-1">
-                  Implement a SQL parser, query executor, and storage engine. Use any AI tools&mdash;Claude,
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100" data-i18n="challenge-step2-title">Build Your Database</h3>
+                <p class="text-gray-600 dark:text-gray-300 mt-1" data-i18n-html="challenge-step2-text">
+                  Implement a SQL parser, query executor, and storage engine. Use any AI tools—Claude,
                   Copilot, or your own agents. Run <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> to track progress.
                 </p>
               </div>
@@ -418,8 +418,8 @@
             <div class="flex items-start gap-4">
               <span class="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">3</span>
               <div>
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Hit 100% and Submit</h3>
-                <p class="text-gray-600 dark:text-gray-300 mt-1">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100" data-i18n="challenge-step3-title">Hit 100% and Submit</h3>
+                <p class="text-gray-600 dark:text-gray-300 mt-1" data-i18n-html="challenge-step3-text">
                   When all 622 test files pass, open an issue at
                   <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a>
                   with your repo link and commit hashes. Beat 25 days to join the leaderboard.
@@ -432,29 +432,29 @@
 
       <!-- VibeSQL Links -->
       <section>
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6">Explore VibeSQL</h2>
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6" data-i18n="challenge-explore-title">Explore VibeSQL</h2>
         <div class="grid md:grid-cols-3 gap-6">
           <a href="./" class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 transition-colors">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2" data-i18n="challenge-explore-demo-title">
               Try the Demo
             </h3>
-            <p class="text-gray-600 dark:text-gray-300">
+            <p class="text-gray-600 dark:text-gray-300" data-i18n="challenge-explore-demo-text">
               Run SQL queries in your browser using the WebAssembly build.
             </p>
           </a>
           <a href="conformance.html" class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 transition-colors">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2" data-i18n="challenge-explore-conformance-title">
               Conformance Report
             </h3>
-            <p class="text-gray-600 dark:text-gray-300">
+            <p class="text-gray-600 dark:text-gray-300" data-i18n="challenge-explore-conformance-text">
               Detailed breakdown of SQL:1999 standards compliance.
             </p>
           </a>
           <a href="benchmarks.html" class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 transition-colors">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2" data-i18n="challenge-explore-benchmarks-title">
               Performance Benchmarks
             </h3>
-            <p class="text-gray-600 dark:text-gray-300">
+            <p class="text-gray-600 dark:text-gray-300" data-i18n="challenge-explore-benchmarks-text">
               TPC-H, TPC-C, and other benchmarks vs SQLite and DuckDB.
             </p>
           </a>
@@ -465,7 +465,7 @@
 
     <!-- Footer -->
     <footer class="mt-12 text-center text-sm text-gray-500 dark:text-gray-400 pb-6">
-      <p>VibeSQL - SQL:1999 Database in WebAssembly</p>
+      <p data-i18n="challenge-footer">VibeSQL - SQL:1999 Database in WebAssembly</p>
     </footer>
   </div>
 
