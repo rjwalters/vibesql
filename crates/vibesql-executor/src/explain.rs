@@ -1031,11 +1031,20 @@ impl ExplainExecutor {
             // A covering index requires:
             // 1. All SELECT columns are in the index
             // 2. All WHERE clause columns are also in the index (or evaluable from index)
-            let mut all_needed_columns = needed_columns.clone();
-            if let Some(where_expr) = where_clause {
-                collect_column_refs(where_expr, &mut all_needed_columns);
-            }
-            let is_covering = is_covering_index(&index_name, &all_needed_columns, database);
+            //
+            // NOTE: If needed_columns is empty, it means SELECT * was used (wildcard),
+            // which requires ALL table columns - this can never be a covering index
+            // unless the index literally contains all columns.
+            let is_covering = if needed_columns.is_empty() {
+                // Wildcard case: need all table columns, cannot be a covering index
+                false
+            } else {
+                let mut all_needed_columns = needed_columns.clone();
+                if let Some(where_expr) = where_clause {
+                    collect_column_refs(where_expr, &mut all_needed_columns);
+                }
+                is_covering_index(&index_name, &all_needed_columns, database)
+            };
 
             // Check if we have any predicates on the index (determines SCAN vs SEARCH)
             let has_index_predicates = if let Some(where_expr) = where_clause {
