@@ -705,3 +705,93 @@ conformance-tcl-common-failures = Falhas Comuns
 conformance-tcl-failure-patterns = Top { $count } padrões de falha por contagem de ocorrências
 conformance-tcl-about-title = Sobre os Testes TCL:
 conformance-tcl-about-text = A suíte de testes TCL do SQLite é o teste de conformidade canônico para compatibilidade com SQLite. Ela testa comportamentos específicos do SQLite, peculiaridades e casos extremos que podem não ser cobertos por suítes de teste SQL padrão. Taxas de aprovação altas aqui indicam forte compatibilidade com SQLite para cenários de migração de aplicativos.
+
+# =============================================================================
+# Página do Desafio
+# =============================================================================
+
+# Título da página e cabeçalho
+challenge-page-title = Desafio de Programação SQL Vibe - VibeSQL
+challenge-header = Desafio de Programação SQL Vibe
+
+# Seção hero
+challenge-hero-title = O Desafio de Programação SQL Vibe
+challenge-hero-subtitle = Um benchmark objetivo para desenvolvimento de software multi-agente. Construa um banco de dados SQL do zero. Passe 6 milhões de testes. Ganhe o troféu.
+challenge-btn-start = Começar a Construir
+challenge-btn-trophy = Ver o Troféu
+challenge-btn-leaderboard = Classificação
+
+# Insight chave
+challenge-insight-title = A Única Métrica que Importa: Tempo Calendário
+challenge-insight-text = Commits e linhas de código são aproximações. O que importa são os <strong>dias até a conclusão</strong>. 1.000 agentes trabalhando em paralelo podem superar 100 agentes? Seu framework de orquestração mantém a produtividade ao escalar? Este benchmark vai te dizer.
+
+# Seção do desafio
+challenge-section-title = O Desafio
+challenge-objective-title = Objetivo
+challenge-objective-text = Construa um motor de banco de dados SQL do zero que passe na <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">suíte SQLLogicTest</a>. Esta é a mesma suíte de testes usada para validar SQLite, DuckDB e outros bancos de dados de produção.
+challenge-success-title = Critérios de Sucesso
+challenge-success-pass-rate = 100% de taxa de aprovação no SQLLogicTest
+challenge-success-assertions = ~6 milhões de asserções de teste individuais
+challenge-success-files = Todos os 622 arquivos de teste passando
+challenge-constraints-title = Restrições
+challenge-constraint-parser = <strong>Sem bibliotecas de parser SQL existentes</strong> — construa seu próprio parser
+challenge-constraint-engine = <strong>Sem motores de consulta existentes</strong> — implemente a execução do zero
+challenge-constraint-libs = <strong>Sem bibliotecas específicas de banco de dados</strong> — use apenas bibliotecas de propósito geral
+challenge-allowed-title = Permitido
+challenge-allowed-lang = Qualquer linguagem de programação
+challenge-allowed-ai = Qualquer framework de orquestração de IA
+challenge-allowed-human = Intervenção humana (ilimitada)
+challenge-allowed-libs = Bibliotecas de propósito geral (estruturas de dados, I/O, etc.)
+
+# Seção do troféu
+challenge-trophy-title = O Troféu
+challenge-trophy-name = O Troféu Vibe Coding
+challenge-trophy-desc = Um troféu físico será concedido a cada detentor do recorde. O design reflete o espírito do "vibe coding" — uma varinha banhada a ouro montada em nogueira com placas de latão.
+challenge-trophy-claim = <strong>Seu nome vai no troféu</strong> quando você superar o recorde atual por pelo menos 5%.
+challenge-rules-title = Regras do Prêmio
+challenge-rule-improve = <strong>Melhoria de 5% necessária</strong> — supere o recorde anterior por pelo menos 5% (em dias calendário) para reivindicar o troféu
+challenge-rule-public = <strong>Repositório público</strong> — seu código deve estar disponível publicamente para verificação
+challenge-rule-pass = <strong>100% de taxa de aprovação</strong> — todos os 622 arquivos SQLLogicTest devem passar
+challenge-rule-git = <strong>Histórico git verificável</strong> — a data do primeiro commit até 100% de aprovação determina seu tempo
+challenge-record-title = Detentor Atual do Recorde
+challenge-record-days = { $days } dias
+challenge-record-name = VibeSQL (Linha de Base)
+challenge-record-date = Outubro - Novembro 2025
+challenge-record-beat = Superar isso em 5%? Isso significa <strong>{ $target } dias ou menos</strong> para reivindicar o troféu.
+
+# Seção por que este desafio
+challenge-why-title = Por Que Este Desafio?
+challenge-why-objective-title = Medição Objetiva
+challenge-why-objective-text = Sem revisões de código subjetivas. Os testes passam ou não passam. 6 milhões de asserções não deixam espaço para ambiguidade.
+challenge-why-complexity-title = Complexidade Real
+challenge-why-complexity-text = Bancos de dados SQL requerem parsers, otimizadores e motores de execução. Isso não é um problema de brinquedo — é engenharia de nível de produção.
+challenge-why-time-title = Tempo é a Verdade
+challenge-why-time-text = Dias calendário até a conclusão é a métrica definitiva. Paralelizar para 1.000 agentes ajuda? Agora você pode descobrir.
+
+# Seção começar
+challenge-start-title = Começar
+challenge-start-intro = Comece do zero em qualquer linguagem, ou use um dos nossos repositórios semente por conveniência. Cada semente inclui a suíte SQLLogicTest, um executor de testes e workflow de CI.
+challenge-seed-title = Repositórios Semente
+challenge-seed-optional = (opcional)
+challenge-seed-rust-desc = Sistema de build Cargo, abstrações de custo zero, segurança de memória sem GC.
+challenge-seed-cpp-desc = Sistema de build CMake, máximo desempenho, controle total sobre a memória.
+challenge-seed-go-desc = Ferramentas simples, compilação rápida, excelentes primitivas de concorrência.
+challenge-seed-fork = Fork no GitHub →
+challenge-step1-title = Inicie Seu Projeto
+challenge-step1-text = Crie um novo repo do zero, ou faça fork de uma semente acima para começar rápido. Obtenha a <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">suíte SQLLogicTest</a>. Seu primeiro commit inicia o relógio.
+challenge-step2-title = Construa Seu Banco de Dados
+challenge-step2-text = Implemente um parser SQL, executor de consultas e motor de armazenamento. Use qualquer ferramenta de IA — Claude, Copilot, ou seus próprios agentes. Execute <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> para acompanhar o progresso.
+challenge-step3-title = Alcance 100% e Envie
+challenge-step3-text = Quando todos os 622 arquivos de teste passarem, abra uma issue em <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> com o link do seu repo e hashes dos commits. Supere 25 dias para entrar na classificação.
+
+# Seção explorar VibeSQL
+challenge-explore-title = Explorar VibeSQL
+challenge-explore-demo-title = Experimentar a Demo
+challenge-explore-demo-text = Execute consultas SQL no seu navegador usando o build WebAssembly.
+challenge-explore-conformance-title = Relatório de Conformidade
+challenge-explore-conformance-text = Detalhamento detalhado da conformidade com padrões SQL:1999.
+challenge-explore-benchmarks-title = Benchmarks de Desempenho
+challenge-explore-benchmarks-text = TPC-H, TPC-C e outros benchmarks vs SQLite e DuckDB.
+
+# Rodapé
+challenge-footer = VibeSQL - Banco de Dados SQL:1999 em WebAssembly

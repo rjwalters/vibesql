@@ -728,3 +728,93 @@ conformance-tcl-about-text = SQLite's TCL test suite is the canonical conformanc
 conformance-generated = Generated:
 conformance-commit = Commit:
 conformance-status = Status:
+
+# =============================================================================
+# Challenge Page
+# =============================================================================
+
+# Page title and header
+challenge-page-title = SQL Vibe Coding Challenge - VibeSQL
+challenge-header = SQL Vibe Coding Challenge
+
+# Hero section
+challenge-hero-title = The SQL Vibe Coding Challenge
+challenge-hero-subtitle = An objective benchmark for multi-agent software development. Build a SQL database from scratch. Pass 6 million tests. Win the trophy.
+challenge-btn-start = Start Building
+challenge-btn-trophy = See The Trophy
+challenge-btn-leaderboard = Leaderboard
+
+# Key Insight callout
+challenge-insight-title = The Only Metric That Matters: Calendar Time
+challenge-insight-text = Commits and lines of code are proxies. What matters is <strong>days to completion</strong>. Can 1,000 agents working in parallel beat 100 agents? Does your orchestration framework maintain productivity as you scale? This benchmark will tell you.
+
+# The Challenge section
+challenge-section-title = The Challenge
+challenge-objective-title = Objective
+challenge-objective-text = Build a SQL database engine from scratch that passes the <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest suite</a>. This is the same test suite used to validate SQLite, DuckDB, and other production databases.
+challenge-success-title = Success Criteria
+challenge-success-pass-rate = 100% pass rate on SQLLogicTest suite
+challenge-success-assertions = ~6 million individual test assertions
+challenge-success-files = All 622 test files passing
+challenge-constraints-title = Constraints
+challenge-constraint-parser = <strong>No existing SQL parser libraries</strong> — build your own parser
+challenge-constraint-engine = <strong>No existing query engines</strong> — implement execution from scratch
+challenge-constraint-libs = <strong>No database-specific libraries</strong> — use only general-purpose libraries
+challenge-allowed-title = Allowed
+challenge-allowed-lang = Any programming language
+challenge-allowed-ai = Any AI orchestration framework
+challenge-allowed-human = Human intervention (unlimited)
+challenge-allowed-libs = General-purpose libraries (data structures, I/O, etc.)
+
+# The Trophy section
+challenge-trophy-title = The Trophy
+challenge-trophy-name = The Vibe Coding Trophy
+challenge-trophy-desc = A physical trophy will be awarded to each record holder. The design reflects the spirit of "vibe coding" — a gold-plated wand mounted on walnut with brass nameplates.
+challenge-trophy-claim = <strong>Your name goes on the trophy</strong> when you beat the current record by at least 5%.
+challenge-rules-title = Award Rules
+challenge-rule-improve = <strong>5% improvement required</strong> — beat the previous record by at least 5% (in calendar days) to claim the trophy
+challenge-rule-public = <strong>Public repository</strong> — your code must be publicly available for verification
+challenge-rule-pass = <strong>100% pass rate</strong> — all 622 SQLLogicTest files must pass
+challenge-rule-git = <strong>Verifiable git history</strong> — first commit date to 100% pass rate determines your time
+challenge-record-title = Current Record Holder
+challenge-record-days = { $days } days
+challenge-record-name = VibeSQL (Baseline)
+challenge-record-date = October - November 2025
+challenge-record-beat = Beat this by 5%? That's <strong>{ $target } days or less</strong> to claim the trophy.
+
+# Why This Challenge section
+challenge-why-title = Why This Challenge?
+challenge-why-objective-title = Objective Measurement
+challenge-why-objective-text = No subjective code reviews. Either the tests pass or they don't. 6 million assertions leave no room for ambiguity.
+challenge-why-complexity-title = Real Complexity
+challenge-why-complexity-text = SQL databases require parsers, optimizers, and execution engines. This isn't a toy problem—it's production-grade engineering.
+challenge-why-time-title = Time Is Truth
+challenge-why-time-text = Calendar days to completion is the ultimate metric. Does parallelizing to 1,000 agents help? Now you can find out.
+
+# Get Started section
+challenge-start-title = Get Started
+challenge-start-intro = Start from scratch in any language, or use one of our seed repos for convenience. Each seed includes the SQLLogicTest suite, a test runner, and CI workflow.
+challenge-seed-title = Seed Repos
+challenge-seed-optional = (optional)
+challenge-seed-rust-desc = Cargo build system, zero-cost abstractions, memory safety without GC.
+challenge-seed-cpp-desc = CMake build system, maximum performance, full control over memory.
+challenge-seed-go-desc = Simple toolchain, fast compilation, excellent concurrency primitives.
+challenge-seed-fork = Fork on GitHub →
+challenge-step1-title = Start Your Project
+challenge-step1-text = Create a new repo from scratch, or fork a seed above for a head start. Get the <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest suite</a>. Your first commit starts the clock.
+challenge-step2-title = Build Your Database
+challenge-step2-text = Implement a SQL parser, query executor, and storage engine. Use any AI tools—Claude, Copilot, or your own agents. Run <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> to track progress.
+challenge-step3-title = Hit 100% and Submit
+challenge-step3-text = When all 622 test files pass, open an issue at <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> with your repo link and commit hashes. Beat 25 days to join the leaderboard.
+
+# Explore VibeSQL section
+challenge-explore-title = Explore VibeSQL
+challenge-explore-demo-title = Try the Demo
+challenge-explore-demo-text = Run SQL queries in your browser using the WebAssembly build.
+challenge-explore-conformance-title = Conformance Report
+challenge-explore-conformance-text = Detailed breakdown of SQL:1999 standards compliance.
+challenge-explore-benchmarks-title = Performance Benchmarks
+challenge-explore-benchmarks-text = TPC-H, TPC-C, and other benchmarks vs SQLite and DuckDB.
+
+# Footer
+challenge-footer = VibeSQL - SQL:1999 Database in WebAssembly

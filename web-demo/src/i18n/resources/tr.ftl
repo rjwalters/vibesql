@@ -698,3 +698,114 @@ conformance-tcl-common-failures = Yaygın Hatalar
 conformance-tcl-failure-patterns = Oluşum sayısına göre en sık { $count } hata kalıbı
 conformance-tcl-about-title = TCL Testleri Hakkında:
 conformance-tcl-about-text = SQLite'ın TCL test paketi, SQLite uyumluluğu için standart uygunluk testidir. Standart SQL test paketleri tarafından kapsanmayabilecek belirli SQLite davranışlarını, tuhaflıkları ve uç durumları test eder. Burada yüksek geçme oranları, uygulama taşıma senaryoları için güçlü SQLite uyumluluğunu gösterir.
+
+# =============================================================================
+# Challenge Page
+# =============================================================================
+
+# Page title and header
+challenge-page-title = SQL Vibe Kodlama Mücadelesi - VibeSQL
+challenge-header = SQL Vibe Kodlama Mücadelesi
+
+# Hero section
+challenge-hero-title = SQL Vibe Kodlama Mücadelesi
+challenge-hero-subtitle = Çoklu ajan yazılım geliştirme için objektif bir kıyaslama. Sıfırdan bir SQL veritabanı oluşturun. 6 milyon testi geçin. Kupayı kazanın.
+challenge-btn-start = Oluşturmaya Başla
+challenge-btn-trophy = Kupayı Gör
+challenge-btn-leaderboard = Liderlik Tablosu
+
+# Key Insight callout
+challenge-insight-title = Önemli Olan Tek Ölçü: Takvim Süresi
+challenge-insight-text = Commit'ler ve kod satırları sadece göstergelerdir. Önemli olan <strong>tamamlamaya kadar geçen gün sayısı</strong>dır. Paralel çalışan 1.000 ajan 100 ajanı yenebilir mi? Orkestrasyon çerçeveniz ölçeklendikçe üretkenliğini korur mu? Bu kıyaslama size söyleyecek.
+
+# The Challenge section
+challenge-section-title = Mücadele
+challenge-objective-title = Hedef
+challenge-objective-text = <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest paketini</a> geçen sıfırdan bir SQL veritabanı motoru oluşturun. Bu, SQLite, DuckDB ve diğer üretim veritabanlarını doğrulamak için kullanılan aynı test paketidir.
+challenge-success-title = Başarı Kriterleri
+challenge-success-pass-rate = SQLLogicTest paketinde %100 geçme oranı
+challenge-success-assertions = ~6 milyon bireysel test doğrulaması
+challenge-success-files = Tüm 622 test dosyası geçer
+challenge-constraints-title = Kısıtlamalar
+challenge-constraint-parser = <strong>Mevcut SQL ayrıştırıcı kütüphaneleri yok</strong> — kendi ayrıştırıcınızı oluşturun
+challenge-constraint-engine = <strong>Mevcut sorgu motorları yok</strong> — sıfırdan yürütme uygulayın
+challenge-constraint-libs = <strong>Veritabanına özgü kütüphaneler yok</strong> — yalnızca genel amaçlı kütüphaneler kullanın
+challenge-allowed-title = İzin Verilenler
+challenge-allowed-lang = Herhangi bir programlama dili
+challenge-allowed-ai = Herhangi bir AI orkestrasyon çerçevesi
+challenge-allowed-human = İnsan müdahalesi (sınırsız)
+challenge-allowed-libs = Genel amaçlı kütüphaneler (veri yapıları, G/Ç, vb.)
+
+# The Trophy section
+challenge-trophy-title = Kupa
+challenge-trophy-name = Vibe Kodlama Kupası
+challenge-trophy-desc = Her rekor sahibine fiziksel bir kupa verilecektir. Tasarım "vibe coding" ruhunu yansıtır — pirinç plaketlerle ceviz üzerine monte edilmiş altın kaplama bir asa.
+challenge-trophy-claim = Mevcut rekoru en az %5 geçtiğinizde <strong>adınız kupaya yazılır</strong>.
+challenge-rules-title = Ödül Kuralları
+challenge-rule-improve = <strong>%5 iyileştirme gerekli</strong> — kupayı talep etmek için önceki rekoru en az %5 (takvim günlerinde) yenin
+challenge-rule-public = <strong>Açık depo</strong> — kodunuz doğrulama için herkese açık olmalıdır
+challenge-rule-pass = <strong>%100 geçme oranı</strong> — tüm 622 SQLLogicTest dosyası geçmelidir
+challenge-rule-git = <strong>Doğrulanabilir git geçmişi</strong> — ilk commit tarihinden %100 geçme oranına kadar geçen süre sizin sürenizi belirler
+challenge-record-title = Mevcut Rekor Sahibi
+challenge-record-days = { $days } gün
+challenge-record-name = VibeSQL (Temel)
+challenge-record-date = Ekim - Kasım 2025
+challenge-record-beat = Bunu %5 yenin? Kupayı almak için <strong>{ $target } gün veya daha az</strong>.
+
+# Why This Challenge section
+challenge-why-title = Neden Bu Mücadele?
+challenge-why-objective-title = Objektif Ölçüm
+challenge-why-objective-text = Subjektif kod incelemeleri yok. Ya testler geçer ya da geçmez. 6 milyon doğrulama belirsizliğe yer bırakmaz.
+challenge-why-complexity-title = Gerçek Karmaşıklık
+challenge-why-complexity-text = SQL veritabanları ayrıştırıcılar, optimize ediciler ve yürütme motorları gerektirir. Bu bir oyuncak problem değil—üretim kalitesinde mühendislik.
+challenge-why-time-title = Zaman Gerçektir
+challenge-why-time-text = Tamamlamaya kadar geçen takvim günleri nihai ölçüdür. 1.000 ajana paralelize etmek yardımcı olur mu? Artık öğrenebilirsiniz.
+
+# Get Started section
+challenge-start-title = Başlayın
+challenge-start-intro = Herhangi bir dilde sıfırdan başlayın veya kolaylık için tohum depolarımızdan birini kullanın. Her tohum SQLLogicTest paketini, bir test çalıştırıcısını ve CI iş akışını içerir.
+challenge-seed-title = Tohum Depoları
+challenge-seed-optional = (isteğe bağlı)
+challenge-seed-rust-desc = Cargo derleme sistemi, sıfır maliyetli soyutlamalar, GC olmadan bellek güvenliği.
+challenge-seed-cpp-desc = CMake derleme sistemi, maksimum performans, bellek üzerinde tam kontrol.
+challenge-seed-go-desc = Basit araç zinciri, hızlı derleme, mükemmel eşzamanlılık ilkelleri.
+challenge-seed-fork = GitHub'da Fork Et →
+challenge-step1-title = Projenizi Başlatın
+challenge-step1-text = Sıfırdan yeni bir depo oluşturun veya hızlı bir başlangıç için yukarıdaki bir tohumu fork edin. <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest paketini</a> alın. İlk commit'iniz saati başlatır.
+challenge-step2-title = Veritabanınızı Oluşturun
+challenge-step2-text = Bir SQL ayrıştırıcısı, sorgu yürütücüsü ve depolama motoru uygulayın. Herhangi bir AI aracı kullanın—Claude, Copilot veya kendi ajanlarınız. İlerlemeyi takip etmek için <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> çalıştırın.
+challenge-step3-title = %100'e Ulaşın ve Gönderin
+challenge-step3-text = Tüm 622 test dosyası geçtiğinde, depo bağlantınız ve commit hash'lerinizle <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> adresinde bir issue açın. Liderlik tablosuna katılmak için 25 günü yenin.
+
+# Explore VibeSQL section
+challenge-explore-title = VibeSQL'i Keşfedin
+challenge-explore-demo-title = Demo'yu Deneyin
+challenge-explore-demo-text = WebAssembly derlemesini kullanarak tarayıcınızda SQL sorguları çalıştırın.
+challenge-explore-conformance-title = Uygunluk Raporu
+challenge-explore-conformance-text = SQL:1999 standart uyumluluğunun ayrıntılı dökümü.
+challenge-explore-benchmarks-title = Performans Kıyaslamaları
+challenge-explore-benchmarks-text = SQLite ve DuckDB'ye karşı TPC-H, TPC-C ve diğer kıyaslamalar.
+
+# Footer
+challenge-footer = VibeSQL - WebAssembly'de SQL:1999 Veritabanı
+
+# Navigation
+nav-challenge = SQL Vibe Kodlama Mücadelesi
+nav-trends = Performans Trendleri
+
+# Trends page
+trends-title = Performans Trendleri - VibeSQL
+trends-heading = VibeSQL - Performans Trendleri
+trends-total-runs = Toplam Kıyaslama Çalıştırması
+trends-across-suites = tüm paketlerde
+trends-date-range = Tarih Aralığı
+trends-first-to-last = ilkten son çalıştırmaya
+trends-latest-commit = Son Commit
+trends-most-recent = en son kıyaslama
+trends-generated = Oluşturuldu
+trends-last-export = son veri dışa aktarımı
+
+# Bullet points
+bench-bullet-prepared-stmts = Hazırlanmış ifadeler
+bench-bullet-larger-scale = Daha büyük ölçek faktörleri
+bench-bullet-parallel-clients = Paralel istemciler

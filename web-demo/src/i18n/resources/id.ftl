@@ -696,3 +696,109 @@ conformance-tcl-common-failures = Kegagalan Umum
 conformance-tcl-failure-patterns = { $count } pola kegagalan teratas berdasarkan jumlah kejadian
 conformance-tcl-about-title = Tentang Tes TCL:
 conformance-tcl-about-text = Suite tes TCL SQLite adalah tes kesesuaian kanonik untuk kompatibilitas SQLite. Ini menguji perilaku SQLite tertentu, keunikan, dan kasus tepi yang mungkin tidak tercakup oleh suite tes SQL standar. Tingkat kelulusan tinggi di sini menunjukkan kompatibilitas SQLite yang kuat untuk skenario migrasi aplikasi.
+
+# =============================================================================
+# Challenge Page
+# =============================================================================
+
+# Page title and header
+challenge-page-title = Tantangan Vibe Coding SQL - VibeSQL
+challenge-header = Tantangan Vibe Coding SQL
+
+# Hero section
+challenge-hero-title = Tantangan Vibe Coding SQL
+challenge-hero-subtitle = Tolok ukur objektif untuk pengembangan perangkat lunak multi-agen. Bangun database SQL dari nol. Loloskan 6 juta tes. Menangkan trofi.
+challenge-btn-start = Mulai Membangun
+challenge-btn-trophy = Lihat Trofi
+challenge-btn-leaderboard = Papan Peringkat
+
+# Key Insight callout
+challenge-insight-title = Satu-satunya Metrik yang Penting: Waktu Kalender
+challenge-insight-text = Commit dan baris kode adalah proksi. Yang penting adalah <strong>hari hingga penyelesaian</strong>. Bisakah 1.000 agen yang bekerja paralel mengalahkan 100 agen? Apakah kerangka orkestrasi Anda mempertahankan produktivitas saat Anda berkembang? Tolok ukur ini akan memberitahu Anda.
+
+# The Challenge section
+challenge-section-title = Tantangannya
+challenge-objective-title = Tujuan
+challenge-objective-text = Bangun mesin database SQL dari nol yang lolos <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">suite SQLLogicTest</a>. Ini adalah suite tes yang sama yang digunakan untuk memvalidasi SQLite, DuckDB, dan database produksi lainnya.
+challenge-success-title = Kriteria Keberhasilan
+challenge-success-pass-rate = 100% tingkat kelulusan pada suite SQLLogicTest
+challenge-success-assertions = ~6 juta asersi tes individual
+challenge-success-files = Semua 622 file tes lulus
+challenge-constraints-title = Batasan
+challenge-constraint-parser = <strong>Tidak ada pustaka parser SQL yang ada</strong> — bangun parser Anda sendiri
+challenge-constraint-engine = <strong>Tidak ada mesin kueri yang ada</strong> — implementasikan eksekusi dari nol
+challenge-constraint-libs = <strong>Tidak ada pustaka khusus database</strong> — gunakan hanya pustaka tujuan umum
+challenge-allowed-title = Diizinkan
+challenge-allowed-lang = Bahasa pemrograman apa pun
+challenge-allowed-ai = Kerangka orkestrasi AI apa pun
+challenge-allowed-human = Intervensi manusia (tidak terbatas)
+challenge-allowed-libs = Pustaka tujuan umum (struktur data, I/O, dll.)
+
+# The Trophy section
+challenge-trophy-title = Trofi
+challenge-trophy-name = Trofi Vibe Coding
+challenge-trophy-desc = Trofi fisik akan diberikan kepada setiap pemegang rekor. Desainnya mencerminkan semangat "vibe coding" — tongkat berlapis emas yang dipasang pada kayu walnut dengan plakat kuningan.
+challenge-trophy-claim = <strong>Nama Anda ada di trofi</strong> ketika Anda mengalahkan rekor saat ini minimal 5%.
+challenge-rules-title = Aturan Penghargaan
+challenge-rule-improve = <strong>Peningkatan 5% diperlukan</strong> — kalahkan rekor sebelumnya minimal 5% (dalam hari kalender) untuk mengklaim trofi
+challenge-rule-public = <strong>Repositori publik</strong> — kode Anda harus tersedia untuk umum untuk verifikasi
+challenge-rule-pass = <strong>100% tingkat kelulusan</strong> — semua 622 file SQLLogicTest harus lulus
+challenge-rule-git = <strong>Riwayat git yang dapat diverifikasi</strong> — tanggal commit pertama hingga 100% tingkat kelulusan menentukan waktu Anda
+challenge-record-title = Pemegang Rekor Saat Ini
+challenge-record-days = { $days } hari
+challenge-record-name = VibeSQL (Baseline)
+challenge-record-date = Oktober - November 2025
+challenge-record-beat = Kalahkan ini 5%? Itu <strong>{ $target } hari atau kurang</strong> untuk mengklaim trofi.
+
+# Why This Challenge section
+challenge-why-title = Mengapa Tantangan Ini?
+challenge-why-objective-title = Pengukuran Objektif
+challenge-why-objective-text = Tidak ada review kode subjektif. Entah tes lulus atau tidak. 6 juta asersi tidak menyisakan ruang untuk ambiguitas.
+challenge-why-complexity-title = Kompleksitas Nyata
+challenge-why-complexity-text = Database SQL memerlukan parser, optimizer, dan mesin eksekusi. Ini bukan masalah mainan—ini adalah rekayasa kelas produksi.
+challenge-why-time-title = Waktu Adalah Kebenaran
+challenge-why-time-text = Hari kalender hingga penyelesaian adalah metrik utama. Apakah paralelisasi ke 1.000 agen membantu? Sekarang Anda bisa mengetahuinya.
+
+# Get Started section
+challenge-start-title = Mulai
+challenge-start-intro = Mulai dari nol dalam bahasa apa pun, atau gunakan salah satu repo seed kami untuk kenyamanan. Setiap seed mencakup suite SQLLogicTest, test runner, dan alur kerja CI.
+challenge-seed-title = Repo Seed
+challenge-seed-optional = (opsional)
+challenge-seed-rust-desc = Sistem build Cargo, abstraksi tanpa biaya, keamanan memori tanpa GC.
+challenge-seed-cpp-desc = Sistem build CMake, kinerja maksimal, kontrol penuh atas memori.
+challenge-seed-go-desc = Toolchain sederhana, kompilasi cepat, primitif konkurensi yang sangat baik.
+challenge-seed-fork = Fork di GitHub →
+challenge-step1-title = Mulai Proyek Anda
+challenge-step1-text = Buat repo baru dari nol, atau fork seed di atas untuk awal yang baik. Dapatkan <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">suite SQLLogicTest</a>. Commit pertama Anda memulai waktu.
+challenge-step2-title = Bangun Database Anda
+challenge-step2-text = Implementasikan parser SQL, eksekutor kueri, dan mesin penyimpanan. Gunakan alat AI apa pun—Claude, Copilot, atau agen Anda sendiri. Jalankan <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> untuk melacak kemajuan.
+challenge-step3-title = Capai 100% dan Kirim
+challenge-step3-text = Ketika semua 622 file tes lulus, buka issue di <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> dengan tautan repo dan hash commit Anda. Kalahkan 25 hari untuk bergabung dengan papan peringkat.
+
+# Explore VibeSQL section
+challenge-explore-title = Jelajahi VibeSQL
+challenge-explore-demo-title = Coba Demo
+challenge-explore-demo-text = Jalankan kueri SQL di browser Anda menggunakan build WebAssembly.
+challenge-explore-conformance-title = Laporan Kesesuaian
+challenge-explore-conformance-text = Rincian detail kepatuhan standar SQL:1999.
+challenge-explore-benchmarks-title = Benchmark Kinerja
+challenge-explore-benchmarks-text = TPC-H, TPC-C, dan benchmark lainnya vs SQLite dan DuckDB.
+
+# Footer
+challenge-footer = VibeSQL - Database SQL:1999 di WebAssembly
+
+# Navigation
+nav-challenge = Tantangan Vibe Coding SQL
+nav-trends = Tren Kinerja
+
+# Trends page
+trends-title = Tren Kinerja - VibeSQL
+trends-heading = VibeSQL - Tren Kinerja
+trends-total-runs = Total Benchmark Run
+trends-across-suites = di semua suite
+trends-date-range = Rentang Tanggal
+trends-first-to-last = run pertama hingga terakhir
+trends-latest-commit = Commit Terbaru
+trends-most-recent = benchmark terbaru
+trends-generated = Dihasilkan
+trends-last-export = ekspor data terakhir

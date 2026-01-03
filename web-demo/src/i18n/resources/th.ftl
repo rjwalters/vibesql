@@ -697,3 +697,114 @@ conformance-tcl-common-failures = ความล้มเหลวที่พ�
 conformance-tcl-failure-patterns = { $count } รูปแบบความล้มเหลวอันดับต้นตามจำนวนครั้งที่เกิดขึ้น
 conformance-tcl-about-title = เกี่ยวกับการทดสอบ TCL:
 conformance-tcl-about-text = ชุดทดสอบ TCL ของ SQLite เป็นการทดสอบความสอดคล้องมาตรฐานสำหรับความเข้ากันได้กับ SQLite ทดสอบพฤติกรรมเฉพาะของ SQLite ลักษณะเฉพาะ และกรณีขอบที่อาจไม่ครอบคลุมโดยชุดทดสอบ SQL มาตรฐาน อัตราการผ่านสูงที่นี่บ่งบอกถึงความเข้ากันได้กับ SQLite ที่แข็งแกร่งสำหรับสถานการณ์การย้ายแอปพลิเคชัน
+
+# =============================================================================
+# Challenge Page
+# =============================================================================
+
+# Page title and header
+challenge-page-title = ความท้าทาย SQL Vibe Coding - VibeSQL
+challenge-header = ความท้าทาย SQL Vibe Coding
+
+# Hero section
+challenge-hero-title = ความท้าทาย SQL Vibe Coding
+challenge-hero-subtitle = มาตรฐานการวัดประสิทธิภาพเชิงวัตถุประสงค์สำหรับการพัฒนาซอฟต์แวร์แบบหลายเอเจนต์ สร้างฐานข้อมูล SQL ตั้งแต่เริ่มต้น ผ่าน 6 ล้านการทดสอบ ชนะถ้วยรางวัล
+challenge-btn-start = เริ่มสร้าง
+challenge-btn-trophy = ดูถ้วยรางวัล
+challenge-btn-leaderboard = กระดานผู้นำ
+
+# Key Insight callout
+challenge-insight-title = ตัวชี้วัดเดียวที่สำคัญ: เวลาปฏิทิน
+challenge-insight-text = Commit และบรรทัดโค้ดเป็นเพียงตัวแทน สิ่งที่สำคัญคือ<strong>จำนวนวันจนเสร็จ</strong> 1,000 เอเจนต์ที่ทำงานพร้อมกันสามารถเอาชนะ 100 เอเจนต์ได้หรือไม่? กรอบการประสานงานของคุณรักษาประสิทธิภาพเมื่อขยายขนาดหรือไม่? มาตรฐานนี้จะบอกคุณ
+
+# The Challenge section
+challenge-section-title = ความท้าทาย
+challenge-objective-title = วัตถุประสงค์
+challenge-objective-text = สร้างเอนจิ้นฐานข้อมูล SQL ตั้งแต่เริ่มต้นที่ผ่าน<a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">ชุด SQLLogicTest</a> นี่คือชุดทดสอบเดียวกันที่ใช้ตรวจสอบ SQLite, DuckDB และฐานข้อมูลระดับ production อื่นๆ
+challenge-success-title = เกณฑ์ความสำเร็จ
+challenge-success-pass-rate = อัตราการผ่าน 100% บนชุด SQLLogicTest
+challenge-success-assertions = ~6 ล้านการยืนยันทดสอบแต่ละรายการ
+challenge-success-files = ไฟล์ทดสอบทั้ง 622 ไฟล์ผ่าน
+challenge-constraints-title = ข้อจำกัด
+challenge-constraint-parser = <strong>ไม่ใช้ไลบรารี parser SQL ที่มีอยู่</strong> — สร้าง parser ของคุณเอง
+challenge-constraint-engine = <strong>ไม่ใช้เอนจิ้นคิวรีที่มีอยู่</strong> — ติดตั้งการดำเนินการตั้งแต่เริ่มต้น
+challenge-constraint-libs = <strong>ไม่ใช้ไลบรารีเฉพาะฐานข้อมูล</strong> — ใช้เฉพาะไลบรารีวัตถุประสงค์ทั่วไป
+challenge-allowed-title = อนุญาต
+challenge-allowed-lang = ภาษาโปรแกรมใดก็ได้
+challenge-allowed-ai = กรอบการประสานงาน AI ใดก็ได้
+challenge-allowed-human = การแทรกแซงจากมนุษย์ (ไม่จำกัด)
+challenge-allowed-libs = ไลบรารีวัตถุประสงค์ทั่วไป (โครงสร้างข้อมูล, I/O ฯลฯ)
+
+# The Trophy section
+challenge-trophy-title = ถ้วยรางวัล
+challenge-trophy-name = ถ้วยรางวัล Vibe Coding
+challenge-trophy-desc = ถ้วยรางวัลจริงจะมอบให้กับผู้ถือสถิติแต่ละคน การออกแบบสะท้อนจิตวิญญาณของ "vibe coding" — ไม้เท้าชุบทองติดตั้งบนไม้วอลนัทพร้อมป้ายทองเหลือง
+challenge-trophy-claim = <strong>ชื่อของคุณจะอยู่บนถ้วยรางวัล</strong>เมื่อคุณทำลายสถิติปัจจุบันอย่างน้อย 5%
+challenge-rules-title = กฎการมอบรางวัล
+challenge-rule-improve = <strong>ต้องปรับปรุง 5%</strong> — ทำลายสถิติก่อนหน้าอย่างน้อย 5% (ในวันปฏิทิน) เพื่อรับถ้วยรางวัล
+challenge-rule-public = <strong>ที่เก็บสาธารณะ</strong> — โค้ดของคุณต้องเปิดเผยต่อสาธารณะเพื่อการตรวจสอบ
+challenge-rule-pass = <strong>อัตราการผ่าน 100%</strong> — ไฟล์ SQLLogicTest ทั้ง 622 ไฟล์ต้องผ่าน
+challenge-rule-git = <strong>ประวัติ git ที่ตรวจสอบได้</strong> — วันที่ commit แรกถึงอัตราการผ่าน 100% กำหนดเวลาของคุณ
+challenge-record-title = ผู้ถือสถิติปัจจุบัน
+challenge-record-days = { $days } วัน
+challenge-record-name = VibeSQL (พื้นฐาน)
+challenge-record-date = ตุลาคม - พฤศจิกายน 2025
+challenge-record-beat = ทำลายสถิตินี้ 5%? นั่นคือ<strong>{ $target } วันหรือน้อยกว่า</strong>เพื่อรับถ้วยรางวัล
+
+# Why This Challenge section
+challenge-why-title = ทำไมต้องความท้าทายนี้?
+challenge-why-objective-title = การวัดเชิงวัตถุประสงค์
+challenge-why-objective-text = ไม่มีการรีวิวโค้ดแบบอัตนัย การทดสอบผ่านหรือไม่ผ่าน 6 ล้านการยืนยันไม่เหลือที่ว่างสำหรับความคลุมเครือ
+challenge-why-complexity-title = ความซับซ้อนจริง
+challenge-why-complexity-text = ฐานข้อมูล SQL ต้องการ parser, optimizer และเอนจิ้นดำเนินการ นี่ไม่ใช่ปัญหาของเล่น—เป็นวิศวกรรมระดับ production
+challenge-why-time-title = เวลาคือความจริง
+challenge-why-time-text = วันปฏิทินจนเสร็จคือตัวชี้วัดสูงสุด การขนานไปยัง 1,000 เอเจนต์ช่วยหรือไม่? ตอนนี้คุณสามารถค้นพบได้
+
+# Get Started section
+challenge-start-title = เริ่มต้น
+challenge-start-intro = เริ่มจากศูนย์ในภาษาใดก็ได้ หรือใช้ที่เก็บ seed หนึ่งในของเราเพื่อความสะดวก แต่ละ seed รวมชุด SQLLogicTest, test runner และเวิร์กโฟลว์ CI
+challenge-seed-title = ที่เก็บ Seed
+challenge-seed-optional = (ไม่บังคับ)
+challenge-seed-rust-desc = ระบบ build Cargo, abstraction ไม่มีค่าใช้จ่าย, ความปลอดภัยหน่วยความจำโดยไม่มี GC
+challenge-seed-cpp-desc = ระบบ build CMake, ประสิทธิภาพสูงสุด, ควบคุมหน่วยความจำเต็มที่
+challenge-seed-go-desc = toolchain ง่าย, คอมไพล์เร็ว, primitive การทำงานพร้อมกันที่ยอดเยี่ยม
+challenge-seed-fork = Fork บน GitHub →
+challenge-step1-title = เริ่มโปรเจกต์ของคุณ
+challenge-step1-text = สร้างที่เก็บใหม่ตั้งแต่เริ่มต้น หรือ fork seed ด้านบนเพื่อเริ่มต้นอย่างรวดเร็ว รับ<a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">ชุด SQLLogicTest</a> commit แรกของคุณเริ่มนับเวลา
+challenge-step2-title = สร้างฐานข้อมูลของคุณ
+challenge-step2-text = ติดตั้ง SQL parser, query executor และ storage engine ใช้เครื่องมือ AI ใดก็ได้—Claude, Copilot หรือเอเจนต์ของคุณเอง รัน <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> เพื่อติดตามความคืบหน้า
+challenge-step3-title = ไปถึง 100% และส่ง
+challenge-step3-text = เมื่อไฟล์ทดสอบทั้ง 622 ไฟล์ผ่าน เปิด issue ที่ <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> พร้อมลิงก์ที่เก็บและ hash commit ของคุณ ทำลาย 25 วันเพื่อเข้าร่วมกระดานผู้นำ
+
+# Explore VibeSQL section
+challenge-explore-title = สำรวจ VibeSQL
+challenge-explore-demo-title = ลองเดโม
+challenge-explore-demo-text = รันคิวรี SQL ในเบราว์เซอร์ของคุณโดยใช้ build WebAssembly
+challenge-explore-conformance-title = รายงานความสอดคล้อง
+challenge-explore-conformance-text = การวิเคราะห์โดยละเอียดของการปฏิบัติตามมาตรฐาน SQL:1999
+challenge-explore-benchmarks-title = เกณฑ์มาตรฐานประสิทธิภาพ
+challenge-explore-benchmarks-text = TPC-H, TPC-C และเกณฑ์มาตรฐานอื่นๆ เทียบกับ SQLite และ DuckDB
+
+# Footer
+challenge-footer = VibeSQL - ฐานข้อมูล SQL:1999 ใน WebAssembly
+
+# Navigation
+nav-challenge = ความท้าทาย SQL Vibe Coding
+nav-trends = แนวโน้มประสิทธิภาพ
+
+# Trends page
+trends-title = แนวโน้มประสิทธิภาพ - VibeSQL
+trends-heading = VibeSQL - แนวโน้มประสิทธิภาพ
+trends-total-runs = การรัน Benchmark ทั้งหมด
+trends-across-suites = ในทุกชุด
+trends-date-range = ช่วงวันที่
+trends-first-to-last = จากการรันแรกถึงสุดท้าย
+trends-latest-commit = Commit ล่าสุด
+trends-most-recent = benchmark ล่าสุด
+trends-generated = สร้างเมื่อ
+trends-last-export = การส่งออกข้อมูลล่าสุด
+
+# Bullet points
+bench-bullet-prepared-stmts = Prepared statements
+bench-bullet-larger-scale = Scale factor ใหญ่ขึ้น
+bench-bullet-parallel-clients = Client แบบขนาน

@@ -705,3 +705,93 @@ conformance-tcl-about-text = SQLite 的 TCL 测试套件是 SQLite 兼容性的�
 conformance-generated = 生成时间：
 conformance-commit = 提交：
 conformance-status = 状态：
+
+# =============================================================================
+# 挑战页面
+# =============================================================================
+
+# 页面标题和头部
+challenge-page-title = SQL Vibe 编码挑战 - VibeSQL
+challenge-header = SQL Vibe 编码挑战
+
+# 英雄区域
+challenge-hero-title = SQL Vibe 编码挑战
+challenge-hero-subtitle = 多智能体软件开发的客观基准。从零开始构建 SQL 数据库。通过 600 万项测试。赢得奖杯。
+challenge-btn-start = 开始构建
+challenge-btn-trophy = 查看奖杯
+challenge-btn-leaderboard = 排行榜
+
+# 关键洞察提示
+challenge-insight-title = 唯一重要的指标：日历时间
+challenge-insight-text = 提交次数和代码行数只是代理指标。真正重要的是<strong>完成所需的天数</strong>。1000 个智能体并行工作能否击败 100 个智能体？您的编排框架能否在扩展时保持生产力？这个基准测试会告诉您答案。
+
+# 挑战部分
+challenge-section-title = 挑战内容
+challenge-objective-title = 目标
+challenge-objective-text = 从零开始构建一个能够通过 <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest 套件</a>的 SQL 数据库引擎。这是用于验证 SQLite、DuckDB 和其他生产数据库的同一个测试套件。
+challenge-success-title = 成功标准
+challenge-success-pass-rate = SQLLogicTest 套件 100% 通过率
+challenge-success-assertions = 约 600 万个独立测试断言
+challenge-success-files = 全部 622 个测试文件通过
+challenge-constraints-title = 约束条件
+challenge-constraint-parser = <strong>禁止使用现有 SQL 解析器库</strong> — 必须自行构建解析器
+challenge-constraint-engine = <strong>禁止使用现有查询引擎</strong> — 必须从零实现执行引擎
+challenge-constraint-libs = <strong>禁止使用数据库专用库</strong> — 只能使用通用库
+challenge-allowed-title = 允许使用
+challenge-allowed-lang = 任何编程语言
+challenge-allowed-ai = 任何 AI 编排框架
+challenge-allowed-human = 人工干预（无限制）
+challenge-allowed-libs = 通用库（数据结构、I/O 等）
+
+# 奖杯部分
+challenge-trophy-title = 奖杯
+challenge-trophy-name = Vibe 编码奖杯
+challenge-trophy-desc = 每位记录保持者都将获得一座实体奖杯。设计体现了"Vibe 编码"的精神 — 镀金魔杖安装在胡桃木底座上，配有黄铜铭牌。
+challenge-trophy-claim = 当您以至少 5% 的优势打破当前记录时，<strong>您的名字将刻在奖杯上</strong>。
+challenge-rules-title = 获奖规则
+challenge-rule-improve = <strong>需要 5% 的改进</strong> — 必须比之前的记录快至少 5%（以日历天数计）才能获得奖杯
+challenge-rule-public = <strong>公开仓库</strong> — 您的代码必须公开可供验证
+challenge-rule-pass = <strong>100% 通过率</strong> — 全部 622 个 SQLLogicTest 文件必须通过
+challenge-rule-git = <strong>可验证的 git 历史</strong> — 从首次提交到 100% 通过率的时间决定您的成绩
+challenge-record-title = 当前记录保持者
+challenge-record-days = { $days } 天
+challenge-record-name = VibeSQL（基准线）
+challenge-record-date = 2025 年 10 月 - 11 月
+challenge-record-beat = 想超越 5%？这意味着需要在 <strong>{ $target } 天或更短时间内</strong>完成才能获得奖杯。
+
+# 为什么选择这个挑战
+challenge-why-title = 为什么选择这个挑战？
+challenge-why-objective-title = 客观衡量
+challenge-why-objective-text = 没有主观的代码审查。测试要么通过，要么不通过。600 万个断言不留任何模糊空间。
+challenge-why-complexity-title = 真实复杂度
+challenge-why-complexity-text = SQL 数据库需要解析器、优化器和执行引擎。这不是玩具问题 — 这是生产级工程。
+challenge-why-time-title = 时间即真理
+challenge-why-time-text = 完成所需的日历天数是终极指标。并行化到 1000 个智能体有帮助吗？现在您可以找到答案。
+
+# 开始部分
+challenge-start-title = 开始
+challenge-start-intro = 使用任何语言从零开始，或使用我们的种子仓库获得便利。每个种子仓库都包含 SQLLogicTest 套件、测试运行器和 CI 工作流。
+challenge-seed-title = 种子仓库
+challenge-seed-optional = （可选）
+challenge-seed-rust-desc = Cargo 构建系统，零成本抽象，无 GC 的内存安全。
+challenge-seed-cpp-desc = CMake 构建系统，极致性能，完全控制内存。
+challenge-seed-go-desc = 简单的工具链，快速编译，出色的并发原语。
+challenge-seed-fork = 在 GitHub 上 Fork →
+challenge-step1-title = 启动您的项目
+challenge-step1-text = 从零创建新仓库，或 fork 上面的种子仓库快速开始。获取 <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest 套件</a>。您的首次提交开始计时。
+challenge-step2-title = 构建您的数据库
+challenge-step2-text = 实现 SQL 解析器、查询执行器和存储引擎。使用任何 AI 工具 — Claude、Copilot 或您自己的智能体。运行 <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> 跟踪进度。
+challenge-step3-title = 达到 100% 并提交
+challenge-step3-text = 当全部 622 个测试文件通过后，在 <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> 创建 issue，附上您的仓库链接和提交哈希。在 25 天内完成即可进入排行榜。
+
+# 探索 VibeSQL 部分
+challenge-explore-title = 探索 VibeSQL
+challenge-explore-demo-title = 试用演示
+challenge-explore-demo-text = 使用 WebAssembly 构建在浏览器中运行 SQL 查询。
+challenge-explore-conformance-title = 符合性报告
+challenge-explore-conformance-text = SQL:1999 标准符合性的详细分析。
+challenge-explore-benchmarks-title = 性能基准测试
+challenge-explore-benchmarks-text = TPC-H、TPC-C 及其他基准测试与 SQLite 和 DuckDB 的对比。
+
+# 页脚
+challenge-footer = VibeSQL - WebAssembly 中的 SQL:1999 数据库

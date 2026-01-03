@@ -697,3 +697,93 @@ conformance-tcl-common-failures = الإخفاقات الشائعة
 conformance-tcl-failure-patterns = أعلى { $count } أنماط فشل حسب عدد الحدوث
 conformance-tcl-about-title = حول اختبارات TCL:
 conformance-tcl-about-text = مجموعة اختبارات TCL من SQLite هي اختبار المطابقة القياسي لتوافق SQLite. تختبر سلوكيات SQLite المحددة والخصائص والحالات الحدية التي قد لا تغطيها مجموعات اختبار SQL القياسية. تشير معدلات النجاح العالية هنا إلى توافق قوي مع SQLite لسيناريوهات ترحيل التطبيقات.
+
+# =============================================================================
+# صفحة التحدي
+# =============================================================================
+
+# عنوان الصفحة والرأس
+challenge-page-title = تحدي برمجة SQL Vibe - VibeSQL
+challenge-header = تحدي برمجة SQL Vibe
+
+# قسم البطل
+challenge-hero-title = تحدي برمجة SQL Vibe
+challenge-hero-subtitle = معيار موضوعي لتطوير البرمجيات متعددة الوكلاء. ابنِ قاعدة بيانات SQL من الصفر. اجتز 6 ملايين اختبار. افز بالكأس.
+challenge-btn-start = ابدأ البناء
+challenge-btn-trophy = شاهد الكأس
+challenge-btn-leaderboard = لوحة المتصدرين
+
+# الرؤية الرئيسية
+challenge-insight-title = المقياس الوحيد المهم: الوقت التقويمي
+challenge-insight-text = الإيداعات وأسطر الكود هي مؤشرات فرعية. ما يهم هو <strong>الأيام حتى الإنجاز</strong>. هل يمكن لـ 1,000 وكيل يعملون بالتوازي التغلب على 100 وكيل؟ هل يحافظ إطار التنسيق الخاص بك على الإنتاجية عند التوسع؟ هذا المعيار سيخبرك.
+
+# قسم التحدي
+challenge-section-title = التحدي
+challenge-objective-title = الهدف
+challenge-objective-text = ابنِ محرك قاعدة بيانات SQL من الصفر يجتاز <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">مجموعة SQLLogicTest</a>. هذه نفس مجموعة الاختبارات المستخدمة للتحقق من SQLite وDuckDB وقواعد البيانات الإنتاجية الأخرى.
+challenge-success-title = معايير النجاح
+challenge-success-pass-rate = معدل نجاح 100% في SQLLogicTest
+challenge-success-assertions = ~6 ملايين تأكيد اختبار فردي
+challenge-success-files = جميع 622 ملف اختبار ناجحة
+challenge-constraints-title = القيود
+challenge-constraint-parser = <strong>لا مكتبات تحليل SQL موجودة</strong> — ابنِ محللك الخاص
+challenge-constraint-engine = <strong>لا محركات استعلام موجودة</strong> — نفذ التنفيذ من الصفر
+challenge-constraint-libs = <strong>لا مكتبات خاصة بقواعد البيانات</strong> — استخدم فقط المكتبات ذات الأغراض العامة
+challenge-allowed-title = مسموح
+challenge-allowed-lang = أي لغة برمجة
+challenge-allowed-ai = أي إطار تنسيق ذكاء اصطناعي
+challenge-allowed-human = تدخل بشري (غير محدود)
+challenge-allowed-libs = مكتبات ذات أغراض عامة (هياكل البيانات، الإدخال/الإخراج، إلخ)
+
+# قسم الكأس
+challenge-trophy-title = الكأس
+challenge-trophy-name = كأس Vibe Coding
+challenge-trophy-desc = سيُمنح كأس فعلي لكل حامل رقم قياسي. يعكس التصميم روح "vibe coding" — عصا مطلية بالذهب مثبتة على خشب الجوز مع لوحات نحاسية.
+challenge-trophy-claim = <strong>سيكون اسمك على الكأس</strong> عندما تتجاوز الرقم القياسي الحالي بنسبة 5% على الأقل.
+challenge-rules-title = قواعد الجائزة
+challenge-rule-improve = <strong>مطلوب تحسين 5%</strong> — تجاوز الرقم القياسي السابق بنسبة 5% على الأقل (بالأيام التقويمية) للمطالبة بالكأس
+challenge-rule-public = <strong>مستودع عام</strong> — يجب أن يكون كودك متاحًا للعامة للتحقق
+challenge-rule-pass = <strong>معدل نجاح 100%</strong> — يجب أن تنجح جميع 622 ملف SQLLogicTest
+challenge-rule-git = <strong>سجل git قابل للتحقق</strong> — تاريخ أول إيداع حتى معدل نجاح 100% يحدد وقتك
+challenge-record-title = حامل الرقم القياسي الحالي
+challenge-record-days = { $days } يوم
+challenge-record-name = VibeSQL (الخط الأساسي)
+challenge-record-date = أكتوبر - نوفمبر 2025
+challenge-record-beat = تريد التغلب على هذا بنسبة 5%؟ هذا يعني <strong>{ $target } يوم أو أقل</strong> للمطالبة بالكأس.
+
+# قسم لماذا هذا التحدي
+challenge-why-title = لماذا هذا التحدي؟
+challenge-why-objective-title = قياس موضوعي
+challenge-why-objective-text = لا مراجعات كود شخصية. إما أن تنجح الاختبارات أو لا. 6 ملايين تأكيد لا تترك مجالاً للغموض.
+challenge-why-complexity-title = تعقيد حقيقي
+challenge-why-complexity-text = تتطلب قواعد بيانات SQL محللات ومحسنات ومحركات تنفيذ. هذه ليست مشكلة لعبة — إنها هندسة بمستوى الإنتاج.
+challenge-why-time-title = الوقت هو الحقيقة
+challenge-why-time-text = الأيام التقويمية حتى الإنجاز هي المقياس النهائي. هل يساعد التوازي إلى 1,000 وكيل؟ الآن يمكنك اكتشاف ذلك.
+
+# قسم البدء
+challenge-start-title = ابدأ
+challenge-start-intro = ابدأ من الصفر بأي لغة، أو استخدم أحد مستودعاتنا الأولية للراحة. يتضمن كل مستودع أولي مجموعة SQLLogicTest ومشغل اختبارات وسير عمل CI.
+challenge-seed-title = المستودعات الأولية
+challenge-seed-optional = (اختياري)
+challenge-seed-rust-desc = نظام بناء Cargo، تجريدات بتكلفة صفرية، أمان الذاكرة بدون GC.
+challenge-seed-cpp-desc = نظام بناء CMake، أقصى أداء، تحكم كامل في الذاكرة.
+challenge-seed-go-desc = سلسلة أدوات بسيطة، تجميع سريع، أساسيات تزامن ممتازة.
+challenge-seed-fork = Fork على GitHub →
+challenge-step1-title = ابدأ مشروعك
+challenge-step1-text = أنشئ مستودعًا جديدًا من الصفر، أو افرع مستودعًا أوليًا أعلاه للبدء السريع. احصل على <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">مجموعة SQLLogicTest</a>. إيداعك الأول يبدأ العد.
+challenge-step2-title = ابنِ قاعدة بياناتك
+challenge-step2-text = نفذ محلل SQL ومنفذ استعلامات ومحرك تخزين. استخدم أي أدوات ذكاء اصطناعي — Claude أو Copilot أو وكلائك الخاصين. شغّل <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> لتتبع التقدم.
+challenge-step3-title = حقق 100% وقدم
+challenge-step3-text = عندما تنجح جميع 622 ملف اختبار، افتح issue في <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> مع رابط مستودعك وتجزئات الإيداعات. تجاوز 25 يومًا للانضمام إلى لوحة المتصدرين.
+
+# قسم استكشاف VibeSQL
+challenge-explore-title = استكشف VibeSQL
+challenge-explore-demo-title = جرب العرض التوضيحي
+challenge-explore-demo-text = شغّل استعلامات SQL في متصفحك باستخدام بناء WebAssembly.
+challenge-explore-conformance-title = تقرير المطابقة
+challenge-explore-conformance-text = تفصيل مفصل للامتثال لمعايير SQL:1999.
+challenge-explore-benchmarks-title = معايير الأداء
+challenge-explore-benchmarks-text = TPC-H وTPC-C ومعايير أخرى مقابل SQLite وDuckDB.
+
+# التذييل
+challenge-footer = VibeSQL - قاعدة بيانات SQL:1999 في WebAssembly

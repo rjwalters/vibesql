@@ -705,3 +705,114 @@ conformance-tcl-common-failures = Vanliga Fel
 conformance-tcl-failure-patterns = Topp { $count } felmönster efter antal förekomster
 conformance-tcl-about-title = Om TCL-tester:
 conformance-tcl-about-text = SQLites TCL-testsvit är det kanoniska överensstämmelsetestet för SQLite-kompatibilitet. Den testar specifika SQLite-beteenden, egenheter och gränsfall som kanske inte täcks av standard SQL-testsviter. Höga godkännandegrader här indikerar stark SQLite-kompatibilitet för applikationsmigreringsscenarier.
+
+# =============================================================================
+# Challenge Page
+# =============================================================================
+
+# Page title and header
+challenge-page-title = SQL Vibe Coding Challenge - VibeSQL
+challenge-header = SQL Vibe Coding Challenge
+
+# Hero section
+challenge-hero-title = SQL Vibe Coding Challenge
+challenge-hero-subtitle = En objektiv benchmark för multi-agent mjukvaruutveckling. Bygg en SQL-databas från grunden. Klara 6 miljoner tester. Vinn trofén.
+challenge-btn-start = Börja Bygga
+challenge-btn-trophy = Se Trofén
+challenge-btn-leaderboard = Topplista
+
+# Key Insight callout
+challenge-insight-title = Det Enda Måttet Som Spelar Roll: Kalendertid
+challenge-insight-text = Commits och kodrader är bara indikatorer. Det som räknas är <strong>dagar till färdigställande</strong>. Kan 1000 agenter som arbetar parallellt slå 100 agenter? Behåller ditt orkestrationsramverk produktiviteten vid skalning? Denna benchmark ger dig svaret.
+
+# The Challenge section
+challenge-section-title = Utmaningen
+challenge-objective-title = Mål
+challenge-objective-text = Bygg en SQL-databasmotor från grunden som klarar <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest-sviten</a>. Detta är samma testsvit som används för att validera SQLite, DuckDB och andra produktionsdatabaser.
+challenge-success-title = Framgångskriterier
+challenge-success-pass-rate = 100% godkännandegrad på SQLLogicTest-sviten
+challenge-success-assertions = ~6 miljoner individuella testpåståenden
+challenge-success-files = Alla 622 testfiler godkända
+challenge-constraints-title = Begränsningar
+challenge-constraint-parser = <strong>Inga befintliga SQL-parserbibliotek</strong> — bygg din egen parser
+challenge-constraint-engine = <strong>Inga befintliga frågemotorer</strong> — implementera exekvering från grunden
+challenge-constraint-libs = <strong>Inga databasspecifika bibliotek</strong> — använd endast generella bibliotek
+challenge-allowed-title = Tillåtet
+challenge-allowed-lang = Vilket programmeringsspråk som helst
+challenge-allowed-ai = Vilket AI-orkestrationsramverk som helst
+challenge-allowed-human = Mänsklig intervention (obegränsat)
+challenge-allowed-libs = Generella bibliotek (datastrukturer, I/O, etc.)
+
+# The Trophy section
+challenge-trophy-title = Trofén
+challenge-trophy-name = Vibe Coding Trofén
+challenge-trophy-desc = En fysisk trofé tilldelas varje rekordhållare. Designen speglar andan i "vibe coding" — en förgylld trollstav monterad på valnöt med mässingsplaketter.
+challenge-trophy-claim = <strong>Ditt namn hamnar på trofén</strong> när du slår det nuvarande rekordet med minst 5%.
+challenge-rules-title = Tilldelningsregler
+challenge-rule-improve = <strong>5% förbättring krävs</strong> — slå det tidigare rekordet med minst 5% (i kalenderdagar) för att ta hem trofén
+challenge-rule-public = <strong>Offentligt repository</strong> — din kod måste vara offentligt tillgänglig för verifiering
+challenge-rule-pass = <strong>100% godkännandegrad</strong> — alla 622 SQLLogicTest-filer måste godkännas
+challenge-rule-git = <strong>Verifierbar git-historik</strong> — första commit-datumet till 100% godkännandegrad bestämmer din tid
+challenge-record-title = Nuvarande Rekordhållare
+challenge-record-days = { $days } dagar
+challenge-record-name = VibeSQL (Baslinje)
+challenge-record-date = Oktober - November 2025
+challenge-record-beat = Slå detta med 5%? Det är <strong>{ $target } dagar eller mindre</strong> för att ta hem trofén.
+
+# Why This Challenge section
+challenge-why-title = Varför Denna Utmaning?
+challenge-why-objective-title = Objektiv Mätning
+challenge-why-objective-text = Inga subjektiva kodgranskningar. Testerna godkänns eller inte. 6 miljoner påståenden lämnar inget utrymme för tvetydighet.
+challenge-why-complexity-title = Verklig Komplexitet
+challenge-why-complexity-text = SQL-databaser kräver parsers, optimerare och exekveringsmotorer. Detta är inte ett leksaksproblem—det är produktionsnivå ingenjörskonst.
+challenge-why-time-title = Tid Är Sanning
+challenge-why-time-text = Kalenderdagar till färdigställande är det ultimata måttet. Hjälper parallellisering till 1000 agenter? Nu kan du ta reda på det.
+
+# Get Started section
+challenge-start-title = Kom Igång
+challenge-start-intro = Börja från grunden på vilket språk som helst, eller använd ett av våra seed-repos för bekvämlighet. Varje seed inkluderar SQLLogicTest-sviten, en testlöpare och CI-arbetsflöde.
+challenge-seed-title = Seed Repos
+challenge-seed-optional = (valfritt)
+challenge-seed-rust-desc = Cargo byggsystem, nollkostnadsabstraktioner, minnessäkerhet utan GC.
+challenge-seed-cpp-desc = CMake byggsystem, maximal prestanda, full kontroll över minne.
+challenge-seed-go-desc = Enkel toolchain, snabb kompilering, utmärkta concurrency-primitiver.
+challenge-seed-fork = Fork på GitHub →
+challenge-step1-title = Starta Ditt Projekt
+challenge-step1-text = Skapa ett nytt repo från grunden, eller forka en seed ovan för en snabbstart. Hämta <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest-sviten</a>. Din första commit startar klockan.
+challenge-step2-title = Bygg Din Databas
+challenge-step2-text = Implementera en SQL-parser, frågexekverare och lagringsmotor. Använd vilka AI-verktyg som helst—Claude, Copilot eller dina egna agenter. Kör <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> för att följa framstegen.
+challenge-step3-title = Nå 100% och Skicka In
+challenge-step3-text = När alla 622 testfiler godkänns, öppna ett ärende på <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> med din repo-länk och commit-hashar. Slå 25 dagar för att komma med på topplistan.
+
+# Explore VibeSQL section
+challenge-explore-title = Utforska VibeSQL
+challenge-explore-demo-title = Prova Demon
+challenge-explore-demo-text = Kör SQL-frågor i din webbläsare med WebAssembly-bygget.
+challenge-explore-conformance-title = Överensstämmelserapport
+challenge-explore-conformance-text = Detaljerad uppdelning av SQL:1999 standardöverensstämmelse.
+challenge-explore-benchmarks-title = Prestandabenchmarks
+challenge-explore-benchmarks-text = TPC-H, TPC-C och andra benchmarks vs SQLite och DuckDB.
+
+# Footer
+challenge-footer = VibeSQL - SQL:1999 Databas i WebAssembly
+
+# Navigation
+nav-challenge = SQL Vibe Coding Challenge
+nav-trends = Prestandatrender
+
+# Trends page
+trends-title = Prestandatrender - VibeSQL
+trends-heading = VibeSQL - Prestandatrender
+trends-total-runs = Totalt Antal Benchmarkkörningar
+trends-across-suites = över alla sviter
+trends-date-range = Datumintervall
+trends-first-to-last = från första till sista körningen
+trends-latest-commit = Senaste Commit
+trends-most-recent = senaste benchmark
+trends-generated = Genererad
+trends-last-export = senaste dataexport
+
+# Bullet points
+bench-bullet-prepared-stmts = Förberedda satser
+bench-bullet-larger-scale = Större skalfaktorer
+bench-bullet-parallel-clients = Parallella klienter

@@ -697,3 +697,93 @@ conformance-tcl-common-failures = सामान्य विफलताएं
 conformance-tcl-failure-patterns = घटना गणना द्वारा शीर्ष { $count } विफलता पैटर्न
 conformance-tcl-about-title = TCL टेस्ट के बारे में:
 conformance-tcl-about-text = SQLite की TCL टेस्ट सूट SQLite संगतता के लिए मानक अनुरूपता परीक्षण है। यह विशिष्ट SQLite व्यवहार, विशेषताओं और एज केस का परीक्षण करता है जो मानक SQL टेस्ट सूट द्वारा कवर नहीं किए जा सकते हैं। यहां उच्च पास दर एप्लिकेशन माइग्रेशन परिदृश्यों के लिए मजबूत SQLite संगतता को इंगित करती है।
+
+# =============================================================================
+# चुनौती पेज
+# =============================================================================
+
+# पेज शीर्षक और हेडर
+challenge-page-title = SQL Vibe कोडिंग चुनौती - VibeSQL
+challenge-header = SQL Vibe कोडिंग चुनौती
+
+# हीरो सेक्शन
+challenge-hero-title = SQL Vibe कोडिंग चुनौती
+challenge-hero-subtitle = मल्टी-एजेंट सॉफ्टवेयर विकास के लिए एक वस्तुनिष्ठ बेंचमार्क। शून्य से SQL डेटाबेस बनाएं। 60 लाख टेस्ट पास करें। ट्रॉफी जीतें।
+challenge-btn-start = निर्माण शुरू करें
+challenge-btn-trophy = ट्रॉफी देखें
+challenge-btn-leaderboard = लीडरबोर्ड
+
+# मुख्य अंतर्दृष्टि
+challenge-insight-title = एकमात्र मायने रखने वाली मीट्रिक: कैलेंडर समय
+challenge-insight-text = कमिट्स और कोड की लाइनें प्रॉक्सी हैं। जो मायने रखता है वह है <strong>पूर्णता तक के दिन</strong>। क्या 1,000 एजेंट समानांतर में काम करके 100 एजेंटों को हरा सकते हैं? क्या आपका ऑर्केस्ट्रेशन फ्रेमवर्क स्केल करते समय उत्पादकता बनाए रखता है? यह बेंचमार्क आपको बताएगा।
+
+# चुनौती सेक्शन
+challenge-section-title = चुनौती
+challenge-objective-title = उद्देश्य
+challenge-objective-text = शून्य से एक SQL डेटाबेस इंजन बनाएं जो <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest सूट</a> पास करे। यह वही टेस्ट सूट है जिसका उपयोग SQLite, DuckDB और अन्य प्रोडक्शन डेटाबेस को मान्य करने के लिए किया जाता है।
+challenge-success-title = सफलता मानदंड
+challenge-success-pass-rate = SQLLogicTest सूट पर 100% पास दर
+challenge-success-assertions = ~60 लाख व्यक्तिगत टेस्ट assertions
+challenge-success-files = सभी 622 टेस्ट फाइलें पास
+challenge-constraints-title = प्रतिबंध
+challenge-constraint-parser = <strong>कोई मौजूदा SQL पार्सर लाइब्रेरी नहीं</strong> — अपना खुद का पार्सर बनाएं
+challenge-constraint-engine = <strong>कोई मौजूदा क्वेरी इंजन नहीं</strong> — शून्य से execution लागू करें
+challenge-constraint-libs = <strong>कोई डेटाबेस-विशिष्ट लाइब्रेरी नहीं</strong> — केवल सामान्य-उद्देश्य लाइब्रेरी का उपयोग करें
+challenge-allowed-title = अनुमति
+challenge-allowed-lang = कोई भी प्रोग्रामिंग भाषा
+challenge-allowed-ai = कोई भी AI ऑर्केस्ट्रेशन फ्रेमवर्क
+challenge-allowed-human = मानव हस्तक्षेप (असीमित)
+challenge-allowed-libs = सामान्य-उद्देश्य लाइब्रेरी (डेटा संरचनाएं, I/O, आदि)
+
+# ट्रॉफी सेक्शन
+challenge-trophy-title = ट्रॉफी
+challenge-trophy-name = Vibe कोडिंग ट्रॉफी
+challenge-trophy-desc = प्रत्येक रिकॉर्ड धारक को एक भौतिक ट्रॉफी प्रदान की जाएगी। डिज़ाइन "vibe coding" की भावना को दर्शाता है — अखरोट की लकड़ी पर लगी सोने की छड़ी पीतल की नेमप्लेट के साथ।
+challenge-trophy-claim = जब आप मौजूदा रिकॉर्ड को कम से कम 5% से हराते हैं तो <strong>आपका नाम ट्रॉफी पर जाएगा</strong>।
+challenge-rules-title = पुरस्कार नियम
+challenge-rule-improve = <strong>5% सुधार आवश्यक</strong> — ट्रॉफी का दावा करने के लिए पिछले रिकॉर्ड को कम से कम 5% (कैलेंडर दिनों में) से हराएं
+challenge-rule-public = <strong>सार्वजनिक रिपॉजिटरी</strong> — सत्यापन के लिए आपका कोड सार्वजनिक रूप से उपलब्ध होना चाहिए
+challenge-rule-pass = <strong>100% पास दर</strong> — सभी 622 SQLLogicTest फाइलें पास होनी चाहिए
+challenge-rule-git = <strong>सत्यापन योग्य git इतिहास</strong> — पहले कमिट की तारीख से 100% पास दर तक आपका समय निर्धारित करता है
+challenge-record-title = वर्तमान रिकॉर्ड धारक
+challenge-record-days = { $days } दिन
+challenge-record-name = VibeSQL (बेसलाइन)
+challenge-record-date = अक्टूबर - नवंबर 2025
+challenge-record-beat = इसे 5% से हराना चाहते हैं? इसका मतलब है ट्रॉफी का दावा करने के लिए <strong>{ $target } दिन या उससे कम</strong>।
+
+# यह चुनौती क्यों सेक्शन
+challenge-why-title = यह चुनौती क्यों?
+challenge-why-objective-title = वस्तुनिष्ठ माप
+challenge-why-objective-text = कोई व्यक्तिपरक कोड समीक्षा नहीं। टेस्ट या तो पास होते हैं या नहीं। 60 लाख assertions अस्पष्टता के लिए कोई जगह नहीं छोड़ते।
+challenge-why-complexity-title = वास्तविक जटिलता
+challenge-why-complexity-text = SQL डेटाबेस के लिए पार्सर, ऑप्टिमाइज़र और execution इंजन की आवश्यकता होती है। यह खिलौना समस्या नहीं है — यह प्रोडक्शन-ग्रेड इंजीनियरिंग है।
+challenge-why-time-title = समय ही सत्य है
+challenge-why-time-text = पूर्णता तक कैलेंडर दिन अंतिम मीट्रिक है। क्या 1,000 एजेंटों तक समानांतर करने से मदद मिलती है? अब आप पता लगा सकते हैं।
+
+# शुरू करें सेक्शन
+challenge-start-title = शुरू करें
+challenge-start-intro = किसी भी भाषा में शून्य से शुरू करें, या सुविधा के लिए हमारे seed repos में से एक का उपयोग करें। प्रत्येक seed में SQLLogicTest सूट, टेस्ट रनर और CI वर्कफ्लो शामिल है।
+challenge-seed-title = Seed Repos
+challenge-seed-optional = (वैकल्पिक)
+challenge-seed-rust-desc = Cargo बिल्ड सिस्टम, शून्य-लागत abstractions, GC के बिना मेमोरी सुरक्षा।
+challenge-seed-cpp-desc = CMake बिल्ड सिस्टम, अधिकतम प्रदर्शन, मेमोरी पर पूर्ण नियंत्रण।
+challenge-seed-go-desc = सरल टूलचेन, तेज़ संकलन, उत्कृष्ट concurrency primitives।
+challenge-seed-fork = GitHub पर Fork करें →
+challenge-step1-title = अपना प्रोजेक्ट शुरू करें
+challenge-step1-text = शून्य से नया repo बनाएं, या जल्दी शुरू करने के लिए ऊपर seed को fork करें। <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest सूट</a> प्राप्त करें। आपका पहला कमिट घड़ी शुरू करता है।
+challenge-step2-title = अपना डेटाबेस बनाएं
+challenge-step2-text = SQL पार्सर, क्वेरी executor और स्टोरेज इंजन लागू करें। कोई भी AI टूल उपयोग करें — Claude, Copilot, या अपने खुद के एजेंट। प्रगति ट्रैक करने के लिए <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> चलाएं।
+challenge-step3-title = 100% हिट करें और सबमिट करें
+challenge-step3-text = जब सभी 622 टेस्ट फाइलें पास हो जाएं, <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> पर अपने repo लिंक और कमिट हैश के साथ issue खोलें। लीडरबोर्ड में शामिल होने के लिए 25 दिनों को हराएं।
+
+# VibeSQL एक्सप्लोर करें सेक्शन
+challenge-explore-title = VibeSQL एक्सप्लोर करें
+challenge-explore-demo-title = डेमो आज़माएं
+challenge-explore-demo-text = WebAssembly बिल्ड का उपयोग करके अपने ब्राउज़र में SQL क्वेरी चलाएं।
+challenge-explore-conformance-title = अनुरूपता रिपोर्ट
+challenge-explore-conformance-text = SQL:1999 मानकों अनुपालन का विस्तृत विवरण।
+challenge-explore-benchmarks-title = प्रदर्शन बेंचमार्क
+challenge-explore-benchmarks-text = SQLite और DuckDB के विरुद्ध TPC-H, TPC-C और अन्य बेंचमार्क।
+
+# फुटर
+challenge-footer = VibeSQL - WebAssembly में SQL:1999 डेटाबेस

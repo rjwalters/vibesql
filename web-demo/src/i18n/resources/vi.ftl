@@ -697,3 +697,114 @@ conformance-tcl-common-failures = Lỗi Thường Gặp
 conformance-tcl-failure-patterns = { $count } mẫu lỗi hàng đầu theo số lần xuất hiện
 conformance-tcl-about-title = Về Kiểm Tra TCL:
 conformance-tcl-about-text = Bộ kiểm tra TCL của SQLite là bài kiểm tra tuân thủ chuẩn cho tương thích SQLite. Nó kiểm tra các hành vi SQLite cụ thể, đặc điểm riêng và các trường hợp biên có thể không được bao phủ bởi các bộ kiểm tra SQL tiêu chuẩn. Tỷ lệ đạt cao ở đây cho thấy khả năng tương thích SQLite mạnh mẽ cho các kịch bản di chuyển ứng dụng.
+
+# =============================================================================
+# Challenge Page
+# =============================================================================
+
+# Page title and header
+challenge-page-title = Thử Thách Vibe Coding SQL - VibeSQL
+challenge-header = Thử Thách Vibe Coding SQL
+
+# Hero section
+challenge-hero-title = Thử Thách Vibe Coding SQL
+challenge-hero-subtitle = Một tiêu chuẩn đánh giá khách quan cho phát triển phần mềm đa tác nhân. Xây dựng cơ sở dữ liệu SQL từ đầu. Vượt qua 6 triệu bài kiểm tra. Giành cúp.
+challenge-btn-start = Bắt Đầu Xây Dựng
+challenge-btn-trophy = Xem Cúp
+challenge-btn-leaderboard = Bảng Xếp Hạng
+
+# Key Insight callout
+challenge-insight-title = Chỉ Số Duy Nhất Quan Trọng: Thời Gian Thực Tế
+challenge-insight-text = Commit và dòng code chỉ là đại diện. Điều quan trọng là <strong>số ngày để hoàn thành</strong>. Liệu 1.000 tác nhân làm việc song song có thể đánh bại 100 tác nhân? Khung điều phối của bạn có duy trì năng suất khi mở rộng quy mô? Tiêu chuẩn này sẽ cho bạn biết.
+
+# The Challenge section
+challenge-section-title = Thử Thách
+challenge-objective-title = Mục Tiêu
+challenge-objective-text = Xây dựng một engine cơ sở dữ liệu SQL từ đầu để vượt qua <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">bộ SQLLogicTest</a>. Đây là bộ kiểm tra tương tự được sử dụng để xác nhận SQLite, DuckDB và các cơ sở dữ liệu sản xuất khác.
+challenge-success-title = Tiêu Chí Thành Công
+challenge-success-pass-rate = Tỷ lệ đạt 100% trên bộ SQLLogicTest
+challenge-success-assertions = ~6 triệu xác nhận kiểm tra riêng lẻ
+challenge-success-files = Tất cả 622 tệp kiểm tra đạt
+challenge-constraints-title = Ràng Buộc
+challenge-constraint-parser = <strong>Không có thư viện parser SQL có sẵn</strong> — tự xây dựng parser của bạn
+challenge-constraint-engine = <strong>Không có engine truy vấn có sẵn</strong> — triển khai thực thi từ đầu
+challenge-constraint-libs = <strong>Không có thư viện chuyên dụng cho cơ sở dữ liệu</strong> — chỉ sử dụng thư viện đa năng
+challenge-allowed-title = Được Phép
+challenge-allowed-lang = Bất kỳ ngôn ngữ lập trình nào
+challenge-allowed-ai = Bất kỳ khung điều phối AI nào
+challenge-allowed-human = Sự can thiệp của con người (không giới hạn)
+challenge-allowed-libs = Thư viện đa năng (cấu trúc dữ liệu, I/O, v.v.)
+
+# The Trophy section
+challenge-trophy-title = Cúp
+challenge-trophy-name = Cúp Vibe Coding
+challenge-trophy-desc = Một cúp vật lý sẽ được trao cho mỗi người giữ kỷ lục. Thiết kế phản ánh tinh thần "vibe coding" — một cây gậy mạ vàng gắn trên gỗ óc chó với biển đồng.
+challenge-trophy-claim = <strong>Tên của bạn sẽ có trên cúp</strong> khi bạn phá kỷ lục hiện tại ít nhất 5%.
+challenge-rules-title = Quy Tắc Trao Giải
+challenge-rule-improve = <strong>Yêu cầu cải thiện 5%</strong> — phá kỷ lục trước đó ít nhất 5% (theo ngày thực tế) để nhận cúp
+challenge-rule-public = <strong>Kho lưu trữ công khai</strong> — code của bạn phải được công khai để xác minh
+challenge-rule-pass = <strong>Tỷ lệ đạt 100%</strong> — tất cả 622 tệp SQLLogicTest phải đạt
+challenge-rule-git = <strong>Lịch sử git có thể xác minh</strong> — ngày commit đầu tiên đến tỷ lệ đạt 100% xác định thời gian của bạn
+challenge-record-title = Người Giữ Kỷ Lục Hiện Tại
+challenge-record-days = { $days } ngày
+challenge-record-name = VibeSQL (Cơ Sở)
+challenge-record-date = Tháng 10 - Tháng 11 năm 2025
+challenge-record-beat = Phá kỷ lục này 5%? Đó là <strong>{ $target } ngày hoặc ít hơn</strong> để nhận cúp.
+
+# Why This Challenge section
+challenge-why-title = Tại Sao Thử Thách Này?
+challenge-why-objective-title = Đo Lường Khách Quan
+challenge-why-objective-text = Không có đánh giá code chủ quan. Hoặc các bài kiểm tra đạt hoặc không. 6 triệu xác nhận không để lại chỗ cho sự mơ hồ.
+challenge-why-complexity-title = Độ Phức Tạp Thực Sự
+challenge-why-complexity-text = Cơ sở dữ liệu SQL đòi hỏi parser, optimizer và engine thực thi. Đây không phải là bài toán đồ chơi—đây là kỹ thuật cấp sản xuất.
+challenge-why-time-title = Thời Gian Là Sự Thật
+challenge-why-time-text = Số ngày thực tế để hoàn thành là chỉ số cuối cùng. Song song hóa lên 1.000 tác nhân có giúp ích không? Bây giờ bạn có thể tìm ra.
+
+# Get Started section
+challenge-start-title = Bắt Đầu
+challenge-start-intro = Bắt đầu từ đầu với bất kỳ ngôn ngữ nào, hoặc sử dụng một trong các repo seed của chúng tôi để thuận tiện. Mỗi seed bao gồm bộ SQLLogicTest, test runner và quy trình CI.
+challenge-seed-title = Repo Seed
+challenge-seed-optional = (tùy chọn)
+challenge-seed-rust-desc = Hệ thống build Cargo, trừu tượng hóa không chi phí, an toàn bộ nhớ không cần GC.
+challenge-seed-cpp-desc = Hệ thống build CMake, hiệu suất tối đa, kiểm soát hoàn toàn bộ nhớ.
+challenge-seed-go-desc = Toolchain đơn giản, biên dịch nhanh, các nguyên mẫu đồng thời xuất sắc.
+challenge-seed-fork = Fork trên GitHub →
+challenge-step1-title = Bắt Đầu Dự Án
+challenge-step1-text = Tạo repo mới từ đầu, hoặc fork một seed ở trên để khởi đầu nhanh. Lấy <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">bộ SQLLogicTest</a>. Commit đầu tiên của bạn bắt đầu đồng hồ.
+challenge-step2-title = Xây Dựng Cơ Sở Dữ Liệu
+challenge-step2-text = Triển khai SQL parser, query executor và storage engine. Sử dụng bất kỳ công cụ AI nào—Claude, Copilot, hoặc các tác nhân của riêng bạn. Chạy <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> để theo dõi tiến độ.
+challenge-step3-title = Đạt 100% và Gửi
+challenge-step3-text = Khi tất cả 622 tệp kiểm tra đạt, mở một issue tại <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> với liên kết repo và hash commit của bạn. Phá 25 ngày để tham gia bảng xếp hạng.
+
+# Explore VibeSQL section
+challenge-explore-title = Khám Phá VibeSQL
+challenge-explore-demo-title = Thử Demo
+challenge-explore-demo-text = Chạy truy vấn SQL trong trình duyệt của bạn bằng bản build WebAssembly.
+challenge-explore-conformance-title = Báo Cáo Tuân Thủ
+challenge-explore-conformance-text = Phân tích chi tiết tuân thủ tiêu chuẩn SQL:1999.
+challenge-explore-benchmarks-title = Đánh Giá Hiệu Năng
+challenge-explore-benchmarks-text = TPC-H, TPC-C và các benchmark khác so với SQLite và DuckDB.
+
+# Footer
+challenge-footer = VibeSQL - Cơ Sở Dữ Liệu SQL:1999 trong WebAssembly
+
+# Navigation
+nav-challenge = Thử Thách Vibe Coding SQL
+nav-trends = Xu Hướng Hiệu Năng
+
+# Trends page
+trends-title = Xu Hướng Hiệu Năng - VibeSQL
+trends-heading = VibeSQL - Xu Hướng Hiệu Năng
+trends-total-runs = Tổng Số Lần Chạy Benchmark
+trends-across-suites = trên tất cả các bộ
+trends-date-range = Phạm Vi Ngày
+trends-first-to-last = từ lần chạy đầu đến cuối
+trends-latest-commit = Commit Mới Nhất
+trends-most-recent = benchmark gần nhất
+trends-generated = Được Tạo
+trends-last-export = lần xuất dữ liệu cuối
+
+# Bullet points
+bench-bullet-prepared-stmts = Prepared statements
+bench-bullet-larger-scale = Hệ số quy mô lớn hơn
+bench-bullet-parallel-clients = Client song song

@@ -718,3 +718,93 @@ conformance-tcl-common-failures = Veelvoorkomende Fouten
 conformance-tcl-failure-patterns = Top { $count } foutpatronen op basis van aantal voorkomens
 conformance-tcl-about-title = Over TCL Tests:
 conformance-tcl-about-text = De TCL test suite van SQLite is de canonieke conformiteitstest voor SQLite-compatibiliteit. Het test specifiek SQLite-gedrag, eigenaardigheden en randgevallen die mogelijk niet worden gedekt door standaard SQL test suites. Hoge slaagpercentages hier wijzen op sterke SQLite-compatibiliteit voor applicatiemigratiescenario's.
+
+# =============================================================================
+# Challenge Page
+# =============================================================================
+
+# Page title and header
+challenge-page-title = SQL Vibe Coding Challenge - VibeSQL
+challenge-header = SQL Vibe Coding Challenge
+
+# Hero section
+challenge-hero-title = De SQL Vibe Coding Challenge
+challenge-hero-subtitle = Een objectieve benchmark voor multi-agent softwareontwikkeling. Bouw een SQL-database vanaf nul. Slaag voor 6 miljoen tests. Win de trofee.
+challenge-btn-start = Begin met Bouwen
+challenge-btn-trophy = Bekijk de Trofee
+challenge-btn-leaderboard = Ranglijst
+
+# Key Insight callout
+challenge-insight-title = De Enige Maatstaf die Telt: Kalendertijd
+challenge-insight-text = Commits en regels code zijn indicatoren. Wat telt is <strong>dagen tot voltooiing</strong>. Kan 1.000 agents parallel werken sneller dan 100 agents? Behoudt jouw orkestratie-framework productiviteit bij schalen? Deze benchmark geeft het antwoord.
+
+# The Challenge section
+challenge-section-title = De Uitdaging
+challenge-objective-title = Doel
+challenge-objective-text = Bouw een SQL-database-engine vanaf nul die slaagt voor de <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest suite</a>. Dit is dezelfde testsuite die wordt gebruikt om SQLite, DuckDB en andere productiedatabases te valideren.
+challenge-success-title = Succescriteria
+challenge-success-pass-rate = 100% slaagpercentage op SQLLogicTest suite
+challenge-success-assertions = ~6 miljoen individuele testbeweringen
+challenge-success-files = Alle 622 testbestanden geslaagd
+challenge-constraints-title = Beperkingen
+challenge-constraint-parser = <strong>Geen bestaande SQL-parserbibliotheken</strong> — bouw je eigen parser
+challenge-constraint-engine = <strong>Geen bestaande query-engines</strong> — implementeer uitvoering vanaf nul
+challenge-constraint-libs = <strong>Geen database-specifieke bibliotheken</strong> — gebruik alleen algemene bibliotheken
+challenge-allowed-title = Toegestaan
+challenge-allowed-lang = Elke programmeertaal
+challenge-allowed-ai = Elk AI-orkestratieframework
+challenge-allowed-human = Menselijke interventie (onbeperkt)
+challenge-allowed-libs = Algemene bibliotheken (datastructuren, I/O, etc.)
+
+# The Trophy section
+challenge-trophy-title = De Trofee
+challenge-trophy-name = De Vibe Coding Trofee
+challenge-trophy-desc = Een fysieke trofee wordt uitgereikt aan elke recordhouder. Het ontwerp weerspiegelt de geest van "vibe coding" — een vergulde toverstok gemonteerd op walnoot met koperen naamplaatjes.
+challenge-trophy-claim = <strong>Jouw naam komt op de trofee</strong> wanneer je het huidige record met minstens 5% verslaat.
+challenge-rules-title = Toekenningsregels
+challenge-rule-improve = <strong>5% verbetering vereist</strong> — versla het vorige record met minstens 5% (in kalenderdagen) om de trofee te claimen
+challenge-rule-public = <strong>Publieke repository</strong> — je code moet publiek beschikbaar zijn voor verificatie
+challenge-rule-pass = <strong>100% slaagpercentage</strong> — alle 622 SQLLogicTest-bestanden moeten slagen
+challenge-rule-git = <strong>Verifieerbare git-geschiedenis</strong> — eerste commitdatum tot 100% slaagpercentage bepaalt je tijd
+challenge-record-title = Huidige Recordhouder
+challenge-record-days = { $days } dagen
+challenge-record-name = VibeSQL (Baseline)
+challenge-record-date = Oktober - November 2025
+challenge-record-beat = Dit verslaan met 5%? Dat is <strong>{ $target } dagen of minder</strong> om de trofee te claimen.
+
+# Why This Challenge section
+challenge-why-title = Waarom Deze Uitdaging?
+challenge-why-objective-title = Objectieve Meting
+challenge-why-objective-text = Geen subjectieve codebeoordelingen. De tests slagen of niet. 6 miljoen beweringen laten geen ruimte voor ambiguïteit.
+challenge-why-complexity-title = Echte Complexiteit
+challenge-why-complexity-text = SQL-databases vereisen parsers, optimizers en uitvoeringsengines. Dit is geen speelgoedprobleem—het is productie-niveau engineering.
+challenge-why-time-title = Tijd is Waarheid
+challenge-why-time-text = Kalenderdagen tot voltooiing is de ultieme maatstaf. Helpt parallelliseren naar 1.000 agents? Nu kun je het ontdekken.
+
+# Get Started section
+challenge-start-title = Aan de Slag
+challenge-start-intro = Begin vanaf nul in elke taal, of gebruik een van onze seed-repo's voor gemak. Elke seed bevat de SQLLogicTest suite, een testrunner en CI-workflow.
+challenge-seed-title = Seed Repo's
+challenge-seed-optional = (optioneel)
+challenge-seed-rust-desc = Cargo buildsysteem, zero-cost abstracties, geheugenbeveiliging zonder GC.
+challenge-seed-cpp-desc = CMake buildsysteem, maximale prestaties, volledige controle over geheugen.
+challenge-seed-go-desc = Eenvoudige toolchain, snelle compilatie, uitstekende concurrency-primitieven.
+challenge-seed-fork = Fork op GitHub →
+challenge-step1-title = Start Je Project
+challenge-step1-text = Maak een nieuwe repo vanaf nul, of fork een seed hierboven voor een voorsprong. Haal de <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest suite</a>. Je eerste commit start de klok.
+challenge-step2-title = Bouw Je Database
+challenge-step2-text = Implementeer een SQL-parser, query-executor en storage-engine. Gebruik alle AI-tools—Claude, Copilot of je eigen agents. Voer <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> uit om voortgang te volgen.
+challenge-step3-title = Bereik 100% en Dien In
+challenge-step3-text = Wanneer alle 622 testbestanden slagen, open een issue op <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> met je repo-link en commit-hashes. Versla 25 dagen om op de ranglijst te komen.
+
+# Explore VibeSQL section
+challenge-explore-title = Ontdek VibeSQL
+challenge-explore-demo-title = Probeer de Demo
+challenge-explore-demo-text = Voer SQL-queries uit in je browser met de WebAssembly-build.
+challenge-explore-conformance-title = Conformiteitsrapport
+challenge-explore-conformance-text = Gedetailleerde uitsplitsing van SQL:1999 standaardconformiteit.
+challenge-explore-benchmarks-title = Prestatiebenchmarks
+challenge-explore-benchmarks-text = TPC-H, TPC-C en andere benchmarks vs SQLite en DuckDB.
+
+# Footer
+challenge-footer = VibeSQL - SQL:1999 Database in WebAssembly
