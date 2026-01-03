@@ -208,9 +208,9 @@ impl super::Catalog {
                 schema.get_table_by_identifier(&table_id)
             })
         } else {
-            // For unqualified identifiers, check temp schema first (SQLite semantics)
+            // For unqualified identifiers, check session-specific temp schema first (SQLite semantics)
             // Temp tables shadow tables in the main schema
-            if let Some(temp_schema) = self.schemas.get(crate::TEMP_SCHEMA) {
+            if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
                 if let Some(table) = temp_schema.get_table_by_identifier(identifier) {
                     return Some(table);
                 }
@@ -238,12 +238,12 @@ impl super::Catalog {
                 schema.get_table(&normalized_table, self.case_sensitive_identifiers)
             })
         } else {
-            // Unqualified name: check temp schema first (SQLite semantics)
+            // Unqualified name: check session-specific temp schema first (SQLite semantics)
             // Temp tables shadow tables in the main schema
             let normalized_table = self.normalize_identifier(name);
 
-            // First check temp schema
-            if let Some(temp_schema) = self.schemas.get(crate::TEMP_SCHEMA) {
+            // First check session's temp schema
+            if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
                 if let Some(table) =
                     temp_schema.get_table(&normalized_table, self.case_sensitive_identifiers)
                 {
@@ -358,10 +358,10 @@ impl super::Catalog {
     /// - Quoted identifiers are case-sensitive (match exact canonical form)
     /// - Unquoted identifiers are case-insensitive (lowercase canonical form)
     ///
-    /// For unqualified identifiers, checks temp schema first (SQLite semantics).
+    /// For unqualified identifiers, checks session-specific temp schema first (SQLite semantics).
     pub fn table_exists_by_identifier(&self, identifier: &TableIdentifier) -> bool {
-        // Check temp schema first
-        if let Some(temp_schema) = self.schemas.get(crate::TEMP_SCHEMA) {
+        // Check session's temp schema first
+        if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
             if temp_schema.table_exists_by_identifier(identifier) {
                 return true;
             }

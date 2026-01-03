@@ -71,16 +71,19 @@ impl CreateTableExecutor {
         database: &mut Database,
     ) -> Result<String, ExecutorError> {
         // Parse qualified table name (schema.table or just table)
-        // For TEMP tables, force the schema to "temp" (SQLite compatibility)
+        // For TEMP tables, use the session-specific temp schema (SQLite compatibility)
         let (schema_name, table_name, identifier) = if stmt.temporary {
-            // Temporary table - always use temp schema
+            // Temporary table - use session-specific temp schema
+            // Each session gets its own temp schema (e.g., "temp_1", "temp_2")
+            // for isolation between database connections
+            let temp_schema = database.catalog.temp_schema_name();
             let id = TableIdentifier::qualified(
-                vibesql_catalog::TEMP_SCHEMA,
+                temp_schema,
                 false,
                 &stmt.table_name,
                 stmt.quoted,
             );
-            (vibesql_catalog::TEMP_SCHEMA.to_string(), stmt.table_name.clone(), id)
+            (temp_schema.to_string(), stmt.table_name.clone(), id)
         } else if let Some((schema_part, table_part)) = stmt.table_name.split_once('.') {
             // Schema-qualified table name - use qualified identifier
             // Note: We use stmt.quoted for both parts since the parser combined them

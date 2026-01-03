@@ -243,12 +243,14 @@ impl Database {
         };
 
         // Schemas (excluding default and temp schemas which are auto-created)
+        // Skip all temp schemas (temp_1, temp_2, etc.) - they are session-scoped
         let schemas = self
             .catalog
             .list_schemas()
             .into_iter()
             .filter(|name| {
-                name != vibesql_catalog::DEFAULT_SCHEMA && name != vibesql_catalog::TEMP_SCHEMA
+                name != vibesql_catalog::DEFAULT_SCHEMA
+                    && !vibesql_catalog::Catalog::is_temp_schema(name)
             })
             .map(|name| JsonSchema { name })
             .collect();
@@ -486,11 +488,12 @@ fn sql_value_to_json(value: &SqlValue) -> serde_json::Value {
 fn json_database_to_db(json_db: JsonDatabase) -> Result<Database, StorageError> {
     let mut db = Database::new();
 
-    // Create schemas (skip auto-created ones like public/temp)
+    // Create schemas (skip auto-created ones like public/temp schemas)
     for schema in json_db.schemas {
-        // Skip schemas that already exist (e.g., temp schema is auto-created)
+        // Skip schemas that already exist (e.g., default and temp schemas are auto-created)
+        // Also skip any temp schemas (temp_1, temp_2, etc.) from old data files
         if schema.name == vibesql_catalog::DEFAULT_SCHEMA
-            || schema.name == vibesql_catalog::TEMP_SCHEMA
+            || vibesql_catalog::Catalog::is_temp_schema(&schema.name)
         {
             continue;
         }

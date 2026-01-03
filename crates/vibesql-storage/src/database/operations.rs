@@ -109,8 +109,8 @@ impl Operations {
 
         // Try with schema prefix if not already qualified
         if !table_name.contains('.') {
-            // Try 3: Temp schema first (SQLite semantics - temp tables shadow main tables)
-            let temp_qualified = format!("{}.{}", vibesql_catalog::TEMP_SCHEMA, normalized_name);
+            // Try 3: Session's temp schema first (SQLite semantics - temp tables shadow main tables)
+            let temp_qualified = format!("{}.{}", catalog.temp_schema_name(), normalized_name);
             if tables.contains_key(&temp_qualified) {
                 return Ok(tables.get_mut(&temp_qualified).unwrap());
             }

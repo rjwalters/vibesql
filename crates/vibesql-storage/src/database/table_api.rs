@@ -17,20 +17,22 @@ impl Database {
     // Table Operations
     // ============================================================================
 
-    /// Check if a table name refers to a temporary table (in the "temp" schema)
+    /// Check if a table name refers to a temporary table (in any temp schema)
     ///
     /// Temporary tables are not persisted to WAL.
+    /// This checks if the table is in ANY temp schema (temp_1, temp_2, etc.)
     fn is_temp_table(&self, table_name: &str) -> bool {
-        // Check if the table name is qualified with "temp." schema
+        // Check if the table name is qualified with a temp schema prefix (e.g., "temp_1.foo")
         if let Some((schema, _)) = table_name.split_once('.') {
-            schema.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA)
+            vibesql_catalog::Catalog::is_temp_schema(schema)
         } else {
-            // Unqualified name - check if it exists in temp schema
-            self.tables.contains_key(&format!(
+            // Unqualified name - check if it exists in this session's temp schema
+            let temp_qualified = format!(
                 "{}.{}",
-                vibesql_catalog::TEMP_SCHEMA,
+                self.catalog.temp_schema_name(),
                 table_name.to_lowercase()
-            ))
+            );
+            self.tables.contains_key(&temp_qualified)
         }
     }
 
@@ -61,11 +63,11 @@ impl Database {
             format!("{}.{}", current_schema, identifier.canonical())
         };
 
-        // Check if this is a temporary table (in the "temp" schema)
+        // Check if this is a temporary table (in any temp schema)
         // Temp tables are not persisted to WAL
         let is_temp = identifier
             .schema_canonical()
-            .is_some_and(|s| s.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA));
+            .is_some_and(|s| vibesql_catalog::Catalog::is_temp_schema(s));
 
         if !is_temp {
             // Assign table ID and emit WAL entry for persistence
@@ -180,11 +182,11 @@ impl Database {
             }
         }
 
-        // For unqualified names, check temp schema first (SQLite semantics)
+        // For unqualified names, check session's temp schema first (SQLite semantics)
         // Temp tables shadow tables in the main schema
         if !name.contains('.') {
-            // Check temp schema first
-            let temp_qualified = format!("{}.{}", vibesql_catalog::TEMP_SCHEMA, lowercase_name);
+            // Check session's temp schema first
+            let temp_qualified = format!("{}.{}", self.catalog.temp_schema_name(), lowercase_name);
             if let Some(table) = self.tables.get(&temp_qualified) {
                 return Some(table);
             }
@@ -241,11 +243,11 @@ impl Database {
             return self.tables.get_mut(&uppercase_name);
         }
 
-        // For unqualified names, check temp schema first (SQLite semantics)
+        // For unqualified names, check session's temp schema first (SQLite semantics)
         // Temp tables shadow tables in the main schema
         if !name.contains('.') {
-            // Check temp schema first
-            let temp_qualified = format!("{}.{}", vibesql_catalog::TEMP_SCHEMA, lowercase_name);
+            // Check session's temp schema first
+            let temp_qualified = format!("{}.{}", self.catalog.temp_schema_name(), lowercase_name);
             if self.tables.contains_key(&temp_qualified) {
                 return self.tables.get_mut(&temp_qualified);
             }
