@@ -369,9 +369,11 @@ fn remove_duplicate_columns_for_using_join(
         vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter
     );
 
-    // Build a map of column name -> leftmost left column index
-    // This is the index that unqualified references will resolve to
-    let mut leftmost_left_indices: std::collections::HashMap<String, usize> =
+    // Build a map of column name -> best left column index for coalesce pairs
+    // For chained joins (e.g., RIGHT JOIN followed by FULL JOIN), prefer non-hidden
+    // columns because hidden columns may be NULL from a previous outer join.
+    // Issue #4798: Hidden columns from previous RIGHT/FULL JOINs should not be used.
+    let mut leftmost_left_indices: std::collections::HashMap<String, (usize, bool)> =
         std::collections::HashMap::new();
     if needs_coalesce {
         for (table_start_idx, table_schema) in left_schema.table_schemas.values() {
@@ -379,39 +381,114 @@ fn remove_duplicate_columns_for_using_join(
                 let lowercase = col.name.to_lowercase();
                 if using_cols_lower.contains(&lowercase) {
                     let absolute_idx = table_start_idx + col_idx;
-                    leftmost_left_indices
-                        .entry(lowercase)
-                        .and_modify(|e| {
-                            if absolute_idx < *e {
-                                *e = absolute_idx
+                    let is_hidden = left_schema.hidden_columns.contains(&absolute_idx);
+
+                    // Prefer non-hidden over hidden, then prefer leftmost
+                    let should_update = match leftmost_left_indices.get(&lowercase) {
+                        None => true,
+                        Some((best_idx, best_is_hidden)) => {
+                            if *best_is_hidden && !is_hidden {
+                                true // prefer non-hidden
+                            } else if !*best_is_hidden && is_hidden {
+                                false // keep non-hidden
+                            } else {
+                                absolute_idx < *best_idx // same hidden status: prefer leftmost
                             }
-                        })
-                        .or_insert(absolute_idx);
+                        }
+                    };
+
+                    if should_update {
+                        leftmost_left_indices.insert(lowercase, (absolute_idx, is_hidden));
+                    }
                 }
             }
         }
     }
 
-    // Identify which columns from the right side are USING columns to hide
-    // Use table_start_idx from right_schema to compute correct absolute positions
-    for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
-        for (col_idx, col) in table_schema.columns.iter().enumerate() {
-            let lowercase = col.name.to_lowercase();
-            if using_cols_lower.contains(&lowercase) {
-                // This is a USING column, mark it as hidden for SELECT * expansion
-                // Position in result = left_col_count + position_in_right_schema
-                let right_idx = left_col_count + table_start_idx + col_idx;
-                result.schema.hide_column(right_idx);
+    // Issue #4798 (continued): For RIGHT JOIN USING, hide LEFT-side USING columns,
+    // not right-side. This ensures subsequent JOINs on the same column use the
+    // non-hidden column (which contains the actual value, not NULL).
+    //
+    // For LEFT/INNER JOIN: hide right-side columns (right can be NULL)
+    // For RIGHT JOIN: hide left-side columns (left can be NULL for unmatched right rows)
+    // For FULL JOIN: hide left-side columns (use right value; both could be NULL but
+    //                the coalesce pair handles this for SELECT *)
+    let is_right_or_full = matches!(
+        join_type,
+        vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter
+    );
 
-                // If coalescing is needed, register the coalesce pair in the schema
-                // This maps the column name to (left_idx, right_idx) so the evaluator
-                // can apply COALESCE semantics for unqualified column references
-                if needs_coalesce {
-                    if let Some(&left_idx) = leftmost_left_indices.get(&lowercase) {
-                        result
-                            .schema
-                            .add_using_coalesce_pair(&col.name, left_idx, right_idx);
+    if is_right_or_full {
+        // For RIGHT/FULL JOIN: hide left-side USING columns
+        // This ensures subsequent JOINs use the right-side column (which has the actual value)
+        for (table_start_idx, table_schema) in left_schema.table_schemas.values() {
+            for (col_idx, col) in table_schema.columns.iter().enumerate() {
+                let lowercase = col.name.to_lowercase();
+                if using_cols_lower.contains(&lowercase) {
+                    let left_idx = table_start_idx + col_idx;
+                    result.schema.hide_column(left_idx);
+                }
+            }
+        }
+
+        // Also register coalesce pairs for SELECT * expansion
+        // The coalesce pair maps column name to (left_idx, right_idx) for COALESCE semantics
+        // For the right side, prefer non-hidden columns (same logic as left side)
+        let mut best_right_indices: std::collections::HashMap<String, (usize, bool)> =
+            std::collections::HashMap::new();
+        for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
+            for (col_idx, col) in table_schema.columns.iter().enumerate() {
+                let lowercase = col.name.to_lowercase();
+                if using_cols_lower.contains(&lowercase) {
+                    let right_rel_idx = table_start_idx + col_idx;
+                    let is_hidden = right_schema.hidden_columns.contains(&right_rel_idx);
+
+                    // Prefer non-hidden over hidden, then prefer leftmost
+                    let should_update = match best_right_indices.get(&lowercase) {
+                        None => true,
+                        Some((best_idx, best_is_hidden)) => {
+                            if *best_is_hidden && !is_hidden {
+                                true // prefer non-hidden
+                            } else if !*best_is_hidden && is_hidden {
+                                false // keep non-hidden
+                            } else {
+                                right_rel_idx < *best_idx // same hidden status: prefer leftmost
+                            }
+                        }
+                    };
+
+                    if should_update {
+                        best_right_indices.insert(lowercase, (right_rel_idx, is_hidden));
                     }
+                }
+            }
+        }
+
+        // Now register coalesce pairs using the best left and right indices
+        for (col_name, (right_rel_idx, _)) in &best_right_indices {
+            let right_idx = left_col_count + right_rel_idx;
+            if let Some(&(left_idx, _)) = leftmost_left_indices.get(col_name) {
+                // Find original column name from using_columns for case preservation
+                let original_name = using_columns
+                    .iter()
+                    .find(|c| c.to_lowercase() == *col_name)
+                    .map(|s| s.as_str())
+                    .unwrap_or(col_name);
+                result
+                    .schema
+                    .add_using_coalesce_pair(original_name, left_idx, right_idx);
+            }
+        }
+    } else {
+        // For LEFT/INNER JOIN: hide right-side USING columns (original behavior)
+        for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
+            for (col_idx, col) in table_schema.columns.iter().enumerate() {
+                let lowercase = col.name.to_lowercase();
+                if using_cols_lower.contains(&lowercase) {
+                    // This is a USING column, mark it as hidden for SELECT * expansion
+                    // Position in result = left_col_count + position_in_right_schema
+                    let right_idx = left_col_count + table_start_idx + col_idx;
+                    result.schema.hide_column(right_idx);
                 }
             }
         }
