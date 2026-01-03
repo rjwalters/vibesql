@@ -307,16 +307,54 @@ where
     )?;
 
     // For USING clause joins, remove duplicate columns from the result
-    // (USING clause should only include join columns once, from the left side)
-    if let (Some(using_cols), Some(left_schema), Some(right_schema)) =
-        (using_columns.as_ref(), left_schema_for_using, right_schema_for_using)
+    // (USING clause should only include join columns once as the "primary" column)
+    //
+    // Issue #4781: For RIGHT/FULL OUTER JOINs, the USING column should use COALESCE semantics:
+    // - RIGHT OUTER JOIN: hide left-side USING column (use right as primary, since left may be NULL)
+    // - FULL OUTER JOIN: coalesce left with right value, then hide right (standard behavior)
+    // - LEFT OUTER / INNER: hide right-side USING column (standard behavior)
+    if let (Some(using_cols), Some(ref left_schema), Some(ref right_schema)) =
+        (using_columns.as_ref(), &left_schema_for_using, &right_schema_for_using)
     {
-        result = remove_duplicate_columns_for_using_join(
-            result,
-            &left_schema,
-            &right_schema,
-            using_cols,
-        )?;
+        match join_type {
+            vibesql_ast::JoinType::RightOuter => {
+                // For RIGHT OUTER JOIN: hide LEFT-side USING columns (right side is primary)
+                // This way, unqualified USING column references pick up the right-side value
+                result = remove_duplicate_columns_for_using_join_right_outer(
+                    result,
+                    left_schema,
+                    right_schema,
+                    using_cols,
+                )?;
+            }
+            vibesql_ast::JoinType::FullOuter => {
+                // For FULL OUTER JOIN: hide LEFT-side USING columns (same as RIGHT OUTER)
+                // This ensures the unqualified USING column resolves to the right side,
+                // which preserves the value for "unmatched right" rows (where left is NULL).
+                //
+                // Note: For "unmatched left" rows (where right is NULL), the unqualified
+                // USING column will resolve to the right column which is NULL. This is
+                // a known limitation - true COALESCE semantics would require row-level
+                // evaluation or a virtual column.
+                //
+                // Qualified references (t1.a, t2.a) correctly return original values.
+                result = remove_duplicate_columns_for_using_join_right_outer(
+                    result,
+                    left_schema,
+                    right_schema,
+                    using_cols,
+                )?;
+            }
+            _ => {
+                // For INNER/LEFT OUTER/CROSS: hide right-side USING column (left is primary)
+                result = remove_duplicate_columns_for_using_join(
+                    result,
+                    left_schema,
+                    right_schema,
+                    using_cols,
+                )?;
+            }
+        }
     }
 
     Ok(result)
@@ -355,6 +393,43 @@ fn remove_duplicate_columns_for_using_join(
                 // This is a USING column, mark it as hidden for SELECT * expansion
                 // Position in result = left_col_count + position_in_right_schema
                 let hidden_idx = left_col_count + table_start_idx + col_idx;
+                result.schema.hide_column(hidden_idx);
+
+                // Mark as "joined column" so it won't be considered ambiguous
+                // when referenced without table qualification (issue #4517)
+                result.schema.add_joined_column(&col.name);
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Mark USING columns as hidden for RIGHT OUTER JOIN - hides LEFT-side columns
+///
+/// For RIGHT OUTER JOIN, we hide the LEFT-side USING columns instead of the right-side.
+/// This ensures that unqualified USING column references pick up the right-side value,
+/// which is non-NULL even for unmatched rows (where left columns are NULL).
+///
+/// Issue #4781: USING column coalescing incorrect for RIGHT/FULL JOIN
+fn remove_duplicate_columns_for_using_join_right_outer(
+    mut result: super::FromResult,
+    left_schema: &CombinedSchema,
+    _right_schema: &CombinedSchema,
+    using_columns: &[String],
+) -> Result<super::FromResult, crate::errors::ExecutorError> {
+    // Create a set of USING column names (lowercase for case-insensitive comparison)
+    let using_cols_lower: HashSet<String> =
+        using_columns.iter().map(|c| c.to_lowercase()).collect();
+
+    // Identify which columns from the LEFT side are USING columns to hide
+    // (opposite of standard behavior which hides right-side columns)
+    for (table_start_idx, table_schema) in left_schema.table_schemas.values() {
+        for (col_idx, col) in table_schema.columns.iter().enumerate() {
+            let lowercase = col.name.to_lowercase();
+            if using_cols_lower.contains(&lowercase) {
+                // This is a USING column from the left side, mark it as hidden
+                let hidden_idx = table_start_idx + col_idx;
                 result.schema.hide_column(hidden_idx);
 
                 // Mark as "joined column" so it won't be considered ambiguous

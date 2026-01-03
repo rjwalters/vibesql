@@ -330,16 +330,41 @@ impl CombinedSchema {
             // IMPORTANT: For LEFT JOINs, we must resolve to the LEFTMOST table
             // that has the column. Since HashMap iteration order is non-deterministic,
             // we find ALL matches and pick the one with the lowest start_index.
+            //
+            // Issue #4781: For NATURAL/USING joins, prefer NON-HIDDEN columns.
+            // In RIGHT JOIN USING(a), the left-side `a` is hidden, so we should
+            // pick the right-side `a` (which is not hidden). This ensures
+            // COALESCE semantics where the USING column picks the non-NULL value.
+            let column_lower = column.to_lowercase();
+            let is_joined_column = self.joined_columns.contains(&column_lower);
+
             let mut best_match: Option<usize> = None;
+            let mut best_match_is_hidden = false;
+
             for (start_index, schema) in self.table_schemas.values() {
                 if let Some(idx) = schema.get_column_index(column) {
                     let absolute_idx = start_index + idx;
-                    match best_match {
-                        None => best_match = Some(absolute_idx),
-                        Some(current_best) if absolute_idx < current_best => {
-                            best_match = Some(absolute_idx);
+                    let is_hidden = self.hidden_columns.contains(&absolute_idx);
+
+                    // For joined columns, prefer non-hidden columns
+                    // For regular columns, prefer leftmost (lowest index) as before
+                    let should_update = match (best_match, is_joined_column) {
+                        (None, _) => true,
+                        // For joined columns: prefer non-hidden over hidden
+                        (Some(_), true) if best_match_is_hidden && !is_hidden => true,
+                        // For all columns: prefer lower index if same hidden status
+                        (Some(current_best), _)
+                            if absolute_idx < current_best
+                                && (!is_joined_column || is_hidden == best_match_is_hidden) =>
+                        {
+                            true
                         }
-                        _ => {}
+                        _ => false,
+                    };
+
+                    if should_update {
+                        best_match = Some(absolute_idx);
+                        best_match_is_hidden = is_hidden;
                     }
                 }
             }
