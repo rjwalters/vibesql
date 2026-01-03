@@ -1564,6 +1564,9 @@ array set vibesql_skip_files {
     insert4 "Tests SQLite's internal INSERT transfer optimization (sqlite3_xferopt_count)"
     insert5 "Tests SQLite's internal INSERT from SELECT optimization with xfer count"
     intreal "Tests custom intreal() function registered via sqlite3_create_function"
+    intarray "Tests sqlite3_intarray_create extension API - SQLite-specific"
+    indexedby "Uses INDEXED BY hint syntax which is SQLite-specific"
+    wherelimit "Tests UPDATE/DELETE ... LIMIT syntax which is SQLite-specific"
     where8 "Tests OR optimization via execsql_status2 internal statistics - query results correct"
 }
 
@@ -1671,6 +1674,11 @@ array set vibesql_skip_tests {
     update-21.3 "min/max UPDATE optimization differs from SQLite"
     update-21.4 "min/max UPDATE optimization differs from SQLite"
     update-21.12 "EXPLAIN QUERY PLAN output format is SQLite-specific"
+    func-29.1 "Uses sqlite3_db_status internal SQLite API"
+    func-29.2 "Uses sqlite3_db_status internal SQLite API"
+    func-29.3 "Uses sqlite3_db_status internal SQLite API"
+    func-29.5 "Uses sqlite3_db_status internal SQLite API"
+    func-29.6 "Uses sqlite3_db_status internal SQLite API"
     index-9.2 "Uses TEMP TABLE from ifcapable tempdb block"
     index-12.4 "Uses integrity_check and sqlite_stat1"
     index-12.7 "Uses INDEXED BY hint which is SQLite-specific"
