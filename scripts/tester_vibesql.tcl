@@ -1039,9 +1039,9 @@ proc execsql {sql {db ""}} {
     while {1} {
         set sql_upper [string toupper [string trim $sql]]
 
-        # Check for unsupported PRAGMAs (allow full_column_names and short_column_names through)
+        # Check for unsupported PRAGMAs (allow supported PRAGMAs through)
         if {[string match "PRAGMA*" $sql_upper]} {
-            if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names)} $sql]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check)} [string trim $sql]]} {
                 # This PRAGMA is supported - stop stripping
                 break
             } else {
