@@ -481,15 +481,37 @@ fn generate_natural_join_condition(
     // the leftmost non-NULL value is used for NATURAL JOIN columns.
     // Issue #4753: HashMap iteration order is non-deterministic, so we need to track
     // the absolute index and pick the leftmost occurrence.
-    let mut left_columns: HashMap<String, (String, String, usize, Option<String>)> = HashMap::new();
+    //
+    // Issue #4798: For NATURAL RIGHT/FULL JOIN, the left-side columns are hidden and the
+    // right-side columns contain the correct COALESCED values. We must prefer NON-HIDDEN
+    // columns when there are multiple matches. This ensures the join condition uses
+    // the correct column value.
+    let mut left_columns: HashMap<String, (String, String, usize, Option<String>, bool)> =
+        HashMap::new();
     for (table_name, (table_start_idx, table_schema)) in &left_schema.table_schemas {
         for (col_offset, col) in table_schema.columns.iter().enumerate() {
             let lowercase_name = col.name.to_lowercase();
             let absolute_idx = table_start_idx + col_offset;
-            // Only keep the leftmost occurrence (lowest absolute_idx)
-            if !left_columns.contains_key(&lowercase_name)
-                || absolute_idx < left_columns.get(&lowercase_name).unwrap().2
-            {
+            let is_hidden = left_schema.hidden_columns.contains(&absolute_idx);
+
+            // Prefer non-hidden columns over hidden ones (issue #4798)
+            // Among columns with the same hidden status, prefer leftmost (lowest index)
+            let should_update = match left_columns.get(&lowercase_name) {
+                None => true,
+                Some((_, _, best_idx, _, best_is_hidden)) => {
+                    // Prefer non-hidden over hidden
+                    if *best_is_hidden && !is_hidden {
+                        true
+                    } else if !*best_is_hidden && is_hidden {
+                        false
+                    } else {
+                        // Same hidden status: prefer leftmost
+                        absolute_idx < *best_idx
+                    }
+                }
+            };
+
+            if should_update {
                 left_columns.insert(
                     lowercase_name,
                     (
@@ -497,6 +519,7 @@ fn generate_natural_join_condition(
                         col.name.clone(),
                         absolute_idx,
                         col.collation.clone(),
+                        is_hidden,
                     ),
                 );
             }
@@ -512,7 +535,7 @@ fn generate_natural_join_condition(
     for (table_name, (table_idx, table_schema)) in &right_schema.table_schemas {
         for col in &table_schema.columns {
             let lowercase_name = col.name.to_lowercase();
-            if let Some((left_table, left_col, _absolute_idx, left_collation)) =
+            if let Some((left_table, left_col, _absolute_idx, left_collation, _is_hidden)) =
                 left_columns.get(&lowercase_name)
             {
                 // Found a common column - only use the leftmost occurrence from left schema
@@ -1540,32 +1563,56 @@ fn generate_using_join_condition(
         // the leftmost non-NULL value is used for USING columns.
         // Issue #4753: HashMap iteration order is non-deterministic, so using find_map()
         // could pick t2.a (NULL from LEFT JOIN) instead of t1.a (actual value).
+        //
+        // Issue #4798: For RIGHT/FULL JOIN USING, the left-side columns are hidden and the
+        // right-side columns contain the correct COALESCED values. We must prefer NON-HIDDEN
+        // columns when there are multiple matches. This ensures the join condition uses
+        // the correct column value (e.g., t4.a = 19 instead of t1.a = NULL for the a=19 row).
         let left_col = {
             let mut best_match: Option<(
                 vibesql_catalog::TableIdentifier,
                 String,
                 usize,
                 Option<String>,
+                bool, // is_hidden
             )> = None;
             for (table_name, (start_idx, table_schema)) in &left_schema.table_schemas {
                 for (col_offset, col) in table_schema.columns.iter().enumerate() {
                     if col.name.to_lowercase() == col_lower {
                         let absolute_idx = start_idx + col_offset;
-                        // Pick the column with the lowest absolute index (leftmost table)
-                        if best_match.is_none()
-                            || absolute_idx < best_match.as_ref().unwrap().2
-                        {
+                        let is_hidden = left_schema.hidden_columns.contains(&absolute_idx);
+
+                        // Prefer non-hidden columns over hidden ones (issue #4798)
+                        // Among columns with the same hidden status, prefer leftmost (lowest index)
+                        let should_update = match &best_match {
+                            None => true,
+                            Some((_, _, _, _, best_is_hidden)) => {
+                                // Prefer non-hidden over hidden
+                                if *best_is_hidden && !is_hidden {
+                                    true
+                                } else if !*best_is_hidden && is_hidden {
+                                    false
+                                } else {
+                                    // Same hidden status: prefer leftmost
+                                    absolute_idx < best_match.as_ref().unwrap().2
+                                }
+                            }
+                        };
+
+                        if should_update {
                             best_match = Some((
                                 table_name.clone(),
                                 col.name.clone(),
                                 absolute_idx,
                                 col.collation.clone(),
+                                is_hidden,
                             ));
                         }
                     }
                 }
             }
-            best_match
+            // Convert to the expected type (drop the is_hidden field)
+            best_match.map(|(table, col, idx, collation, _)| (table, col, idx, collation))
         }
         .ok_or_else(|| ExecutorError::JoinUsingColumnNotPresent {
             column_name: col_name.to_string(),

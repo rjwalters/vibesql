@@ -97,3 +97,74 @@ DROP TABLE t1
 
 statement ok
 DROP TABLE t2
+
+# Issue #4798: RIGHT JOIN followed by INNER JOIN incorrectly filters rows
+# When a RIGHT JOIN is followed by an INNER JOIN on the same USING column,
+# rows preserved by the RIGHT JOIN should not be filtered out.
+statement ok
+CREATE TABLE rj_t1(a INT, b INT, c INT)
+
+statement ok
+CREATE TABLE rj_t2(a INT, b INT, d INT)
+
+statement ok
+CREATE TABLE rj_t3(a INT, b INT, e INT)
+
+statement ok
+CREATE TABLE rj_t4(a INT, b INT, f INT)
+
+statement ok
+CREATE TABLE rj_t5(a INT, b INT, g INT)
+
+statement ok
+INSERT INTO rj_t1 VALUES(15,25,35)
+
+statement ok
+INSERT INTO rj_t2 VALUES(15,25,35)
+
+statement ok
+INSERT INTO rj_t3 VALUES(15,25,35)
+
+statement ok
+INSERT INTO rj_t4 VALUES(15,25,35),(19,29,39)
+
+statement ok
+INSERT INTO rj_t5 VALUES(15,25,35),(19,29,39)
+
+# After RIGHT JOIN t4 USING(a), the result should have rows with a=15 and a=19.
+# The subsequent INNER JOIN t5 USING(a) should match both rows since t5 has both values.
+# Expected: 2 rows (a=15 and a=19)
+query III rowsort
+SELECT a, rj_t4.a, rj_t5.a FROM rj_t1 INNER JOIN rj_t2 USING(a) INNER JOIN rj_t3 USING(a) RIGHT JOIN rj_t4 USING(a) INNER JOIN rj_t5 USING(a)
+----
+15 15 15
+19 19 19
+
+# Also test that NULL values from the RIGHT JOIN are preserved correctly
+query IIIII rowsort
+SELECT a, rj_t1.a, rj_t2.a, rj_t4.a, rj_t5.a FROM rj_t1 INNER JOIN rj_t2 USING(a) RIGHT JOIN rj_t4 USING(a) INNER JOIN rj_t5 USING(a)
+----
+15 15 15 15 15
+19 NULL NULL 19 19
+
+# Test NATURAL RIGHT JOIN followed by INNER JOIN
+query I rowsort
+SELECT a FROM rj_t1 NATURAL RIGHT JOIN rj_t4 INNER JOIN rj_t5 USING(a)
+----
+15
+19
+
+statement ok
+DROP TABLE rj_t1
+
+statement ok
+DROP TABLE rj_t2
+
+statement ok
+DROP TABLE rj_t3
+
+statement ok
+DROP TABLE rj_t4
+
+statement ok
+DROP TABLE rj_t5
