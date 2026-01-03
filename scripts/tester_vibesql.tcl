@@ -2143,13 +2143,6 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses EXPLAIN on DDL (not supported)"]
     }
 
-    # CREATE/DROP TRIGGER - triggers not fully supported
-    if {[regexp -nocase {CREATE\s+TRIGGER\s} $script]} {
-        return [list 1 "uses CREATE TRIGGER (not supported)"]
-    }
-    if {[regexp -nocase {DROP\s+TRIGGER\s} $script]} {
-        return [list 1 "uses DROP TRIGGER (not supported)"]
-    }
 
     # UPDATE/INSERT OR REPLACE/IGNORE/ABORT conflict resolution - not fully supported
     if {[regexp -nocase {(?:UPDATE|INSERT)\s+OR\s+(?:REPLACE|IGNORE|ABORT|ROLLBACK|FAIL)\s} $script]} {
