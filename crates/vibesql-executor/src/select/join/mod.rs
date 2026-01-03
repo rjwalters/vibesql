@@ -1222,16 +1222,37 @@ pub(super) fn nested_loop_join(
     }?;
 
     // For NATURAL JOIN or USING clause, remove duplicate columns from the result
+    // For RIGHT/FULL OUTER JOINs, also coalesce common column values so unmatched rows
+    // use the right side's value for the common/USING column (issue #4781)
     if natural {
         if let (Some(ref left_schema), Some(ref right_schema)) =
-            (left_schema_for_dedup, right_schema_for_dedup)
+            (&left_schema_for_dedup, &right_schema_for_dedup)
         {
+            // For RIGHT/FULL OUTER JOIN, coalesce common columns before hiding duplicates
+            if matches!(
+                join_type,
+                vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter
+            ) {
+                coalesce_common_columns_for_outer_join(&mut result, left_schema, right_schema);
+            }
             result = remove_duplicate_columns_for_natural_join(result, left_schema, right_schema)?;
         }
     } else if let Some(using_cols) = using_columns {
         if let (Some(ref left_schema), Some(ref right_schema)) =
-            (left_schema_for_dedup, right_schema_for_dedup)
+            (&left_schema_for_dedup, &right_schema_for_dedup)
         {
+            // For RIGHT/FULL OUTER JOIN, coalesce USING columns before hiding duplicates
+            if matches!(
+                join_type,
+                vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter
+            ) {
+                coalesce_using_columns_for_outer_join(
+                    &mut result,
+                    left_schema,
+                    right_schema,
+                    using_cols,
+                );
+            }
             result = remove_duplicate_columns_for_using_join(
                 result,
                 left_schema,
@@ -1256,7 +1277,6 @@ pub(super) fn nested_loop_join(
 /// - FULL OUTER JOIN: COALESCE(left, right) is used for both unmatched cases
 ///
 /// This function updates left column values to COALESCE(left, right) for common columns.
-#[allow(dead_code)]
 fn coalesce_common_columns_for_outer_join(
     result: &mut FromResult,
     left_schema: &CombinedSchema,
@@ -1278,6 +1298,74 @@ fn coalesce_common_columns_for_outer_join(
     }
 
     // Build pairs of (left_idx, right_idx) for common columns
+    let left_col_count = left_schema.total_columns;
+    let mut coalesce_pairs: Vec<(usize, usize)> = Vec::new();
+
+    for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
+        for (col_idx, col) in table_schema.columns.iter().enumerate() {
+            let lowercase = col.name.to_lowercase();
+            if let Some(left_indices) = left_column_map.get(&lowercase) {
+                let right_idx = left_col_count + table_start_idx + col_idx;
+                // For each left column with this name, create a coalesce pair
+                for &left_idx in left_indices {
+                    coalesce_pairs.push((left_idx, right_idx));
+                }
+            }
+        }
+    }
+
+    // Apply COALESCE to each row: if left value is NULL, use right value
+    if !coalesce_pairs.is_empty() {
+        let rows = result.rows_mut();
+        for row in rows {
+            for &(left_idx, right_idx) in &coalesce_pairs {
+                if row.values[left_idx] == vibesql_types::SqlValue::Null {
+                    row.values[left_idx] = row.values[right_idx].clone();
+                }
+            }
+        }
+    }
+}
+
+/// Coalesce USING column values for RIGHT/FULL OUTER JOIN
+///
+/// For RIGHT JOIN and FULL JOIN with USING clause, when a left row is NULL (unmatched),
+/// the USING column value should come from the right side, not the left.
+///
+/// SQL standard semantics: USING clause columns use COALESCE(left.col, right.col)
+/// - INNER JOIN: values are equal, doesn't matter
+/// - LEFT OUTER JOIN: unmatched rows have right=NULL, so left value is used (no change needed)
+/// - RIGHT OUTER JOIN: unmatched rows have left=NULL, so right value should be used
+/// - FULL OUTER JOIN: COALESCE(left, right) is used for both unmatched cases
+///
+/// This function updates left column values to COALESCE(left, right) for USING columns only.
+fn coalesce_using_columns_for_outer_join(
+    result: &mut FromResult,
+    left_schema: &CombinedSchema,
+    right_schema: &CombinedSchema,
+    using_cols: &[String],
+) {
+    use std::collections::{HashMap, HashSet};
+
+    // Create a set of USING column names (lowercase for case-insensitive comparison)
+    let using_cols_lower: HashSet<String> = using_cols.iter().map(|c| c.to_lowercase()).collect();
+
+    // Build a map: lowercase column name -> list of left column indices
+    // Only include columns that are in the USING list
+    let mut left_column_map: HashMap<String, Vec<usize>> = HashMap::new();
+    for (table_start_idx, table_schema) in left_schema.table_schemas.values() {
+        for (col_idx, col) in table_schema.columns.iter().enumerate() {
+            let lowercase = col.name.to_lowercase();
+            if using_cols_lower.contains(&lowercase) {
+                left_column_map
+                    .entry(lowercase)
+                    .or_default()
+                    .push(table_start_idx + col_idx);
+            }
+        }
+    }
+
+    // Build pairs of (left_idx, right_idx) for USING columns
     let left_col_count = left_schema.total_columns;
     let mut coalesce_pairs: Vec<(usize, usize)> = Vec::new();
 
