@@ -34,7 +34,13 @@ impl CombinedExpressionEvaluator<'_> {
                     }
                 }
 
-                // Column not found - treat as NONE affinity
+                // Column not found - check if it's a rowid pseudo-column
+                // ROWID, _rowid_, and oid have INTEGER affinity
+                let column_lower = column.to_lowercase();
+                if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
+                    return Some(TypeAffinity::Integer);
+                }
+                // Otherwise treat as NONE affinity
                 Some(TypeAffinity::None)
             }
             // For COLLATE expressions, get affinity of the inner expression
@@ -141,7 +147,9 @@ impl CombinedExpressionEvaluator<'_> {
     /// When comparing a TEXT-affinity column to an INTEGER literal, SQLite:
     /// 1. Converts the INTEGER to TEXT
     /// 2. Performs string comparison
-    pub(super) fn apply_affinity_for_comparison(
+    ///
+    /// This method is public for use in GROUP BY expression evaluation.
+    pub fn apply_affinity_for_comparison(
         &self,
         left_expr: &vibesql_ast::Expression,
         left_val: SqlValue,

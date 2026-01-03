@@ -71,6 +71,22 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
+        // Coerce PK values to match column data types (SQLite type affinity)
+        // This handles cases like WHERE i='12' where i is INTEGER PRIMARY KEY
+        // The literal '12' must be coerced to Integer(12) for the index lookup
+        let pk_key: Vec<SqlValue> = pk_key
+            .into_iter()
+            .zip(pk_column_names.iter())
+            .map(|(val, col_name)| {
+                if let Some(col_idx) = table.schema.get_column_index(col_name) {
+                    let col_type = &table.schema.columns[col_idx].data_type;
+                    coerce_value_to_column_type(val, col_type)
+                } else {
+                    val
+                }
+            })
+            .collect();
+
         // Direct PK lookup - O(log n)
         let row = if pk_key.len() == 1 {
             self.database
@@ -263,5 +279,57 @@ impl SelectExecutor<'_> {
 
         let projected = self.apply_projection_fast(&stmt.select_list, vec![row], &schema)?;
         Ok(Some(projected))
+    }
+}
+
+/// Coerce a value to match the expected column data type for index lookup.
+///
+/// This implements SQLite type affinity coercion for WHERE clause values.
+/// When a literal value in the WHERE clause doesn't match the column type,
+/// we coerce it to enable proper index lookup.
+///
+/// Examples:
+/// - WHERE i='12' on INTEGER column should coerce '12' to Integer(12)
+/// - WHERE s=123 on TEXT column should coerce 123 to Varchar("123")
+fn coerce_value_to_column_type(val: SqlValue, col_type: &vibesql_types::DataType) -> SqlValue {
+    use vibesql_types::TypeAffinity;
+
+    let col_affinity = col_type.sqlite_affinity();
+
+    match (col_affinity, &val) {
+        // INTEGER/NUMERIC affinity column with string value: try to parse as number
+        (
+            TypeAffinity::Integer | TypeAffinity::Numeric,
+            SqlValue::Varchar(s) | SqlValue::Character(s),
+        ) => {
+            if let Ok(i) = s.parse::<i64>() {
+                return SqlValue::Integer(i);
+            }
+            if let Ok(f) = s.parse::<f64>() {
+                return SqlValue::Double(f);
+            }
+            val
+        }
+        // REAL affinity column with string value: try to parse as float
+        (TypeAffinity::Real, SqlValue::Varchar(s) | SqlValue::Character(s)) => {
+            if let Ok(f) = s.parse::<f64>() {
+                return SqlValue::Double(f);
+            }
+            val
+        }
+        // TEXT affinity column with numeric value: convert to string
+        (TypeAffinity::Text, SqlValue::Integer(i)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(i.to_string()))
+        }
+        (TypeAffinity::Text, SqlValue::Double(f)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(f.to_string()))
+        }
+        (TypeAffinity::Text, SqlValue::Float(f)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(f.to_string()))
+        }
+        (TypeAffinity::Text, SqlValue::Real(f)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(f.to_string()))
+        }
+        _ => val,
     }
 }

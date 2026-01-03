@@ -41,7 +41,11 @@ impl Catalog {
         for col in &index.columns {
             // Only validate column existence for non-expression index columns
             if let Some(column_name) = col.column_name() {
-                if !table.columns.iter().any(|c| c.name == column_name) {
+                // Use case-insensitive column comparison (SQLite behavior)
+                // Column names from parser may be uppercase (keywords like TYPE)
+                // while stored column names preserve original case from CREATE TABLE
+                let column_name_lower = column_name.to_lowercase();
+                if !table.columns.iter().any(|c| c.name.to_lowercase() == column_name_lower) {
                     return Err(CatalogError::ColumnNotFound {
                         column_name: column_name.to_string(),
                         table_name: index.table_name.clone(),

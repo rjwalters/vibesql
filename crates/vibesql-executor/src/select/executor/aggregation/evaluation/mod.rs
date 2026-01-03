@@ -449,6 +449,11 @@ impl SelectExecutor<'_> {
                     evaluator,
                     grouping_context,
                 )?;
+                // Apply SQLite type affinity rules before comparison.
+                // This ensures TEXT columns compared to INTEGER columns use
+                // affinity-based coercion rather than strict type ordering.
+                let (left_val, right_val) =
+                    evaluator.apply_affinity_for_comparison(left, left_val, right, right_val);
                 crate::evaluator::ExpressionEvaluator::eval_binary_op_static(
                     &left_val,
                     op,

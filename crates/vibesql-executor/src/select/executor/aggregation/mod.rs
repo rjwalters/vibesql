@@ -688,7 +688,16 @@ impl SelectExecutor<'_> {
             match item {
                 vibesql_ast::SelectItem::Wildcard { .. } => {
                     // Expand SELECT * to all columns from all tables in the schema
-                    for (table_name, (_start_idx, table_schema)) in &schema.table_schemas {
+                    // IMPORTANT: Sort by start_idx to preserve left-to-right join order
+                    // (HashMap iteration order is non-deterministic)
+                    let mut tables: Vec<_> = schema
+                        .table_schemas
+                        .iter()
+                        .map(|(name, (idx, schema))| (*idx, name, schema))
+                        .collect();
+                    tables.sort_by_key(|(idx, _, _)| *idx);
+
+                    for (_start_idx, table_name, table_schema) in tables {
                         for column in &table_schema.columns {
                             // Create a column reference expression for each column
                             let column_expr = if schema.table_schemas.len() > 1 {

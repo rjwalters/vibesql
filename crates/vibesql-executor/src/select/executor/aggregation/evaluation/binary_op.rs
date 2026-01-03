@@ -1,10 +1,7 @@
 //! Binary and unary operator evaluation in aggregate context
 
 use super::super::super::builder::SelectExecutor;
-use crate::{
-    errors::ExecutorError,
-    evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator},
-};
+use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 
 /// Evaluate binary operations in aggregate context
 pub(super) fn evaluate_binary(
@@ -19,10 +16,16 @@ pub(super) fn evaluate_binary(
     let left_val = executor.evaluate_with_aggregates(left, group_rows, group_key, evaluator)?;
     let right_val = executor.evaluate_with_aggregates(right, group_rows, group_key, evaluator)?;
 
-    // Reuse the binary op evaluation logic from ExpressionEvaluator
-    let temp_schema = vibesql_catalog::TableSchema::new("temp".to_string(), vec![]);
-    let temp_evaluator = ExpressionEvaluator::with_database(&temp_schema, executor.database);
-    temp_evaluator.eval_binary_op(&left_val, op, &right_val)
+    // Apply SQLite type affinity rules before comparison.
+    // The evaluator has the correct schema to determine column affinities.
+    // Without this, TEXT columns compared to INTEGER columns would use strict
+    // type ordering instead of affinity-based coercion.
+    let (left_val, right_val) =
+        evaluator.apply_affinity_for_comparison(left, left_val, right, right_val);
+
+    // Use the static binary op evaluation
+    let sql_mode = executor.database.sql_mode();
+    crate::evaluator::ExpressionEvaluator::eval_binary_op_static(&left_val, op, &right_val, sql_mode)
 }
 
 /// Evaluate unary operations in aggregate context
