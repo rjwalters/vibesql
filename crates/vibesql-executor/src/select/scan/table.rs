@@ -792,6 +792,18 @@ fn try_primary_key_lookup(
         None => return Ok(None), // Cannot extract all PK values
     };
 
+    // Coerce PK values to match column data types (SQLite type affinity)
+    // This handles cases like WHERE i='12' where i is INTEGER PRIMARY KEY
+    // The literal '12' must be coerced to Integer(12) for the index lookup
+    let pk_values: Vec<vibesql_types::SqlValue> = pk_values
+        .into_iter()
+        .zip(pk_indices.iter())
+        .map(|(val, &idx)| {
+            let col_type = &table.schema.columns[idx].data_type;
+            coerce_value_to_column_type(val.clone(), col_type)
+        })
+        .collect();
+
     // Get primary key index
     let pk_index = match table.primary_key_index() {
         Some(idx) => idx,
@@ -805,7 +817,8 @@ fn try_primary_key_lookup(
     let schema = CombinedSchema::from_table(effective_name, table_schema);
 
     // Perform O(1) lookup in primary key index
-    let rows = match pk_index.get(&pk_values) {
+    let lookup_result = pk_index.get(&pk_values);
+    let rows = match lookup_result {
         Some(&row_idx) => {
             // Found the row via PK index - but we must still apply the FULL WHERE clause
             // in case there are additional predicates beyond the PK columns.
@@ -824,10 +837,21 @@ fn try_primary_key_lookup(
                         cte_results,
                     )
                 };
-                match evaluator.eval(where_expr, row) {
-                    Ok(vibesql_types::SqlValue::Boolean(true)) => vec![row.clone()],
-                    Ok(_) => vec![], // Row doesn't match full WHERE clause (false or NULL)
-                    Err(_) => vec![], // Evaluation error - treat as no match
+                let eval_result = evaluator.eval(where_expr, row);
+                match eval_result {
+                    Ok(vibesql_types::SqlValue::Boolean(true)) => {
+                        vec![row.clone()]
+                    }
+                    Ok(vibesql_types::SqlValue::Integer(i)) if i != 0 => {
+                        // SQLite compatibility: treat non-zero integer as true
+                        vec![row.clone()]
+                    }
+                    Ok(_) => {
+                        vec![]
+                    }
+                    Err(_) => {
+                        vec![]
+                    }
                 }
             } else {
                 vec![] // Row is deleted or index invalid
@@ -835,8 +859,9 @@ fn try_primary_key_lookup(
         }
         None => vec![], // No matching row
     };
-
-    Ok(Some(super::FromResult::from_rows(schema, rows)))
+    // Use from_rows_where_filtered because we already evaluated the WHERE clause
+    // when filtering the PK-matched row. This prevents double-filtering in fast path.
+    Ok(Some(super::FromResult::from_rows_where_filtered(schema, rows, None)))
 }
 
 /// Extract primary key values from WHERE clause
@@ -905,6 +930,59 @@ fn collect_equality_predicates_recursive(
         }
         // Other expressions are not useful for PK lookup
         _ => {}
+    }
+}
+
+/// Coerce a value to match a column's data type using SQLite affinity rules.
+///
+/// This is used for PRIMARY KEY lookups where the literal value in the WHERE clause
+/// may have a different type than the column. For example:
+/// - WHERE i='12' on INTEGER column should coerce '12' to Integer(12)
+/// - WHERE s=123 on TEXT column should coerce 123 to Varchar("123")
+fn coerce_value_to_column_type(
+    val: vibesql_types::SqlValue,
+    col_type: &vibesql_types::DataType,
+) -> vibesql_types::SqlValue {
+    use vibesql_types::{SqlValue, TypeAffinity};
+
+    let col_affinity = col_type.sqlite_affinity();
+
+    match (col_affinity, &val) {
+        // INTEGER/NUMERIC affinity column with string value: try to parse as number
+        (TypeAffinity::Integer | TypeAffinity::Numeric, SqlValue::Varchar(s) | SqlValue::Character(s)) => {
+            // Try to parse as integer first
+            if let Ok(i) = s.parse::<i64>() {
+                return SqlValue::Integer(i);
+            }
+            // Try to parse as float
+            if let Ok(f) = s.parse::<f64>() {
+                return SqlValue::Double(f);
+            }
+            // Can't convert - keep original (will fail lookup, which is correct)
+            val
+        }
+        // REAL affinity column with string value: try to parse as float
+        (TypeAffinity::Real, SqlValue::Varchar(s) | SqlValue::Character(s)) => {
+            if let Ok(f) = s.parse::<f64>() {
+                return SqlValue::Double(f);
+            }
+            val
+        }
+        // TEXT affinity column with numeric value: convert to string
+        (TypeAffinity::Text, SqlValue::Integer(i)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(i.to_string()))
+        }
+        (TypeAffinity::Text, SqlValue::Double(f)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(f.to_string()))
+        }
+        (TypeAffinity::Text, SqlValue::Float(f)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(f.to_string()))
+        }
+        (TypeAffinity::Text, SqlValue::Real(f)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(f.to_string()))
+        }
+        // No conversion needed
+        _ => val,
     }
 }
 
