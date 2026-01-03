@@ -283,3 +283,114 @@ fn test_create_temp_view_if_not_exists() {
         panic!("Expected CreateView statement");
     }
 }
+
+// ============================================================================
+// VALUES clause as view source (Issue #4799)
+// ============================================================================
+
+#[test]
+fn test_create_view_with_values_single_row() {
+    // Classic Oracle-style dual view
+    let sql = "CREATE VIEW dual(dummy) AS VALUES('x')";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
+        assert_eq!(stmt.view_name, "dual");
+        assert!(stmt.columns.is_some());
+        let cols = stmt.columns.unwrap();
+        assert_eq!(cols.len(), 1);
+        assert_eq!(cols[0], "dummy");
+        // Query should have values
+        assert!(stmt.query.values.is_some());
+        let values = stmt.query.values.as_ref().unwrap();
+        assert_eq!(values.len(), 1); // Single row
+        assert_eq!(values[0].len(), 1); // Single column
+    } else {
+        panic!("Expected CreateView statement");
+    }
+}
+
+#[test]
+fn test_create_view_with_values_multiple_rows() {
+    // View with multiple rows
+    let sql = "CREATE VIEW numbers(n) AS VALUES(1),(2),(3)";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
+        assert_eq!(stmt.view_name, "numbers");
+        assert!(stmt.query.values.is_some());
+        let values = stmt.query.values.as_ref().unwrap();
+        assert_eq!(values.len(), 3); // Three rows
+    } else {
+        panic!("Expected CreateView statement");
+    }
+}
+
+#[test]
+fn test_create_view_with_values_multiple_columns() {
+    // View with multiple columns
+    let sql = "CREATE VIEW pairs(a, b) AS VALUES(1, 'one'),(2, 'two')";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
+        assert_eq!(stmt.view_name, "pairs");
+        assert!(stmt.columns.is_some());
+        let cols = stmt.columns.unwrap();
+        assert_eq!(cols.len(), 2);
+        assert!(stmt.query.values.is_some());
+        let values = stmt.query.values.as_ref().unwrap();
+        assert_eq!(values.len(), 2); // Two rows
+        assert_eq!(values[0].len(), 2); // Two columns per row
+    } else {
+        panic!("Expected CreateView statement");
+    }
+}
+
+#[test]
+fn test_create_temp_view_with_values() {
+    let sql = "CREATE TEMP VIEW constants(name, value) AS VALUES('PI', 3.14159),('E', 2.71828)";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
+        assert_eq!(stmt.view_name, "constants");
+        assert!(stmt.temporary);
+        assert!(stmt.query.values.is_some());
+    } else {
+        panic!("Expected CreateView statement");
+    }
+}
+
+#[test]
+fn test_create_view_if_not_exists_with_values() {
+    let sql = "CREATE VIEW IF NOT EXISTS singleton(x) AS VALUES(42)";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
+        assert_eq!(stmt.view_name, "singleton");
+        assert!(stmt.if_not_exists);
+        assert!(stmt.query.values.is_some());
+    } else {
+        panic!("Expected CreateView statement");
+    }
+}
+
+#[test]
+fn test_create_view_values_without_column_list() {
+    // Column names should be derived from VALUES expression positions
+    let sql = "CREATE VIEW data AS VALUES(1, 2, 3)";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
+        assert_eq!(stmt.view_name, "data");
+        assert!(stmt.columns.is_none()); // No explicit column list
+        assert!(stmt.query.values.is_some());
+    } else {
+        panic!("Expected CreateView statement");
+    }
+}

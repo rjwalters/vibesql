@@ -201,6 +201,85 @@ impl<'arena> ArenaParser<'arena> {
         Ok(self.arena.alloc(stmt))
     }
 
+    /// Parse a VALUES statement (standalone or as part of a view definition).
+    ///
+    /// Syntax: VALUES(expr, ...) [, (expr, ...), ...] [ORDER BY] [LIMIT] [OFFSET]
+    ///
+    /// Used for:
+    /// - Standalone VALUES statements: VALUES(1);
+    /// - View definitions: CREATE VIEW dual AS VALUES('x');
+    /// - CTEs: WITH t AS (VALUES(1)) SELECT * FROM t;
+    pub(crate) fn parse_values_statement(
+        &mut self,
+    ) -> Result<&'arena SelectStmt<'arena>, ParseError> {
+        self.consume_keyword(Keyword::Values)?;
+
+        // Parse VALUES rows: (row1), (row2), ...
+        let mut rows = BumpVec::new_in(self.arena);
+        loop {
+            self.expect_token(Token::LParen)?;
+            let row = self.parse_expression_list()?;
+            self.expect_token(Token::RParen)?;
+            rows.push(row);
+
+            if !self.try_consume(&Token::Comma) {
+                break;
+            }
+        }
+
+        // Parse set operations (UNION, INTERSECT, EXCEPT)
+        let set_operation = self.parse_set_operation_internal()?;
+
+        // Parse ORDER BY
+        let order_by = if self.try_consume_keyword(Keyword::Order) {
+            self.consume_keyword(Keyword::By)?;
+            Some(self.parse_order_by_clause()?)
+        } else {
+            None
+        };
+
+        // Parse LIMIT (supports comma syntax: LIMIT offset,count)
+        let (limit, offset_from_limit) = if self.try_consume_keyword(Keyword::Limit) {
+            let first_expr = self.parse_expression()?;
+            if self.try_consume(&Token::Comma) {
+                let second_expr = self.parse_expression()?;
+                (Some(second_expr), Some(first_expr))
+            } else {
+                (Some(first_expr), None)
+            }
+        } else {
+            (None, None)
+        };
+
+        // Parse OFFSET (only if not already set via comma syntax)
+        let offset = if offset_from_limit.is_some() {
+            offset_from_limit
+        } else if self.try_consume_keyword(Keyword::Offset) {
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
+        let stmt = SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: BumpVec::new_in(self.arena),
+            into_table: None,
+            into_variables: None,
+            from: None,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order_by,
+            limit,
+            offset,
+            set_operation,
+            values: Some(rows),
+        };
+
+        Ok(self.arena.alloc(stmt))
+    }
+
     /// Parse WITH clause (CTEs).
     ///
     /// If `recursive` is true, all CTEs in this list are marked as recursive.
@@ -307,7 +386,8 @@ impl<'arena> ArenaParser<'arena> {
 
         // Check for qualified wildcard (table.* or alias.*)
         // Must check BEFORE parsing as expression to avoid losing the qualifier.
-        // The expression parser would parse "table.*" as Expression::Wildcard, losing the table name.
+        // The expression parser would parse "table.*" as Expression::Wildcard, losing the table
+        // name.
         let saved_position = self.position;
         if let Token::Identifier(qualifier) | Token::DelimitedIdentifier(qualifier) = self.peek() {
             let qualifier = qualifier.clone();

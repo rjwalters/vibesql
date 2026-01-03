@@ -6,12 +6,21 @@ impl Parser {
         self.parse_select_statement_internal(true, true)
     }
 
-    /// Parse SELECT statement when embedded in another statement (cursor, view, etc.)
-    /// This allows tokens after SELECT that belong to the outer statement.
+    /// Parse SELECT or VALUES statement when embedded in another statement (cursor, view, etc.)
+    /// This allows tokens after SELECT/VALUES that belong to the outer statement.
+    ///
+    /// Supports:
+    /// - SELECT ... (standard select statement)
+    /// - VALUES(expr, ...) [, ...] (table value constructor, e.g., CREATE VIEW dual AS VALUES('x'))
     pub(crate) fn parse_embedded_select_statement(
         &mut self,
     ) -> Result<vibesql_ast::SelectStmt, ParseError> {
-        self.parse_select_statement_internal(true, false)
+        if self.peek_keyword(Keyword::Values) {
+            // Handle VALUES clause as view source (e.g., CREATE VIEW dual(dummy) AS VALUES('x'))
+            self.parse_values_statement_internal(true, false)
+        } else {
+            self.parse_select_statement_internal(true, false)
+        }
     }
 
     /// Internal SELECT parser with control over ORDER BY/LIMIT parsing
@@ -271,7 +280,8 @@ impl Parser {
 
         // Parse LIMIT clause
         // SQLite allows expressions in LIMIT (e.g., LIMIT 5+3)
-        // SQLite also allows comma syntax: LIMIT offset,count (equivalent to LIMIT count OFFSET offset)
+        // SQLite also allows comma syntax: LIMIT offset,count (equivalent to LIMIT count OFFSET
+        // offset)
         let (limit, offset_from_limit) = if allow_order_limit && self.peek_keyword(Keyword::Limit) {
             self.consume_keyword(Keyword::Limit)?;
             let first_expr = self.parse_expression()?;
