@@ -9,7 +9,7 @@ import './styles/main.css';
 import { initTheme } from './theme';
 import { initLocale } from './locale';
 import { NavigationComponent } from './components/Navigation';
-import { initI18n, updateDOM } from './i18n';
+import { initI18n, updateDOM, setI18nLocale, onI18nChange } from './i18n';
 
 // Chart.js is loaded via CDN in challenge.html
 declare const Chart: any;
@@ -277,6 +277,17 @@ async function init(): Promise<void> {
   // Initialize i18n
   initI18n(locale.current);
   updateDOM();
+
+  // Update i18n when locale changes
+  locale.onChange((newLocale) => {
+    setI18nLocale(newLocale);
+    updateDOM();
+  });
+
+  // Re-render DOM when i18n changes (for components that use t() directly)
+  onI18nChange(() => {
+    updateDOM();
+  });
 
   // Initialize navigation
   new NavigationComponent('challenge', theme, locale);
