@@ -113,9 +113,26 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
             write_bool(writer, metadata.unique)?;
 
             // Write indexed columns
+            // Format (v6+): type_byte, content_string, direction_byte
+            // type_byte: 0 = column reference, 1 = expression
             write_u32(writer, metadata.columns.len() as u32)?;
             for col in &metadata.columns {
-                write_string(writer, col.expect_column_name())?;
+                use vibesql_ast::IndexColumn;
+                match col {
+                    IndexColumn::Column { column_name, .. } => {
+                        // Type 0 = column reference
+                        writer.write_all(&[0u8])
+                            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                        write_string(writer, column_name)?;
+                    }
+                    IndexColumn::Expression { expr, .. } => {
+                        // Type 1 = expression (stored as SQL text)
+                        writer.write_all(&[1u8])
+                            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                        use vibesql_ast::pretty_print::ToSql;
+                        write_string(writer, &expr.to_sql())?;
+                    }
+                }
                 // Write direction as u8 (0 = Asc, 1 = Desc)
                 let direction = match col.direction() {
                     vibesql_ast::OrderDirection::Asc => 0u8,
@@ -379,24 +396,73 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
         let mut columns = Vec::new();
 
         for _ in 0..column_count {
-            let column_name = read_string(reader)?;
-            let direction_byte = read_u8(reader)?;
-            let direction = match direction_byte {
-                0 => vibesql_ast::OrderDirection::Asc,
-                1 => vibesql_ast::OrderDirection::Desc,
-                _ => {
-                    return Err(StorageError::NotImplemented(format!(
-                        "Invalid sort direction: {}",
-                        direction_byte
-                    )))
+            // Version 6+ stores index column type (0 = column, 1 = expression)
+            // Version 1-5 stored only column names (no type byte)
+            let index_column = if version >= 6 {
+                let type_byte = read_u8(reader)?;
+                let content = read_string(reader)?;
+                let direction_byte = read_u8(reader)?;
+                let direction = match direction_byte {
+                    0 => vibesql_ast::OrderDirection::Asc,
+                    1 => vibesql_ast::OrderDirection::Desc,
+                    _ => {
+                        return Err(StorageError::NotImplemented(format!(
+                            "Invalid sort direction: {}",
+                            direction_byte
+                        )))
+                    }
+                };
+
+                match type_byte {
+                    0 => {
+                        // Column reference
+                        vibesql_ast::IndexColumn::Column {
+                            column_name: content,
+                            direction,
+                            prefix_length: None,
+                        }
+                    }
+                    1 => {
+                        // Expression index - parse the SQL expression
+                        let expr = vibesql_parser::arena_parser::parse_expression_to_owned(&content)
+                            .map_err(|e| StorageError::NotImplemented(format!(
+                                "Failed to parse expression index '{}': {}",
+                                content, e
+                            )))?;
+                        vibesql_ast::IndexColumn::Expression {
+                            expr: Box::new(expr),
+                            direction,
+                        }
+                    }
+                    _ => {
+                        return Err(StorageError::NotImplemented(format!(
+                            "Invalid index column type: {}",
+                            type_byte
+                        )))
+                    }
+                }
+            } else {
+                // Legacy format (v1-5): just column name + direction
+                let column_name = read_string(reader)?;
+                let direction_byte = read_u8(reader)?;
+                let direction = match direction_byte {
+                    0 => vibesql_ast::OrderDirection::Asc,
+                    1 => vibesql_ast::OrderDirection::Desc,
+                    _ => {
+                        return Err(StorageError::NotImplemented(format!(
+                            "Invalid sort direction: {}",
+                            direction_byte
+                        )))
+                    }
+                };
+                vibesql_ast::IndexColumn::Column {
+                    column_name,
+                    direction,
+                    prefix_length: None,
                 }
             };
 
-            columns.push(vibesql_ast::IndexColumn::Column {
-                column_name,
-                direction,
-                prefix_length: None,
-            });
+            columns.push(index_column);
         }
 
         index_specs.push((index_name, table_name, unique, columns));

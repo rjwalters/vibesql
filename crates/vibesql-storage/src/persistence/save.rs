@@ -304,8 +304,19 @@ impl Database {
                     write!(writer, ", ")
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
                 }
-                write!(writer, "{}", col.expect_column_name())
-                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                // Handle both column references and expression indexes
+                use vibesql_ast::IndexColumn;
+                match col {
+                    IndexColumn::Column { column_name, .. } => {
+                        write!(writer, "{}", column_name)
+                            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                    }
+                    IndexColumn::Expression { expr, .. } => {
+                        use vibesql_ast::pretty_print::ToSql;
+                        write!(writer, "{}", expr.to_sql())
+                            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                    }
+                }
                 write!(writer, " {:?}", col.direction())
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
             }

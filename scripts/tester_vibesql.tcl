@@ -1936,16 +1936,6 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses EXPLAIN on DDL (not supported)"]
     }
 
-    # Expression indexes (CREATE INDEX ... ON table(expression)) - not supported
-    # Detect expressions in index definitions: operators or function calls inside
-    if {[regexp -nocase {CREATE\s+(?:UNIQUE\s+)?INDEX\s+\w+\s+ON\s+\w+\s*\([^)]*[-+*/=<>]} $script]} {
-        return [list 1 "uses expression index (not supported)"]
-    }
-    # Also detect function calls in index definitions like abs(b), lower(x)
-    if {[regexp -nocase {CREATE\s+(?:UNIQUE\s+)?INDEX\s+\w+\s+ON\s+\w+\s*\([^)]*\w+\s*\(} $script]} {
-        return [list 1 "uses expression index with function (not supported)"]
-    }
-
     # CREATE/DROP TRIGGER - triggers not fully supported
     if {[regexp -nocase {CREATE\s+TRIGGER\s} $script]} {
         return [list 1 "uses CREATE TRIGGER (not supported)"]
