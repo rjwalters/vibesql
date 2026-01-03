@@ -144,7 +144,7 @@ impl ToSql for SqlValue {
                 }
             }
             SqlValue::Real(r) => {
-                let f64_val = *r as f64;
+                let f64_val = *r;
                 if f64_val.is_nan() || f64_val.is_infinite() {
                     "NULL".to_string()
                 } else if f64_val.fract() == 0.0 {
