@@ -4,15 +4,28 @@
 //!
 //! # Structure
 //!
-//! - `create_index.rs` - CREATE INDEX executor
+//! ## CREATE INDEX submodules
+//! - `create_index.rs` - Main CREATE INDEX executor and dispatch logic
+//! - `validation.rs` - Pre-creation validation (column checks, privileges, etc.)
+//! - `btree_index.rs` - B-tree index creation (standard and unique)
+//! - `spatial_index.rs` - Spatial/R-tree index creation
+//! - `vector_index.rs` - IVFFlat and HNSW vector index creation
+//! - `expression_index.rs` - Expression-based functional index creation
+//!
+//! ## Other DDL operations
 //! - `drop_index.rs` - DROP INDEX executor
 //! - `reindex.rs` - REINDEX executor
 //! - `analyze.rs` - ANALYZE executor
 
 pub mod analyze;
+mod btree_index;
 pub mod create_index;
 pub mod drop_index;
+mod expression_index;
 pub mod reindex;
+mod spatial_index;
+mod validation;
+mod vector_index;
 
 pub use analyze::AnalyzeExecutor;
 pub use create_index::CreateIndexExecutor;
