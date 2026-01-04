@@ -5,6 +5,7 @@ use std::{
     hash::{Hash, Hasher},
     ops::Deref,
 };
+
 use vibesql_catalog::TableIdentifier;
 
 /// A normalized table/alias key for case-insensitive lookups.
@@ -119,8 +120,8 @@ pub struct CombinedSchema {
     /// Enables resolution of columns from multiple nesting levels
     pub outer_schema: Option<Box<CombinedSchema>>,
     /// Table aliases/names that appear more than once in the FROM clause (issue #4507)
-    /// Used to detect ambiguous qualified column references like "A.f1" when table "A" appears twice
-    /// Stores normalized (lowercase) table identifiers for case-insensitive matching
+    /// Used to detect ambiguous qualified column references like "A.f1" when table "A" appears
+    /// twice Stores normalized (lowercase) table identifiers for case-insensitive matching
     pub duplicate_aliases: HashSet<TableIdentifier>,
     /// Column names that have been joined via NATURAL JOIN or USING clause (issue #4517)
     /// These columns exist in multiple tables but should NOT be considered ambiguous
@@ -163,7 +164,8 @@ impl CombinedSchema {
 
     /// Create a new combined schema from a single table
     ///
-    /// Note: Table name is automatically normalized via TableIdentifier for case-insensitive lookups
+    /// Note: Table name is automatically normalized via TableIdentifier for case-insensitive
+    /// lookups
     pub fn from_table(table_name: String, schema: vibesql_catalog::TableSchema) -> Self {
         let total_columns = schema.columns.len();
         let mut table_schemas = HashMap::new();
@@ -224,7 +226,8 @@ impl CombinedSchema {
 
     /// Combine two schemas (for JOIN operations)
     ///
-    /// Note: Right table name is automatically normalized via TableIdentifier for case-insensitive lookups
+    /// Note: Right table name is automatically normalized via TableIdentifier for case-insensitive
+    /// lookups
     pub fn combine(
         left: CombinedSchema,
         right_table_name: String,
@@ -675,8 +678,7 @@ impl CombinedSchema {
     ///
     /// Issue #4783: USING column semantics differ from SQLite in OUTER JOINs
     pub fn add_using_coalesce_pair(&mut self, column: &str, left_idx: usize, right_idx: usize) {
-        self.using_coalesce_pairs
-            .insert(column.to_lowercase(), (left_idx, right_idx));
+        self.using_coalesce_pairs.insert(column.to_lowercase(), (left_idx, right_idx));
     }
 
     /// Get the coalesce pair for a USING column, if any.
@@ -711,10 +713,15 @@ impl CombinedSchema {
     ///
     /// Returns Some(right_idx) if the given index is a left-side USING column, None otherwise.
     pub fn get_using_coalesce_right_for_left(&self, left_idx: usize) -> Option<usize> {
-        self.using_coalesce_pairs
-            .values()
-            .find(|(l, _)| *l == left_idx)
-            .map(|(_, r)| *r)
+        self.using_coalesce_pairs.values().find(|(l, _)| *l == left_idx).map(|(_, r)| *r)
+    }
+
+    /// Check if the given column index is the right-side of a USING coalesce pair.
+    ///
+    /// These columns should be skipped in SELECT * output because they're
+    /// represented by the left-side column with COALESCE applied.
+    pub fn is_using_coalesce_right_side(&self, right_idx: usize) -> bool {
+        self.using_coalesce_pairs.values().any(|(_, r)| *r == right_idx)
     }
 }
 
@@ -766,7 +773,8 @@ impl SchemaBuilder {
     /// Add a table to the schema
     ///
     /// This is an O(1) operation - columns are not copied, just indexed
-    /// Note: Table names are automatically normalized via TableIdentifier for case-insensitive lookups
+    /// Note: Table names are automatically normalized via TableIdentifier for case-insensitive
+    /// lookups
     pub fn add_table(&mut self, name: String, schema: vibesql_catalog::TableSchema) -> &mut Self {
         let num_columns = schema.columns.len();
         let table_id = TableIdentifier::unquoted(&name);

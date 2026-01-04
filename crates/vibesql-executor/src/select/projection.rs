@@ -17,9 +17,15 @@ pub(crate) fn project_row_combined(
     for item in columns {
         match item {
             vibesql_ast::SelectItem::Wildcard { .. } => {
-                // SELECT * - include all columns except hidden ones (from NATURAL JOIN deduplication)
-                // When window functions are present, only include base columns (not appended window
-                // values)
+                // SELECT * - include all columns except hidden ones (from NATURAL JOIN
+                // deduplication) When window functions are present, only include
+                // base columns (not appended window values)
+                //
+                // SQL Standard Column Ordering for USING/NATURAL JOINs:
+                // According to SQL:2011, SELECT * from JOIN USING should output:
+                // 1. The common/USING columns (merged) - appear FIRST
+                // 2. Remaining columns from the left table
+                // 3. Remaining columns from the right table
                 let max_col = if let Some(mapping) = window_mapping {
                     if !mapping.is_empty() {
                         // Find the minimum window column index to know where base columns end
@@ -31,17 +37,97 @@ pub(crate) fn project_row_combined(
                     row.values.len()
                 };
 
-                // Iterate through columns, handling hidden columns with replacements
-                for idx in 0..max_col {
+                // Build column indices, reordering for SQL standard USING/NATURAL JOIN output
+                // If there are joined columns, put them first
+                let column_indices: Vec<usize> = if schema.joined_columns.is_empty() {
+                    // No USING/NATURAL JOIN - use natural order
+                    (0..max_col).collect()
+                } else {
+                    // Collect visible column indices with their join status
+                    let mut joined_cols: Vec<usize> = Vec::new();
+                    let mut other_cols: Vec<usize> = Vec::new();
+
+                    // Sort table_schemas by start_index for deterministic iteration order
+                    // HashMap iteration is non-deterministic; sorting ensures consistent results
+                    let mut sorted_tables: Vec<_> = schema.table_schemas.iter().collect();
+                    sorted_tables.sort_by_key(|(_, (start_index, _))| *start_index);
+
+                    // Build a reverse lookup: for each column index, find its name
+                    // to check if it's a joined column
+                    for (_, (start_index, table_schema)) in sorted_tables {
+                        for (col_idx, col_schema) in table_schema.columns.iter().enumerate() {
+                            let abs_idx = start_index + col_idx;
+                            if abs_idx >= max_col {
+                                continue;
+                            }
+
+                            // Skip replacement targets (they're output via hidden column's
+                            // position)
+                            if schema.column_replacement_map.values().any(|&v| v == abs_idx) {
+                                continue;
+                            }
+
+                            // Skip right-side USING columns (they're output via the left-side
+                            // column with COALESCE applied)
+                            if schema.is_using_coalesce_right_side(abs_idx) {
+                                continue;
+                            }
+
+                            // Check if column should be included
+                            // Hidden columns are included if they have a replacement OR
+                            // if they are USING columns with coalesce pairs (for COALESCE output)
+                            let should_include = if schema.is_column_hidden(abs_idx) {
+                                schema.get_column_replacement(abs_idx).is_some()
+                                    || schema.get_using_coalesce_right_for_left(abs_idx).is_some()
+                            } else {
+                                true
+                            };
+
+                            if should_include {
+                                let is_joined =
+                                    schema.joined_columns.contains(&col_schema.name.to_lowercase());
+                                if is_joined {
+                                    joined_cols.push(abs_idx);
+                                } else {
+                                    other_cols.push(abs_idx);
+                                }
+                            }
+                        }
+                    }
+
+                    // Sort each group by index to maintain relative order
+                    joined_cols.sort();
+                    other_cols.sort();
+
+                    // Concatenate: joined columns first, then others
+                    joined_cols.into_iter().chain(other_cols).collect()
+                };
+
+                // Iterate through reordered columns, handling hidden columns with replacements
+                for idx in column_indices {
                     if schema.is_column_hidden(idx) {
-                        // Check if this hidden column has a replacement (for RIGHT/FULL OUTER JOINs)
-                        // The replacement maintains column ordering from left table while using right values
+                        // Check if this hidden column has a replacement (for RIGHT/FULL OUTER
+                        // JOINs) The replacement maintains column ordering
+                        // from left table while using right values
                         if let Some(replacement_idx) = schema.get_column_replacement(idx) {
                             if replacement_idx < row.values.len() {
                                 values.push(row.values[replacement_idx].clone());
                             }
+                        } else if let Some(right_idx) =
+                            schema.get_using_coalesce_right_for_left(idx)
+                        {
+                            // This is a hidden USING column in RIGHT/FULL OUTER JOIN
+                            // Apply COALESCE(left_val, right_val) semantics
+                            let left_val = &row.values[idx];
+                            if *left_val == vibesql_types::SqlValue::Null
+                                && right_idx < row.values.len()
+                            {
+                                values.push(row.values[right_idx].clone());
+                            } else {
+                                values.push(left_val.clone());
+                            }
                         }
-                        // If no replacement, skip this hidden column
+                        // If neither replacement nor coalesce pair, skip this hidden column
                     } else {
                         // Check if this is a left-side USING column that needs COALESCE
                         // In FULL OUTER JOIN with USING, the visible left column should show
