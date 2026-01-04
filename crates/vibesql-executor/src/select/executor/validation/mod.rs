@@ -24,9 +24,6 @@ pub use aggregates::{
     check_aggregate_arg_count, find_aggregate_in_expression, validate_aggregate_arguments,
     validate_having_aliased_aggregates, validate_no_nested_aggregates,
 };
-// Re-export ColumnReference for tests
-#[cfg(test)]
-pub use column_refs::ColumnReference;
 pub use column_refs::{extract_column_refs, validate_column_ref};
 pub use join_limits::validate_join_table_limit;
 pub use schema::validate_aggregate_subquery_outer_refs;

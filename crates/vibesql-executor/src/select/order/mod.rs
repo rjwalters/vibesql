@@ -83,8 +83,6 @@ pub(super) fn apply_order_by(
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::Ordering;
-
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
