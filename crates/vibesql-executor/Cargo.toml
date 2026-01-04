@@ -60,7 +60,7 @@ tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
 
 [dev-dependencies]
 vibesql-parser = { version = "0.1.3", path = "../vibesql-parser" }
-vibesql-bench-common = { version = "0.1.3", path = "../vibesql-bench-common" }
+vibesql-bench-common = { version = "0.1.3", path = "../vibesql-bench-common", features = ["vibesql"] }
 # NOTE: vibesql-server dev-dependency removed to break circular dependency.
 # Server benchmarks (sysbench_server, tpcc_server, tpch_server) are now in vibesql-server crate.
 criterion = { version = "0.8", features = ["html_reports"] }
@@ -94,12 +94,12 @@ in-memory-indexes = ["vibesql-storage/in-memory-indexes"]
 # Comparison engines (embedded)
 # Note: DuckDB linking causes significant binary bloat (73MB vs 15MB) which
 # affects CPU cache locality and can slow down benchmarks.
-sqlite = ["dep:rusqlite"]
-duckdb = ["dep:duckdb"]
+sqlite = ["dep:rusqlite", "vibesql-bench-common/sqlite"]
+duckdb = ["dep:duckdb", "vibesql-bench-common/duckdb"]
 
 # Comparison engines (client-server)
 # MySQL requires MYSQL_URL env var (e.g., mysql://root:password@localhost:3306/tpch)
-mysql = ["dep:mysql"]
+mysql = ["dep:mysql", "vibesql-bench-common/mysql"]
 # vibesql-server is a separate crate, not a feature here
 
 # Convenience groups

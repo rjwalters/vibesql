@@ -45,6 +45,7 @@
 //! ```
 
 mod data;
+pub mod schema;
 mod transactions;
 
 pub use data::*;
