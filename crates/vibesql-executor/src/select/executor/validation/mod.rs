@@ -29,8 +29,7 @@ pub use aggregates::{
 pub use column_refs::ColumnReference;
 pub use column_refs::{extract_column_refs, validate_column_ref};
 pub use join_limits::validate_join_table_limit;
-#[allow(unused_imports)]
-pub use schema::validate_no_aggregate_with_outer_column;
+pub use schema::validate_aggregate_subquery_outer_refs;
 use vibesql_ast::{Expression, SelectItem};
 
 use crate::{errors::ExecutorError, schema::CombinedSchema};

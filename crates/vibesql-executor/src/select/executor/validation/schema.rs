@@ -1,6 +1,23 @@
 //! Schema-level validation for subqueries
 //!
 //! Validates that aggregates in subqueries don't reference outer columns.
+//!
+//! ## Key Validation: Aggregates with Outer Column References
+//!
+//! SQLite rejects queries where a scalar subquery is used as an argument to
+//! an outer aggregate function, and the subquery's aggregate references an
+//! outer column. For example:
+//!
+//! ```sql
+//! -- REJECT: count(x) references outer t35a.x, and subquery is argument to max()
+//! SELECT max((SELECT count(x) FROM t35b)) FROM t35a;
+//!
+//! -- ALLOW: count(x) references outer column, but subquery is NOT inside an aggregate
+//! SELECT (SELECT count(x) FROM t35b) FROM t35a;
+//! ```
+//!
+//! This distinction is critical: correlated subqueries with aggregates are valid
+//! when they stand alone, but invalid when used as arguments to outer aggregates.
 
 use std::collections::{HashMap, HashSet};
 
@@ -14,7 +31,6 @@ use crate::{errors::ExecutorError, schema::CombinedSchema};
 /// (not the subquery's own tables)
 ///
 /// Returns Some(column_name) if an outer column is found, None otherwise.
-#[allow(dead_code)]
 fn find_outer_column_in_expression(
     expr: &Expression,
     subquery_tables: &[String],
@@ -197,7 +213,6 @@ fn find_outer_column_in_expression(
 /// Check if an aggregate function's arguments reference columns from the outer schema
 ///
 /// Returns Some(aggregate_name) if misuse is found, None otherwise.
-#[allow(dead_code)]
 fn find_aggregate_with_outer_column(
     expr: &Expression,
     subquery_tables: &[String],
@@ -395,7 +410,6 @@ fn find_aggregate_with_outer_column(
 }
 
 /// Extract table names from a FROM clause
-#[allow(dead_code)]
 fn extract_table_names(from: Option<&vibesql_ast::FromClause>) -> Vec<String> {
     let mut tables = Vec::new();
     if let Some(from_clause) = from {
@@ -405,7 +419,6 @@ fn extract_table_names(from: Option<&vibesql_ast::FromClause>) -> Vec<String> {
 }
 
 /// Recursively extract table names from a FROM clause
-#[allow(dead_code)]
 fn extract_table_names_recursive(from: &vibesql_ast::FromClause, tables: &mut Vec<String>) {
     match from {
         vibesql_ast::FromClause::Table { name, alias, .. } => {
@@ -427,7 +440,6 @@ fn extract_table_names_recursive(from: &vibesql_ast::FromClause, tables: &mut Ve
 /// Build a CombinedSchema from table names in a FROM clause
 ///
 /// Looks up each table in the database and builds a schema containing all columns.
-#[allow(dead_code)]
 fn build_schema_from_tables(
     tables: &[String],
     database: &vibesql_storage::Database,
@@ -483,7 +495,6 @@ fn build_schema_from_tables(
 /// Note: This validation is skipped if the subquery's FROM clause contains CTEs or
 /// subquery aliases, since we can't reliably determine the inner schema without
 /// executing the CTE/subquery first.
-#[allow(dead_code)]
 pub fn validate_no_aggregate_with_outer_column(
     stmt: &SelectStmt,
     outer_schema: &CombinedSchema,
@@ -529,4 +540,219 @@ pub fn validate_no_aggregate_with_outer_column(
     }
 
     Ok(())
+}
+
+/// Validate that scalar subqueries inside outer aggregate arguments don't have
+/// aggregates referencing outer columns.
+///
+/// This is the targeted validation for issue #4853. It specifically checks for:
+///
+/// ```sql
+/// SELECT max((SELECT count(x) FROM t35b)) FROM t35a;
+/// --     ^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/// --     |    Scalar subquery with aggregate referencing outer column 'x'
+/// --     Outer aggregate function
+/// ```
+///
+/// The key distinction from the general `validate_no_aggregate_with_outer_column`:
+/// - This ONLY validates when a scalar subquery appears as an argument to an outer aggregate
+/// - Standalone correlated subqueries like `SELECT (SELECT count(x) FROM t35b) FROM t35a` are valid
+///   and should not be rejected
+///
+/// Returns an error if a scalar subquery inside an outer aggregate contains an aggregate
+/// that references an outer column.
+pub fn validate_aggregate_subquery_outer_refs(
+    stmt: &SelectStmt,
+    database: &vibesql_storage::Database,
+) -> Result<(), ExecutorError> {
+    // Build outer schema from FROM clause
+    let outer_tables = extract_table_names(stmt.from.as_ref());
+    let outer_schema = match build_schema_from_tables(&outer_tables, database) {
+        Some(schema) => schema,
+        None => return Ok(()), // No outer schema, nothing to validate
+    };
+
+    // Check each SELECT item for outer aggregates containing scalar subqueries
+    for item in &stmt.select_list {
+        if let SelectItem::Expression { expr, .. } = item {
+            validate_aggregates_with_subquery_args(expr, &outer_schema, database)?;
+        }
+    }
+
+    // Also check HAVING clause
+    if let Some(having) = &stmt.having {
+        validate_aggregates_with_subquery_args(having, &outer_schema, database)?;
+    }
+
+    Ok(())
+}
+
+/// Recursively find outer aggregate functions and validate their scalar subquery arguments
+fn validate_aggregates_with_subquery_args(
+    expr: &Expression,
+    outer_schema: &CombinedSchema,
+    database: &vibesql_storage::Database,
+) -> Result<(), ExecutorError> {
+    match expr {
+        Expression::AggregateFunction { args, .. } => {
+            // This is an outer aggregate - check its arguments for scalar subqueries
+            for arg in args {
+                validate_subqueries_in_aggregate_arg(arg, outer_schema, database)?;
+            }
+            Ok(())
+        }
+        Expression::Function { name, args, .. } => {
+            // Check if this is a built-in aggregate function
+            if is_aggregate_function(name.as_str()) {
+                let upper = name.to_uppercase();
+                // Multi-arg MIN/MAX are scalar functions, not aggregates
+                let is_scalar_minmax = matches!(upper.as_str(), "MIN" | "MAX") && args.len() > 1;
+                if !is_scalar_minmax {
+                    // This is an outer aggregate - check its arguments for scalar subqueries
+                    for arg in args {
+                        validate_subqueries_in_aggregate_arg(arg, outer_schema, database)?;
+                    }
+                    return Ok(());
+                }
+            }
+            // Non-aggregate function or scalar MIN/MAX - recurse into arguments
+            for arg in args {
+                validate_aggregates_with_subquery_args(arg, outer_schema, database)?;
+            }
+            Ok(())
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            validate_aggregates_with_subquery_args(left, outer_schema, database)?;
+            validate_aggregates_with_subquery_args(right, outer_schema, database)
+        }
+        Expression::UnaryOp { expr, .. } => {
+            validate_aggregates_with_subquery_args(expr, outer_schema, database)
+        }
+        Expression::Cast { expr, .. } => {
+            validate_aggregates_with_subquery_args(expr, outer_schema, database)
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                validate_aggregates_with_subquery_args(op, outer_schema, database)?;
+            }
+            for when_clause in when_clauses {
+                for cond in &when_clause.conditions {
+                    validate_aggregates_with_subquery_args(cond, outer_schema, database)?;
+                }
+                validate_aggregates_with_subquery_args(
+                    &when_clause.result,
+                    outer_schema,
+                    database,
+                )?;
+            }
+            if let Some(else_expr) = else_result {
+                validate_aggregates_with_subquery_args(else_expr, outer_schema, database)?;
+            }
+            Ok(())
+        }
+        Expression::IsNull { expr, .. } => {
+            validate_aggregates_with_subquery_args(expr, outer_schema, database)
+        }
+        Expression::Between { expr, low, high, .. } => {
+            validate_aggregates_with_subquery_args(expr, outer_schema, database)?;
+            validate_aggregates_with_subquery_args(low, outer_schema, database)?;
+            validate_aggregates_with_subquery_args(high, outer_schema, database)
+        }
+        Expression::InList { expr, values, .. } => {
+            validate_aggregates_with_subquery_args(expr, outer_schema, database)?;
+            for val in values {
+                validate_aggregates_with_subquery_args(val, outer_schema, database)?;
+            }
+            Ok(())
+        }
+        Expression::Like { expr, pattern, .. } => {
+            validate_aggregates_with_subquery_args(expr, outer_schema, database)?;
+            validate_aggregates_with_subquery_args(pattern, outer_schema, database)
+        }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children {
+                validate_aggregates_with_subquery_args(child, outer_schema, database)?;
+            }
+            Ok(())
+        }
+        // Scalar subqueries NOT inside an aggregate are fine - don't recurse into them
+        Expression::ScalarSubquery(_) | Expression::Exists { .. } | Expression::In { .. } => Ok(()),
+        _ => Ok(()),
+    }
+}
+
+/// Validate scalar subqueries that appear as arguments to outer aggregates
+///
+/// This function is called when we're inside an outer aggregate's arguments.
+/// Any scalar subquery found here must be validated for aggregates referencing outer columns.
+fn validate_subqueries_in_aggregate_arg(
+    expr: &Expression,
+    outer_schema: &CombinedSchema,
+    database: &vibesql_storage::Database,
+) -> Result<(), ExecutorError> {
+    match expr {
+        Expression::ScalarSubquery(subquery) => {
+            // Found a scalar subquery inside an outer aggregate - validate it
+            validate_no_aggregate_with_outer_column(subquery, outer_schema, database)
+        }
+        // Recurse into composite expressions to find nested scalar subqueries
+        Expression::BinaryOp { left, right, .. } => {
+            validate_subqueries_in_aggregate_arg(left, outer_schema, database)?;
+            validate_subqueries_in_aggregate_arg(right, outer_schema, database)
+        }
+        Expression::UnaryOp { expr, .. } => {
+            validate_subqueries_in_aggregate_arg(expr, outer_schema, database)
+        }
+        Expression::Function { args, .. } => {
+            for arg in args {
+                validate_subqueries_in_aggregate_arg(arg, outer_schema, database)?;
+            }
+            Ok(())
+        }
+        Expression::Cast { expr, .. } => {
+            validate_subqueries_in_aggregate_arg(expr, outer_schema, database)
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                validate_subqueries_in_aggregate_arg(op, outer_schema, database)?;
+            }
+            for when_clause in when_clauses {
+                for cond in &when_clause.conditions {
+                    validate_subqueries_in_aggregate_arg(cond, outer_schema, database)?;
+                }
+                validate_subqueries_in_aggregate_arg(&when_clause.result, outer_schema, database)?;
+            }
+            if let Some(else_expr) = else_result {
+                validate_subqueries_in_aggregate_arg(else_expr, outer_schema, database)?;
+            }
+            Ok(())
+        }
+        Expression::IsNull { expr, .. } => {
+            validate_subqueries_in_aggregate_arg(expr, outer_schema, database)
+        }
+        Expression::Between { expr, low, high, .. } => {
+            validate_subqueries_in_aggregate_arg(expr, outer_schema, database)?;
+            validate_subqueries_in_aggregate_arg(low, outer_schema, database)?;
+            validate_subqueries_in_aggregate_arg(high, outer_schema, database)
+        }
+        Expression::InList { expr, values, .. } => {
+            validate_subqueries_in_aggregate_arg(expr, outer_schema, database)?;
+            for val in values {
+                validate_subqueries_in_aggregate_arg(val, outer_schema, database)?;
+            }
+            Ok(())
+        }
+        Expression::Like { expr, pattern, .. } => {
+            validate_subqueries_in_aggregate_arg(expr, outer_schema, database)?;
+            validate_subqueries_in_aggregate_arg(pattern, outer_schema, database)
+        }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children {
+                validate_subqueries_in_aggregate_arg(child, outer_schema, database)?;
+            }
+            Ok(())
+        }
+        // Note: We don't recurse into nested aggregates because the outer check handles those
+        _ => Ok(()),
+    }
 }

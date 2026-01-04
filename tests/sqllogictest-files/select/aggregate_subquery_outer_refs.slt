@@ -1,0 +1,63 @@
+# Issue #4853: Detect and reject aggregate functions with outer column references in subqueries
+#
+# SQLite rejects queries where a scalar subquery is used as an argument to an outer
+# aggregate function, and the subquery's aggregate references an outer column.
+
+# Setup tables
+statement ok
+CREATE TABLE t35a(x INTEGER)
+
+statement ok
+CREATE TABLE t35b(y INTEGER)
+
+statement ok
+INSERT INTO t35a VALUES(1), (2)
+
+statement ok
+INSERT INTO t35b VALUES(10), (20)
+
+# This should fail: count(x) references outer table t35a.x
+# and the subquery is used as argument to outer aggregate max()
+statement error misuse of aggregate: count()
+SELECT max((SELECT count(x) FROM t35b)) FROM t35a
+
+# This variation IS valid - references inner column y
+query I
+SELECT max((SELECT count(y) FROM t35b)) FROM t35a
+----
+2
+
+# Standalone correlated subquery with aggregate referencing outer column is valid
+# (not inside an outer aggregate)
+query I rowsort
+SELECT (SELECT count(x) FROM t35b) FROM t35a
+----
+2
+2
+
+# Multiple outer aggregates with subqueries - first one should trigger error
+statement error misuse of aggregate: count()
+SELECT max((SELECT count(x) FROM t35b)), min(y) FROM t35a, t35b
+
+# Nested expression with subquery inside outer aggregate
+statement error misuse of aggregate: count()
+SELECT sum(1 + (SELECT count(x) FROM t35b)) FROM t35a
+
+# Valid: aggregate on inner column even with outer table in subquery correlation
+query I
+SELECT max((SELECT count(*) FROM t35b WHERE y > 0)) FROM t35a
+----
+2
+
+# Valid: scalar subquery NOT inside outer aggregate
+query I
+SELECT x + (SELECT count(x) FROM t35b) FROM t35a WHERE x = 1
+----
+3
+
+# Cleanup
+statement ok
+DROP TABLE t35a
+
+statement ok
+DROP TABLE t35b
