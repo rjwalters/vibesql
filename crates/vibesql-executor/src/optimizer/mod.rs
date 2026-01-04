@@ -11,10 +11,12 @@
 //! - Aggregate-aware query optimization for GROUP BY/HAVING performance
 //! - Unused table elimination for cross join optimization
 //! - Column pruning for post-join processing optimization (#4355)
+//! - DISTINCT elimination when unique index + NOT NULL guarantee uniqueness (#4852)
 
 pub mod adaptive;
 pub mod aggregate_analysis;
 pub mod column_pruning;
+pub mod distinct_elimination;
 mod expressions;
 pub mod index_planner;
 mod predicate_plan;
@@ -30,6 +32,7 @@ pub use column_pruning::{
     collect_columns_from_expr, collect_required_columns, compute_projection_indices, project_rows,
     remap_schema,
 };
+pub use distinct_elimination::can_eliminate_distinct;
 pub use expressions::*;
 pub use predicate_plan::PredicatePlan;
 pub use subquery_rewrite::rewrite_subquery_optimizations;
