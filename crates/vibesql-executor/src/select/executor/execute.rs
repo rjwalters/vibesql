@@ -59,13 +59,13 @@ impl SelectExecutor<'_> {
         // This catches queries like SELECT * FROM t, t, t, ... (65+ times)
         super::validation::validate_join_table_limit(stmt)?;
 
-        // NOTE: Validation for aggregates referencing outer columns was removed.
-        // The previous validation (issue #4730) was too strict - it rejected valid SQLite queries
-        // like `SELECT (SELECT string_agg(a1,'x') FROM t2) FROM t1;` where a scalar subquery's
-        // aggregate references an outer column. SQLite allows this when the subquery result
-        // is not used as an argument to an outer aggregate function. The specific case that
-        // should error (like `SELECT max((SELECT count(x) FROM t35b)) FROM t35a;`) requires
-        // more targeted detection of when a subquery is used as an outer aggregate argument.
+        // Validate aggregates with outer column references in subqueries (issue #4853)
+        // This catches the specific case where a scalar subquery appears as an argument
+        // to an outer aggregate function, and the subquery's aggregate references an
+        // outer column. Example: SELECT max((SELECT count(x) FROM t35b)) FROM t35a;
+        // Note: Standalone correlated subqueries are valid and allowed, e.g.,
+        // SELECT (SELECT count(x) FROM t35b) FROM t35a; is valid in SQLite.
+        super::validation::validate_aggregate_subquery_outer_refs(stmt, self.database)?;
 
         #[cfg(feature = "profile-q6")]
         let execute_start = std::time::Instant::now();
@@ -1177,11 +1177,13 @@ impl SelectExecutor<'_> {
             // LIMIT enables early termination when ORDER BY is satisfied by index (#3253)
             // Pass select_list for table elimination optimization (#3556)
             //
-            // Don't pass ORDER BY if there's a set operation - it will be handled at the set operation level
+            // Don't pass ORDER BY if there's a set operation - it will be handled at the set
+            // operation level
             let order_by_hint =
                 if stmt.set_operation.is_some() { None } else { stmt.order_by.as_deref() };
-            // Don't pass LIMIT hint for set operations - limit must be applied after combining results
-            // This prevents early termination from incorrectly limiting the left side of UNION queries
+            // Don't pass LIMIT hint for set operations - limit must be applied after combining
+            // results This prevents early termination from incorrectly limiting the
+            // left side of UNION queries
             let limit_val = if stmt.set_operation.is_some() {
                 None
             } else {
@@ -1262,7 +1264,9 @@ impl SelectExecutor<'_> {
                             } else {
                                 // If table wasn't qualified, search all tables in FROM
                                 if let Some(collation) = Self::find_column_collation_in_from(
-                                    db, from_clause.unwrap(), column_name
+                                    db,
+                                    from_clause.unwrap(),
+                                    column_name,
                                 ) {
                                     return Some(collation);
                                 }
@@ -1616,11 +1620,13 @@ impl SelectExecutor<'_> {
         mut rows: Vec<vibesql_storage::Row>,
         order_by: &[vibesql_ast::OrderByItem],
         select_list: &[vibesql_ast::SelectItem],
-        all_union_aliases: &[Vec<Option<String>>], // Aliases from all UNION branches (wildcards expanded)
-        column_collations: &[Option<String>],      // Inherited collations from first SELECT columns
+        all_union_aliases: &[Vec<Option<String>>], /* Aliases from all UNION branches (wildcards
+                                                    * expanded) */
+        column_collations: &[Option<String>], // Inherited collations from first SELECT columns
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
-        use crate::select::grouping::compare_sql_values_with_collation;
         use std::cmp::Ordering;
+
+        use crate::select::grouping::compare_sql_values_with_collation;
 
         // Build column name map from the first branch's aliases (with wildcards already expanded)
         // The all_union_aliases already contains expanded column names from collect_union_aliases
@@ -1682,9 +1688,10 @@ impl SelectExecutor<'_> {
                     };
                     (col_idx, Some(collation.clone()))
                 }
-                // Complex expressions (aggregates, arithmetic, etc.): match against first SELECT's select_list
-                // SQLite allows ORDER BY to reference expressions from the first SELECT
-                // e.g., SELECT count(*) FROM t UNION SELECT n FROM t2 ORDER BY count(*)
+                // Complex expressions (aggregates, arithmetic, etc.): match against first SELECT's
+                // select_list SQLite allows ORDER BY to reference expressions from
+                // the first SELECT e.g., SELECT count(*) FROM t UNION SELECT n FROM
+                // t2 ORDER BY count(*)
                 other_expr => {
                     let col_idx = select_list.iter().enumerate().find_map(|(idx, item)| {
                         if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
@@ -1719,9 +1726,8 @@ impl SelectExecutor<'_> {
                     None => !is_desc, // SQLite default: NULL is smallest
                 };
                 // Use explicit collation if specified, otherwise inherit from column schema
-                let collation = explicit_collation.or_else(|| {
-                    inherited_collations.get(col_idx).cloned().flatten()
-                });
+                let collation = explicit_collation
+                    .or_else(|| inherited_collations.get(col_idx).cloned().flatten());
                 sort_columns.push((col_idx, is_desc, nulls_first, collation));
             } else {
                 // ORDER BY term doesn't match any column in the result set
