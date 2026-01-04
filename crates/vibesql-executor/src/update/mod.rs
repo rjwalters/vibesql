@@ -34,8 +34,8 @@ use vibesql_storage::{statistics::CostEstimator, Database};
 
 use crate::{
     dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
-    expression_index_maintenance, privilege_checker::PrivilegeChecker,
-    sqlite_schema::is_sqlite_schema_table,
+    expression_index_maintenance, insert::validation::coerce_value,
+    privilege_checker::PrivilegeChecker, sqlite_schema::is_sqlite_schema_table,
 };
 
 /// Executor for UPDATE statements
@@ -793,8 +793,12 @@ impl UpdateExecutor {
                 _ => evaluator.eval(&assignment.value, &old_row)?,
             };
 
+            // Apply type affinity coercion (SQLite compatibility)
+            let column = &schema.columns[col_index];
+            let coerced_value = coerce_value(new_value, &column.data_type)?;
+
             new_row
-                .set(col_index, new_value)
+                .set(col_index, coerced_value)
                 .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
             changed_columns.insert(col_index);
         }
@@ -918,9 +922,12 @@ impl UpdateExecutor {
                 return Ok(None); // Unique constraint needs validation
             }
 
-            // Check NOT NULL constraint
+            // Apply type affinity coercion (SQLite compatibility)
             let column = &schema.columns[col_index];
-            if !column.nullable && new_value == vibesql_types::SqlValue::Null {
+            let coerced_value = coerce_value(new_value, &column.data_type)?;
+
+            // Check NOT NULL constraint (after coercion)
+            if !column.nullable && coerced_value == vibesql_types::SqlValue::Null {
                 return Err(ExecutorError::ConstraintViolation(format!(
                     "NOT NULL constraint violation: column '{}' cannot be NULL",
                     column.name
@@ -932,7 +939,7 @@ impl UpdateExecutor {
                 return Ok(None); // Index update needs normal path
             }
 
-            inplace_updates.push((col_index, new_value));
+            inplace_updates.push((col_index, coerced_value));
         }
 
         // All checks passed - apply updates in-place

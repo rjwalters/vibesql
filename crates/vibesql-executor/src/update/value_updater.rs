@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use vibesql_ast::Assignment;
 
-use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator};
+use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator, insert::validation::coerce_value};
 
 /// Applies assignment expressions to rows
 pub struct ValueUpdater<'a> {
@@ -107,9 +107,15 @@ impl<'a> ValueUpdater<'a> {
                 }
             };
 
+            // Apply type affinity coercion (SQLite compatibility)
+            // This ensures UPDATE applies the same type conversion as INSERT
+            // e.g., UPDATE t SET r='5' on a REAL column stores 5.0, not '5'
+            let column = &self.schema.columns[col_index];
+            let coerced_value = coerce_value(new_value, &column.data_type)?;
+
             // Update column in new row
             new_row
-                .set(col_index, new_value)
+                .set(col_index, coerced_value)
                 .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
 
             // Track that this column changed
