@@ -4,6 +4,8 @@
 //! These functions follow SQLite's exact semantics as documented at:
 //! https://www.sqlite.org/lang_corefunc.html
 
+use std::borrow::Cow;
+
 use rand::Rng;
 use vibesql_types::SqlValue;
 
@@ -940,14 +942,19 @@ pub(super) fn like(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         }
     };
 
-    let text = match &args[1] {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
-        other => {
-            return Err(ExecutorError::UnsupportedFeature(format!(
-                "LIKE text must be a string, got {:?}",
-                other
-            )));
-        }
+    // SQLite coerces non-string types to strings for LIKE comparison
+    let text: Cow<str> = match &args[1] {
+        SqlValue::Varchar(s) | SqlValue::Character(s) => Cow::Borrowed(s.as_str()),
+        SqlValue::Integer(i) => Cow::Owned(i.to_string()),
+        SqlValue::Bigint(i) => Cow::Owned(i.to_string()),
+        SqlValue::Smallint(i) => Cow::Owned(i.to_string()),
+        SqlValue::Unsigned(u) => Cow::Owned(u.to_string()),
+        SqlValue::Real(r) => Cow::Owned(r.to_string()),
+        SqlValue::Double(d) => Cow::Owned(d.to_string()),
+        SqlValue::Numeric(n) => Cow::Owned(n.to_string()),
+        SqlValue::Float(f) => Cow::Owned(f.to_string()),
+        SqlValue::Boolean(b) => Cow::Owned(if *b { "1".to_string() } else { "0".to_string() }),
+        other => Cow::Owned(other.to_string()),
     };
 
     // Optional escape character (3rd argument)
@@ -964,7 +971,7 @@ pub(super) fn like(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         None
     };
     // SQLite's like() function uses case-insensitive matching by default
-    let matched = crate::evaluator::pattern::like_match(text, pattern, false, escape_char);
+    let matched = crate::evaluator::pattern::like_match(&text, pattern, false, escape_char);
     Ok(SqlValue::Integer(if matched { 1 } else { 0 }))
 }
 
@@ -1001,18 +1008,23 @@ pub(super) fn glob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         }
     };
 
-    let text = match &args[1] {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
-        other => {
-            return Err(ExecutorError::UnsupportedFeature(format!(
-                "GLOB text must be a string, got {:?}",
-                other
-            )));
-        }
+    // SQLite coerces non-string types to strings for GLOB comparison
+    let text: Cow<str> = match &args[1] {
+        SqlValue::Varchar(s) | SqlValue::Character(s) => Cow::Borrowed(s.as_str()),
+        SqlValue::Integer(i) => Cow::Owned(i.to_string()),
+        SqlValue::Bigint(i) => Cow::Owned(i.to_string()),
+        SqlValue::Smallint(i) => Cow::Owned(i.to_string()),
+        SqlValue::Unsigned(u) => Cow::Owned(u.to_string()),
+        SqlValue::Real(r) => Cow::Owned(r.to_string()),
+        SqlValue::Double(d) => Cow::Owned(d.to_string()),
+        SqlValue::Numeric(n) => Cow::Owned(n.to_string()),
+        SqlValue::Float(f) => Cow::Owned(f.to_string()),
+        SqlValue::Boolean(b) => Cow::Owned(if *b { "1".to_string() } else { "0".to_string() }),
+        other => Cow::Owned(other.to_string()),
     };
 
     // Use the pattern matching function from pattern.rs
-    let matched = crate::evaluator::pattern::glob_match(text, pattern);
+    let matched = crate::evaluator::pattern::glob_match(&text, pattern);
     Ok(SqlValue::Integer(if matched { 1 } else { 0 }))
 }
 
