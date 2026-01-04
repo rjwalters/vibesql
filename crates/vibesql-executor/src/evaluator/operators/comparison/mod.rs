@@ -238,12 +238,11 @@ where
         (Integer(a), Integer(b)) => Ok(Boolean(predicate(a.cmp(b)))),
 
         // String comparisons (VARCHAR and CHAR are compatible)
-        // SQLite behavior: If both strings look like numbers, compare numerically
-        // Examples: '0' = '0.0' → true, '10' < '9' → true (10 < 9 is false, but '10' < '9' as strings)
-        // We need numeric comparison: '10' > '9' → true
-        (Varchar(a), Varchar(b)) => compare_strings(a, b, predicate),
-        (Character(a), Character(b)) => compare_strings(a, b, predicate),
-        (Character(a), Varchar(b)) | (Varchar(b), Character(a)) => compare_strings(a, b, predicate),
+        // SQLite behavior: String values compare lexicographically (byte-by-byte)
+        // '0' != '0.0' (different strings), '10' < '9' (lexicographic order)
+        (Varchar(a), Varchar(b)) => Ok(Boolean(predicate(a.cmp(b)))),
+        (Character(a), Character(b)) => Ok(Boolean(predicate(a.cmp(b)))),
+        (Character(a), Varchar(b)) | (Varchar(b), Character(a)) => Ok(Boolean(predicate(a.cmp(b)))),
 
         // Temporal type comparisons (DATE, TIME, TIMESTAMP)
         (Date(a), Date(b)) => Ok(Boolean(predicate(a.cmp(b)))),
@@ -335,52 +334,4 @@ where
             right: right.clone(),
         }),
     }
-}
-
-/// Compare two strings with SQLite's numeric coercion rules
-///
-/// SQLite behavior: When comparing two strings, if both look like numbers,
-/// compare them numerically. Otherwise, compare as strings.
-///
-/// Examples:
-/// - '0' = '0.0' → true (both are numeric, 0.0 == 0.0)
-/// - '10' > '9' → true (both are numeric, 10 > 9)
-/// - 'abc' < 'def' → true (neither is numeric, string comparison)
-/// - '10' < 'abc' → true (mixed: numeric < non-numeric in SQLite)
-#[inline]
-fn compare_strings<F>(a: &str, b: &str, predicate: F) -> Result<SqlValue, ExecutorError>
-where
-    F: FnOnce(std::cmp::Ordering) -> bool,
-{
-    // Try to parse both strings as numbers
-    let a_num = parse_as_number(a);
-    let b_num = parse_as_number(b);
-
-    match (a_num, b_num) {
-        // Both are numeric - compare as numbers
-        (Some(a_val), Some(b_val)) => {
-            let ordering = a_val.partial_cmp(&b_val).unwrap_or(std::cmp::Ordering::Equal);
-            Ok(SqlValue::Boolean(predicate(ordering)))
-        }
-        // One is numeric, one is not - SQLite orders numeric < text
-        (Some(_), None) => Ok(SqlValue::Boolean(predicate(std::cmp::Ordering::Less))),
-        (None, Some(_)) => Ok(SqlValue::Boolean(predicate(std::cmp::Ordering::Greater))),
-        // Neither is numeric - compare as strings
-        (None, None) => Ok(SqlValue::Boolean(predicate(a.cmp(b)))),
-    }
-}
-
-/// Try to parse a string as a number (integer or float)
-///
-/// Returns Some(f64) if the string looks like a number, None otherwise.
-/// Handles: integers, floats, negative numbers, leading/trailing whitespace
-#[inline]
-fn parse_as_number(s: &str) -> Option<f64> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    // Try parsing as f64 (handles both integer and floating point)
-    trimmed.parse::<f64>().ok()
 }
