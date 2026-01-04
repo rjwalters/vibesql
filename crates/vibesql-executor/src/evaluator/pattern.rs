@@ -24,11 +24,19 @@ pub(crate) fn like_match(text: &str, pattern: &str, case_sensitive: bool, escape
             let mut processed_pattern: Vec<PatternElement> = Vec::with_capacity(pattern_bytes.len());
 
             while i < pattern_bytes.len() {
-                if pattern_bytes[i] == esc_byte && i + 1 < pattern_bytes.len() {
-                    // Next character is escaped - treat as literal
-                    let next_char = pattern_bytes[i + 1];
-                    processed_pattern.push(PatternElement::Literal(next_char));
-                    i += 2;
+                if pattern_bytes[i] == esc_byte {
+                    if i + 1 < pattern_bytes.len() {
+                        // Next character is escaped - treat as literal
+                        let next_char = pattern_bytes[i + 1];
+                        processed_pattern.push(PatternElement::Literal(next_char));
+                        i += 2;
+                    } else {
+                        // Escape character at end of pattern with nothing to escape.
+                        // Per SQLite documentation: "If there is no character following
+                        // the escape character in the LIKE pattern, then the pattern is
+                        // invalid and the LIKE expression evaluates to false."
+                        return false;
+                    }
                 } else if pattern_bytes[i] == b'%' {
                     processed_pattern.push(PatternElement::AnySequence);
                     i += 1;
