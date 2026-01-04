@@ -4,7 +4,7 @@
 
 use vibesql_types::SqlValue;
 
-use crate::{errors::ExecutorError, evaluator::casting::to_i64};
+use crate::{errors::ExecutorError, evaluator::casting::{string_to_number, to_i64}};
 
 /// Evaluate a unary operation
 ///
@@ -42,6 +42,19 @@ pub(crate) fn eval_unary_op(
         // In SQLite, unary + on text returns the text unchanged
         (Plus, SqlValue::Character(s)) => Ok(SqlValue::Character(s.clone())),
         (Plus, SqlValue::Varchar(s)) => Ok(SqlValue::Varchar(s.clone())),
+
+        // Unary minus on text types - convert to number first (SQLite behavior)
+        // SQLite converts strings to numbers before applying unary minus:
+        // - Numeric strings: '-123' → Integer(-123), '-3.14' → Real(-3.14)
+        // - Non-numeric strings: '.' → 0, 'abc' → 0
+        (Minus, SqlValue::Character(s)) | (Minus, SqlValue::Varchar(s)) => {
+            let (int_val, float_val, is_float) = string_to_number(s);
+            if is_float {
+                Ok(SqlValue::Real(-float_val))
+            } else {
+                Ok(SqlValue::Integer(-int_val))
+            }
+        }
 
         // Unary NOT - logical negation
         // Per SQL standard three-valued logic:
@@ -238,6 +251,54 @@ mod tests {
             eval_unary_op(&UnaryOperator::Plus, &SqlValue::Varchar(arcstr::ArcStr::from("")))
                 .unwrap(),
             SqlValue::Varchar(arcstr::ArcStr::from(""))
+        );
+    }
+
+    #[test]
+    fn test_unary_minus_on_text() {
+        // SQLite behavior: unary - on text converts to number first, then negates
+        // Non-numeric strings become 0
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Minus, &SqlValue::Varchar(arcstr::ArcStr::from(".")))
+                .unwrap(),
+            SqlValue::Integer(0)
+        );
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Minus, &SqlValue::Varchar(arcstr::ArcStr::from("abc")))
+                .unwrap(),
+            SqlValue::Integer(0)
+        );
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Minus, &SqlValue::Varchar(arcstr::ArcStr::from("")))
+                .unwrap(),
+            SqlValue::Integer(0)
+        );
+
+        // Numeric strings are converted and negated
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Minus, &SqlValue::Varchar(arcstr::ArcStr::from("123")))
+                .unwrap(),
+            SqlValue::Integer(-123)
+        );
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Minus, &SqlValue::Varchar(arcstr::ArcStr::from("  5  ")))
+                .unwrap(),
+            SqlValue::Integer(-5)
+        );
+
+        // Float strings
+        let result = eval_unary_op(&UnaryOperator::Minus, &SqlValue::Varchar(arcstr::ArcStr::from("3.14")))
+            .unwrap();
+        match result {
+            SqlValue::Real(v) => assert!((v - (-3.14)).abs() < 0.001, "Expected -3.14, got {}", v),
+            other => panic!("Expected Real, got {:?}", other),
+        }
+
+        // Character type works the same
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Minus, &SqlValue::Character(arcstr::ArcStr::from("42")))
+                .unwrap(),
+            SqlValue::Integer(-42)
         );
     }
 }
