@@ -40,7 +40,7 @@ fn setup_sort_table(db: &mut Database, row_count: usize, include_nulls: bool) {
                 data_type: vibesql_types::DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             collation: None,
             },
             vibesql_catalog::ColumnSchema {
@@ -48,7 +48,7 @@ fn setup_sort_table(db: &mut Database, row_count: usize, include_nulls: bool) {
                 data_type: vibesql_types::DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             collation: None,
             },
             vibesql_catalog::ColumnSchema {
@@ -56,7 +56,7 @@ fn setup_sort_table(db: &mut Database, row_count: usize, include_nulls: bool) {
                 data_type: vibesql_types::DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             collation: None,
             },
             vibesql_catalog::ColumnSchema {
@@ -64,7 +64,7 @@ fn setup_sort_table(db: &mut Database, row_count: usize, include_nulls: bool) {
                 data_type: vibesql_types::DataType::Varchar { max_length: Some(100) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             collation: None,
             },
         ],
@@ -104,7 +104,7 @@ fn setup_presorted_table(db: &mut Database, row_count: usize, table_name: &str) 
             data_type: vibesql_types::DataType::Integer,
             nullable: false,
             default_value: None,
-            generated_expr: None,
+            generated_expr: None, is_exact_integer_type: false,
             collation: None,
         }],
     );
@@ -125,7 +125,7 @@ fn setup_reverse_sorted_table(db: &mut Database, row_count: usize, table_name: &
             data_type: vibesql_types::DataType::Integer,
             nullable: false,
             default_value: None,
-            generated_expr: None,
+            generated_expr: None, is_exact_integer_type: false,
             collation: None,
         }],
     );

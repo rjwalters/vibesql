@@ -526,7 +526,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -534,7 +534,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -542,7 +542,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Date,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -550,7 +550,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -558,7 +558,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -566,7 +566,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -574,7 +574,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -582,7 +582,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -590,7 +590,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -598,7 +598,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -606,7 +606,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -614,7 +614,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -622,7 +622,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -630,7 +630,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -638,7 +638,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(9) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -646,7 +646,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(6) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -654,7 +654,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -662,7 +662,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -670,7 +670,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -678,7 +678,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -686,7 +686,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -694,7 +694,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -702,7 +702,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -710,7 +710,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -718,7 +718,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -726,7 +726,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -734,7 +734,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -742,7 +742,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -758,7 +758,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -766,7 +766,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -774,7 +774,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -782,7 +782,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -790,7 +790,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -798,7 +798,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -806,7 +806,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(2) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -814,7 +814,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -822,7 +822,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -830,7 +830,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -846,7 +846,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -854,7 +854,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -862,7 +862,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Date,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -870,7 +870,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Date,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -878,7 +878,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(200) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -886,7 +886,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -894,7 +894,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -902,7 +902,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -910,7 +910,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -918,7 +918,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -926,7 +926,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -934,7 +934,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -942,7 +942,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -950,7 +950,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -958,7 +958,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -966,7 +966,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -974,7 +974,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -982,7 +982,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -990,7 +990,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -998,7 +998,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1006,7 +1006,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1014,7 +1014,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -1030,7 +1030,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1038,7 +1038,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1046,7 +1046,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1054,7 +1054,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1062,7 +1062,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(15) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1070,7 +1070,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1078,7 +1078,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1086,7 +1086,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(30) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1094,7 +1094,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(2) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1102,7 +1102,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1110,7 +1110,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1118,7 +1118,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 5, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1126,7 +1126,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -1142,7 +1142,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1150,7 +1150,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1158,7 +1158,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1166,7 +1166,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1174,7 +1174,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1182,7 +1182,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1190,7 +1190,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1198,7 +1198,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1206,7 +1206,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1214,7 +1214,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(30) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1222,7 +1222,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1230,7 +1230,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1238,7 +1238,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1246,7 +1246,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1254,7 +1254,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1262,7 +1262,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(13) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1270,7 +1270,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1278,7 +1278,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -1294,7 +1294,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1302,7 +1302,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1310,7 +1310,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Date,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1318,7 +1318,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Date,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1326,7 +1326,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1334,7 +1334,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1342,7 +1342,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1350,7 +1350,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1358,7 +1358,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1366,7 +1366,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(40) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1374,7 +1374,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1382,7 +1382,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(100) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1390,7 +1390,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(100) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1398,7 +1398,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(40) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1406,7 +1406,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1414,7 +1414,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1422,7 +1422,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1430,7 +1430,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1438,7 +1438,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1446,7 +1446,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1454,7 +1454,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(15) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1462,7 +1462,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1470,7 +1470,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1478,7 +1478,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(30) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1486,7 +1486,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(2) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1494,7 +1494,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1502,7 +1502,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1510,7 +1510,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 5, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1518,7 +1518,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 5, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -1534,7 +1534,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1542,7 +1542,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1550,7 +1550,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1558,7 +1558,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1566,7 +1566,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1574,7 +1574,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1582,7 +1582,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1590,7 +1590,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1598,7 +1598,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1606,7 +1606,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1614,7 +1614,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1622,7 +1622,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1630,7 +1630,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1638,7 +1638,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1646,7 +1646,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1654,7 +1654,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1662,7 +1662,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1670,7 +1670,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1678,7 +1678,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1686,7 +1686,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1694,7 +1694,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1702,7 +1702,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1710,7 +1710,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -1730,7 +1730,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1738,7 +1738,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1746,7 +1746,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1754,7 +1754,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1762,7 +1762,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1770,7 +1770,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 15, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1778,7 +1778,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1786,7 +1786,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1794,7 +1794,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1802,7 +1802,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1810,7 +1810,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1818,7 +1818,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1826,7 +1826,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1834,7 +1834,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1842,7 +1842,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1850,7 +1850,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1858,7 +1858,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(100) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1866,7 +1866,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(15) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1874,7 +1874,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -1890,7 +1890,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1898,7 +1898,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1906,7 +1906,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1914,7 +1914,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1922,7 +1922,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1930,7 +1930,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1938,7 +1938,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(15) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1946,7 +1946,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1954,7 +1954,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1962,7 +1962,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(30) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1970,7 +1970,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(2) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1978,7 +1978,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1986,7 +1986,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -1994,7 +1994,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 5, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -2010,7 +2010,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2018,7 +2018,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2026,7 +2026,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(30) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2034,7 +2034,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2042,7 +2042,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2050,7 +2050,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -2066,7 +2066,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2074,7 +2074,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2082,7 +2082,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(100) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -2098,7 +2098,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2106,7 +2106,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2114,7 +2114,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2122,7 +2122,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2130,7 +2130,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2138,7 +2138,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2146,7 +2146,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2154,7 +2154,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2162,7 +2162,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2170,7 +2170,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2178,7 +2178,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2186,7 +2186,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2194,7 +2194,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2202,7 +2202,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2210,7 +2210,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2218,7 +2218,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2226,7 +2226,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2234,7 +2234,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2242,7 +2242,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2250,7 +2250,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -2270,7 +2270,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2278,7 +2278,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2286,7 +2286,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2294,7 +2294,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2302,7 +2302,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2310,7 +2310,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2318,7 +2318,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2326,7 +2326,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(100) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2334,7 +2334,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(100) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -2350,7 +2350,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2358,7 +2358,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2366,7 +2366,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2374,7 +2374,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2382,7 +2382,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2390,7 +2390,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2398,7 +2398,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2406,7 +2406,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2414,7 +2414,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(100) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2422,7 +2422,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2430,7 +2430,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2438,7 +2438,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2446,7 +2446,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2454,7 +2454,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -2470,7 +2470,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2478,7 +2478,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2486,7 +2486,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2494,7 +2494,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2502,7 +2502,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2510,7 +2510,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2518,7 +2518,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2526,7 +2526,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2534,7 +2534,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(40) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2542,7 +2542,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2550,7 +2550,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2558,7 +2558,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(100) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2566,7 +2566,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(40) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2574,7 +2574,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2582,7 +2582,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2590,7 +2590,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2598,7 +2598,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2606,7 +2606,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(15) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2614,7 +2614,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2622,7 +2622,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2630,7 +2630,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(30) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2638,7 +2638,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(2) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2646,7 +2646,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2654,7 +2654,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2662,7 +2662,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 5, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2670,7 +2670,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 5, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -2686,7 +2686,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2694,7 +2694,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2702,7 +2702,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2710,7 +2710,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2718,7 +2718,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2726,7 +2726,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2734,7 +2734,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2742,7 +2742,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2750,7 +2750,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2758,7 +2758,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2766,7 +2766,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2774,7 +2774,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2782,7 +2782,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2790,7 +2790,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2798,7 +2798,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2806,7 +2806,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2814,7 +2814,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2822,7 +2822,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2830,7 +2830,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2838,7 +2838,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2846,7 +2846,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2854,7 +2854,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2862,7 +2862,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2870,7 +2870,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2878,7 +2878,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2886,7 +2886,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2894,7 +2894,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2902,7 +2902,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2910,7 +2910,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2918,7 +2918,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2926,7 +2926,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2934,7 +2934,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2942,7 +2942,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2950,7 +2950,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -2966,7 +2966,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2974,7 +2974,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2982,7 +2982,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2990,7 +2990,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -2998,7 +2998,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3006,7 +3006,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3014,7 +3014,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3022,7 +3022,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3030,7 +3030,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3038,7 +3038,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3046,7 +3046,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3054,7 +3054,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3062,7 +3062,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3070,7 +3070,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3078,7 +3078,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3086,7 +3086,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3094,7 +3094,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3102,7 +3102,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3110,7 +3110,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3118,7 +3118,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3126,7 +3126,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3134,7 +3134,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3142,7 +3142,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3150,7 +3150,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3158,7 +3158,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3166,7 +3166,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3174,7 +3174,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -3190,7 +3190,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3198,7 +3198,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3206,7 +3206,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3214,7 +3214,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3222,7 +3222,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3230,7 +3230,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3238,7 +3238,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3246,7 +3246,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3254,7 +3254,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3262,7 +3262,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3270,7 +3270,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3278,7 +3278,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3286,7 +3286,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3294,7 +3294,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3302,7 +3302,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3310,7 +3310,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3318,7 +3318,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3326,7 +3326,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3334,7 +3334,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3342,7 +3342,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3350,7 +3350,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3358,7 +3358,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3366,7 +3366,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3374,7 +3374,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3382,7 +3382,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3390,7 +3390,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3398,7 +3398,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3406,7 +3406,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3414,7 +3414,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3422,7 +3422,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3430,7 +3430,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3438,7 +3438,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3446,7 +3446,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3454,7 +3454,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -3470,7 +3470,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3478,7 +3478,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3486,7 +3486,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3494,7 +3494,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3502,7 +3502,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3510,7 +3510,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3518,7 +3518,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3526,7 +3526,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3534,7 +3534,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3542,7 +3542,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3550,7 +3550,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3558,7 +3558,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3566,7 +3566,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3574,7 +3574,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3582,7 +3582,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3590,7 +3590,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3598,7 +3598,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3606,7 +3606,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3614,7 +3614,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3622,7 +3622,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3630,7 +3630,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3638,7 +3638,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3646,7 +3646,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3654,7 +3654,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 7, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -3670,7 +3670,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3678,7 +3678,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3686,7 +3686,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(1) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3694,7 +3694,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3702,7 +3702,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3710,7 +3710,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3718,7 +3718,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3726,7 +3726,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3734,7 +3734,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -3750,7 +3750,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3758,7 +3758,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3766,7 +3766,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(15) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3774,7 +3774,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3782,7 +3782,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -3798,7 +3798,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3806,7 +3806,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3814,7 +3814,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -3830,7 +3830,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3838,7 +3838,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(16) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3846,7 +3846,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Date,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3854,7 +3854,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Date,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3862,7 +3862,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3870,7 +3870,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3878,7 +3878,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3886,7 +3886,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3894,7 +3894,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3902,7 +3902,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3910,7 +3910,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3918,7 +3918,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(40) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3926,7 +3926,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3934,7 +3934,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3942,7 +3942,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(100) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3950,7 +3950,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(40) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3958,7 +3958,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3966,7 +3966,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3974,7 +3974,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3982,7 +3982,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3990,7 +3990,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -3998,7 +3998,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -4006,7 +4006,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(15) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -4014,7 +4014,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -4022,7 +4022,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -4030,7 +4030,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(30) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -4038,7 +4038,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(2) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -4046,7 +4046,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(10) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -4054,7 +4054,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(20) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -4062,7 +4062,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 5, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -4070,7 +4070,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Decimal { precision: 5, scale: 2 },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],
@@ -4086,7 +4086,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -4094,7 +4094,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -4102,7 +4102,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -4110,7 +4110,7 @@ fn create_tpcds_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],

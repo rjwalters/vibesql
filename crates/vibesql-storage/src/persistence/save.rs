@@ -218,7 +218,17 @@ impl Database {
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
                 }
 
-                writeln!(writer, ");")
+                // Close the column definitions
+                write!(writer, ")")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+                // Add WITHOUT ROWID clause for SQLite compatibility (Issue #4803)
+                if schema.without_rowid {
+                    write!(writer, " WITHOUT ROWID")
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                }
+
+                writeln!(writer, ";")
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
                 // INSERT statements for data (only live/non-deleted rows)

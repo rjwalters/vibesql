@@ -234,7 +234,7 @@ mod tests {
                 .collect(),
             default_value: None,
             comment: None,
-            generated_expr: None,
+            generated_expr: None, is_exact_integer_type: false,
         }
     }
 

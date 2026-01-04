@@ -152,7 +152,7 @@ mod tests {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -160,7 +160,7 @@ mod tests {
                 data_type: DataType::Varchar { max_length: Some(255) },
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ];

@@ -24,7 +24,7 @@ fn test_when_clause_filters_firing() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             },
             vibesql_ast::ColumnDef {
                 name: "amount".to_string(),
@@ -33,13 +33,13 @@ fn test_when_clause_filters_firing() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
     CreateTableExecutor::execute(&table_stmt, &mut db)
         .expect("Failed to create transactions table");

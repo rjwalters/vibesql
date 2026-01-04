@@ -469,7 +469,7 @@ mod tests {
                 data_type: vibesql_types::DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             vibesql_catalog::ColumnSchema {
@@ -477,7 +477,7 @@ mod tests {
                 data_type: vibesql_types::DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             vibesql_catalog::ColumnSchema {
@@ -485,7 +485,7 @@ mod tests {
                 data_type: vibesql_types::DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             vibesql_catalog::ColumnSchema {
@@ -493,7 +493,7 @@ mod tests {
                 data_type: vibesql_types::DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ];

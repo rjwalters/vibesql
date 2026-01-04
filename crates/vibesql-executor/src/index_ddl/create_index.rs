@@ -786,7 +786,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None,
+                    generated_expr: None, is_exact_integer_type: false,
                 },
                 ColumnDef {
                     name: "email".to_string(),
@@ -795,7 +795,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None,
+                    generated_expr: None, is_exact_integer_type: false,
                 },
                 ColumnDef {
                     name: "name".to_string(),
@@ -804,13 +804,13 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None,
+                    generated_expr: None, is_exact_integer_type: false,
                 },
             ],
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
-            as_query: None,
+            as_query: None, without_rowid: false,
         };
 
         CreateTableExecutor::execute(&stmt, db).unwrap();
@@ -1096,7 +1096,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None,
+                    generated_expr: None, is_exact_integer_type: false,
                 },
                 ColumnDef {
                     name: "embedding".to_string(),
@@ -1105,7 +1105,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None,
+                    generated_expr: None, is_exact_integer_type: false,
                 },
                 ColumnDef {
                     name: "content".to_string(),
@@ -1114,13 +1114,13 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None,
+                    generated_expr: None, is_exact_integer_type: false,
                 },
             ],
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
-            as_query: None,
+            as_query: None, without_rowid: false,
         };
 
         CreateTableExecutor::execute(&stmt, db).unwrap();
@@ -1506,7 +1506,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None,
+                    generated_expr: None, is_exact_integer_type: false,
                 },
                 vibesql_ast::ColumnDef {
                     name: "price".to_string(),
@@ -1515,7 +1515,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None,
+                    generated_expr: None, is_exact_integer_type: false,
                 },
                 vibesql_ast::ColumnDef {
                     name: "discount".to_string(),
@@ -1524,13 +1524,13 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None,
+                    generated_expr: None, is_exact_integer_type: false,
                 },
             ],
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
-            as_query: None,
+            as_query: None, without_rowid: false,
         };
         crate::CreateTableExecutor::execute(&table_stmt, &mut db).unwrap();
 

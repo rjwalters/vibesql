@@ -89,7 +89,7 @@ fn create_groupby_database(row_count: usize, num_groups: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             collation: None,
             },
             ColumnSchema {
@@ -97,7 +97,7 @@ fn create_groupby_database(row_count: usize, num_groups: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             collation: None,
             },
             ColumnSchema {
@@ -105,7 +105,7 @@ fn create_groupby_database(row_count: usize, num_groups: usize) -> Database {
                 data_type: DataType::Bigint,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             collation: None,
             },
         ],

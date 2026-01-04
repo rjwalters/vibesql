@@ -663,8 +663,12 @@ fn execute_insert_internal(
     }
 
     // Update LAST_INSERT_ROWID if any auto-generated values were produced
+    // SQLite: last_insert_rowid() is NOT updated for WITHOUT ROWID tables
+    // (see SQLite documentation R-47220-63683)
     if let Some(id) = first_generated_id {
-        db.set_last_insert_rowid(id);
+        if !schema.without_rowid {
+            db.set_last_insert_rowid(id);
+        }
     }
 
     // Invalidate the database-level columnar cache since table data changed.

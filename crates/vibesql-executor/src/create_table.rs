@@ -45,7 +45,7 @@ impl CreateTableExecutor {
     ///             constraints: vec![],
     ///             default_value: None,
     ///             comment: None,
-    ///             generated_expr: None,
+    ///             generated_expr: None, is_exact_integer_type: false,
     ///         },
     ///         ColumnDef {
     ///             name: "name".to_string(),
@@ -54,13 +54,13 @@ impl CreateTableExecutor {
     ///             constraints: vec![],
     ///             default_value: None,
     ///             comment: None,
-    ///             generated_expr: None,
+    ///             generated_expr: None, is_exact_integer_type: false,
     ///         },
     ///     ],
     ///     table_constraints: vec![],
     ///     table_options: vec![],
     ///     quoted: false,
-    ///     as_query: None,
+    ///     as_query: None, without_rowid: false,
     /// };
     ///
     /// let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -200,6 +200,9 @@ impl CreateTableExecutor {
 
         // Create TableSchema with unqualified name
         let mut table_schema = TableSchema::new(table_name.clone(), columns);
+
+        // Apply WITHOUT ROWID flag from AST (SQLite compatibility)
+        table_schema.without_rowid = stmt.without_rowid;
 
         // Apply constraint results to schema (sets PK, unique, and check constraints)
         ConstraintValidator::apply_to_schema(&mut table_schema, &constraint_result);

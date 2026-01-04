@@ -146,6 +146,10 @@ pub struct CreateTableStmt {
     /// Optional AS SELECT query for CREATE TABLE ... AS SELECT syntax
     /// When present, columns are derived from the query result
     pub as_query: Option<Box<crate::SelectStmt>>,
+    /// If true, table was created with WITHOUT ROWID clause (SQLite compatibility).
+    /// WITHOUT ROWID tables have no implicit rowid column and last_insert_rowid()
+    /// is not updated when inserting into them.
+    pub without_rowid: bool,
 }
 
 /// Column definition
