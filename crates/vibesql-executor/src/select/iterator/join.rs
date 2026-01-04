@@ -134,6 +134,7 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
             using_coalesce_pairs: HashMap::new(),
+            column_replacement_map: HashMap::new(),
         };
 
         let right_count = right_rows.len();

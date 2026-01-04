@@ -1635,6 +1635,7 @@ fn build_schema_from_tables(
             duplicate_aliases: std::collections::HashSet::new(),
             joined_columns: std::collections::HashSet::new(),
             using_coalesce_pairs: std::collections::HashMap::new(),
+            column_replacement_map: std::collections::HashMap::new(),
         })
     }
 }

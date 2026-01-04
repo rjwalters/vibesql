@@ -77,11 +77,17 @@ impl SelectExecutor<'_> {
                 vibesql_ast::SelectItem::Wildcard { alias } => {
                     // SELECT * [AS (col1, col2, ...)] - expand to all column names from schema
                     // Skip hidden columns (from NATURAL JOIN deduplication)
+                    // For RIGHT/FULL OUTER JOINs, hidden columns with replacements are included
                     // Respects full_column_names PRAGMA when there are multiple tables with duplicate columns
                     if let Some(from_res) = from_result {
                         // Get all column names in order from the combined schema
                         // Store (index, column_name, table_name_for_display)
                         let mut table_columns: Vec<(usize, String, String)> = Vec::new();
+
+                        // Build a set of replacement target indices (columns that are replacement sources)
+                        // These should be skipped since they're output via the hidden column's position
+                        let replacement_targets: std::collections::HashSet<usize> =
+                            from_res.schema.column_replacement_map.values().copied().collect();
 
                         for (table_id, (start_index, table_schema)) in
                             &from_res.schema.table_schemas
@@ -91,10 +97,21 @@ impl SelectExecutor<'_> {
 
                             for (col_idx, col_schema) in table_schema.columns.iter().enumerate() {
                                 let abs_idx = start_index + col_idx;
-                                // Skip hidden columns (from NATURAL JOIN deduplication)
-                                if from_res.schema.is_column_hidden(abs_idx) {
+
+                                // Skip columns that are replacement targets (they're output via replacement)
+                                if replacement_targets.contains(&abs_idx) {
                                     continue;
                                 }
+
+                                // For hidden columns, check if they have a replacement
+                                // If so, include the name (value comes from replacement)
+                                // If not, skip them
+                                if from_res.schema.is_column_hidden(abs_idx) {
+                                    if from_res.schema.get_column_replacement(abs_idx).is_none() {
+                                        continue;
+                                    }
+                                }
+
                                 let col_name = col_schema.name.clone();
                                 table_columns.push((
                                     abs_idx,

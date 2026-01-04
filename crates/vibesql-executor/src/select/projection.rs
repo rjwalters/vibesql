@@ -31,14 +31,19 @@ pub(crate) fn project_row_combined(
                     row.values.len()
                 };
 
-                // Iterate through columns, skipping hidden ones
-                for (idx, value) in row.values.iter().enumerate() {
-                    if idx >= max_col {
-                        break;
-                    }
-                    // Skip hidden columns (from NATURAL JOIN deduplication)
-                    if !schema.is_column_hidden(idx) {
-                        values.push(value.clone());
+                // Iterate through columns, handling hidden columns with replacements
+                for idx in 0..max_col {
+                    if schema.is_column_hidden(idx) {
+                        // Check if this hidden column has a replacement (for RIGHT/FULL OUTER JOINs)
+                        // The replacement maintains column ordering from left table while using right values
+                        if let Some(replacement_idx) = schema.get_column_replacement(idx) {
+                            if replacement_idx < row.values.len() {
+                                values.push(row.values[replacement_idx].clone());
+                            }
+                        }
+                        // If no replacement, skip this hidden column
+                    } else {
+                        values.push(row.values[idx].clone());
                     }
                 }
             }

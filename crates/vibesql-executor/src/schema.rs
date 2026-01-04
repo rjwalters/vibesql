@@ -133,6 +133,14 @@ pub struct CombinedSchema {
     /// semantics: if the left value is NULL, use the right value.
     /// Issue #4783: USING column semantics differ from SQLite in OUTER JOINs
     pub using_coalesce_pairs: HashMap<String, (usize, usize)>,
+    /// Column replacement map for RIGHT/FULL OUTER NATURAL JOINs in SELECT * expansion.
+    /// Maps hidden_column_index -> replacement_column_index.
+    /// When expanding SELECT *, if a column is hidden but has a replacement, output
+    /// the replacement column's value instead of skipping. This maintains the column
+    /// ordering from the left table while using values from the right table.
+    /// Example: In `t5 NATURAL RIGHT JOIN t4`, t5.id is hidden but should be replaced
+    /// by t4.id to maintain the output order (id, y, x) instead of (y, id, x).
+    pub column_replacement_map: HashMap<usize, usize>,
 }
 
 impl CombinedSchema {
@@ -149,6 +157,7 @@ impl CombinedSchema {
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
             using_coalesce_pairs: HashMap::new(),
+            column_replacement_map: HashMap::new(),
         }
     }
 
@@ -168,6 +177,7 @@ impl CombinedSchema {
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
             using_coalesce_pairs: HashMap::new(),
+            column_replacement_map: HashMap::new(),
         }
     }
 
@@ -192,6 +202,7 @@ impl CombinedSchema {
                 default_value: None,  // Derived table columns have no defaults
                 generated_expr: None, // Derived table columns are not generated
                 collation: None,      // Derived table columns don't inherit collation
+                is_exact_integer_type: false, // Derived columns don't preserve exact type
             })
             .collect();
 
@@ -207,6 +218,7 @@ impl CombinedSchema {
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
             using_coalesce_pairs: HashMap::new(),
+            column_replacement_map: HashMap::new(),
         }
     }
 
@@ -249,6 +261,7 @@ impl CombinedSchema {
             duplicate_aliases,
             joined_columns: left.joined_columns,
             using_coalesce_pairs: left.using_coalesce_pairs,
+            column_replacement_map: left.column_replacement_map,
         }
     }
 
@@ -314,6 +327,12 @@ impl CombinedSchema {
             using_coalesce_pairs.insert(col_name, (left_total + left_idx, left_total + right_idx));
         }
 
+        // Merge column_replacement_map from both sides (adjusting right side indices)
+        let mut column_replacement_map = left.column_replacement_map;
+        for (hidden_idx, replacement_idx) in right.column_replacement_map {
+            column_replacement_map.insert(left_total + hidden_idx, left_total + replacement_idx);
+        }
+
         CombinedSchema {
             table_schemas,
             total_columns: left_total + right.total_columns,
@@ -322,6 +341,7 @@ impl CombinedSchema {
             duplicate_aliases,
             joined_columns,
             using_coalesce_pairs,
+            column_replacement_map,
         }
     }
 
@@ -669,6 +689,19 @@ impl CombinedSchema {
     pub fn get_using_coalesce_pair(&self, column: &str) -> Option<(usize, usize)> {
         self.using_coalesce_pairs.get(&column.to_lowercase()).copied()
     }
+
+    /// Add a column replacement for SELECT * expansion (for RIGHT/FULL OUTER JOINs).
+    ///
+    /// When a hidden column has a replacement, SELECT * will output the replacement
+    /// column's value at the hidden column's position, maintaining correct column ordering.
+    pub fn add_column_replacement(&mut self, hidden_idx: usize, replacement_idx: usize) {
+        self.column_replacement_map.insert(hidden_idx, replacement_idx);
+    }
+
+    /// Get the replacement column index for a hidden column, if any.
+    pub fn get_column_replacement(&self, hidden_idx: usize) -> Option<usize> {
+        self.column_replacement_map.get(&hidden_idx).copied()
+    }
 }
 
 /// Builder for incrementally constructing a CombinedSchema
@@ -683,6 +716,7 @@ pub struct SchemaBuilder {
     duplicate_aliases: HashSet<TableIdentifier>,
     joined_columns: HashSet<String>,
     using_coalesce_pairs: HashMap<String, (usize, usize)>,
+    column_replacement_map: HashMap<usize, usize>,
 }
 
 impl SchemaBuilder {
@@ -695,6 +729,7 @@ impl SchemaBuilder {
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
             using_coalesce_pairs: HashMap::new(),
+            column_replacement_map: HashMap::new(),
         }
     }
 
@@ -710,6 +745,7 @@ impl SchemaBuilder {
             duplicate_aliases: schema.duplicate_aliases,
             joined_columns: schema.joined_columns,
             using_coalesce_pairs: schema.using_coalesce_pairs,
+            column_replacement_map: schema.column_replacement_map,
         }
     }
 
@@ -747,7 +783,13 @@ impl SchemaBuilder {
             duplicate_aliases: self.duplicate_aliases,
             joined_columns: self.joined_columns,
             using_coalesce_pairs: self.using_coalesce_pairs,
+            column_replacement_map: self.column_replacement_map,
         }
+    }
+
+    /// Add a column replacement for SELECT * expansion (for RIGHT/FULL OUTER JOINs)
+    pub fn add_column_replacement(&mut self, hidden_idx: usize, replacement_idx: usize) {
+        self.column_replacement_map.insert(hidden_idx, replacement_idx);
     }
 }
 

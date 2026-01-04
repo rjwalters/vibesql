@@ -230,6 +230,7 @@ fn build_aggregate_result_schema(select_list: &[SelectItem]) -> CombinedSchema {
         duplicate_aliases: std::collections::HashSet::new(),
         joined_columns: std::collections::HashSet::new(),
         using_coalesce_pairs: std::collections::HashMap::new(),
+        column_replacement_map: std::collections::HashMap::new(),
     }
 }
 

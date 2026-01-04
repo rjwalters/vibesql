@@ -1401,15 +1401,20 @@ fn remove_duplicate_columns_for_natural_join(
             for (col_idx, col) in table_schema.columns.iter().enumerate() {
                 let lowercase = col.name.to_lowercase();
                 if let Some(left_entries) = left_column_map.get(&lowercase) {
-                    // Hide the left-side column(s)
+                    let right_idx = left_col_count + table_start_idx + col_idx;
+
+                    // Hide the left-side column(s) and add replacement mapping
+                    // The replacement ensures SELECT * outputs the right column value
+                    // at the left column's position, maintaining correct column ordering
                     for (_, _, left_idx) in left_entries {
                         result.schema.hide_column(*left_idx);
+                        // Add replacement: hidden left column -> visible right column
+                        result.schema.add_column_replacement(*left_idx, right_idx);
                     }
 
                     // Add coalesce pair for COALESCE(left, right) semantics on unqualified references
                     // Use the first left column entry for the coalesce pair
                     if let Some((_, actual_name, left_idx)) = left_entries.first() {
-                        let right_idx = left_col_count + table_start_idx + col_idx;
                         result
                             .schema
                             .add_using_coalesce_pair(actual_name, *left_idx, right_idx);
@@ -1417,6 +1422,9 @@ fn remove_duplicate_columns_for_natural_join(
 
                     // Mark as joined column for ambiguity resolution
                     result.schema.add_joined_column(&col.name);
+
+                    // Also hide the right column since it will be output via replacement
+                    result.schema.hide_column(right_idx);
                 }
             }
         }
