@@ -9,6 +9,7 @@
 //! - `utils` - Utility methods for expression analysis
 //! - `index_optimization` - Index-based optimizations for WHERE and ORDER BY
 //! - `arena_execution` - Arena-based execution for zero-allocation prepared statements
+//! - `set_operations` - UNION, INTERSECT, EXCEPT handling
 
 mod aggregation;
 mod arena_execution;
@@ -20,6 +21,7 @@ mod fast_path;
 pub use fast_path::{is_simple_point_query, is_streaming_aggregate_query};
 mod index_optimization;
 mod nonagg;
+mod set_operations;
 mod utils;
 pub(crate) mod validation;
 
