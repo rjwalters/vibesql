@@ -20,7 +20,7 @@ use super::{
 use crate::{
     errors::ExecutorError,
     evaluator::CombinedExpressionEvaluator,
-    optimizer::optimize_where_clause,
+    optimizer::{can_eliminate_distinct, optimize_where_clause},
     pipeline::ExecutionContext,
     select::{
         filter::apply_where_filter_combined_auto,
@@ -452,9 +452,10 @@ impl SelectExecutor<'_> {
             result
         };
 
-        // Apply DISTINCT if specified
+        // Apply DISTINCT if specified (skip if unique index guarantees uniqueness - issue #4852)
+        let needs_distinct = stmt.distinct && !can_eliminate_distinct(stmt, self.database);
         let projected_rows =
-            if stmt.distinct { apply_distinct(projected_rows) } else { projected_rows };
+            if needs_distinct { apply_distinct(projected_rows) } else { projected_rows };
 
         // Don't apply LIMIT/OFFSET if we have a set operation - it will be applied later
         if stmt.set_operation.is_some() {

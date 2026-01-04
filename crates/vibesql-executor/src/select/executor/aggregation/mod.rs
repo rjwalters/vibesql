@@ -13,8 +13,8 @@ use crate::{
     errors::ExecutorError,
     evaluator::compiled_pivot::PivotAggregateGroup,
     optimizer::{
-        collect_columns_from_expr, collect_required_columns, compute_projection_indices,
-        optimize_where_clause, project_rows, remap_schema,
+        can_eliminate_distinct, collect_columns_from_expr, collect_required_columns,
+        compute_projection_indices, optimize_where_clause, project_rows, remap_schema,
     },
     pipeline::ExecutionContext,
     select::{
@@ -621,8 +621,9 @@ impl SelectExecutor<'_> {
             result_rows
         };
 
-        // Apply DISTINCT if specified
-        let result_rows = if stmt.distinct { apply_distinct(result_rows) } else { result_rows };
+        // Apply DISTINCT if specified (skip if unique index guarantees uniqueness - issue #4852)
+        let needs_distinct = stmt.distinct && !can_eliminate_distinct(stmt, self.database);
+        let result_rows = if needs_distinct { apply_distinct(result_rows) } else { result_rows };
 
         // SQL Standard: Aggregates without GROUP BY must return exactly ONE row,
         // even if the input is empty. If we have no GROUP BY and result_rows is empty,

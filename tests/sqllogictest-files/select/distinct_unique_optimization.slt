@@ -1,0 +1,80 @@
+# Test DISTINCT elimination optimization (issue #4852)
+#
+# DISTINCT should only be eliminated when:
+# 1. SELECT columns are covered by a UNIQUE index
+# 2. All columns in that unique index are NOT NULL
+#
+# Without the NOT NULL guarantee, multiple NULL values could exist
+# in the result set (since NULL != NULL in SQL).
+
+# Create table with nullable columns and unique index
+statement ok
+CREATE TABLE t1(a, b, c, d)
+
+statement ok
+CREATE UNIQUE INDEX i1 ON t1(b, c)
+
+# Create table with NOT NULL columns and unique index
+statement ok
+CREATE TABLE t4(a, b NOT NULL, c NOT NULL, d NOT NULL)
+
+statement ok
+CREATE UNIQUE INDEX t4i1 ON t4(b, c)
+
+# Insert test data with NULLs in t1
+statement ok
+INSERT INTO t1 VALUES (1, NULL, NULL, 1)
+
+statement ok
+INSERT INTO t1 VALUES (2, NULL, NULL, 2)
+
+statement ok
+INSERT INTO t1 VALUES (3, 1, 2, 3)
+
+# Insert test data in t4 (no NULLs allowed)
+statement ok
+INSERT INTO t4 VALUES (1, 1, 2, 1)
+
+statement ok
+INSERT INTO t4 VALUES (2, 3, 4, 2)
+
+# Test: SELECT DISTINCT b, c FROM t1 should return multiple NULL rows
+# because DISTINCT is NOT eliminated (columns are nullable)
+query II rowsort
+SELECT DISTINCT b, c FROM t1
+----
+1	2
+NULL	NULL
+
+# Test: SELECT DISTINCT b, c FROM t4 returns all rows
+# DISTINCT can be eliminated because unique index columns are NOT NULL
+query II rowsort
+SELECT DISTINCT b, c FROM t4
+----
+1	2
+3	4
+
+# Test: Multiple NULL values in t1 are preserved when DISTINCT not eliminated
+statement ok
+INSERT INTO t1 VALUES (4, NULL, 3, 4)
+
+query II rowsort
+SELECT DISTINCT b, c FROM t1
+----
+1	2
+NULL	3
+NULL	NULL
+
+# Test: DISTINCT on columns NOT covered by unique index is NOT eliminated
+query II rowsort
+SELECT DISTINCT a, b FROM t4
+----
+1	1
+2	3
+
+# Clean up
+statement ok
+DROP TABLE t1
+
+statement ok
+DROP TABLE t4
