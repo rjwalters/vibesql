@@ -104,9 +104,25 @@ impl<'arena> ArenaParser<'arena> {
                 self.consume_keyword(Keyword::In)?;
                 self.expect_token(Token::LParen)?;
 
-                if self.peek_keyword(Keyword::Select) {
+                // Check if it's a subquery, looking past any extra parentheses
+                let is_subquery = self.is_subquery_in_clause();
+
+                if is_subquery {
+                    // Skip any extra leading parentheses
+                    let mut extra_parens = 0;
+                    while self.peek() == &Token::LParen {
+                        self.advance();
+                        extra_parens += 1;
+                    }
+
                     let subquery = self.parse_select_statement()?;
+
+                    // Consume the extra closing parentheses
+                    for _ in 0..extra_parens {
+                        self.expect_token(Token::RParen)?;
+                    }
                     self.expect_token(Token::RParen)?;
+
                     let left_ref = self.arena.alloc(left);
                     return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::In {
                         expr: left_ref,
@@ -174,9 +190,25 @@ impl<'arena> ArenaParser<'arena> {
             self.consume_keyword(Keyword::In)?;
             self.expect_token(Token::LParen)?;
 
-            if self.peek_keyword(Keyword::Select) {
+            // Check if it's a subquery, looking past any extra parentheses
+            let is_subquery = self.is_subquery_in_clause();
+
+            if is_subquery {
+                // Skip any extra leading parentheses
+                let mut extra_parens = 0;
+                while self.peek() == &Token::LParen {
+                    self.advance();
+                    extra_parens += 1;
+                }
+
                 let subquery = self.parse_select_statement()?;
+
+                // Consume the extra closing parentheses
+                for _ in 0..extra_parens {
+                    self.expect_token(Token::RParen)?;
+                }
                 self.expect_token(Token::RParen)?;
+
                 let left_ref = self.arena.alloc(left);
                 return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::In {
                     expr: left_ref,

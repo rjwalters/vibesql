@@ -517,6 +517,22 @@ impl<'arena> ArenaParser<'arena> {
         matches!(self.peek_next(), Token::Keyword { keyword: kw, .. } if *kw == keyword)
     }
 
+    /// Check if the current position starts a subquery in an IN clause.
+    /// Looks past any leading parentheses to detect SELECT keyword.
+    /// This handles cases like IN ((SELECT ...)) where extra parentheses wrap the subquery.
+    pub(crate) fn is_subquery_in_clause(&self) -> bool {
+        let mut offset = 0;
+        // Skip past any leading parentheses
+        while self.peek_at_offset(offset) == &Token::LParen {
+            offset += 1;
+        }
+        // Check if we find SELECT after the parentheses
+        matches!(
+            self.peek_at_offset(offset),
+            Token::Keyword { keyword: Keyword::Select, .. }
+        )
+    }
+
     /// Consume a keyword, returning an error if it's not the expected keyword.
     pub(crate) fn consume_keyword(&mut self, keyword: Keyword) -> Result<(), ParseError> {
         if self.peek_keyword(keyword) {

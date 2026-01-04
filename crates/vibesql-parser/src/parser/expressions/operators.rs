@@ -217,9 +217,24 @@ impl Parser {
                 self.expect_token(Token::LParen)?;
 
                 // Check if it's a subquery (SELECT ...) or a value list
-                if self.peek_keyword(Keyword::Select) {
-                    // It's a subquery: NOT IN (SELECT ...)
+                // We need to look past any extra parentheses to detect subqueries
+                let is_subquery = self.is_subquery_in_clause();
+
+                if is_subquery {
+                    // Skip any extra leading parentheses
+                    let mut extra_parens = 0;
+                    while self.peek() == &Token::LParen {
+                        self.advance();
+                        extra_parens += 1;
+                    }
+
+                    // It's a subquery: NOT IN (SELECT ...) or NOT IN ((SELECT ...))
                     let subquery = self.parse_select_statement()?;
+
+                    // Consume the extra closing parentheses
+                    for _ in 0..extra_parens {
+                        self.expect_token(Token::RParen)?;
+                    }
                     self.expect_token(Token::RParen)?;
 
                     // Don't return - assign to left and continue to check for IS NULL
@@ -365,9 +380,25 @@ impl Parser {
             self.expect_token(Token::LParen)?;
 
             // Check if it's a subquery (SELECT ...) or a value list
-            if self.peek_keyword(Keyword::Select) {
-                // It's a subquery: IN (SELECT ...)
+            // We need to look past any extra parentheses to detect subqueries
+            // e.g., IN ((SELECT ...)) should be treated the same as IN (SELECT ...)
+            let is_subquery = self.is_subquery_in_clause();
+
+            if is_subquery {
+                // Skip any extra leading parentheses
+                let mut extra_parens = 0;
+                while self.peek() == &Token::LParen {
+                    self.advance();
+                    extra_parens += 1;
+                }
+
+                // It's a subquery: IN (SELECT ...) or IN ((SELECT ...))
                 let subquery = self.parse_select_statement()?;
+
+                // Consume the extra closing parentheses
+                for _ in 0..extra_parens {
+                    self.expect_token(Token::RParen)?;
+                }
                 self.expect_token(Token::RParen)?;
 
                 // Don't return - assign to left and continue to check for IS NULL

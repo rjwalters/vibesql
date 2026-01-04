@@ -140,6 +140,22 @@ impl Parser {
         }
     }
 
+    /// Check if the current position starts a subquery in an IN clause.
+    /// Looks past any leading parentheses to detect SELECT keyword.
+    /// This handles cases like IN ((SELECT ...)) where extra parentheses wrap the subquery.
+    pub(super) fn is_subquery_in_clause(&self) -> bool {
+        let mut offset = 0;
+        // Skip past any leading parentheses
+        while self.peek_at_offset(offset) == &Token::LParen {
+            offset += 1;
+        }
+        // Check if we find SELECT after the parentheses
+        matches!(
+            self.peek_at_offset(offset),
+            Token::Keyword { keyword: Keyword::Select, .. }
+        )
+    }
+
     /// Parse a signed number (optional minus sign followed by number)
     pub(super) fn parse_signed_number(&mut self) -> Result<String, ParseError> {
         let mut num_str = String::new();
