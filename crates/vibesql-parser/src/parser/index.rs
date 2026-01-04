@@ -433,13 +433,64 @@ impl Parser {
                 // SQLite allows: CREATE INDEX i1xy ON t1(`x`,'y' ASC); -- 'y' is a column name
                 let column_name = self.parse_alias_name()?;
 
+                // Check if this is actually an expression (has arithmetic operator after identifier)
+                // Examples: b+1, a*2, x-y are expressions, not column names
+                if matches!(
+                    self.peek(),
+                    Token::Symbol('+')
+                        | Token::Symbol('-')
+                        | Token::Symbol('*')
+                        | Token::Symbol('/')
+                        | Token::Symbol('%')
+                        | Token::Symbol('|')
+                        | Token::Symbol('&')
+                        | Token::Symbol('<')
+                        | Token::Symbol('>')
+                        | Token::Symbol('=')
+                ) || matches!(self.peek(), Token::Keyword { keyword: kw, .. } if matches!(kw,
+                    crate::keywords::Keyword::And
+                    | crate::keywords::Keyword::Or
+                    | crate::keywords::Keyword::Is
+                    | crate::keywords::Keyword::Like
+                    | crate::keywords::Keyword::Glob
+                    | crate::keywords::Keyword::Between
+                    | crate::keywords::Keyword::In
+                ))
+                {
+                    // This is an expression - backtrack and parse fully
+                    self.position = saved_position;
+                    let expr = self.parse_expression()?;
+
+                    let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
+                        self.advance();
+                        vibesql_ast::OrderDirection::Asc
+                    } else if self.peek_keyword(crate::keywords::Keyword::Desc) {
+                        self.advance();
+                        vibesql_ast::OrderDirection::Desc
+                    } else {
+                        vibesql_ast::OrderDirection::Asc
+                    };
+
+                    columns.push(vibesql_ast::IndexColumn::new_expression(expr, direction));
+
+                    if self.peek() == &Token::Comma {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                    continue;
+                }
+
                 // Check for optional prefix length: column_name(length)
                 // BUT: if the token after ( is not a number, this is likely a function call
                 // like abs(b), not a prefix length like name(10). In that case, backtrack
                 // and parse as an expression.
                 let prefix_length = if self.peek() == &Token::LParen {
                     // Peek ahead to check if this is a prefix length (number) or function args
-                    if matches!(self.peek_at_offset(1), Token::Number(_)) {
+                    // A prefix length is: (number) - so we need Number followed by RParen
+                    if matches!(self.peek_at_offset(1), Token::Number(_))
+                        && matches!(self.peek_at_offset(2), Token::RParen)
+                    {
                         self.advance(); // consume LParen
 
                         // Parse the integer length
