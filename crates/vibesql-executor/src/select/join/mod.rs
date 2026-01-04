@@ -1397,19 +1397,43 @@ fn remove_duplicate_columns_for_natural_join(
         // For RIGHT/FULL OUTER JOINs: hide left-side columns and add coalesce pairs
         // This ensures SELECT * shows the right-side value (which is non-NULL for unmatched rows)
         // while qualified references like t5.id still return the actual NULL value
+
+        // Build a set of columns that are replacement targets from the left schema
+        // (i.e., columns that other columns point to for their replacement value)
+        let existing_replacement_targets: std::collections::HashSet<usize> =
+            left_schema.column_replacement_map.values().copied().collect();
+
         for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
             for (col_idx, col) in table_schema.columns.iter().enumerate() {
                 let lowercase = col.name.to_lowercase();
                 if let Some(left_entries) = left_column_map.get(&lowercase) {
                     let right_idx = left_col_count + table_start_idx + col_idx;
 
-                    // Hide the left-side column(s) and add replacement mapping
-                    // The replacement ensures SELECT * outputs the right column value
-                    // at the left column's position, maintaining correct column ordering
+                    // Handle chained NATURAL JOINs: update existing replacements that point
+                    // to columns being hidden in this join. For example:
+                    // t5 NATURAL RIGHT JOIN t4 NATURAL RIGHT JOIN t6
+                    // After first join: {0 -> 2}
+                    // After second join: 2 is being hidden, so update {0 -> 4}
+                    for (_, _, left_idx) in left_entries {
+                        // If this column is a replacement target from a previous join,
+                        // we need to update all replacements that point to it
+                        if existing_replacement_targets.contains(left_idx) {
+                            // Find and update all replacements pointing to this column
+                            for (source, target) in left_schema.column_replacement_map.iter() {
+                                if *target == *left_idx {
+                                    // Update the existing replacement to point to the new right column
+                                    result.schema.add_column_replacement(*source, right_idx);
+                                }
+                            }
+                        } else {
+                            // Normal case: add replacement for this column
+                            result.schema.add_column_replacement(*left_idx, right_idx);
+                        }
+                    }
+
+                    // Hide all left columns that are common (replacement targets get hidden too)
                     for (_, _, left_idx) in left_entries {
                         result.schema.hide_column(*left_idx);
-                        // Add replacement: hidden left column -> visible right column
-                        result.schema.add_column_replacement(*left_idx, right_idx);
                     }
 
                     // Add coalesce pair for COALESCE(left, right) semantics on unqualified references
