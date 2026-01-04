@@ -788,9 +788,9 @@ impl CombinedExpressionEvaluator<'_> {
             // EXTRACT expression: EXTRACT(field FROM expr)
             vibesql_ast::Expression::Extract { field, expr } => self.eval_extract(field, expr, row),
 
-            // LIKE pattern matching: expr LIKE pattern
-            vibesql_ast::Expression::Like { expr, pattern, negated, .. } => {
-                self.eval_like(expr, pattern, *negated, row)
+            // LIKE pattern matching: expr LIKE pattern [ESCAPE escape_char]
+            vibesql_ast::Expression::Like { expr, pattern, negated, escape } => {
+                self.eval_like(expr, pattern, escape, *negated, row)
             }
 
             // GLOB pattern matching: expr GLOB pattern (SQLite)
