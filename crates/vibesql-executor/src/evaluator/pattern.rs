@@ -1,3 +1,19 @@
+/// Determine the number of bytes in a UTF-8 character based on its leading byte
+#[inline]
+fn utf8_char_len(byte: u8) -> usize {
+    if byte & 0x80 == 0 {
+        1 // ASCII: 0xxxxxxx
+    } else if byte & 0xE0 == 0xC0 {
+        2 // 2-byte: 110xxxxx
+    } else if byte & 0xF0 == 0xE0 {
+        3 // 3-byte: 1110xxxx
+    } else if byte & 0xF8 == 0xF0 {
+        4 // 4-byte: 11110xxx
+    } else {
+        1 // Invalid UTF-8 or continuation byte, advance by 1
+    }
+}
+
 /// SQL LIKE pattern matching
 /// Supports wildcards:
 /// - % matches any sequence of characters (including empty)
@@ -81,11 +97,13 @@ fn like_match_with_elements(
             false
         }
         PatternElement::AnyChar => {
-            // _ matches exactly one character
+            // _ matches exactly one Unicode character (which may be multiple bytes)
             if text_pos >= text.len() {
                 return false;
             }
-            like_match_with_elements(text, pattern, text_pos + 1, pattern_pos + 1, case_sensitive)
+            // Advance by the number of bytes in this UTF-8 character
+            let char_len = utf8_char_len(text[text_pos]);
+            like_match_with_elements(text, pattern, text_pos + char_len, pattern_pos + 1, case_sensitive)
         }
         PatternElement::Literal(pattern_char) => {
             if text_pos >= text.len() {
@@ -145,13 +163,14 @@ fn glob_match_recursive(text: &[u8], pattern: &[u8], text_pos: usize, pattern_po
             false
         }
         b'?' => {
-            // ? matches exactly one character
+            // ? matches exactly one Unicode character (which may be multiple bytes)
             if text_pos >= text.len() {
                 // No character left to match
                 return false;
             }
-            // Skip one character in text and one in pattern
-            glob_match_recursive(text, pattern, text_pos + 1, pattern_pos + 1)
+            // Advance by the number of bytes in this UTF-8 character
+            let char_len = utf8_char_len(text[text_pos]);
+            glob_match_recursive(text, pattern, text_pos + char_len, pattern_pos + 1)
         }
         b'[' => {
             // Character class [...] or [^...] or [!...]
@@ -268,13 +287,14 @@ fn like_match_recursive(
             false
         }
         b'_' => {
-            // _ matches exactly one character
+            // _ matches exactly one Unicode character (which may be multiple bytes)
             if text_pos >= text.len() {
                 // No character left to match
                 return false;
             }
-            // Skip one character in text and one in pattern
-            like_match_recursive(text, pattern, text_pos + 1, pattern_pos + 1, case_sensitive)
+            // Advance by the number of bytes in this UTF-8 character
+            let char_len = utf8_char_len(text[text_pos]);
+            like_match_recursive(text, pattern, text_pos + char_len, pattern_pos + 1, case_sensitive)
         }
         _ => {
             // Regular character comparison
