@@ -2832,7 +2832,98 @@ proc db_leave {db} {
 
 proc sqlite3_mprintf_int {args} {
     # Stub for SQLite printf with integers
-    return [format [lindex $args 0] {*}[lrange $args 1 end]]
+    # Handles SQLite-specific behavior: # flag doesn't add 0x/0 prefix for zero values
+    set fmt [lindex $args 0]
+    set vals [lrange $args 1 end]
+
+    # Pre-process format string to handle # flag with zero values
+    # For each format specifier with #, check if corresponding value is 0
+    set result ""
+    set val_idx 0
+    set i 0
+    set len [string length $fmt]
+
+    while {$i < $len} {
+        set c [string index $fmt $i]
+        if {$c ne "%"} {
+            append result $c
+            incr i
+            continue
+        }
+
+        # Found %, parse the format specifier
+        set spec_start $i
+        incr i
+
+        # Check for %%
+        if {$i < $len && [string index $fmt $i] eq "%"} {
+            append result "%"
+            incr i
+            continue
+        }
+
+        # Parse flags
+        set has_alt 0
+        set flags ""
+        while {$i < $len} {
+            set c [string index $fmt $i]
+            if {$c eq "#"} {
+                set has_alt 1
+                append flags $c
+                incr i
+            } elseif {$c in {- + " " 0}} {
+                append flags $c
+                incr i
+            } else {
+                break
+            }
+        }
+
+        # Parse width
+        set width ""
+        while {$i < $len && [string is digit [string index $fmt $i]]} {
+            append width [string index $fmt $i]
+            incr i
+        }
+
+        # Parse precision
+        set prec ""
+        if {$i < $len && [string index $fmt $i] eq "."} {
+            append prec "."
+            incr i
+            while {$i < $len && [string is digit [string index $fmt $i]]} {
+                append prec [string index $fmt $i]
+                incr i
+            }
+        }
+
+        # Parse conversion specifier
+        set conv ""
+        if {$i < $len} {
+            set conv [string index $fmt $i]
+            incr i
+        }
+
+        # Get the value for this specifier
+        if {$val_idx < [llength $vals]} {
+            set val [lindex $vals $val_idx]
+            incr val_idx
+        } else {
+            set val 0
+        }
+
+        # Per C standard: # flag for x/X/o should NOT add prefix for zero values
+        if {$has_alt && $val == 0 && $conv in {x X o}} {
+            # Remove the # flag for zero values
+            set flags [string map {"#" ""} $flags]
+        }
+
+        # Reconstruct and format
+        set new_fmt "%${flags}${width}${prec}${conv}"
+        append result [format $new_fmt $val]
+    }
+
+    return $result
 }
 
 proc sqlite3_mprintf_str {args} {
