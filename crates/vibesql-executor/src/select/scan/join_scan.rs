@@ -1965,7 +1965,185 @@ fn on_clause_references_unknown_table_or_column(
         vibesql_ast::Expression::Cast { expr, .. } => {
             on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns, all_db_columns)
         }
-        // Literals, Null, Subquery, etc. don't reference tables in the join
+        vibesql_ast::Expression::ScalarSubquery(select_stmt) => {
+            // Pass only outer context - subquery_references_unknown_table will build up
+            // the subquery's own tables as it checks nested joins
+            subquery_references_unknown_table(
+                select_stmt,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            )
+        }
+        vibesql_ast::Expression::In { expr, subquery, .. } => {
+            if on_clause_references_unknown_table_or_column(
+                expr,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            ) {
+                return true;
+            }
+            // Pass only outer context
+            subquery_references_unknown_table(
+                subquery,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            )
+        }
+        vibesql_ast::Expression::Exists { subquery, .. } => {
+            // Pass only outer context
+            subquery_references_unknown_table(
+                subquery,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            )
+        }
+        vibesql_ast::Expression::Conjunction(exprs)
+        | vibesql_ast::Expression::Disjunction(exprs) => exprs.iter().any(|e| {
+            on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns)
+        }),
         _ => false,
+    }
+}
+
+/// Collect all table names from a FromClause (recursively for joins)
+fn collect_tables_from_from_clause(
+    from: &Option<vibesql_ast::FromClause>,
+    tables: &mut HashSet<String>,
+) {
+    if let Some(from_clause) = from {
+        collect_tables_from_from_clause_inner(from_clause, tables);
+    }
+}
+
+fn collect_tables_from_from_clause_inner(from: &vibesql_ast::FromClause, tables: &mut HashSet<String>) {
+    match from {
+        vibesql_ast::FromClause::Table { name, alias, .. } => {
+            let table_name = alias.as_ref().unwrap_or(name);
+            tables.insert(table_name.to_lowercase());
+        }
+        vibesql_ast::FromClause::Join { left, right, .. } => {
+            collect_tables_from_from_clause_inner(left, tables);
+            collect_tables_from_from_clause_inner(right, tables);
+        }
+        vibesql_ast::FromClause::Subquery { alias, .. } => {
+            tables.insert(alias.to_lowercase());
+        }
+        vibesql_ast::FromClause::Values { alias, .. } => {
+            tables.insert(alias.to_lowercase());
+        }
+    }
+}
+
+/// Check if a subquery's column references point to tables not in valid_tables
+fn subquery_references_unknown_table(
+    select_stmt: &vibesql_ast::SelectStmt,
+    valid_tables: &HashSet<String>,
+    valid_columns: &HashSet<String>,
+    all_db_columns: &HashSet<String>,
+) -> bool {
+    // For checking SELECT/WHERE/HAVING, use all tables from this subquery
+    // But for FROM clause, pass only outer context so nested joins are checked properly
+    let mut subquery_all_tables = valid_tables.clone();
+    collect_tables_from_from_clause(&select_stmt.from, &mut subquery_all_tables);
+
+    for item in &select_stmt.select_list {
+        if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+            if on_clause_references_unknown_table_or_column(
+                expr,
+                &subquery_all_tables,
+                valid_columns,
+                all_db_columns,
+            ) {
+                return true;
+            }
+        }
+    }
+
+    if let Some(where_expr) = &select_stmt.where_clause {
+        if on_clause_references_unknown_table_or_column(
+            where_expr,
+            &subquery_all_tables,
+            valid_columns,
+            all_db_columns,
+        ) {
+            return true;
+        }
+    }
+
+    if let Some(having_expr) = &select_stmt.having {
+        if on_clause_references_unknown_table_or_column(
+            having_expr,
+            &subquery_all_tables,
+            valid_columns,
+            all_db_columns,
+        ) {
+            return true;
+        }
+    }
+
+    // For FROM clause, pass only outer context's valid tables
+    if let Some(from) = &select_stmt.from {
+        if from_clause_references_unknown_table(from, valid_tables, valid_columns, all_db_columns) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Check if a FROM clause (including nested joins) has ON conditions referencing unknown tables
+fn from_clause_references_unknown_table(
+    from: &vibesql_ast::FromClause,
+    valid_tables: &HashSet<String>,
+    valid_columns: &HashSet<String>,
+    all_db_columns: &HashSet<String>,
+) -> bool {
+    match from {
+        vibesql_ast::FromClause::Table { .. } => false,
+        vibesql_ast::FromClause::Join {
+            left,
+            right,
+            condition,
+            ..
+        } => {
+            // Build valid tables for this join's ON clause: outer context + left + right of THIS join only
+            let mut join_valid_tables = valid_tables.clone();
+            collect_tables_from_from_clause_inner(left, &mut join_valid_tables);
+            collect_tables_from_from_clause_inner(right, &mut join_valid_tables);
+
+            if let Some(cond) = condition {
+                if on_clause_references_unknown_table_or_column(
+                    cond,
+                    &join_valid_tables,
+                    valid_columns,
+                    all_db_columns,
+                ) {
+                    return true;
+                }
+            }
+            // Recursively check left side (with only outer context)
+            // Then check right side (with outer context + left tables)
+            let mut left_context = valid_tables.clone();
+            if from_clause_references_unknown_table(left, &left_context, valid_columns, all_db_columns) {
+                return true;
+            }
+            collect_tables_from_from_clause_inner(left, &mut left_context);
+            from_clause_references_unknown_table(right, &left_context, valid_columns, all_db_columns)
+        }
+        vibesql_ast::FromClause::Subquery { query, .. } => {
+            let mut subquery_valid_tables = valid_tables.clone();
+            collect_tables_from_from_clause(&query.from, &mut subquery_valid_tables);
+            subquery_references_unknown_table(
+                query,
+                &subquery_valid_tables,
+                valid_columns,
+                all_db_columns,
+            )
+        }
+        vibesql_ast::FromClause::Values { .. } => false,
     }
 }
