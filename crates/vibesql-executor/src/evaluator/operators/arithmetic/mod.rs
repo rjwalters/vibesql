@@ -36,6 +36,7 @@ use vibesql_types::SqlValue;
 pub(super) fn nan_to_null(value: SqlValue) -> SqlValue {
     match &value {
         SqlValue::Float(f) if f.is_nan() => SqlValue::Null,
+        SqlValue::Real(f) if f.is_nan() => SqlValue::Null,
         SqlValue::Double(f) if f.is_nan() => SqlValue::Null,
         SqlValue::Numeric(f) if f.is_nan() => SqlValue::Null,
         _ => value,
