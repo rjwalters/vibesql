@@ -78,51 +78,87 @@ impl SelectExecutor<'_> {
                     // SELECT * [AS (col1, col2, ...)] - expand to all column names from schema
                     // Skip hidden columns (from NATURAL JOIN deduplication)
                     // For RIGHT/FULL OUTER JOINs, hidden columns with replacements are included
-                    // Respects full_column_names PRAGMA when there are multiple tables with duplicate columns
+                    // Respects full_column_names PRAGMA when there are multiple tables with
+                    // duplicate columns
+                    //
+                    // SQL Standard Column Ordering for USING/NATURAL JOINs:
+                    // According to SQL:2011, SELECT * from JOIN USING should output:
+                    // 1. The common/USING columns (merged) - appear FIRST
+                    // 2. Remaining columns from the left table
+                    // 3. Remaining columns from the right table
                     if let Some(from_res) = from_result {
                         // Get all column names in order from the combined schema
-                        // Store (index, column_name, table_name_for_display)
-                        let mut table_columns: Vec<(usize, String, String)> = Vec::new();
+                        // Store (index, column_name, table_name_for_display, is_joined_column)
+                        let mut table_columns: Vec<(usize, String, String, bool)> = Vec::new();
 
-                        // Build a set of replacement target indices (columns that are replacement sources)
-                        // These should be skipped since they're output via the hidden column's position
+                        // Build a set of replacement target indices (columns that are replacement
+                        // sources) These should be skipped since they're
+                        // output via the hidden column's position
                         let replacement_targets: std::collections::HashSet<usize> =
                             from_res.schema.column_replacement_map.values().copied().collect();
 
-                        for (table_id, (start_index, table_schema)) in
-                            &from_res.schema.table_schemas
-                        {
+                        // Sort table_schemas by start_index for deterministic iteration order
+                        // HashMap iteration is non-deterministic; sorting ensures consistent
+                        // results
+                        let mut sorted_tables: Vec<_> =
+                            from_res.schema.table_schemas.iter().collect();
+                        sorted_tables.sort_by_key(|(_, (start_index, _))| *start_index);
+
+                        for (table_id, (start_index, table_schema)) in sorted_tables {
                             // Get the effective table name using TableIdentifier's display form
                             let effective_table_name = table_id.display().to_string();
 
                             for (col_idx, col_schema) in table_schema.columns.iter().enumerate() {
                                 let abs_idx = start_index + col_idx;
 
-                                // Skip columns that are replacement targets (they're output via replacement)
+                                // Skip columns that are replacement targets (they're output via
+                                // replacement)
                                 if replacement_targets.contains(&abs_idx) {
                                     continue;
                                 }
 
-                                // For hidden columns, check if they have a replacement
-                                // If so, include the name (value comes from replacement)
+                                // Skip right-side USING columns (they're output via the left-side
+                                // column with COALESCE applied)
+                                if from_res.schema.is_using_coalesce_right_side(abs_idx) {
+                                    continue;
+                                }
+
+                                // For hidden columns, check if they have a replacement or coalesce
+                                // pair If so, include the name
+                                // (value comes from replacement/coalesce)
                                 // If not, skip them
                                 if from_res.schema.is_column_hidden(abs_idx) {
-                                    if from_res.schema.get_column_replacement(abs_idx).is_none() {
+                                    let has_replacement =
+                                        from_res.schema.get_column_replacement(abs_idx).is_some();
+                                    let has_coalesce = from_res
+                                        .schema
+                                        .get_using_coalesce_right_for_left(abs_idx)
+                                        .is_some();
+                                    if !has_replacement && !has_coalesce {
                                         continue;
                                     }
                                 }
 
                                 let col_name = col_schema.name.clone();
+                                // Check if this is a USING/NATURAL JOIN column
+                                let is_joined = from_res
+                                    .schema
+                                    .joined_columns
+                                    .contains(&col_name.to_lowercase());
                                 table_columns.push((
                                     abs_idx,
                                     col_name,
                                     effective_table_name.clone(),
+                                    is_joined,
                                 ));
                             }
                         }
 
-                        // Sort by index to maintain column order
-                        table_columns.sort_by_key(|(idx, _, _)| *idx);
+                        // Sort columns per SQL standard for USING/NATURAL JOINs:
+                        // 1. Joined columns first (in order of their original position)
+                        // 2. Then remaining columns (in order of their original position)
+                        // This ensures USING columns appear first in SELECT * output
+                        table_columns.sort_by_key(|(idx, _, _, is_joined)| (!*is_joined, *idx));
 
                         // Apply derived column list if present
                         if let Some(derived_cols) = alias {
@@ -138,7 +174,7 @@ impl SelectExecutor<'_> {
                             // BUT only when there's ambiguity (multiple tables or explicit alias)
                             let has_multiple_tables = from_res.schema.table_schemas.len() > 1;
 
-                            for (_, col_name, effective_table_name) in table_columns {
+                            for (_, col_name, effective_table_name, _) in table_columns {
                                 let display_name = match mode {
                                     ColumnNamingMode::Full if has_multiple_tables => {
                                         format!("{}.{}", effective_table_name, col_name)
@@ -155,8 +191,8 @@ impl SelectExecutor<'_> {
                     }
                 }
                 vibesql_ast::SelectItem::QualifiedWildcard { qualifier, alias } => {
-                    // SELECT table.* [AS (col1, col2, ...)] or SELECT alias.* [AS (col1, col2, ...)]
-                    // Respects full_column_names PRAGMA
+                    // SELECT table.* [AS (col1, col2, ...)] or SELECT alias.* [AS (col1, col2,
+                    // ...)] Respects full_column_names PRAGMA
                     if let Some(from_res) = from_result {
                         // Find the table/alias in the schema
                         // TableKey lookup is case-insensitive
@@ -173,8 +209,9 @@ impl SelectExecutor<'_> {
                                 }
                                 column_names.extend(derived_cols.clone());
                             } else {
-                                // SELECT table.* always uses just the column name, never table-qualified
-                                // This matches SQLite behavior where full_column_names PRAGMA
+                                // SELECT table.* always uses just the column name, never
+                                // table-qualified This matches
+                                // SQLite behavior where full_column_names PRAGMA
                                 // does not affect wildcard expansion
                                 for col_schema in &table_schema.columns {
                                     column_names.push(col_schema.name.clone());
@@ -247,7 +284,8 @@ fn derive_expression_name_impl(
                     }
                 }
                 ColumnNamingMode::Expression => {
-                    // Use the original source text to preserve exact formatting (e.g., "test1 . f1")
+                    // Use the original source text to preserve exact formatting (e.g., "test1 .
+                    // f1")
                     if let Some(src) = source_text {
                         src.clone()
                     } else if let Some(s) = schema {
@@ -261,7 +299,8 @@ fn derive_expression_name_impl(
             }
         }
         vibesql_ast::Expression::Function { name, args, character_unit: _ } => {
-            // For functions, use source text in expression mode, otherwise generate name(args) format
+            // For functions, use source text in expression mode, otherwise generate name(args)
+            // format
             if mode == ColumnNamingMode::Expression {
                 if let Some(src) = source_text {
                     return src.clone();
@@ -278,7 +317,8 @@ fn derive_expression_name_impl(
             format!("{}({})", name, args_str)
         }
         vibesql_ast::Expression::AggregateFunction { name, distinct, args, .. } => {
-            // For aggregate functions, use source text in expression mode, otherwise generate name(args) format
+            // For aggregate functions, use source text in expression mode, otherwise generate
+            // name(args) format
             if mode == ColumnNamingMode::Expression {
                 if let Some(src) = source_text {
                     return src.clone();
