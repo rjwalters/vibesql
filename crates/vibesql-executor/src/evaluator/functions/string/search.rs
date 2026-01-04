@@ -56,7 +56,10 @@ fn find_char_position(haystack: &str, needle: &str) -> i64 {
 /// INSTR(string, substring) - Find position of substring (1-indexed, 0 if not found)
 /// MySQL/Oracle function - returns first occurrence position
 ///
-/// SQLite compatibility: Automatically coerces numeric types to strings.
+/// SQLite compatibility:
+/// - When BOTH arguments are BLOBs, returns byte position (1-indexed)
+/// - Otherwise, returns character position for proper Unicode handling
+/// - Automatically coerces numeric types to strings
 pub(in crate::evaluator::functions) fn instr(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
@@ -67,7 +70,15 @@ pub(in crate::evaluator::functions) fn instr(
         )));
     }
 
-    // Coerce both arguments to strings
+    // SQLite: If BOTH arguments are BLOBs, use byte-level matching
+    if let (vibesql_types::SqlValue::Blob(haystack), vibesql_types::SqlValue::Blob(needle)) =
+        (&args[0], &args[1])
+    {
+        let position = find_byte_position(haystack, needle);
+        return Ok(vibesql_types::SqlValue::Integer(position));
+    }
+
+    // Otherwise, coerce both arguments to strings and use character positions
     let haystack = match coerce_to_string(&args[0]) {
         Some(s) => s,
         None => return Ok(vibesql_types::SqlValue::Null),
@@ -80,6 +91,21 @@ pub(in crate::evaluator::functions) fn instr(
     // Find character position (not byte position)
     let position = find_char_position(&haystack, &needle);
     Ok(vibesql_types::SqlValue::Integer(position))
+}
+
+/// Find byte position (1-indexed) of needle in haystack
+/// Returns byte position for BLOB-to-BLOB matching
+fn find_byte_position(haystack: &[u8], needle: &[u8]) -> i64 {
+    if needle.is_empty() {
+        return 1; // SQLite: empty needle returns 1
+    }
+
+    // Find the needle in haystack using byte-level comparison
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .map(|pos| (pos + 1) as i64) // Convert to 1-indexed
+        .unwrap_or(0) // Not found
 }
 
 /// LOCATE(substring, string, [start]) - Find position of substring with optional start
