@@ -23,7 +23,6 @@ indexmap = "2.0"
 hex = "0.4"
 instant = { version = "0.1", features = ["wasm-bindgen"] }
 geo = { version = "0.32", optional = true }
-wkt = { version = "0.14", optional = true }
 rstar = { version = "0.12", optional = true }
 lru = "0.16"
 log = "0.4"
@@ -38,20 +37,11 @@ md-5 = "0.10"
 # Arrow dependencies for vectorized execution
 # Using 53.0+ for chrono 0.4.42 compatibility (fixes quarter() method ambiguity)
 arrow = "57.1"
-arrow-array = "57.1"
-arrow-arith = "57.1"  # For SIMD-accelerated temporal operations
-arrow-select = "57.1"
 
 # Optional comparison engine dependencies
 rusqlite = { version = "0.38", features = ["bundled"], optional = true }
 duckdb = { version = "1.1", features = ["bundled"], optional = true }
 mysql = { version = "26.0", optional = true }
-
-# Optional JIT compilation dependencies
-cranelift = { version = "0.127", optional = true }
-cranelift-jit = { version = "0.127", optional = true }
-cranelift-module = { version = "0.127", optional = true }
-cranelift-native = { version = "0.127", optional = true }
 
 # jemalloc for better memory release characteristics in benchmarks
 # These must be in [dependencies] (not dev-dependencies) to be feature-gated
@@ -67,13 +57,10 @@ criterion = { version = "0.8", features = ["html_reports"] }
 parking_lot = "0.12"  # For concurrent_throughput benchmark
 rand = "0.9"
 rand_chacha = "0.9"
-rust_decimal = "1.33"
-paste = "1.0"
 env_logger = "0.11"
 libc = "0.2"
 sysinfo = "0.37"
 tokio = { version = "1.0", features = ["full", "rt-multi-thread"] }
-bytes = "1.0"
 tempfile = "3.19"
 num_cpus = "1.16"
 
@@ -82,7 +69,7 @@ default = ["parallel", "spatial", "native-columnar"]
 # Parallel processing using rayon (disabled in WASM where it provides no benefit)
 parallel = ["rayon", "crossbeam-deque"]
 # Spatial/geospatial query support (optional, reduces binary size)
-spatial = ["geo", "wkt", "rstar"]
+spatial = ["geo", "rstar"]
 
 # VibeSQL performance features (for benchmarks)
 # Native columnar execution (Phase 2b - zero row materialization)
@@ -115,9 +102,6 @@ benchmark = ["native-columnar", "in-memory-indexes", "all-engines"]
 profile-q6 = []
 # Enable detailed profiling output for TPC-C transactions
 profile-tpcc = []
-# Enable JIT compilation support using Cranelift (research/experimental)
-# Usage: cargo bench --features jit,benchmark
-jit = ["cranelift", "cranelift-jit", "cranelift-module", "cranelift-native"]
 # Enable experimental SIMD-accelerated group-by aggregation (research/experimental)
 simd = []
 # Use jemalloc allocator for better memory release characteristics
