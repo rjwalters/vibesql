@@ -3,6 +3,8 @@
 //! Handles: +, -, *, /
 //! Supports: Integer, Smallint, Bigint, Float, Real, Double, Numeric types
 //! Includes: Type coercion, mixed-type arithmetic, division-by-zero handling
+//!
+//! SQLite compatibility: NaN results are converted to NULL
 
 mod addition;
 mod division;
@@ -16,6 +18,29 @@ pub use modulo::Modulo;
 pub use multiplication::Multiplication;
 pub use subtraction::Subtraction;
 use vibesql_types::SqlValue;
+
+/// Convert NaN floating-point results to NULL for SQLite compatibility.
+///
+/// SQLite converts NaN (Not a Number) results to NULL. This happens when:
+/// - Infinity * 0.0
+/// - 0.0 / 0.0
+/// - Infinity - Infinity
+///
+/// Example:
+/// ```sql
+/// -- SQLite behavior:
+/// SELECT (1e300 * 1e300) * 0.0;  -- Returns NULL (not NaN)
+/// SELECT coalesce((1e300 * 1e300) * 0.0, 99.0);  -- Returns 99.0
+/// ```
+#[inline]
+pub(super) fn nan_to_null(value: SqlValue) -> SqlValue {
+    match &value {
+        SqlValue::Float(f) if f.is_nan() => SqlValue::Null,
+        SqlValue::Double(f) if f.is_nan() => SqlValue::Null,
+        SqlValue::Numeric(f) if f.is_nan() => SqlValue::Null,
+        _ => value,
+    }
+}
 
 use crate::{
     errors::ExecutorError,

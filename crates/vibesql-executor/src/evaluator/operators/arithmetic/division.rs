@@ -79,12 +79,13 @@ impl Division {
         let result_type = sql_mode.division_result_type(left, right);
 
         // Perform division based on coerced values and convert to determined type
+        // Apply nan_to_null for SQLite compatibility (infinity/infinity = NaN → NULL)
         match (coerced, result_type) {
             // ExactNumeric division - result type depends on SQL mode
             (super::CoercedValues::ExactNumeric(a, b), ValueType::Numeric) => {
                 // MySQL mode: exact decimal division
                 let result = (a as f64) / (b as f64);
-                Ok(Numeric(result))
+                Ok(super::nan_to_null(Numeric(result)))
             }
             (super::CoercedValues::ExactNumeric(a, b), ValueType::Integer) => {
                 // SQLite mode: integer division (truncated toward zero)
@@ -94,17 +95,21 @@ impl Division {
             // ApproximateNumeric division - returns Real (f64) for SQLite compatibility
             // SQLite's REAL type is 8-byte IEEE floating point (f64), not 4-byte (f32)
             (super::CoercedValues::ApproximateNumeric(a, b), ValueType::Float) => {
-                Ok(Real(a / b))
+                Ok(super::nan_to_null(Real(a / b)))
             }
             // Numeric division - always returns Numeric
-            (super::CoercedValues::Numeric(a, b), ValueType::Numeric) => Ok(Numeric(a / b)),
+            (super::CoercedValues::Numeric(a, b), ValueType::Numeric) => {
+                Ok(super::nan_to_null(Numeric(a / b)))
+            }
             // Handle edge case: if TypeBehavior returns Float for approximate operands
             // but coercion produced Numeric, convert to Numeric
-            (super::CoercedValues::Numeric(a, b), ValueType::Float) => Ok(Numeric(a / b)),
+            (super::CoercedValues::Numeric(a, b), ValueType::Float) => {
+                Ok(super::nan_to_null(Numeric(a / b)))
+            }
             // ApproximateNumeric with Numeric result type (MySQL mode with Float operands)
             // MySQL always returns Numeric for division even with Float inputs
             (super::CoercedValues::ApproximateNumeric(a, b), ValueType::Numeric) => {
-                Ok(Numeric(a / b))
+                Ok(super::nan_to_null(Numeric(a / b)))
             }
             // All other combinations should be unreachable due to type coercion rules
             _ => unreachable!("Unexpected combination of coerced type and result type"),

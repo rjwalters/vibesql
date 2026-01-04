@@ -85,13 +85,16 @@ impl Addition {
 
         // Use helper for numeric type coercion
         // SQLite converts to float on overflow instead of erroring
+        // Apply nan_to_null for SQLite compatibility (inf + (-inf) = NaN → NULL)
         match coerce_numeric_values(left, right, "+")? {
             super::CoercedValues::ExactNumeric(a, b) => Ok(a
                 .checked_add(b)
                 .map(Integer)
-                .unwrap_or_else(|| Double(a as f64 + b as f64))),
-            super::CoercedValues::ApproximateNumeric(a, b) => Ok(Float((a + b) as f32)),
-            super::CoercedValues::Numeric(a, b) => Ok(Numeric(a + b)),
+                .unwrap_or_else(|| super::nan_to_null(Double(a as f64 + b as f64)))),
+            super::CoercedValues::ApproximateNumeric(a, b) => {
+                Ok(super::nan_to_null(Float((a + b) as f32)))
+            }
+            super::CoercedValues::Numeric(a, b) => Ok(super::nan_to_null(Numeric(a + b))),
         }
     }
 }

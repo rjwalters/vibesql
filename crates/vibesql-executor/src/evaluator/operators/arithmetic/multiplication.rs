@@ -33,9 +33,11 @@ impl Multiplication {
             super::CoercedValues::ExactNumeric(a, b) => Ok(a
                 .checked_mul(b)
                 .map(Integer)
-                .unwrap_or_else(|| Double(a as f64 * b as f64))),
-            super::CoercedValues::ApproximateNumeric(a, b) => Ok(Float((a * b) as f32)),
-            super::CoercedValues::Numeric(a, b) => Ok(Numeric(a * b)),
+                .unwrap_or_else(|| super::nan_to_null(Double(a as f64 * b as f64)))),
+            super::CoercedValues::ApproximateNumeric(a, b) => {
+                Ok(super::nan_to_null(Float((a * b) as f32)))
+            }
+            super::CoercedValues::Numeric(a, b) => Ok(super::nan_to_null(Numeric(a * b))),
         }
     }
 }
