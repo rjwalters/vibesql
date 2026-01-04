@@ -28,7 +28,8 @@ use vibesql_storage::Database as VibeDB;
 use vibesql_types::Date;
 
 // Use data generators from this crate
-use super::{TPCHData, NATIONS, PRIORITIES, REGIONS, SEGMENTS, SHIP_MODES};
+#[cfg(any(feature = "vibesql", feature = "sqlite", feature = "duckdb", feature = "mysql"))]
+use super::{NATIONS, PRIORITIES, REGIONS, SEGMENTS, SHIP_MODES, TPCHData};
 
 /// Batch size for bulk inserts - matches TPC-DS for consistency
 #[cfg(feature = "vibesql")]
@@ -1680,6 +1681,7 @@ fn load_part_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
 /// Uses a formula that guarantees 4 unique suppliers per part at any scale factor.
 /// The base supplier is determined by (part_key - 1) % supplier_count, then
 /// we add evenly-spaced offsets (0, 1/4, 2/4, 3/4 of supplier_count) for each j.
+#[cfg(feature = "vibesql")]
 fn get_valid_supplier_for_part(
     part_key: usize,
     supplier_count: usize,

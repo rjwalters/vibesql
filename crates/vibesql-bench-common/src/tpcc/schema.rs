@@ -15,6 +15,7 @@ use rusqlite::Connection as SqliteConn;
 use vibesql_storage::Database as VibeDB;
 
 // Use data generators from this crate
+#[cfg(any(feature = "vibesql", feature = "sqlite", feature = "duckdb", feature = "mysql"))]
 use super::TPCCData;
 
 // =============================================================================
