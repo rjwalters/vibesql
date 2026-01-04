@@ -34,7 +34,7 @@ fn test_index_ordering() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
 
     vibesql_executor::CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();

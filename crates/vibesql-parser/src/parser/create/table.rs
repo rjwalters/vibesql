@@ -57,6 +57,7 @@ impl Parser {
                 table_options: Vec::new(),
                 quoted: table.is_any_quoted(),
                 as_query: Some(Box::new(select_stmt)),
+                without_rowid: false, // CREATE TABLE AS SELECT cannot be WITHOUT ROWID
             });
         }
 
@@ -213,17 +214,17 @@ impl Parser {
 
         // Parse optional WITH OIDS / WITHOUT OIDS clause (PostgreSQL)
         // or WITHOUT ROWID clause (SQLite)
-        // These are parsed but ignored in execution
+        let mut without_rowid = false;
         if self.peek_keyword(Keyword::With) {
             self.advance(); // consume WITH
             self.expect_keyword(Keyword::Oids)?;
-            // We parse it but don't store it - just for compatibility
         } else if self.peek_keyword(Keyword::Without) {
             self.advance(); // consume WITHOUT
             if self.peek_keyword(Keyword::Oids) {
                 self.advance(); // consume OIDS
             } else if self.peek_keyword(Keyword::Rowid) {
                 self.advance(); // consume ROWID (SQLite WITHOUT ROWID tables)
+                without_rowid = true;
             } else {
                 return Err(ParseError {
                     message: "Expected OIDS or ROWID after WITHOUT".to_string(),
@@ -245,6 +246,7 @@ impl Parser {
             table_options,
             quoted: table.is_any_quoted(),
             as_query: None,
+            without_rowid,
         })
     }
 

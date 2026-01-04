@@ -32,7 +32,7 @@ fn test_create_table_statement() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     });
 
     match stmt {

@@ -47,7 +47,7 @@ fn test_create_simple_table() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -119,7 +119,7 @@ fn test_create_table_with_multiple_types() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -153,7 +153,7 @@ fn test_create_table_already_exists() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
 
     // First creation succeeds
@@ -205,7 +205,7 @@ fn test_create_table_with_nullable_columns() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -229,7 +229,7 @@ fn test_create_table_empty_columns_list() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
 
     // Should succeed (though not very useful)
@@ -260,7 +260,7 @@ fn test_create_multiple_tables() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
     CreateTableExecutor::execute(&stmt1, &mut db).unwrap();
 
@@ -280,7 +280,7 @@ fn test_create_multiple_tables() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
     CreateTableExecutor::execute(&stmt2, &mut db).unwrap();
 
@@ -310,7 +310,7 @@ fn test_create_table_with_special_characters_in_name() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -337,7 +337,7 @@ fn test_create_table_case_sensitivity() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
     CreateTableExecutor::execute(&stmt1, &mut db).unwrap();
 
@@ -357,7 +357,7 @@ fn test_create_table_case_sensitivity() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
 
     // Behavior depends on catalog's case sensitivity
@@ -416,7 +416,7 @@ fn test_create_table_with_spatial_types() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -465,7 +465,7 @@ fn test_create_table_multipolygon_sqllogictest() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None,
+        as_query: None, without_rowid: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);

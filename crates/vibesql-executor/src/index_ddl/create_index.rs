@@ -810,7 +810,7 @@ mod tests {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
-            as_query: None,
+            as_query: None, without_rowid: false,
         };
 
         CreateTableExecutor::execute(&stmt, db).unwrap();
@@ -1120,7 +1120,7 @@ mod tests {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
-            as_query: None,
+            as_query: None, without_rowid: false,
         };
 
         CreateTableExecutor::execute(&stmt, db).unwrap();
@@ -1530,7 +1530,7 @@ mod tests {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
-            as_query: None,
+            as_query: None, without_rowid: false,
         };
         crate::CreateTableExecutor::execute(&table_stmt, &mut db).unwrap();
 
