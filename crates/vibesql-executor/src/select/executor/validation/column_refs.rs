@@ -318,7 +318,8 @@ mod tests {
 
     #[test]
     fn test_extract_column_refs_qualified() {
-        let expr = Expression::ColumnRef(ColumnIdentifier::qualified("products", false, "id", false));
+        let expr =
+            Expression::ColumnRef(ColumnIdentifier::qualified("products", false, "id", false));
         let mut refs = Vec::new();
         extract_column_refs(&expr, &mut refs);
         assert_eq!(refs.len(), 1);
@@ -363,7 +364,8 @@ mod tests {
     #[test]
     fn test_validate_qualified_column_ref() {
         let schema = make_test_schema();
-        let col_ref = ColumnReference { table: Some("products".to_string()), column: "id".to_string() };
+        let col_ref =
+            ColumnReference { table: Some("products".to_string()), column: "id".to_string() };
         let result = validate_column_ref(&col_ref, &schema, None);
         assert!(result.is_ok());
     }

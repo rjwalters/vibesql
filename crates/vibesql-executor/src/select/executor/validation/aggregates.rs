@@ -172,7 +172,7 @@ pub fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
 /// Returns the function name (original case preserved) if found, None otherwise
 pub fn find_aggregate_in_expression(expr: &Expression) -> Option<String> {
     match expr {
-        Expression::AggregateFunction { name, .. } => Some(name.to_string()), // Preserve original case
+        Expression::AggregateFunction { name, .. } => Some(name.to_string()), /* Preserve original case */
         Expression::Function { name, args, .. } => {
             // Check if this function is a built-in aggregate
             // Note: MIN/MAX with multiple args are scalar functions in SQLite

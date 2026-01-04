@@ -88,12 +88,9 @@ fn find_outer_column_in_expression(
         }
         Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
-                if let Some(col) = find_outer_column_in_expression(
-                    op,
-                    subquery_tables,
-                    inner_schema,
-                    outer_schema,
-                ) {
+                if let Some(col) =
+                    find_outer_column_in_expression(op, subquery_tables, inner_schema, outer_schema)
+                {
                     return Some(col);
                 }
             }
@@ -151,12 +148,9 @@ fn find_outer_column_in_expression(
                 })
         }
         Expression::InList { expr, values, .. } => {
-            if let Some(col) = find_outer_column_in_expression(
-                expr,
-                subquery_tables,
-                inner_schema,
-                outer_schema,
-            ) {
+            if let Some(col) =
+                find_outer_column_in_expression(expr, subquery_tables, inner_schema, outer_schema)
+            {
                 return Some(col);
             }
             for val in values {
@@ -353,12 +347,9 @@ fn find_aggregate_with_outer_column(
                 })
         }
         Expression::InList { expr, values, .. } => {
-            if let Some(found) = find_aggregate_with_outer_column(
-                expr,
-                subquery_tables,
-                inner_schema,
-                outer_schema,
-            ) {
+            if let Some(found) =
+                find_aggregate_with_outer_column(expr, subquery_tables, inner_schema, outer_schema)
+            {
                 return Some(found);
             }
             for val in values {

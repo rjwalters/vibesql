@@ -19,22 +19,21 @@ mod schema;
 
 use std::collections::HashSet;
 
-use vibesql_ast::{Expression, SelectItem};
-
-use crate::{errors::ExecutorError, schema::CombinedSchema};
-
 // Re-export public validation functions
 pub use aggregates::{
     check_aggregate_arg_count, find_aggregate_in_expression, validate_aggregate_arguments,
     validate_having_aliased_aggregates, validate_no_nested_aggregates,
 };
-pub use column_refs::{extract_column_refs, validate_column_ref};
 // Re-export ColumnReference for tests
 #[cfg(test)]
 pub use column_refs::ColumnReference;
+pub use column_refs::{extract_column_refs, validate_column_ref};
 pub use join_limits::validate_join_table_limit;
 #[allow(unused_imports)]
 pub use schema::validate_no_aggregate_with_outer_column;
+use vibesql_ast::{Expression, SelectItem};
+
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Validate all column references with optional procedural context and outer schema
 ///
@@ -305,10 +304,7 @@ mod tests {
         let select_list = vec![SelectItem::Wildcard { alias: None }];
         let where_clause = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple(
-                "nonexistent",
-                false,
-            ))),
+            left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("nonexistent", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         };
 
