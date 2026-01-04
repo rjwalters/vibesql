@@ -4,6 +4,27 @@ use std::fmt;
 
 use crate::sql_value::SqlValue;
 
+/// Threshold for converting large integers to scientific notation (SQLite behavior)
+/// SQLite displays integers with absolute value >= 1e15 in scientific notation
+const LARGE_INTEGER_THRESHOLD: i64 = 1_000_000_000_000_000; // 1e15
+
+/// Format a large integer in scientific notation like SQLite does.
+/// SQLite converts very large integers to floating-point representation for display.
+/// Example: 9223372036854775807 becomes "9.22337203685478e+18"
+fn format_large_integer(n: i64) -> String {
+    // Convert to f64 and use the existing scientific notation formatter
+    let f = n as f64;
+    let s = format!("{:.14e}", f);
+    format_scientific_sqlite(&s)
+}
+
+/// Format a large unsigned integer in scientific notation like SQLite does.
+fn format_large_unsigned(n: u64) -> String {
+    let f = n as f64;
+    let s = format!("{:.14e}", f);
+    format_scientific_sqlite(&s)
+}
+
 /// Format a f64 value like SQLite does:
 /// - Use minimal representation (shortest round-trip safe string)
 /// - KEEP ".0" for whole numbers to distinguish REAL from INTEGER (SQLite behavior)
@@ -137,10 +158,33 @@ fn format_f32(n: f32) -> String {
 impl fmt::Display for SqlValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SqlValue::Integer(i) => write!(f, "{}", i),
-            SqlValue::Smallint(i) => write!(f, "{}", i),
-            SqlValue::Bigint(i) => write!(f, "{}", i),
-            SqlValue::Unsigned(u) => write!(f, "{}", u),
+            SqlValue::Integer(i) => {
+                // SQLite displays large integers in scientific notation
+                // Use saturating_abs to handle i64::MIN without overflow
+                if i.saturating_abs() >= LARGE_INTEGER_THRESHOLD {
+                    write!(f, "{}", format_large_integer(*i))
+                } else {
+                    write!(f, "{}", i)
+                }
+            }
+            SqlValue::Smallint(i) => write!(f, "{}", i), // Smallint is always small
+            SqlValue::Bigint(i) => {
+                // SQLite displays large integers in scientific notation
+                // Use saturating_abs to handle i64::MIN without overflow
+                if i.saturating_abs() >= LARGE_INTEGER_THRESHOLD {
+                    write!(f, "{}", format_large_integer(*i))
+                } else {
+                    write!(f, "{}", i)
+                }
+            }
+            SqlValue::Unsigned(u) => {
+                // SQLite displays large integers in scientific notation
+                if *u >= LARGE_INTEGER_THRESHOLD as u64 {
+                    write!(f, "{}", format_large_unsigned(*u))
+                } else {
+                    write!(f, "{}", u)
+                }
+            }
             // Format floating point types like SQLite: minimal representation
             // Use f32-specific formatting for Float/Real to avoid precision artifacts
             SqlValue::Numeric(n) => write!(f, "{}", format_f64(*n)),
@@ -344,5 +388,70 @@ mod tests {
     fn test_blob_display_empty() {
         // Empty blob displays as empty string
         assert_eq!(format!("{}", SqlValue::Blob(vec![])), "");
+    }
+
+    #[test]
+    fn test_large_integer_scientific_notation() {
+        // SQLite displays large integers (>= 1e15) in scientific notation
+        // INT64_MAX: 9223372036854775807 -> 9.22337203685478e+18
+        assert_eq!(
+            format!("{}", SqlValue::Integer(i64::MAX)),
+            "9.22337203685478e+18"
+        );
+        assert_eq!(
+            format!("{}", SqlValue::Bigint(i64::MAX)),
+            "9.22337203685478e+18"
+        );
+        // Large negative integer
+        assert_eq!(
+            format!("{}", SqlValue::Integer(i64::MIN)),
+            "-9.22337203685478e+18"
+        );
+        // Exactly at threshold (1e15)
+        assert_eq!(
+            format!("{}", SqlValue::Integer(1_000_000_000_000_000)),
+            "1e+15"
+        );
+        // Just below threshold - should NOT use scientific notation
+        assert_eq!(
+            format!("{}", SqlValue::Integer(999_999_999_999_999)),
+            "999999999999999"
+        );
+    }
+
+    #[test]
+    fn test_small_integer_no_scientific_notation() {
+        // Small integers should not use scientific notation
+        assert_eq!(format!("{}", SqlValue::Integer(0)), "0");
+        assert_eq!(format!("{}", SqlValue::Integer(42)), "42");
+        assert_eq!(format!("{}", SqlValue::Integer(-100)), "-100");
+        assert_eq!(format!("{}", SqlValue::Integer(1_000_000)), "1000000");
+        assert_eq!(format!("{}", SqlValue::Bigint(123456789)), "123456789");
+    }
+
+    #[test]
+    fn test_unsigned_large_integer_scientific_notation() {
+        // Large unsigned integers should also use scientific notation
+        assert_eq!(
+            format!("{}", SqlValue::Unsigned(u64::MAX)),
+            "1.84467440737096e+19"
+        );
+        assert_eq!(
+            format!("{}", SqlValue::Unsigned(1_000_000_000_000_000)),
+            "1e+15"
+        );
+        // Below threshold
+        assert_eq!(
+            format!("{}", SqlValue::Unsigned(999_999_999_999_999)),
+            "999999999999999"
+        );
+    }
+
+    #[test]
+    fn test_format_large_integer_helper() {
+        // Test the helper function directly
+        assert_eq!(format_large_integer(i64::MAX), "9.22337203685478e+18");
+        assert_eq!(format_large_integer(i64::MIN), "-9.22337203685478e+18");
+        assert_eq!(format_large_integer(1_000_000_000_000_000), "1e+15");
     }
 }
