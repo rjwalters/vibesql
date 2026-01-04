@@ -163,6 +163,7 @@ impl CombinedExpressionEvaluator<'_> {
         &self,
         expr: &vibesql_ast::Expression,
         pattern: &vibesql_ast::Expression,
+        escape: &Option<Box<vibesql_ast::Expression>>,
         negated: bool,
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
@@ -215,12 +216,52 @@ impl CombinedExpressionEvaluator<'_> {
             }
         };
 
+        // Evaluate the escape character if provided
+        let escape_char = if let Some(escape_expr) = escape {
+            let escape_val = self.eval(escape_expr, row)?;
+            match escape_val {
+                vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                    let mut chars = s.chars();
+                    match (chars.next(), chars.next()) {
+                        (Some(c), None) => Some(c), // Exactly one character
+                        (None, _) => None,          // Empty string
+                        _ => {
+                            return Err(ExecutorError::SqliteCompatError(
+                                "ESCAPE expression must be a single character".to_string(),
+                            ))
+                        }
+                    }
+                }
+                vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+                vibesql_types::SqlValue::Integer(n) => {
+                    let s = n.to_string();
+                    let mut chars = s.chars();
+                    match (chars.next(), chars.next()) {
+                        (Some(c), None) => Some(c), // Exactly one character
+                        _ => {
+                            return Err(ExecutorError::SqliteCompatError(
+                                "ESCAPE expression must be a single character".to_string(),
+                            ))
+                        }
+                    }
+                }
+                _ => {
+                    return Err(ExecutorError::TypeMismatch {
+                        left: escape_val,
+                        op: "ESCAPE".to_string(),
+                        right: vibesql_types::SqlValue::Null,
+                    })
+                }
+            }
+        } else {
+            None
+        };
+
         // Get case_sensitive_like setting from database (default: false = case-insensitive)
         let case_sensitive = self.database.map(|db| db.case_sensitive_like()).unwrap_or(false);
 
         // Perform pattern matching
-        // TODO: Pass escape character when combined evaluator supports LIKE ESCAPE
-        let matches = like_match(&text, &pattern_str, case_sensitive, None);
+        let matches = like_match(&text, &pattern_str, case_sensitive, escape_char);
 
         // Apply negation if needed
         let result = if negated { !matches } else { matches };

@@ -788,6 +788,7 @@ mod tests {
             ))),
             pattern: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Al%")))),
             negated: false,
+            escape: None,
         };
 
         let filtered = filter_record_batch_simd(&batch, &predicate).unwrap();
@@ -814,6 +815,7 @@ mod tests {
             ))),
             pattern: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("%lie")))),
             negated: false,
+            escape: None,
         };
 
         let filtered = filter_record_batch_simd(&batch, &predicate).unwrap();
@@ -835,6 +837,7 @@ mod tests {
             ))),
             pattern: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Al%")))),
             negated: true,
+            escape: None,
         };
 
         let filtered = filter_record_batch_simd(&batch, &predicate).unwrap();
@@ -860,6 +863,7 @@ mod tests {
             ))),
             pattern: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("%li%")))),
             negated: false,
+            escape: None,
         };
 
         let filtered = filter_record_batch_simd(&batch, &predicate).unwrap();

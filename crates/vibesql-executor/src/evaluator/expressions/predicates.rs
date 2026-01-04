@@ -484,27 +484,30 @@ impl ExpressionEvaluator<'_> {
             let escape_val = self.eval(escape_expr, row)?;
             match escape_val {
                 vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => {
-                    if s.len() == 1 {
-                        s.chars().next()
-                    } else if s.is_empty() {
-                        None
-                    } else {
-                        // SQLite requires escape character to be exactly one character
-                        return Err(ExecutorError::SqliteCompatError(
-                            "ESCAPE expression must be a single character".to_string(),
-                        ));
+                    let mut chars = s.chars();
+                    match (chars.next(), chars.next()) {
+                        (Some(c), None) => Some(c), // Exactly one character
+                        (None, _) => None,          // Empty string
+                        _ => {
+                            // SQLite requires escape character to be exactly one character
+                            return Err(ExecutorError::SqliteCompatError(
+                                "ESCAPE expression must be a single character".to_string(),
+                            ))
+                        }
                     }
                 }
                 vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
                 vibesql_types::SqlValue::Integer(n) => {
                     // Allow single-digit integers as escape character (SQLite compatibility)
                     let s = n.to_string();
-                    if s.len() == 1 {
-                        s.chars().next()
-                    } else {
-                        return Err(ExecutorError::SqliteCompatError(
-                            "ESCAPE expression must be a single character".to_string(),
-                        ));
+                    let mut chars = s.chars();
+                    match (chars.next(), chars.next()) {
+                        (Some(c), None) => Some(c), // Exactly one character
+                        _ => {
+                            return Err(ExecutorError::SqliteCompatError(
+                                "ESCAPE expression must be a single character".to_string(),
+                            ))
+                        }
                     }
                 }
                 _ => {

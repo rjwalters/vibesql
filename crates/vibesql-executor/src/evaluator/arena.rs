@@ -428,10 +428,34 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             }
 
             // LIKE pattern matching
-            ArenaExtendedExpr::Like { expr: inner, pattern, negated, .. } => {
+            ArenaExtendedExpr::Like { expr: inner, pattern, negated, escape } => {
                 let val = self.eval_with_depth(inner, row)?;
                 let pattern_val = self.eval_with_depth(pattern, row)?;
-                self.eval_like(&val, &pattern_val, *negated)
+                let escape_char = if let Some(escape_expr) = escape {
+                    match self.eval_with_depth(escape_expr, row)? {
+                        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                            let mut chars = s.chars();
+                            match (chars.next(), chars.next()) {
+                                (Some(c), None) => Some(c), // Exactly one character
+                                (None, _) => None,          // Empty string
+                                _ => {
+                                    return Err(ExecutorError::SqliteCompatError(
+                                        "ESCAPE expression must be a single character".to_string(),
+                                    ))
+                                }
+                            }
+                        }
+                        SqlValue::Null => return Ok(SqlValue::Null),
+                        _ => {
+                            return Err(ExecutorError::SqliteCompatError(
+                                "ESCAPE expression must be a single character".to_string(),
+                            ))
+                        }
+                    }
+                } else {
+                    None
+                };
+                self.eval_like(&val, &pattern_val, *negated, escape_char)
             }
 
             // GLOB pattern matching (SQLite)
@@ -647,6 +671,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
         value: &SqlValue,
         pattern: &SqlValue,
         negated: bool,
+        escape_char: Option<char>,
     ) -> Result<SqlValue, ExecutorError> {
         // Get case_sensitive_like setting from database (default: false = case-insensitive)
         let case_sensitive = self.database.map(|db| db.case_sensitive_like()).unwrap_or(false);
@@ -657,8 +682,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             | (SqlValue::Character(s), SqlValue::Varchar(p))
             | (SqlValue::Varchar(s), SqlValue::Character(p))
             | (SqlValue::Character(s), SqlValue::Character(p)) => {
-                // TODO: Pass escape character when arena evaluator supports LIKE ESCAPE
-                let matches = super::pattern::like_match(s, p, case_sensitive, None);
+                let matches = super::pattern::like_match(s, p, case_sensitive, escape_char);
                 Ok(SqlValue::Boolean(if negated { !matches } else { matches }))
             }
             _ => Err(ExecutorError::TypeError(format!(
