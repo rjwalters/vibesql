@@ -5,6 +5,40 @@ use vibesql_types::{SqlValue, TypeAffinity};
 use super::super::core::{CombinedExpressionEvaluator, ExpressionEvaluator};
 use crate::{errors::ExecutorError, select::WindowFunctionKey};
 
+/// Format a float value in SQLite-compatible text format.
+///
+/// SQLite ensures floats always have a decimal point when converted to text.
+/// For example, 10.0 becomes "10.0", not "10". This is important for type
+/// affinity comparisons where TEXT '10' should not equal REAL 10.0.
+///
+/// The formatting follows SQLite's rules:
+/// - Whole numbers get ".0" suffix (10.0 → "10.0")
+/// - Normal decimals display normally (10.5 → "10.5")
+/// - Very small/large numbers use scientific notation
+fn format_float_for_text_comparison(n: f64) -> String {
+    if n.is_nan() {
+        return "NaN".to_string();
+    }
+    if n.is_infinite() {
+        return if n > 0.0 {
+            "Inf".to_string()
+        } else {
+            "-Inf".to_string()
+        };
+    }
+
+    // Use Rust's default formatting
+    let s = n.to_string();
+
+    // If the string doesn't contain a decimal point or 'e'/'E' (scientific notation),
+    // it's a whole number that needs ".0" appended to match SQLite behavior
+    if !s.contains('.') && !s.contains('e') && !s.contains('E') {
+        format!("{}.0", s)
+    } else {
+        s
+    }
+}
+
 impl CombinedExpressionEvaluator<'_> {
     /// Get the SQLite type affinity of an expression if it's a column reference.
     ///
@@ -160,32 +194,52 @@ impl CombinedExpressionEvaluator<'_> {
         let right_affinity = self.get_expression_affinity(right_expr);
 
         // Case 1: Left is TEXT column, right is numeric literal
+        // SQLite converts numeric literals to text for comparison with TEXT columns.
+        // Floats must preserve their decimal representation (10.0 → "10.0", not "10")
+        // so that TEXT '10' != REAL 10.0 (different string representations).
         if left_affinity == Some(TypeAffinity::Text) && self.is_numeric_literal(right_expr) {
             let right_as_text = match &right_val {
                 SqlValue::Integer(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
                 SqlValue::Smallint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
                 SqlValue::Bigint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
                 SqlValue::Unsigned(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
-                SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
-                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
-                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
-                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n as f64),
+                )),
+                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n),
+                )),
+                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n),
+                )),
+                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n),
+                )),
                 _ => right_val,
             };
             return (left_val, right_as_text);
         }
 
         // Case 2: Right is TEXT column, left is numeric literal
+        // Same as Case 1 but symmetric - floats must preserve decimal representation.
         if right_affinity == Some(TypeAffinity::Text) && self.is_numeric_literal(left_expr) {
             let left_as_text = match &left_val {
                 SqlValue::Integer(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
                 SqlValue::Smallint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
                 SqlValue::Bigint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
                 SqlValue::Unsigned(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
-                SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
-                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
-                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
-                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n as f64),
+                )),
+                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n),
+                )),
+                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n),
+                )),
+                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n),
+                )),
                 _ => left_val,
             };
             return (left_as_text, right_val);
