@@ -541,6 +541,16 @@ fn generate_natural_join_condition(
     // right-side columns contain the correct COALESCED values. We must prefer NON-HIDDEN
     // columns when there are multiple matches. This ensures the join condition uses
     // the correct column value.
+    //
+    // Issue #4845: For chained NATURAL RIGHT JOINs (e.g., t4 NATURAL RIGHT JOIN t5 NATURAL RIGHT JOIN t6),
+    // when all matching columns are hidden, we must prefer REPLACEMENT TARGETS over replacement sources.
+    // The replacement target contains the actual value that should be used in the join condition.
+    // Example: After `t4 NATURAL RIGHT JOIN t5`, column_replacement_map has {0 -> 2}, meaning
+    // t5.id (idx 2) holds the value. When the second join is processed, we must use idx 2 (the target)
+    // rather than idx 0 (the source which is NULL for unmatched rows).
+    let replacement_targets: std::collections::HashSet<usize> =
+        left_schema.column_replacement_map.values().copied().collect();
+
     let mut left_columns: HashMap<String, (String, String, usize, Option<String>, bool)> =
         HashMap::new();
     for (table_name, (table_start_idx, table_schema)) in &left_schema.table_schemas {
@@ -548,19 +558,33 @@ fn generate_natural_join_condition(
             let lowercase_name = col.name.to_lowercase();
             let absolute_idx = table_start_idx + col_offset;
             let is_hidden = left_schema.hidden_columns.contains(&absolute_idx);
+            let is_replacement_target = replacement_targets.contains(&absolute_idx);
 
             // Prefer non-hidden columns over hidden ones (issue #4798)
-            // Among columns with the same hidden status, prefer leftmost (lowest index)
+            // Among hidden columns, prefer replacement targets (issue #4845)
+            // Among columns with the same status, prefer leftmost (lowest index)
             let should_update = match left_columns.get(&lowercase_name) {
                 None => true,
                 Some((_, _, best_idx, _, best_is_hidden)) => {
+                    let best_is_replacement_target = replacement_targets.contains(best_idx);
+
                     // Prefer non-hidden over hidden
                     if *best_is_hidden && !is_hidden {
                         true
                     } else if !*best_is_hidden && is_hidden {
                         false
+                    } else if *best_is_hidden && is_hidden {
+                        // Both hidden: prefer replacement target (issue #4845)
+                        if is_replacement_target && !best_is_replacement_target {
+                            true
+                        } else if !is_replacement_target && best_is_replacement_target {
+                            false
+                        } else {
+                            // Same replacement target status: prefer leftmost
+                            absolute_idx < *best_idx
+                        }
                     } else {
-                        // Same hidden status: prefer leftmost
+                        // Both non-hidden: prefer leftmost
                         absolute_idx < *best_idx
                     }
                 }
