@@ -6,7 +6,7 @@ mod execution;
 mod foreign_keys;
 mod replace;
 mod row_validator;
-mod validation;
+pub mod validation;
 
 use crate::errors::ExecutorError;
 
