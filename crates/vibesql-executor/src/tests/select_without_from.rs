@@ -418,6 +418,7 @@ fn test_like_with_column_reference_fails() {
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("A%")),
                 )),
                 negated: false,
+                escape: None,
             },
             alias: None,
             source_text: None,

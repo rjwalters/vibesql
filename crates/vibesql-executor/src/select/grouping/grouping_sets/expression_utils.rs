@@ -618,6 +618,7 @@ mod tests {
             expr: Box::new(e),
             pattern: Box::new(p),
             negated,
+            escape: None,
         };
 
         assert!(expressions_equal(
