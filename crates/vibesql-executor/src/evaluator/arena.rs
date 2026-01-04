@@ -614,7 +614,20 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             for when_clause in when_clauses.iter() {
                 for condition in when_clause.conditions.iter() {
                     let cond_val = self.eval_with_depth(condition, row)?;
-                    if matches!(cond_val, SqlValue::Boolean(true)) {
+                    // In SQL, truthiness is:
+                    // - Boolean(true) => true
+                    // - Integer/Bigint non-zero => true
+                    // - Double/Float non-zero => true
+                    // - Everything else (Null, zero, strings) => false
+                    let is_truthy = match cond_val {
+                        SqlValue::Boolean(b) => b,
+                        SqlValue::Integer(n) => n != 0,
+                        SqlValue::Bigint(n) => n != 0,
+                        SqlValue::Double(n) => n != 0.0,
+                        SqlValue::Float(n) => n != 0.0,
+                        _ => false,
+                    };
+                    if is_truthy {
                         return self.eval_with_depth(&when_clause.result, row);
                     }
                 }
