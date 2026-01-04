@@ -142,7 +142,7 @@ fn create_sbtest_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -150,7 +150,7 @@ fn create_sbtest_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             ColumnSchema {
@@ -158,7 +158,7 @@ fn create_sbtest_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(120) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             // Note: renamed from "pad" to "padding" because PAD is a SQL keyword
@@ -167,7 +167,7 @@ fn create_sbtest_schema_vibesql(db: &mut VibeDB) {
                 data_type: DataType::Varchar { max_length: Some(60) },
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],

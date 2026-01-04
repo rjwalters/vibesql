@@ -27,7 +27,7 @@ fn setup_test_db_with_tables(num_tables: usize, rows_per_table: i64) -> vibesql_
                     data_type: vibesql_types::DataType::Integer,
                     nullable: false,
                     default_value: None,
-                    generated_expr: None,
+                    generated_expr: None, is_exact_integer_type: false,
                     collation: None,
                 },
                 vibesql_catalog::ColumnSchema {
@@ -35,7 +35,7 @@ fn setup_test_db_with_tables(num_tables: usize, rows_per_table: i64) -> vibesql_
                     data_type: vibesql_types::DataType::Integer,
                     nullable: true,
                     default_value: None,
-                    generated_expr: None,
+                    generated_expr: None, is_exact_integer_type: false,
                     collation: None,
                 },
                 vibesql_catalog::ColumnSchema {
@@ -43,7 +43,7 @@ fn setup_test_db_with_tables(num_tables: usize, rows_per_table: i64) -> vibesql_
                     data_type: vibesql_types::DataType::Varchar { max_length: Some(40) },
                     nullable: true,
                     default_value: None,
-                    generated_expr: None,
+                    generated_expr: None, is_exact_integer_type: false,
                     collation: None,
                 },
             ],
@@ -484,7 +484,7 @@ fn test_unqualified_columns_in_complex_predicates() {
                 data_type: vibesql_types::DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             vibesql_catalog::ColumnSchema {
@@ -492,7 +492,7 @@ fn test_unqualified_columns_in_complex_predicates() {
                 data_type: vibesql_types::DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             vibesql_catalog::ColumnSchema {
@@ -500,7 +500,7 @@ fn test_unqualified_columns_in_complex_predicates() {
                 data_type: vibesql_types::DataType::Real,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             vibesql_catalog::ColumnSchema {
@@ -508,7 +508,7 @@ fn test_unqualified_columns_in_complex_predicates() {
                 data_type: vibesql_types::DataType::Integer,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
             vibesql_catalog::ColumnSchema {
@@ -516,7 +516,7 @@ fn test_unqualified_columns_in_complex_predicates() {
                 data_type: vibesql_types::DataType::Real,
                 nullable: true,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
                 collation: None,
             },
         ],

@@ -120,7 +120,7 @@ fn create_filter_database(row_count: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             collation: None,
             },
             ColumnSchema {
@@ -128,7 +128,7 @@ fn create_filter_database(row_count: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             collation: None,
             },
             ColumnSchema {
@@ -136,7 +136,7 @@ fn create_filter_database(row_count: usize) -> Database {
                 data_type: DataType::Bigint,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             collation: None,
             },
             ColumnSchema {
@@ -144,7 +144,7 @@ fn create_filter_database(row_count: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             collation: None,
             },
         ],

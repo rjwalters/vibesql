@@ -60,7 +60,7 @@ impl TruncateTableExecutor {
     ///         constraints: vec![],
     ///         default_value: None,
     ///         comment: None,
-    ///         generated_expr: None,
+    ///         generated_expr: None, is_exact_integer_type: false,
     ///     }],
     ///     table_constraints: vec![],
     ///     table_options: vec![],

@@ -45,7 +45,7 @@ impl CreateTableExecutor {
     ///             constraints: vec![],
     ///             default_value: None,
     ///             comment: None,
-    ///             generated_expr: None,
+    ///             generated_expr: None, is_exact_integer_type: false,
     ///         },
     ///         ColumnDef {
     ///             name: "name".to_string(),
@@ -54,7 +54,7 @@ impl CreateTableExecutor {
     ///             constraints: vec![],
     ///             default_value: None,
     ///             comment: None,
-    ///             generated_expr: None,
+    ///             generated_expr: None, is_exact_integer_type: false,
     ///         },
     ///     ],
     ///     table_constraints: vec![],

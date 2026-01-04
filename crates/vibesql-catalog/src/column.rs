@@ -23,9 +23,8 @@ impl ColumnSchema {
             data_type,
             nullable,
             default_value: None,
-            generated_expr: None,
+            generated_expr: None, is_exact_integer_type: false,
             collation: None,
-            is_exact_integer_type: false,
         }
     }
 

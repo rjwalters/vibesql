@@ -19,7 +19,7 @@ fn test_index_ordering() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             },
             vibesql_ast::ColumnDef {
                 name: "name".to_string(),
@@ -28,7 +28,7 @@ fn test_index_ordering() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None,
+                generated_expr: None, is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
