@@ -88,7 +88,7 @@ impl SelectExecutor<'_> {
                     // 3. Remaining columns from the right table
                     if let Some(from_res) = from_result {
                         // Get all column names in order from the combined schema
-                        // Store (index, column_name, table_name_for_display, is_joined_column)
+                        // Store (index, column_name, table_name_for_display, is_joined)
                         let mut table_columns: Vec<(usize, String, String, bool)> = Vec::new();
 
                         // Build a set of replacement target indices (columns that are replacement
@@ -98,8 +98,7 @@ impl SelectExecutor<'_> {
                             from_res.schema.column_replacement_map.values().copied().collect();
 
                         // Sort table_schemas by start_index for deterministic iteration order
-                        // HashMap iteration is non-deterministic; sorting ensures consistent
-                        // results
+                        // HashMap iteration is non-deterministic; sorting ensures consistent results
                         let mut sorted_tables: Vec<_> =
                             from_res.schema.table_schemas.iter().collect();
                         sorted_tables.sort_by_key(|(_, (start_index, _))| *start_index);
@@ -123,9 +122,8 @@ impl SelectExecutor<'_> {
                                     continue;
                                 }
 
-                                // For hidden columns, check if they have a replacement or coalesce
-                                // pair If so, include the name
-                                // (value comes from replacement/coalesce)
+                                // For hidden columns, check if they have a replacement or coalesce pair
+                                // If so, include the name (value comes from replacement/coalesce)
                                 // If not, skip them
                                 if from_res.schema.is_column_hidden(abs_idx) {
                                     let has_replacement =

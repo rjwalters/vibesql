@@ -130,8 +130,6 @@ pub(crate) fn project_row_combined(
                         // If neither replacement nor coalesce pair, skip this hidden column
                     } else {
                         // Check if this is a left-side USING column that needs COALESCE
-                        // In FULL OUTER JOIN with USING, the visible left column should show
-                        // COALESCE(left_val, right_val) to handle unmatched rows from either side
                         if let Some(right_idx) = schema.get_using_coalesce_right_for_left(idx) {
                             let left_val = &row.values[idx];
                             if *left_val == vibesql_types::SqlValue::Null
