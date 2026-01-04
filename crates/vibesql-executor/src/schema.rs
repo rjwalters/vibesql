@@ -702,6 +702,20 @@ impl CombinedSchema {
     pub fn get_column_replacement(&self, hidden_idx: usize) -> Option<usize> {
         self.column_replacement_map.get(&hidden_idx).copied()
     }
+
+    /// Get the right-side column index for a left-side USING column (for COALESCE in SELECT *).
+    ///
+    /// In FULL OUTER JOIN with USING clause, when expanding SELECT *, we need to apply
+    /// COALESCE(left_val, right_val) for USING columns. This method returns the right-side
+    /// index for a given left-side USING column index.
+    ///
+    /// Returns Some(right_idx) if the given index is a left-side USING column, None otherwise.
+    pub fn get_using_coalesce_right_for_left(&self, left_idx: usize) -> Option<usize> {
+        self.using_coalesce_pairs
+            .values()
+            .find(|(l, _)| *l == left_idx)
+            .map(|(_, r)| *r)
+    }
 }
 
 /// Builder for incrementally constructing a CombinedSchema
