@@ -404,9 +404,11 @@ impl Parser {
                 };
 
                 columns.push(vibesql_ast::IndexColumn::new_expression(expr, direction));
-            } else if matches!(self.peek(), Token::Number(_)) {
-                // Numeric literal - cannot be a column name, must be an expression
+            } else if matches!(self.peek(), Token::Number(_) | Token::Symbol('-') | Token::Symbol('+'))
+            {
+                // Numeric literal or unary operator - cannot be a column name, must be an expression
                 // SQLite allows: CREATE INDEX i ON t(0), CREATE INDEX i ON t(0 LIKE col)
+                // SQLite also allows: CREATE INDEX i ON t(-b=b), CREATE INDEX i ON t(-a)
                 let expr = self.parse_expression()?;
 
                 // Check for optional ASC/DESC

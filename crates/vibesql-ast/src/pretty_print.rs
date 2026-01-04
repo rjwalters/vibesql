@@ -492,14 +492,22 @@ impl ToSql for Expression {
                 format!("EXTRACT({} FROM {})", field.to_sql(), expr.to_sql())
             }
 
-            Expression::Like { expr, pattern, negated } => {
+            Expression::Like { expr, pattern, negated, escape } => {
                 let not_str = if *negated { "NOT " } else { "" };
-                format!("{} {}LIKE {}", expr.to_sql(), not_str, pattern.to_sql())
+                let escape_str = escape
+                    .as_ref()
+                    .map(|e| format!(" ESCAPE {}", e.to_sql()))
+                    .unwrap_or_default();
+                format!("{} {}LIKE {}{}", expr.to_sql(), not_str, pattern.to_sql(), escape_str)
             }
 
-            Expression::Glob { expr, pattern, negated } => {
+            Expression::Glob { expr, pattern, negated, escape } => {
                 let not_str = if *negated { "NOT " } else { "" };
-                format!("{} {}GLOB {}", expr.to_sql(), not_str, pattern.to_sql())
+                let escape_str = escape
+                    .as_ref()
+                    .map(|e| format!(" ESCAPE {}", e.to_sql()))
+                    .unwrap_or_default();
+                format!("{} {}GLOB {}{}", expr.to_sql(), not_str, pattern.to_sql(), escape_str)
             }
 
             Expression::Exists { subquery, negated } => {

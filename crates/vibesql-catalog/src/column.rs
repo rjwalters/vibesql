@@ -10,6 +10,10 @@ pub struct ColumnSchema {
     /// Column-level collation (e.g., "nocase", "binary", "rtrim")
     /// When set, comparisons and ORDER BY involving this column use this collation
     pub collation: Option<String>,
+    /// SQLite rowid alias eligibility flag.
+    /// True only when the original type declaration was exactly "INTEGER" (case-insensitive).
+    /// In SQLite, only `INTEGER PRIMARY KEY` is a rowid alias, not `INT PRIMARY KEY`.
+    pub is_exact_integer_type: bool,
 }
 
 impl ColumnSchema {
@@ -21,6 +25,7 @@ impl ColumnSchema {
             default_value: None,
             generated_expr: None,
             collation: None,
+            is_exact_integer_type: false,
         }
     }
 

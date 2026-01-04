@@ -699,16 +699,18 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
             Expression::Extract { field, expr: Box::new(transform_expression(visitor, *inner)) }
         }
 
-        Expression::Like { expr: inner, pattern, negated } => Expression::Like {
+        Expression::Like { expr: inner, pattern, negated, escape } => Expression::Like {
             expr: Box::new(transform_expression(visitor, *inner)),
             pattern: Box::new(transform_expression(visitor, *pattern)),
             negated,
+            escape: escape.map(|e| Box::new(transform_expression(visitor, *e))),
         },
 
-        Expression::Glob { expr: inner, pattern, negated } => Expression::Glob {
+        Expression::Glob { expr: inner, pattern, negated, escape } => Expression::Glob {
             expr: Box::new(transform_expression(visitor, *inner)),
             pattern: Box::new(transform_expression(visitor, *pattern)),
             negated,
+            escape: escape.map(|e| Box::new(transform_expression(visitor, *e))),
         },
 
         Expression::Exists { subquery, negated } => {

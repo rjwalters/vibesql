@@ -264,15 +264,17 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 field: (*field).into(),
                 expr: Box::new(self.convert_expression(expr)),
             },
-            arena_expr::ExtendedExpr::Like { expr, pattern, negated } => Expression::Like {
+            arena_expr::ExtendedExpr::Like { expr, pattern, negated, escape } => Expression::Like {
                 expr: Box::new(self.convert_expression(expr)),
                 pattern: Box::new(self.convert_expression(pattern)),
                 negated: *negated,
+                escape: escape.map(|e| Box::new(self.convert_expression(e))),
             },
-            arena_expr::ExtendedExpr::Glob { expr, pattern, negated } => Expression::Glob {
+            arena_expr::ExtendedExpr::Glob { expr, pattern, negated, escape } => Expression::Glob {
                 expr: Box::new(self.convert_expression(expr)),
                 pattern: Box::new(self.convert_expression(pattern)),
                 negated: *negated,
+                escape: escape.map(|e| Box::new(self.convert_expression(e))),
             },
             arena_expr::ExtendedExpr::Exists { subquery, negated } => Expression::Exists {
                 subquery: Box::new(self.convert_select(subquery)),

@@ -477,14 +477,14 @@ impl QuerySignature {
                 Self::hash_expression(expr, hasher);
             }
 
-            Expression::Like { expr, pattern, negated } => {
+            Expression::Like { expr, pattern, negated, .. } => {
                 "LIKE".hash(hasher);
                 Self::hash_expression(expr, hasher);
                 Self::hash_expression(pattern, hasher);
                 negated.hash(hasher);
             }
 
-            Expression::Glob { expr, pattern, negated } => {
+            Expression::Glob { expr, pattern, negated, .. } => {
                 "GLOB".hash(hasher);
                 Self::hash_expression(expr, hasher);
                 Self::hash_expression(pattern, hasher);
@@ -959,14 +959,14 @@ impl QuerySignature {
                 Self::hash_arena_expression(expr, hasher);
             }
 
-            ArenaExtendedExpr::Like { expr, pattern, negated } => {
+            ArenaExtendedExpr::Like { expr, pattern, negated, .. } => {
                 "LIKE".hash(hasher);
                 Self::hash_arena_expression(expr, hasher);
                 Self::hash_arena_expression(pattern, hasher);
                 negated.hash(hasher);
             }
 
-            ArenaExtendedExpr::Glob { expr, pattern, negated } => {
+            ArenaExtendedExpr::Glob { expr, pattern, negated, .. } => {
                 "GLOB".hash(hasher);
                 Self::hash_arena_expression(expr, hasher);
                 Self::hash_arena_expression(pattern, hasher);

@@ -148,12 +148,19 @@ impl<'arena> ArenaParser<'arena> {
             } else if self.peek_keyword(Keyword::Like) {
                 self.consume_keyword(Keyword::Like)?;
                 let pattern = self.parse_additive_expression()?;
+                let escape: Option<&Expression<'arena>> = if self.peek_keyword(Keyword::Escape) {
+                    self.consume_keyword(Keyword::Escape)?;
+                    Some(self.arena.alloc(self.parse_additive_expression()?))
+                } else {
+                    None
+                };
                 let left_ref = self.arena.alloc(left);
                 let pattern_ref = self.arena.alloc(pattern);
                 return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::Like {
                     expr: left_ref,
                     pattern: pattern_ref,
                     negated: true,
+                    escape,
                 })));
             } else if self.peek_keyword(Keyword::Null) {
                 // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS NOT NULL"
@@ -211,12 +218,19 @@ impl<'arena> ArenaParser<'arena> {
         } else if self.peek_keyword(Keyword::Like) {
             self.consume_keyword(Keyword::Like)?;
             let pattern = self.parse_additive_expression()?;
+            let escape: Option<&Expression<'arena>> = if self.peek_keyword(Keyword::Escape) {
+                self.consume_keyword(Keyword::Escape)?;
+                Some(self.arena.alloc(self.parse_additive_expression()?))
+            } else {
+                None
+            };
             let left_ref = self.arena.alloc(left);
             let pattern_ref = self.arena.alloc(pattern);
             return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::Like {
                 expr: left_ref,
                 pattern: pattern_ref,
                 negated: false,
+                escape,
             })));
         }
 

@@ -107,10 +107,20 @@ impl Parser {
         };
 
         // Parse optional WHEN condition
+        // SQLite syntax: WHEN expression (no parens required)
+        // PostgreSQL syntax: WHEN (expression) (parens required)
+        // We support both for compatibility
         let when_condition = if self.try_consume_keyword(Keyword::When) {
-            self.expect_token(Token::LParen)?;
+            let has_paren = if self.peek() == &Token::LParen {
+                self.advance(); // consume optional (
+                true
+            } else {
+                false
+            };
             let expr = self.parse_expression()?;
-            self.expect_token(Token::RParen)?;
+            if has_paren {
+                self.expect_token(Token::RParen)?;
+            }
             Some(Box::new(expr))
         } else {
             None

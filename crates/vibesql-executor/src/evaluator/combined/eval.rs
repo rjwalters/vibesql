@@ -735,12 +735,12 @@ impl CombinedExpressionEvaluator<'_> {
             vibesql_ast::Expression::Extract { field, expr } => self.eval_extract(field, expr, row),
 
             // LIKE pattern matching: expr LIKE pattern
-            vibesql_ast::Expression::Like { expr, pattern, negated } => {
+            vibesql_ast::Expression::Like { expr, pattern, negated, .. } => {
                 self.eval_like(expr, pattern, *negated, row)
             }
 
             // GLOB pattern matching: expr GLOB pattern (SQLite)
-            vibesql_ast::Expression::Glob { expr, pattern, negated } => {
+            vibesql_ast::Expression::Glob { expr, pattern, negated, .. } => {
                 self.eval_glob(expr, pattern, *negated, row)
             }
 

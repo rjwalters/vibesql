@@ -61,7 +61,7 @@ fn evaluate_predicate_simd(
                 op
             ))),
         },
-        Expression::Like { expr, pattern, negated } => {
+        Expression::Like { expr, pattern, negated, .. } => {
             evaluate_like_simd(batch, expr, pattern, *negated)
         }
         _ => {

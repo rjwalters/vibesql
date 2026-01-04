@@ -219,7 +219,8 @@ impl CombinedExpressionEvaluator<'_> {
         let case_sensitive = self.database.map(|db| db.case_sensitive_like()).unwrap_or(false);
 
         // Perform pattern matching
-        let matches = like_match(&text, &pattern_str, case_sensitive);
+        // TODO: Pass escape character when combined evaluator supports LIKE ESCAPE
+        let matches = like_match(&text, &pattern_str, case_sensitive, None);
 
         // Apply negation if needed
         let result = if negated { !matches } else { matches };

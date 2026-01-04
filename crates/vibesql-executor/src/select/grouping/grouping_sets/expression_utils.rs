@@ -155,9 +155,18 @@ pub fn expressions_equal(a: &Expression, b: &Expression) -> bool {
 
         // Like: recurse into expressions
         (
-            Expression::Like { expr: e1, pattern: p1, negated: n1 },
-            Expression::Like { expr: e2, pattern: p2, negated: n2 },
-        ) => n1 == n2 && expressions_equal(e1, e2) && expressions_equal(p1, p2),
+            Expression::Like { expr: e1, pattern: p1, negated: n1, escape: esc1 },
+            Expression::Like { expr: e2, pattern: p2, negated: n2, escape: esc2 },
+        ) => {
+            n1 == n2
+                && expressions_equal(e1, e2)
+                && expressions_equal(p1, p2)
+                && match (esc1, esc2) {
+                    (None, None) => true,
+                    (Some(e1), Some(e2)) => expressions_equal(e1, e2),
+                    _ => false,
+                }
+        }
 
         // Exists: subqueries are not comparable for GROUPING() purposes
         (Expression::Exists { .. }, Expression::Exists { .. }) => false,

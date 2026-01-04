@@ -172,7 +172,9 @@ impl Database {
                             StorageError::NotImplemented(format!("Write error: {}", e))
                         })?;
                     }
-                    write!(writer, "{} {}", col.name, format_data_type(&col.data_type))
+                    // Format column type, preserving INT vs INTEGER distinction for rowid alias behavior
+                    let type_str = format_column_type(&col.data_type, col.is_exact_integer_type);
+                    write!(writer, "{} {}", col.name, type_str)
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
                     // Handle generated columns (AS expression syntax)
@@ -371,7 +373,23 @@ impl Database {
     }
 }
 
-/// Format a DataType for SQL CREATE TABLE statement
+/// Format a column type, preserving the INT vs INTEGER distinction for rowid alias behavior.
+/// In SQLite, only `INTEGER PRIMARY KEY` is a rowid alias, not `INT PRIMARY KEY`.
+fn format_column_type(data_type: &vibesql_types::DataType, is_exact_integer_type: bool) -> String {
+    use vibesql_types::DataType;
+
+    match data_type {
+        DataType::Integer => {
+            if is_exact_integer_type {
+                "INTEGER".to_string()
+            } else {
+                "INT".to_string()
+            }
+        }
+        _ => format_data_type(data_type),
+    }
+}
+
 pub(super) fn format_data_type(data_type: &vibesql_types::DataType) -> String {
     use vibesql_types::DataType;
 

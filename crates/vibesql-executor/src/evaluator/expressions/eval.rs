@@ -463,12 +463,12 @@ impl ExpressionEvaluator<'_> {
             }
 
             // LIKE pattern matching
-            vibesql_ast::Expression::Like { expr, pattern, negated } => {
-                self.eval_like(expr, pattern, *negated, row)
+            vibesql_ast::Expression::Like { expr, pattern, negated, escape } => {
+                self.eval_like(expr, pattern, escape, *negated, row)
             }
 
             // GLOB pattern matching (SQLite)
-            vibesql_ast::Expression::Glob { expr, pattern, negated } => {
+            vibesql_ast::Expression::Glob { expr, pattern, negated, .. } => {
                 self.eval_glob(expr, pattern, *negated, row)
             }
 

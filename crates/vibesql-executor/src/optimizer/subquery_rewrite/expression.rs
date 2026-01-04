@@ -319,7 +319,7 @@ pub(super) fn rewrite_expression_with_context(
             )),
         },
 
-        Expression::Like { expr, pattern, negated } => Expression::Like {
+        Expression::Like { expr, pattern, negated, escape } => Expression::Like {
             expr: Box::new(rewrite_expression_with_context(
                 expr,
                 rewrite_subquery_fn,
@@ -331,9 +331,12 @@ pub(super) fn rewrite_expression_with_context(
                 outer_tables,
             )),
             negated: *negated,
+            escape: escape.as_ref().map(|e| {
+                Box::new(rewrite_expression_with_context(e, rewrite_subquery_fn, outer_tables))
+            }),
         },
 
-        Expression::Glob { expr, pattern, negated } => Expression::Glob {
+        Expression::Glob { expr, pattern, negated, escape } => Expression::Glob {
             expr: Box::new(rewrite_expression_with_context(
                 expr,
                 rewrite_subquery_fn,
@@ -345,6 +348,9 @@ pub(super) fn rewrite_expression_with_context(
                 outer_tables,
             )),
             negated: *negated,
+            escape: escape.as_ref().map(|e| {
+                Box::new(rewrite_expression_with_context(e, rewrite_subquery_fn, outer_tables))
+            }),
         },
 
         Expression::Interval { value, unit, leading_precision, fractional_precision } => {

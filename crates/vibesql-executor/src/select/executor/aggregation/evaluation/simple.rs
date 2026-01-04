@@ -175,7 +175,7 @@ pub(super) fn evaluate(
         }
 
         // LIKE: expr LIKE pattern
-        vibesql_ast::Expression::Like { expr: test_expr, pattern, negated } => {
+        vibesql_ast::Expression::Like { expr: test_expr, pattern, negated, .. } => {
             let test_val =
                 executor.evaluate_with_aggregates(test_expr, group_rows, group_key, evaluator)?;
             let pattern_val =
@@ -212,7 +212,8 @@ pub(super) fn evaluate(
             let case_sensitive = executor.database.case_sensitive_like();
 
             // Perform pattern matching
-            let matches = like_match(&text, &pattern_str, case_sensitive);
+            // TODO: Pass escape character when aggregate evaluator supports LIKE ESCAPE
+            let matches = like_match(&text, &pattern_str, case_sensitive, None);
 
             // Apply negation if needed
             let result = if *negated { !matches } else { matches };

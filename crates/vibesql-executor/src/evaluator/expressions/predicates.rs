@@ -444,6 +444,7 @@ impl ExpressionEvaluator<'_> {
         &self,
         expr: &vibesql_ast::Expression,
         pattern: &vibesql_ast::Expression,
+        escape: &Option<Box<vibesql_ast::Expression>>,
         negated: bool,
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
@@ -478,9 +479,49 @@ impl ExpressionEvaluator<'_> {
             }
         };
 
+        // Evaluate the escape character if provided
+        let escape_char = if let Some(escape_expr) = escape {
+            let escape_val = self.eval(escape_expr, row)?;
+            match escape_val {
+                vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => {
+                    if s.len() == 1 {
+                        s.chars().next()
+                    } else if s.is_empty() {
+                        None
+                    } else {
+                        // SQLite requires escape character to be exactly one character
+                        return Err(ExecutorError::SqliteCompatError(
+                            "ESCAPE expression must be a single character".to_string(),
+                        ));
+                    }
+                }
+                vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+                vibesql_types::SqlValue::Integer(n) => {
+                    // Allow single-digit integers as escape character (SQLite compatibility)
+                    let s = n.to_string();
+                    if s.len() == 1 {
+                        s.chars().next()
+                    } else {
+                        return Err(ExecutorError::SqliteCompatError(
+                            "ESCAPE expression must be a single character".to_string(),
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(ExecutorError::TypeMismatch {
+                        left: escape_val,
+                        op: "ESCAPE".to_string(),
+                        right: vibesql_types::SqlValue::Null,
+                    })
+                }
+            }
+        } else {
+            None
+        };
+
         // Get case_sensitive_like setting from database (default: false = case-insensitive)
         let case_sensitive = self.database.map(|db| db.case_sensitive_like()).unwrap_or(false);
-        let matches = like_match(&text, &pattern_str, case_sensitive);
+        let matches = like_match(&text, &pattern_str, case_sensitive, escape_char);
         let result = if negated { !matches } else { matches };
 
         Ok(vibesql_types::SqlValue::Boolean(result))

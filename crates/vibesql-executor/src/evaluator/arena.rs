@@ -428,14 +428,14 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             }
 
             // LIKE pattern matching
-            ArenaExtendedExpr::Like { expr: inner, pattern, negated } => {
+            ArenaExtendedExpr::Like { expr: inner, pattern, negated, .. } => {
                 let val = self.eval_with_depth(inner, row)?;
                 let pattern_val = self.eval_with_depth(pattern, row)?;
                 self.eval_like(&val, &pattern_val, *negated)
             }
 
             // GLOB pattern matching (SQLite)
-            ArenaExtendedExpr::Glob { expr: inner, pattern, negated } => {
+            ArenaExtendedExpr::Glob { expr: inner, pattern, negated, .. } => {
                 let val = self.eval_with_depth(inner, row)?;
                 let pattern_val = self.eval_with_depth(pattern, row)?;
                 self.eval_glob(&val, &pattern_val, *negated)
@@ -644,7 +644,8 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             | (SqlValue::Character(s), SqlValue::Varchar(p))
             | (SqlValue::Varchar(s), SqlValue::Character(p))
             | (SqlValue::Character(s), SqlValue::Character(p)) => {
-                let matches = super::pattern::like_match(s, p, case_sensitive);
+                // TODO: Pass escape character when arena evaluator supports LIKE ESCAPE
+                let matches = super::pattern::like_match(s, p, case_sensitive, None);
                 Ok(SqlValue::Boolean(if negated { !matches } else { matches }))
             }
             _ => Err(ExecutorError::TypeError(format!(

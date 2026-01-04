@@ -110,6 +110,7 @@ impl SelectIntoExecutor {
                         default_value: None,
                         comment: None,
                         generated_expr: None,
+                        is_exact_integer_type: false, // SELECT INTO doesn't preserve exact type
                     });
                 }
             }

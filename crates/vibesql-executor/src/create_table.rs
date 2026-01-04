@@ -186,6 +186,7 @@ impl CreateTableExecutor {
                     default_value,
                     generated_expr: col_def.generated_expr.as_ref().map(|expr| (**expr).clone()),
                     collation,
+                    is_exact_integer_type: col_def.is_exact_integer_type,
                 }
             })
             .collect();
@@ -204,14 +205,15 @@ impl CreateTableExecutor {
         ConstraintValidator::apply_to_schema(&mut table_schema, &constraint_result);
 
         // Detect INTEGER PRIMARY KEY for SQLite rowid aliasing (Issue #4536)
-        // In SQLite, a single-column PRIMARY KEY with INTEGER type is an alias for rowid.
+        // In SQLite, a single-column PRIMARY KEY with exactly "INTEGER" type is an alias for rowid.
         // The column's value IS the rowid, and SELECT rowid returns this column's value.
+        // IMPORTANT: Only exact "INTEGER" qualifies - "INT" does NOT (even though both parse to DataType::Integer)
         if let Some(pk_cols) = &table_schema.primary_key {
             if pk_cols.len() == 1 {
                 if let Some(col_idx) = table_schema.get_column_index(&pk_cols[0]) {
-                    let col_type = &table_schema.columns[col_idx].data_type;
-                    // Only INTEGER (not BIGINT, INT, etc.) qualifies for rowid aliasing
-                    if matches!(col_type, DataType::Integer) {
+                    let col = &table_schema.columns[col_idx];
+                    // Only exact "INTEGER" type qualifies for rowid aliasing, not "INT"
+                    if matches!(col.data_type, DataType::Integer) && col.is_exact_integer_type {
                         table_schema.set_rowid_alias_column(Some(col_idx));
                     }
                 }
@@ -528,6 +530,7 @@ impl CreateTableExecutor {
                     default_value: None,
                     generated_expr: None,
                     collation: None, // CTAS doesn't preserve collation
+                    is_exact_integer_type: false, // CTAS doesn't preserve exact type
                 }
             })
             .collect();

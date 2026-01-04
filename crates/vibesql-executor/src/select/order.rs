@@ -1222,17 +1222,23 @@ fn resolve_where_expression_with_schema_ref(
         },
 
         // LIKE
-        Expression::Like { expr: inner, pattern, negated } => Expression::Like {
+        Expression::Like { expr: inner, pattern, negated, escape } => Expression::Like {
             expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
             pattern: Box::new(resolve_where_expression_with_schema_ref(pattern, select_list, schema)),
             negated: *negated,
+            escape: escape.as_ref().map(|e| {
+                Box::new(resolve_where_expression_with_schema_ref(e, select_list, schema))
+            }),
         },
 
         // GLOB
-        Expression::Glob { expr: inner, pattern, negated } => Expression::Glob {
+        Expression::Glob { expr: inner, pattern, negated, escape } => Expression::Glob {
             expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
             pattern: Box::new(resolve_where_expression_with_schema_ref(pattern, select_list, schema)),
             negated: *negated,
+            escape: escape.as_ref().map(|e| {
+                Box::new(resolve_where_expression_with_schema_ref(e, select_list, schema))
+            }),
         },
 
         // CAST
@@ -1500,7 +1506,7 @@ fn resolve_where_expression_with_schema(
         },
 
         // LIKE
-        Expression::Like { expr: inner, pattern, negated } => Expression::Like {
+        Expression::Like { expr: inner, pattern, negated, escape } => Expression::Like {
             expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
             pattern: Box::new(resolve_where_expression_with_schema(
                 pattern,
@@ -1508,10 +1514,13 @@ fn resolve_where_expression_with_schema(
                 table_columns,
             )),
             negated: *negated,
+            escape: escape.as_ref().map(|e| {
+                Box::new(resolve_where_expression_with_schema(e, select_list, table_columns))
+            }),
         },
 
         // GLOB
-        Expression::Glob { expr: inner, pattern, negated } => Expression::Glob {
+        Expression::Glob { expr: inner, pattern, negated, escape } => Expression::Glob {
             expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
             pattern: Box::new(resolve_where_expression_with_schema(
                 pattern,
@@ -1519,6 +1528,9 @@ fn resolve_where_expression_with_schema(
                 table_columns,
             )),
             negated: *negated,
+            escape: escape.as_ref().map(|e| {
+                Box::new(resolve_where_expression_with_schema(e, select_list, table_columns))
+            }),
         },
 
         // CAST

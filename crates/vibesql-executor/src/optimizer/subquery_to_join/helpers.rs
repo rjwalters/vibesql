@@ -148,10 +148,13 @@ pub(super) fn rewrite_column_refs_with_alias(
                 .collect(),
             negated: *negated,
         },
-        Expression::Like { expr: inner, pattern, negated } => Expression::Like {
+        Expression::Like { expr: inner, pattern, negated, escape } => Expression::Like {
             expr: Box::new(rewrite_column_refs_with_alias(inner, old_table, new_alias)),
             pattern: Box::new(rewrite_column_refs_with_alias(pattern, old_table, new_alias)),
             negated: *negated,
+            escape: escape
+                .as_ref()
+                .map(|e| Box::new(rewrite_column_refs_with_alias(e, old_table, new_alias))),
         },
         Expression::Function { name, args, character_unit } => Expression::Function {
             name: name.clone(),

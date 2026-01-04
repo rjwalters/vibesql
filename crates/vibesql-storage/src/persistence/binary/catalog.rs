@@ -342,6 +342,9 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
                 default_value,
                 generated_expr: None,
                 collation,
+                // Default to false for backward compatibility with existing databases
+                // New tables will have this set correctly at creation time
+                is_exact_integer_type: false,
             });
         }
 

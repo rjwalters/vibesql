@@ -224,21 +224,25 @@ pub enum Expression {
     /// LIKE pattern matching
     /// Example: name LIKE 'John%'
     /// Example: email NOT LIKE '%spam%'
+    /// Example: name LIKE 'John\_Smith' ESCAPE '\'
     /// Pattern wildcards: % (any chars), _ (single char)
     Like {
         expr: Box<Expression>,
         pattern: Box<Expression>,
-        negated: bool, // false = LIKE, true = NOT LIKE
+        negated: bool,                    // false = LIKE, true = NOT LIKE
+        escape: Option<Box<Expression>>,  // Optional ESCAPE character
     },
 
     /// GLOB pattern matching (SQLite)
     /// Example: filename GLOB '*.txt'
     /// Example: path NOT GLOB '/etc/*'
+    /// Example: path GLOB 'dir\*name' ESCAPE '\'
     /// Pattern wildcards: * (any chars), ? (single char), [...] (character class)
     Glob {
         expr: Box<Expression>,
         pattern: Box<Expression>,
-        negated: bool, // false = GLOB, true = NOT GLOB
+        negated: bool,                    // false = GLOB, true = NOT GLOB
+        escape: Option<Box<Expression>>,  // Optional ESCAPE character
     },
 
     /// EXISTS predicate

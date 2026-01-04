@@ -7,6 +7,18 @@ impl Parser {
     pub(in crate::parser) fn parse_data_type(
         &mut self,
     ) -> Result<vibesql_types::DataType, ParseError> {
+        let (data_type, _is_exact_integer) = self.parse_data_type_with_integer_flag()?;
+        Ok(data_type)
+    }
+
+    /// Parse data type with INTEGER flag for SQLite rowid alias detection.
+    /// Returns (DataType, is_exact_integer_type) where is_exact_integer_type is true
+    /// only when the original type declaration was exactly "INTEGER" (case-insensitive).
+    /// This is needed because in SQLite, only `INTEGER PRIMARY KEY` is a rowid alias,
+    /// not `INT PRIMARY KEY`.
+    pub(in crate::parser) fn parse_data_type_with_integer_flag(
+        &mut self,
+    ) -> Result<(vibesql_types::DataType, bool), ParseError> {
         // Get the type name from the token. Note that identifiers are already
         // normalized to lowercase by the lexer, so we use uppercase for matching
         // but store the lowercase form.
@@ -29,16 +41,13 @@ impl Parser {
         // Use uppercase for matching to support case-insensitive type names
         let type_upper = type_name.to_uppercase();
         match type_upper.as_str() {
-            "INTEGER" | "INT" => Ok(vibesql_types::DataType::Integer),
-            "SIGNED" => Ok(vibesql_types::DataType::Integer), /* MySQL-specific: SIGNED is
-                                                                * equivalent to */
-            // INTEGER (signed 32-bit integer)
-            "UNSIGNED" => Ok(vibesql_types::DataType::Unsigned), /* MySQL-specific: UNSIGNED is
-                                                                   * 64-bit */
-            // unsigned integer
-            "SMALLINT" => Ok(vibesql_types::DataType::Smallint),
-            "BIGINT" | "LONG" => Ok(vibesql_types::DataType::Bigint),
-            "BOOLEAN" | "BOOL" => Ok(vibesql_types::DataType::Boolean),
+            "INTEGER" => Ok((vibesql_types::DataType::Integer, true)),
+            "INT" => Ok((vibesql_types::DataType::Integer, false)),
+            "SIGNED" => Ok((vibesql_types::DataType::Integer, false)), // MySQL SIGNED = INTEGER
+            "UNSIGNED" => Ok((vibesql_types::DataType::Unsigned, false)), // MySQL UNSIGNED = 64-bit
+            "SMALLINT" => Ok((vibesql_types::DataType::Smallint, false)),
+            "BIGINT" | "LONG" => Ok((vibesql_types::DataType::Bigint, false)),
+            "BOOLEAN" | "BOOL" => Ok((vibesql_types::DataType::Boolean, false)),
             "BIT" => {
                 // Parse BIT or BIT(n)
                 // MySQL BIT type - stores bit values from 1 to 64 bits
@@ -65,7 +74,7 @@ impl Parser {
                 } else {
                     None // No length specified, default to 1 (handled by storage layer)
                 };
-                Ok(vibesql_types::DataType::Bit { length })
+                Ok((vibesql_types::DataType::Bit { length }, false))
             }
             "FLOAT" => {
                 // Parse FLOAT(precision) or FLOAT
@@ -87,23 +96,23 @@ impl Parser {
                         }
                     };
                     self.expect_token(Token::RParen)?;
-                    Ok(vibesql_types::DataType::Float { precision })
+                    Ok((vibesql_types::DataType::Float { precision }, false))
                 } else {
                     // FLOAT without parameters defaults to 53-bit precision (IEEE 754 double)
-                    Ok(vibesql_types::DataType::Float { precision: 53 })
+                    Ok((vibesql_types::DataType::Float { precision: 53 }, false))
                 }
             }
-            "REAL" => Ok(vibesql_types::DataType::Real),
+            "REAL" => Ok((vibesql_types::DataType::Real, false)),
             "DOUBLE" => {
                 // Check for DOUBLE PRECISION
                 if let Token::Identifier(next) = self.peek() {
                     if next.to_uppercase() == "PRECISION" {
                         self.advance();
-                        return Ok(vibesql_types::DataType::DoublePrecision);
+                        return Ok((vibesql_types::DataType::DoublePrecision, false));
                     }
                 }
                 // Just DOUBLE without PRECISION - treat as DOUBLE PRECISION
-                Ok(vibesql_types::DataType::DoublePrecision)
+                Ok((vibesql_types::DataType::DoublePrecision, false))
             }
             "NUMERIC" | "DECIMAL" | "DEC" => {
                 // Parse NUMERIC(precision, scale) or NUMERIC(precision)
@@ -150,24 +159,24 @@ impl Parser {
                     self.expect_token(Token::RParen)?;
 
                     // DEC, DECIMAL, and NUMERIC all map to DataType::Numeric
-                    Ok(vibesql_types::DataType::Numeric { precision, scale })
+                    Ok((vibesql_types::DataType::Numeric { precision, scale }, false))
                 } else {
                     // NUMERIC/DECIMAL/DEC without parameters - use defaults (38, 0) per SQL
                     // standard
-                    Ok(vibesql_types::DataType::Numeric { precision: 38, scale: 0 })
+                    Ok((vibesql_types::DataType::Numeric { precision: 38, scale: 0 }, false))
                 }
             }
-            "DATE" => Ok(vibesql_types::DataType::Date),
-            "NAME" => Ok(vibesql_types::DataType::Name),
+            "DATE" => Ok((vibesql_types::DataType::Date, false)),
+            "NAME" => Ok((vibesql_types::DataType::Name, false)),
             "TIME" => {
                 // Parse optional WITH TIME ZONE or WITHOUT TIME ZONE
                 let with_timezone = self.parse_timezone_modifier()?;
-                Ok(vibesql_types::DataType::Time { with_timezone })
+                Ok((vibesql_types::DataType::Time { with_timezone }, false))
             }
             "TIMESTAMP" => {
                 // Parse optional WITH TIME ZONE or WITHOUT TIME ZONE
                 let with_timezone = self.parse_timezone_modifier()?;
-                Ok(vibesql_types::DataType::Timestamp { with_timezone })
+                Ok((vibesql_types::DataType::Timestamp { with_timezone }, false))
             }
             "DATETIME" => {
                 // MySQL/SQLite DATETIME type - treated as alias for TIMESTAMP
@@ -180,12 +189,12 @@ impl Parser {
                 //
                 // See issue #1626 for discussion of alternatives.
                 let with_timezone = self.parse_timezone_modifier()?;
-                Ok(vibesql_types::DataType::Timestamp { with_timezone })
+                Ok((vibesql_types::DataType::Timestamp { with_timezone }, false))
             }
             "YEAR" => {
                 // MySQL YEAR type - stores years from 1901-2155
                 // Treated as a user-defined type for compatibility
-                Ok(vibesql_types::DataType::UserDefined { type_name: "year".to_string() })
+                Ok((vibesql_types::DataType::UserDefined { type_name: "year".to_string() }, false))
             }
             "INTERVAL" => {
                 // Parse INTERVAL start_field [TO end_field]
@@ -204,7 +213,7 @@ impl Parser {
                     _ => None,
                 };
 
-                Ok(vibesql_types::DataType::Interval { start_field, end_field })
+                Ok((vibesql_types::DataType::Interval { start_field, end_field }, false))
             }
             "VARCHAR" => {
                 // Parse VARCHAR or VARCHAR(n) or VARCHAR(n CHARACTERS) or VARCHAR(n OCTETS)
@@ -239,7 +248,7 @@ impl Parser {
                 } else {
                     None // No length specified, use default
                 };
-                Ok(vibesql_types::DataType::Varchar { max_length })
+                Ok((vibesql_types::DataType::Varchar { max_length }, false))
             }
             "CHAR" | "CHARACTER" => {
                 // Check for VARYING keyword (CHARACTER VARYING = VARCHAR)
@@ -292,7 +301,7 @@ impl Parser {
                     } else {
                         None // No length specified, use default
                     };
-                    return Ok(vibesql_types::DataType::Varchar { max_length });
+                    return Ok((vibesql_types::DataType::Varchar { max_length }, false));
                 }
 
                 // Otherwise parse as CHAR
@@ -327,7 +336,7 @@ impl Parser {
                     1 // Default length is 1 per SQL:1999 standard
                 };
 
-                Ok(vibesql_types::DataType::Character { length })
+                Ok((vibesql_types::DataType::Character { length }, false))
             }
             "NCHAR" => {
                 // NCHAR is SQL standard national character type
@@ -369,7 +378,7 @@ impl Parser {
                     } else {
                         None // No length specified, use default
                     };
-                    return Ok(vibesql_types::DataType::Varchar { max_length });
+                    return Ok((vibesql_types::DataType::Varchar { max_length }, false));
                 }
 
                 // Otherwise parse as NCHAR (fixed-length)
@@ -404,7 +413,7 @@ impl Parser {
                     1 // Default length is 1 per SQL standard
                 };
 
-                Ok(vibesql_types::DataType::Character { length })
+                Ok((vibesql_types::DataType::Character { length }, false))
             }
             "NVARCHAR" => {
                 // NVARCHAR is SQL Server/MySQL alias for NCHAR VARYING
@@ -439,7 +448,7 @@ impl Parser {
                 } else {
                     None // No length specified, use default
                 };
-                Ok(vibesql_types::DataType::Varchar { max_length })
+                Ok((vibesql_types::DataType::Varchar { max_length }, false))
             }
             "TEXT" => {
                 // TEXT is SQLite-style unlimited VARCHAR
@@ -463,7 +472,7 @@ impl Parser {
                     }
                     self.expect_token(Token::RParen)?;
                 }
-                Ok(vibesql_types::DataType::Varchar { max_length: None })
+                Ok((vibesql_types::DataType::Varchar { max_length: None }, false))
             }
             "BINARY" | "VARBINARY" => {
                 // MySQL BINARY and VARBINARY types with optional size
@@ -491,7 +500,7 @@ impl Parser {
                     self.expect_token(Token::RParen)?;
                 }
 
-                Ok(vibesql_types::DataType::UserDefined { type_name })
+                Ok((vibesql_types::DataType::UserDefined { type_name }, false))
             }
             "ENUM" | "SET" => {
                 // MySQL ENUM and SET types take a list of values in parentheses
@@ -526,7 +535,7 @@ impl Parser {
                     }
                 }
 
-                Ok(vibesql_types::DataType::UserDefined { type_name })
+                Ok((vibesql_types::DataType::UserDefined { type_name }, false))
             }
             "NATIONAL" => {
                 // NATIONAL VARCHAR, NATIONAL CHARACTER, NATIONAL CHAR
@@ -582,7 +591,7 @@ impl Parser {
                         } else {
                             None // No length specified, use default
                         };
-                        Ok(vibesql_types::DataType::Varchar { max_length })
+                        Ok((vibesql_types::DataType::Varchar { max_length }, false))
                     }
                     "CHARACTER" | "CHAR" => {
                         self.advance(); // consume CHARACTER or CHAR
@@ -619,7 +628,7 @@ impl Parser {
                             1 // Default length is 1 per SQL standard
                         };
 
-                        Ok(vibesql_types::DataType::Character { length })
+                        Ok((vibesql_types::DataType::Character { length }, false))
                     }
                     _ => Err(ParseError {
                         message: format!(
@@ -661,22 +670,22 @@ impl Parser {
                     }
                 };
                 self.expect_token(Token::RParen)?;
-                Ok(vibesql_types::DataType::Vector { dimensions })
+                Ok((vibesql_types::DataType::Vector { dimensions }, false))
             }
             // BLOB and CLOB types - SQL:1999 large object types
             // These need explicit handling to map to BinaryLargeObject/CharacterLargeObject
             // instead of falling through to UserDefined
             "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" => {
-                Ok(vibesql_types::DataType::BinaryLargeObject)
+                Ok((vibesql_types::DataType::BinaryLargeObject, false))
             }
-            "CLOB" => Ok(vibesql_types::DataType::CharacterLargeObject),
+            "CLOB" => Ok((vibesql_types::DataType::CharacterLargeObject, false)),
             _ => {
                 // SQLite compatibility: Accept ANY string as a type name.
                 // SQLite uses type affinity rules to determine storage, but accepts
                 // any type name including typos like "IMTEGES" or "INTEGES".
                 // Map all unknown types to UserDefined, which provides BLOB/NUMERIC
                 // affinity behavior in the executor.
-                Ok(vibesql_types::DataType::UserDefined { type_name })
+                Ok((vibesql_types::DataType::UserDefined { type_name }, false))
             }
         }
     }

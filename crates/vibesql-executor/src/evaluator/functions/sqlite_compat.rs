@@ -951,9 +951,20 @@ pub(super) fn like(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     };
 
     // Optional escape character (3rd argument)
-    // For now, we don't support custom escape characters
+    let escape_char: Option<char> = if args.len() >= 3 {
+        match &args[2] {
+            SqlValue::Varchar(s) | SqlValue::Character(s) if s.len() == 1 => s.chars().next(),
+            SqlValue::Integer(n) => {
+                let s = n.to_string();
+                if s.len() == 1 { s.chars().next() } else { None }
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
     // SQLite's like() function uses case-insensitive matching by default
-    let matched = crate::evaluator::pattern::like_match(text, pattern, false);
+    let matched = crate::evaluator::pattern::like_match(text, pattern, false, escape_char);
     Ok(SqlValue::Integer(if matched { 1 } else { 0 }))
 }
 

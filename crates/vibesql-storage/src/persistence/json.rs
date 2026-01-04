@@ -589,6 +589,9 @@ fn json_column_to_schema(col: &JsonColumn) -> Result<ColumnSchema, StorageError>
         default_value: None,
         generated_expr: None,
         collation: col.collation.clone(),
+        // Default to false for backward compatibility with existing databases
+        // New tables will have this set correctly at creation time
+        is_exact_integer_type: false,
     })
 }
 

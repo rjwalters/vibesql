@@ -70,6 +70,7 @@ fn apply_column_aliases(
                 default_value: col.default_value.clone(),
                 generated_expr: col.generated_expr.clone(),
                 collation: col.collation.clone(), // Preserve original collation
+                is_exact_integer_type: col.is_exact_integer_type, // Preserve exact type flag
             })
             .collect();
         // TableSchema::new() rebuilds the column_index_cache
@@ -286,6 +287,7 @@ pub(crate) fn execute_table_scan(
                         default_value: None,
                         generated_expr: None, // Views don't have generated columns
                         collation: None,      // Views don't preserve collation
+                        is_exact_integer_type: false, // Views don't preserve exact type
                     }
                 })
                 .collect()
@@ -301,6 +303,7 @@ pub(crate) fn execute_table_scan(
                     default_value: None,
                     generated_expr: None, // Views don't have generated columns
                     collation: None,      // Views don't preserve collation
+                    is_exact_integer_type: false, // Views don't preserve exact type
                 })
                 .collect()
         };

@@ -923,7 +923,7 @@ fn resolve_outer_alias_refs_to_literals(
             negated: *negated,
         },
 
-        Expression::Like { expr, pattern, negated } => Expression::Like {
+        Expression::Like { expr, pattern, negated, escape } => Expression::Like {
             expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values, expr_values)),
             pattern: Box::new(resolve_outer_alias_refs_to_literals(
                 pattern,
@@ -931,9 +931,12 @@ fn resolve_outer_alias_refs_to_literals(
                 expr_values,
             )),
             negated: *negated,
+            escape: escape.as_ref().map(|e| {
+                Box::new(resolve_outer_alias_refs_to_literals(e, alias_values, expr_values))
+            }),
         },
 
-        Expression::Glob { expr, pattern, negated } => Expression::Glob {
+        Expression::Glob { expr, pattern, negated, escape } => Expression::Glob {
             expr: Box::new(resolve_outer_alias_refs_to_literals(expr, alias_values, expr_values)),
             pattern: Box::new(resolve_outer_alias_refs_to_literals(
                 pattern,
@@ -941,6 +944,9 @@ fn resolve_outer_alias_refs_to_literals(
                 expr_values,
             )),
             negated: *negated,
+            escape: escape.as_ref().map(|e| {
+                Box::new(resolve_outer_alias_refs_to_literals(e, alias_values, expr_values))
+            }),
         },
 
         Expression::Cast { expr, data_type } => Expression::Cast {

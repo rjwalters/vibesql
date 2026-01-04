@@ -103,25 +103,27 @@ impl Parser {
             // Parse data type (optional for SQLite compatibility)
             // SQLite allows typeless columns with BLOB affinity
             // Also check for generated column syntax: AS(expression) or GENERATED ALWAYS AS(expression)
-            let (data_type, mut generated_expr) = if self.peek_keyword(Keyword::As) {
-                // Generated column (short form): AS(expression)
-                self.advance(); // consume AS
-                self.expect_token(Token::LParen)?;
-                let expr = self.parse_expression()?;
-                self.expect_token(Token::RParen)?;
-                // Skip optional STORED or VIRTUAL keyword
-                if self.peek_keyword(Keyword::Stored) || self.peek_keyword(Keyword::Virtual) {
-                    self.advance();
-                }
-                // Generated columns have the type inferred from the expression
-                // For now, use BLOB affinity (will be refined by type inference)
-                (DataType::BinaryLargeObject, Some(Box::new(expr)))
-            } else if self.is_column_constraint_or_separator() {
-                // No data type specified - use BLOB affinity (SQLite default)
-                (DataType::BinaryLargeObject, None)
-            } else {
-                (self.parse_data_type()?, None)
-            };
+            let (data_type, is_exact_integer_type, mut generated_expr) =
+                if self.peek_keyword(Keyword::As) {
+                    // Generated column (short form): AS(expression)
+                    self.advance(); // consume AS
+                    self.expect_token(Token::LParen)?;
+                    let expr = self.parse_expression()?;
+                    self.expect_token(Token::RParen)?;
+                    // Skip optional STORED or VIRTUAL keyword
+                    if self.peek_keyword(Keyword::Stored) || self.peek_keyword(Keyword::Virtual) {
+                        self.advance();
+                    }
+                    // Generated columns have the type inferred from the expression
+                    // For now, use BLOB affinity (will be refined by type inference)
+                    (DataType::BinaryLargeObject, false, Some(Box::new(expr)))
+                } else if self.is_column_constraint_or_separator() {
+                    // No data type specified - use BLOB affinity (SQLite default)
+                    (DataType::BinaryLargeObject, false, None)
+                } else {
+                    let (dt, is_int) = self.parse_data_type_with_integer_flag()?;
+                    (dt, is_int, None)
+                };
 
             // Check for GENERATED ALWAYS AS (expression) [STORED|VIRTUAL] after data type
             if generated_expr.is_none() && self.peek_keyword(Keyword::Generated) {
@@ -194,6 +196,7 @@ impl Parser {
                 default_value,
                 comment,
                 generated_expr,
+                is_exact_integer_type,
             });
 
             if matches!(self.peek(), Token::Comma) {

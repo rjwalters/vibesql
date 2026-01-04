@@ -62,6 +62,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "SYMMETRIC" => Keyword::Symmetric,
     "LIKE" => Keyword::Like,
     "GLOB" => Keyword::Glob,
+    "ESCAPE" => Keyword::Escape,
     "EXISTS" => Keyword::Exists,
     "IF" => Keyword::If,
     "IS" => Keyword::Is,

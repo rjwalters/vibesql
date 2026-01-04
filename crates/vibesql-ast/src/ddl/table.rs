@@ -161,6 +161,11 @@ pub struct ColumnDef {
     /// When present, this column's value is computed from the expression
     /// rather than being stored explicitly
     pub generated_expr: Option<Box<Expression>>,
+    /// SQLite rowid alias eligibility flag.
+    /// True only when the original type declaration was exactly "INTEGER" (case-insensitive).
+    /// In SQLite, only `INTEGER PRIMARY KEY` is a rowid alias, not `INT PRIMARY KEY`.
+    /// This distinguishes between INT and INTEGER which both parse to DataType::Integer.
+    pub is_exact_integer_type: bool,
 }
 
 /// Column-level constraint

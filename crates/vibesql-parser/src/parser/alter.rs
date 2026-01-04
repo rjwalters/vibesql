@@ -86,7 +86,7 @@ fn parse_add_column(
     table_name: String,
 ) -> Result<AlterTableStmt, ParseError> {
     let column_name = parser.parse_identifier()?;
-    let data_type = parser.parse_data_type()?;
+    let (data_type, is_exact_integer_type) = parser.parse_data_type_with_integer_flag()?;
 
     // Parse optional DEFAULT clause
     let default_value = if parser.peek_keyword(Keyword::Default) {
@@ -156,6 +156,7 @@ fn parse_add_column(
         default_value,
         comment: None,
         generated_expr: None,
+        is_exact_integer_type,
     };
 
     Ok(AlterTableStmt::AddColumn(AddColumnStmt { table_name, column_def }))
@@ -278,7 +279,7 @@ fn parse_modify_column(
     }
 
     let column_name = parser.parse_identifier()?;
-    let data_type = parser.parse_data_type()?;
+    let (data_type, is_exact_integer_type) = parser.parse_data_type_with_integer_flag()?;
 
     // Parse optional DEFAULT clause
     let default_value = if parser.peek_keyword(Keyword::Default) {
@@ -348,6 +349,7 @@ fn parse_modify_column(
         default_value,
         comment: None,
         generated_expr: None,
+        is_exact_integer_type,
     };
 
     Ok(AlterTableStmt::ModifyColumn(ModifyColumnStmt { table_name, column_name, new_column_def }))
@@ -365,7 +367,7 @@ fn parse_change_column(
 
     let old_column_name = parser.parse_identifier()?;
     let new_column_name = parser.parse_identifier()?;
-    let data_type = parser.parse_data_type()?;
+    let (data_type, is_exact_integer_type) = parser.parse_data_type_with_integer_flag()?;
 
     // Parse optional DEFAULT clause
     let default_value = if parser.peek_keyword(Keyword::Default) {
@@ -435,6 +437,7 @@ fn parse_change_column(
         default_value,
         comment: None,
         generated_expr: None,
+        is_exact_integer_type,
     };
 
     Ok(AlterTableStmt::ChangeColumn(ChangeColumnStmt {

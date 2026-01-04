@@ -9,8 +9,106 @@
 ///
 /// When case_sensitive is true (PRAGMA case_sensitive_like=ON):
 ///   - All characters are matched exactly (byte-for-byte)
-pub(crate) fn like_match(text: &str, pattern: &str, case_sensitive: bool) -> bool {
-    like_match_recursive(text.as_bytes(), pattern.as_bytes(), 0, 0, case_sensitive)
+///
+/// The optional escape_char allows treating % and _ as literal characters
+/// when preceded by the escape character. E.g., LIKE 'a\_b' ESCAPE '\'
+/// would match the literal string 'a_b'.
+pub(crate) fn like_match(text: &str, pattern: &str, case_sensitive: bool, escape_char: Option<char>) -> bool {
+    // If escape character is provided, preprocess the pattern to handle escapes
+    match escape_char {
+        Some(esc) => {
+            // Build a processed pattern with escape markers
+            let pattern_bytes = pattern.as_bytes();
+            let esc_byte = esc as u8;
+            let mut i = 0;
+            let mut processed_pattern: Vec<PatternElement> = Vec::with_capacity(pattern_bytes.len());
+
+            while i < pattern_bytes.len() {
+                if pattern_bytes[i] == esc_byte && i + 1 < pattern_bytes.len() {
+                    // Next character is escaped - treat as literal
+                    let next_char = pattern_bytes[i + 1];
+                    processed_pattern.push(PatternElement::Literal(next_char));
+                    i += 2;
+                } else if pattern_bytes[i] == b'%' {
+                    processed_pattern.push(PatternElement::AnySequence);
+                    i += 1;
+                } else if pattern_bytes[i] == b'_' {
+                    processed_pattern.push(PatternElement::AnyChar);
+                    i += 1;
+                } else {
+                    processed_pattern.push(PatternElement::Literal(pattern_bytes[i]));
+                    i += 1;
+                }
+            }
+
+            like_match_with_elements(text.as_bytes(), &processed_pattern, 0, 0, case_sensitive)
+        }
+        None => {
+            like_match_recursive(text.as_bytes(), pattern.as_bytes(), 0, 0, case_sensitive)
+        }
+    }
+}
+
+/// Pattern elements for LIKE matching with escape support
+enum PatternElement {
+    Literal(u8),
+    AnySequence,  // %
+    AnyChar,      // _
+}
+
+/// Recursive LIKE matching with preprocessed pattern elements
+fn like_match_with_elements(
+    text: &[u8],
+    pattern: &[PatternElement],
+    text_pos: usize,
+    pattern_pos: usize,
+    case_sensitive: bool,
+) -> bool {
+    // If we've consumed the entire pattern
+    if pattern_pos >= pattern.len() {
+        // Match succeeds if we've also consumed all of text
+        return text_pos >= text.len();
+    }
+
+    match &pattern[pattern_pos] {
+        PatternElement::AnySequence => {
+            // % matches zero or more characters
+            for skip in 0..=(text.len() - text_pos) {
+                if like_match_with_elements(text, pattern, text_pos + skip, pattern_pos + 1, case_sensitive) {
+                    return true;
+                }
+            }
+            false
+        }
+        PatternElement::AnyChar => {
+            // _ matches exactly one character
+            if text_pos >= text.len() {
+                return false;
+            }
+            like_match_with_elements(text, pattern, text_pos + 1, pattern_pos + 1, case_sensitive)
+        }
+        PatternElement::Literal(pattern_char) => {
+            if text_pos >= text.len() {
+                return false;
+            }
+            let text_char = text[text_pos];
+
+            let matches = if case_sensitive {
+                text_char == *pattern_char
+            } else {
+                if pattern_char.is_ascii_alphabetic() && text_char.is_ascii_alphabetic() {
+                    pattern_char.eq_ignore_ascii_case(&text_char)
+                } else {
+                    text_char == *pattern_char
+                }
+            };
+
+            if !matches {
+                return false;
+            }
+            like_match_with_elements(text, pattern, text_pos + 1, pattern_pos + 1, case_sensitive)
+        }
+    }
 }
 
 /// SQLite GLOB pattern matching

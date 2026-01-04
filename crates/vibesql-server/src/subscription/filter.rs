@@ -182,7 +182,7 @@ impl SubscriptionFilter {
                 Ok(SqlValue::Boolean(if *negated { !in_range } else { in_range }))
             }
 
-            Expression::Like { expr, pattern, negated } => {
+            Expression::Like { expr, pattern, negated, .. } => {
                 let val = self.evaluate_expression(expr, values)?;
                 let pattern_val = self.evaluate_expression(pattern, values)?;
 

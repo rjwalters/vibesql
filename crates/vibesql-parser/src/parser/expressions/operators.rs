@@ -277,11 +277,20 @@ impl Parser {
                 // Parse pattern expression
                 let pattern = self.parse_shift_expression()?;
 
+                // Check for optional ESCAPE clause
+                let escape = if self.peek_keyword(Keyword::Escape) {
+                    self.consume_keyword(Keyword::Escape)?;
+                    Some(Box::new(self.parse_shift_expression()?))
+                } else {
+                    None
+                };
+
                 // Don't return - assign to left and continue to check for IS NULL
                 left = vibesql_ast::Expression::Like {
                     expr: Box::new(left),
                     pattern: Box::new(pattern),
                     negated: true,
+                    escape,
                 };
             } else if self.peek_keyword(Keyword::Glob) {
                 // It's NOT GLOB (SQLite)
@@ -290,11 +299,20 @@ impl Parser {
                 // Parse pattern expression
                 let pattern = self.parse_shift_expression()?;
 
+                // Check for optional ESCAPE clause
+                let escape = if self.peek_keyword(Keyword::Escape) {
+                    self.consume_keyword(Keyword::Escape)?;
+                    Some(Box::new(self.parse_shift_expression()?))
+                } else {
+                    None
+                };
+
                 // Don't return - assign to left and continue to check for IS NULL
                 left = vibesql_ast::Expression::Glob {
                     expr: Box::new(left),
                     pattern: Box::new(pattern),
                     negated: true,
+                    escape,
                 };
             } else if self.peek_keyword(Keyword::Null) {
                 // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS NOT NULL"
@@ -407,11 +425,20 @@ impl Parser {
             // Parse pattern expression
             let pattern = self.parse_additive_expression()?;
 
+            // Check for optional ESCAPE clause
+            let escape = if self.peek_keyword(Keyword::Escape) {
+                self.consume_keyword(Keyword::Escape)?;
+                Some(Box::new(self.parse_additive_expression()?))
+            } else {
+                None
+            };
+
             // Don't return - assign to left and continue to check for IS NULL
             left = vibesql_ast::Expression::Like {
                 expr: Box::new(left),
                 pattern: Box::new(pattern),
                 negated: false,
+                escape,
             };
         } else if self.peek_keyword(Keyword::Glob) {
             // It's GLOB (SQLite) (not negated)
@@ -420,11 +447,20 @@ impl Parser {
             // Parse pattern expression
             let pattern = self.parse_additive_expression()?;
 
+            // Check for optional ESCAPE clause
+            let escape = if self.peek_keyword(Keyword::Escape) {
+                self.consume_keyword(Keyword::Escape)?;
+                Some(Box::new(self.parse_additive_expression()?))
+            } else {
+                None
+            };
+
             // Don't return - assign to left and continue to check for IS NULL
             left = vibesql_ast::Expression::Glob {
                 expr: Box::new(left),
                 pattern: Box::new(pattern),
                 negated: false,
+                escape,
             };
         }
 

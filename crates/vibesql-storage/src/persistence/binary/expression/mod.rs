@@ -303,17 +303,25 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             }
             write_expression(writer, string)?;
         }
-        Expression::Like { expr, pattern, negated } => {
+        Expression::Like { expr, pattern, negated, escape } => {
             write_tag!(writer, ExprTag::Like);
             write_expression(writer, expr)?;
             write_expression(writer, pattern)?;
             write_bool(writer, *negated)?;
+            write_bool(writer, escape.is_some())?;
+            if let Some(esc) = escape {
+                write_expression(writer, esc)?;
+            }
         }
-        Expression::Glob { expr, pattern, negated } => {
+        Expression::Glob { expr, pattern, negated, escape } => {
             write_tag!(writer, ExprTag::Glob);
             write_expression(writer, expr)?;
             write_expression(writer, pattern)?;
             write_bool(writer, *negated)?;
+            write_bool(writer, escape.is_some())?;
+            if let Some(esc) = escape {
+                write_expression(writer, esc)?;
+            }
         }
         Expression::Exists { .. } => {
             return Err(StorageError::NotImplemented(
@@ -618,13 +626,17 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             let expr = Box::new(read_expression(reader)?);
             let pattern = Box::new(read_expression(reader)?);
             let negated = read_bool(reader)?;
-            Ok(Expression::Like { expr, pattern, negated })
+            let has_escape = read_bool(reader)?;
+            let escape = if has_escape { Some(Box::new(read_expression(reader)?)) } else { None };
+            Ok(Expression::Like { expr, pattern, negated, escape })
         }
         ExprTag::Glob => {
             let expr = Box::new(read_expression(reader)?);
             let pattern = Box::new(read_expression(reader)?);
             let negated = read_bool(reader)?;
-            Ok(Expression::Glob { expr, pattern, negated })
+            let has_escape = read_bool(reader)?;
+            let escape = if has_escape { Some(Box::new(read_expression(reader)?)) } else { None };
+            Ok(Expression::Glob { expr, pattern, negated, escape })
         }
         ExprTag::Exists => Err(StorageError::NotImplemented(
             "EXISTS deserialization not yet implemented".to_string(),
