@@ -43,7 +43,21 @@ pub(crate) fn project_row_combined(
                         }
                         // If no replacement, skip this hidden column
                     } else {
-                        values.push(row.values[idx].clone());
+                        // Check if this is a left-side USING column that needs COALESCE
+                        // In FULL OUTER JOIN with USING, the visible left column should show
+                        // COALESCE(left_val, right_val) to handle unmatched rows from either side
+                        if let Some(right_idx) = schema.get_using_coalesce_right_for_left(idx) {
+                            let left_val = &row.values[idx];
+                            if *left_val == vibesql_types::SqlValue::Null
+                                && right_idx < row.values.len()
+                            {
+                                values.push(row.values[right_idx].clone());
+                            } else {
+                                values.push(left_val.clone());
+                            }
+                        } else {
+                            values.push(row.values[idx].clone());
+                        }
                     }
                 }
             }
