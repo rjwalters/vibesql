@@ -102,8 +102,10 @@ fn test_unary_plus_text() {
     );
 }
 
+/// SQLite behavior: unary minus on non-numeric strings converts to 0
+/// -"hello" → -0 → 0 (string_to_number("hello") returns 0)
 #[test]
-fn test_unary_minus_invalid_type() {
+fn test_unary_minus_string_converts_to_zero() {
     let db = vibesql_storage::Database::new();
     let expr = vibesql_ast::Expression::UnaryOp {
         op: vibesql_ast::UnaryOperator::Minus,
@@ -111,5 +113,6 @@ fn test_unary_minus_invalid_type() {
             arcstr::ArcStr::from("hello"),
         ))),
     };
-    assert_type_mismatch(&db, expr);
+    // SQLite converts non-numeric strings to 0, then negates: -0 = 0
+    assert_expression_result(&db, expr, vibesql_types::SqlValue::Integer(0));
 }

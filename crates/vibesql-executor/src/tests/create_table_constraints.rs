@@ -359,7 +359,7 @@ fn test_integer_primary_key_no_autoindex() {
             }],
             default_value: None,
             comment: None,
-            generated_expr: None, is_exact_integer_type: false,
+            generated_expr: None, is_exact_integer_type: true, // Must be true for INTEGER PRIMARY KEY rowid aliasing
         }],
         table_constraints: vec![],
         table_options: vec![],
