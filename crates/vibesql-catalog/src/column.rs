@@ -18,12 +18,17 @@ pub struct ColumnSchema {
 
 impl ColumnSchema {
     pub fn new(name: String, data_type: vibesql_types::DataType, nullable: bool) -> Self {
+        // Default is_exact_integer_type to true for DataType::Integer.
+        // This ensures programmatically-created INTEGER columns get the standard "INTEGER"
+        // output (not "INT") and are eligible for SQLite's rowid alias behavior.
+        let is_exact_integer_type = matches!(data_type, vibesql_types::DataType::Integer);
         ColumnSchema {
             name,
             data_type,
             nullable,
             default_value: None,
-            generated_expr: None, is_exact_integer_type: false,
+            generated_expr: None,
+            is_exact_integer_type,
             collation: None,
         }
     }
