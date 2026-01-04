@@ -27,7 +27,6 @@ console_error_panic_hook = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
 serde_json = "1.0"
-getrandom = { version = "0.3", features = ["wasm_js"] }
 
 # Optional i18n support
 vibesql-l10n = { version = "0.1.3", path = "../vibesql-l10n", optional = true }
@@ -43,10 +42,13 @@ vibesql-ast = { version = "0.1.3", path = "../vibesql-ast" }
 vibesql-parser = { version = "0.1.3", path = "../vibesql-parser" }
 vibesql-executor = { version = "0.1.3", path = "../vibesql-executor", default-features = false }
 vibesql-storage = { version = "0.1.3", path = "../vibesql-storage", default-features = false }
-vibesql-catalog = { version = "0.1.3", path = "../vibesql-catalog" }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
+
+# wasm-bindgen-futures is required by #[wasm_bindgen] macro even though not directly imported
+[package.metadata.cargo-machete]
+ignored = ["wasm-bindgen-futures"]
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = [
