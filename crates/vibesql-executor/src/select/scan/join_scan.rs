@@ -310,7 +310,8 @@ where
     // (USING clause should only include join columns once as the "primary" column)
     //
     // Issue #4781: For RIGHT/FULL OUTER JOINs, the USING column should use COALESCE semantics:
-    // - RIGHT OUTER JOIN: hide left-side USING column (use right as primary, since left may be NULL)
+    // - RIGHT OUTER JOIN: hide left-side USING column (use right as primary, since left may be
+    //   NULL)
     // - FULL OUTER JOIN: coalesce left with right value, then hide right (standard behavior)
     // - LEFT OUTER / INNER: hide right-side USING column (standard behavior)
     if let (Some(using_cols), Some(ref left_schema), Some(ref right_schema)) =
@@ -364,10 +365,8 @@ fn remove_duplicate_columns_for_using_join(
     // - RIGHT OUTER: left can be NULL for unmatched rows from right
     // - FULL OUTER: either side can be NULL for unmatched rows
     // Issue #4783: USING column semantics differ from SQLite in OUTER JOINs
-    let needs_coalesce = matches!(
-        join_type,
-        vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter
-    );
+    let needs_coalesce =
+        matches!(join_type, vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter);
 
     // Build a map of column name -> best left column index for coalesce pairs
     // For chained joins (e.g., RIGHT JOIN followed by FULL JOIN), prefer non-hidden
@@ -413,10 +412,8 @@ fn remove_duplicate_columns_for_using_join(
     // For RIGHT JOIN: hide left-side columns (left can be NULL for unmatched right rows)
     // For FULL JOIN: hide left-side columns (use right value; both could be NULL but
     //                the coalesce pair handles this for SELECT *)
-    let is_right_or_full = matches!(
-        join_type,
-        vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter
-    );
+    let is_right_or_full =
+        matches!(join_type, vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter);
 
     if is_right_or_full {
         // For RIGHT/FULL JOIN: hide left-side USING columns
@@ -474,9 +471,7 @@ fn remove_duplicate_columns_for_using_join(
                     .find(|c| c.to_lowercase() == *col_name)
                     .map(|s| s.as_str())
                     .unwrap_or(col_name);
-                result
-                    .schema
-                    .add_using_coalesce_pair(original_name, left_idx, right_idx);
+                result.schema.add_using_coalesce_pair(original_name, left_idx, right_idx);
             }
         }
     } else {
@@ -506,7 +501,8 @@ fn remove_duplicate_columns_for_using_join(
 /// JOIN)
 ///
 /// For self-joins (where left and right have the same table name), we use synthetic table
-/// identifiers to ensure the condition correctly distinguishes between the left and right instances.
+/// identifiers to ensure the condition correctly distinguishes between the left and right
+/// instances.
 fn generate_natural_join_condition(
     left_schema: &crate::schema::CombinedSchema,
     right_schema: &crate::schema::CombinedSchema,
@@ -514,16 +510,10 @@ fn generate_natural_join_condition(
     use std::collections::HashMap;
 
     // Check if this is a self-join case (same table names on both sides)
-    let left_table_names: std::collections::HashSet<_> = left_schema
-        .table_schemas
-        .keys()
-        .map(|k| k.canonical().to_lowercase())
-        .collect();
-    let right_table_names: std::collections::HashSet<_> = right_schema
-        .table_schemas
-        .keys()
-        .map(|k| k.canonical().to_lowercase())
-        .collect();
+    let left_table_names: std::collections::HashSet<_> =
+        left_schema.table_schemas.keys().map(|k| k.canonical().to_lowercase()).collect();
+    let right_table_names: std::collections::HashSet<_> =
+        right_schema.table_schemas.keys().map(|k| k.canonical().to_lowercase()).collect();
     let is_self_join = !left_table_names.is_disjoint(&right_table_names);
 
     // Get all column names from left schema (normalized to lowercase for case-insensitive
@@ -645,11 +635,7 @@ fn generate_natural_join_condition(
         // what CombinedSchema::merge will create
         let right_table_ref = if is_self_join {
             let adjusted_start = left_schema.total_columns + right_table_start;
-            format!(
-                "__selfjoin_right_{}_{}",
-                right_table.to_lowercase(),
-                adjusted_start
-            )
+            format!("__selfjoin_right_{}_{}", right_table.to_lowercase(), adjusted_start)
         } else {
             right_table
         };
@@ -1619,24 +1605,18 @@ fn generate_using_join_condition(
     // Check if this is a self-join case (same table names on both sides)
     // In this case, we need to use column indices instead of table-qualified names
     // because both would resolve to the same column position in the combined schema.
-    let left_table_names: std::collections::HashSet<_> = left_schema
-        .table_schemas
-        .keys()
-        .map(|k| k.canonical().to_lowercase())
-        .collect();
-    let right_table_names: std::collections::HashSet<_> = right_schema
-        .table_schemas
-        .keys()
-        .map(|k| k.canonical().to_lowercase())
-        .collect();
+    let left_table_names: std::collections::HashSet<_> =
+        left_schema.table_schemas.keys().map(|k| k.canonical().to_lowercase()).collect();
+    let right_table_names: std::collections::HashSet<_> =
+        right_schema.table_schemas.keys().map(|k| k.canonical().to_lowercase()).collect();
     let is_self_join = !left_table_names.is_disjoint(&right_table_names);
 
     for col_name in columns {
         let col_lower = col_name.to_lowercase();
 
         // Find column in left schema (case-insensitive) - also get absolute index and collation
-        // IMPORTANT: For chained USING joins (e.g., t1 LEFT JOIN t2 USING(a) LEFT JOIN t3 USING(a)),
-        // the left_schema may contain multiple tables with the same column name.
+        // IMPORTANT: For chained USING joins (e.g., t1 LEFT JOIN t2 USING(a) LEFT JOIN t3
+        // USING(a)), the left_schema may contain multiple tables with the same column name.
         // We must pick the LEFTMOST table (lowest start_idx) to ensure we use the correct
         // value for the join condition. This matches SQLite's COALESCE semantics where
         // the leftmost non-NULL value is used for USING columns.
@@ -1697,33 +1677,67 @@ fn generate_using_join_condition(
             column_name: col_name.to_string(),
         })?;
 
-        // Find column in right schema (case-insensitive) - get absolute index, table start, collation
-        let right_col = right_schema
-            .table_schemas
-            .iter()
-            .find_map(|(table_name, (start_idx, table_schema))| {
-                table_schema
-                    .columns
-                    .iter()
-                    .enumerate()
-                    .find_map(|(col_offset, col)| {
-                        if col.name.to_lowercase() == col_lower {
-                            // Return: (table_name, col_name, absolute_col_idx, table_start_idx, collation)
-                            Some((
+        // Find column in right schema (case-insensitive) - get absolute index, table start,
+        // collation IMPORTANT: For nested USING joins (e.g., t2 INNER JOIN (t3 LEFT JOIN t4
+        // USING(a)) USING(a)), the right_schema may contain multiple tables with the same
+        // column name (t3.a, t4.a). We must prefer NON-HIDDEN columns and the LEFTMOST
+        // (lowest index) column to ensure we use the correct value for the join condition.
+        // This matches the coalesce semantics where the leftmost non-NULL value is used for
+        // USING columns. Issue #4843: Using find_map() with HashMap has non-deterministic
+        // iteration order, which could pick a NULL column (e.g., t4.a from LEFT JOIN)
+        // instead of the correct coalesced value (e.g., t3.a).
+        let right_col = {
+            let mut best_match: Option<(
+                vibesql_catalog::TableIdentifier,
+                String,
+                usize,
+                usize,
+                Option<String>,
+                bool, // is_hidden
+            )> = None;
+            for (table_name, (start_idx, table_schema)) in &right_schema.table_schemas {
+                for (col_offset, col) in table_schema.columns.iter().enumerate() {
+                    if col.name.to_lowercase() == col_lower {
+                        let absolute_idx = start_idx + col_offset;
+                        let is_hidden = right_schema.hidden_columns.contains(&absolute_idx);
+
+                        // Prefer non-hidden columns over hidden ones
+                        // Among columns with the same hidden status, prefer leftmost (lowest index)
+                        let should_update = match &best_match {
+                            None => true,
+                            Some((_, _, best_idx, _, _, best_is_hidden)) => {
+                                // Prefer non-hidden over hidden
+                                if *best_is_hidden && !is_hidden {
+                                    true
+                                } else if !*best_is_hidden && is_hidden {
+                                    false
+                                } else {
+                                    // Same hidden status: prefer leftmost
+                                    absolute_idx < *best_idx
+                                }
+                            }
+                        };
+
+                        if should_update {
+                            best_match = Some((
                                 table_name.clone(),
                                 col.name.clone(),
-                                start_idx + col_offset,
+                                absolute_idx,
                                 *start_idx,
                                 col.collation.clone(),
-                            ))
-                        } else {
-                            None
+                                is_hidden,
+                            ));
                         }
-                    })
-            })
-            .ok_or_else(|| ExecutorError::JoinUsingColumnNotPresent {
-                column_name: col_name.to_string(),
-            })?;
+                    }
+                }
+            }
+            // Convert to the expected type (drop the is_hidden field)
+            best_match
+                .map(|(table, col, idx, start, collation, _)| (table, col, idx, start, collation))
+        }
+        .ok_or_else(|| ExecutorError::JoinUsingColumnNotPresent {
+            column_name: col_name.to_string(),
+        })?;
 
         // Use left column's collation if present, otherwise use right column's
         let collation = left_col.3.clone().or(right_col.4.clone());
@@ -1736,11 +1750,7 @@ fn generate_using_join_condition(
             // Format: __selfjoin_right_{original_name}_{adjusted_start}
             // adjusted_start = left_schema.total_columns + table_start_index (not column index!)
             let adjusted_start = left_schema.total_columns + right_col.3;
-            format!(
-                "__selfjoin_right_{}_{}",
-                right_col.0.canonical(),
-                adjusted_start
-            )
+            format!("__selfjoin_right_{}_{}", right_col.0.canonical(), adjusted_start)
         } else {
             right_col.0.to_string()
         };
@@ -1787,9 +1797,9 @@ fn generate_using_join_condition(
 
 /// Validate that an ON clause doesn't reference tables that aren't in the current join.
 ///
-/// SQLite requires that ON clauses only reference tables from the current join (left and right sides).
-/// If the ON clause references a table that appears later in the FROM clause (to the right),
-/// SQLite returns the error: "ON clause references tables to its right"
+/// SQLite requires that ON clauses only reference tables from the current join (left and right
+/// sides). If the ON clause references a table that appears later in the FROM clause (to the
+/// right), SQLite returns the error: "ON clause references tables to its right"
 ///
 /// This validation checks two cases:
 /// 1. Table-qualified references (e.g., `t3.x`) - the table must exist in left or right schema
@@ -1829,7 +1839,8 @@ fn validate_on_clause_table_references(
         }
     }
 
-    // Collect all column names from all tables in the database (for detecting right-table references)
+    // Collect all column names from all tables in the database (for detecting right-table
+    // references)
     let mut all_db_columns: HashSet<String> = HashSet::new();
     for table_name in database.list_tables() {
         if let Some(table) = database.get_table(&table_name) {
@@ -1857,9 +1868,10 @@ fn validate_on_clause_table_references(
 /// For table-qualified references (e.g., `t3.x`): checks if the table is in valid_tables.
 /// For unqualified references (e.g., `b`): checks if the column exists in valid_columns.
 ///   - If it exists in valid_columns, it's OK (column is in current join)
-///   - If it doesn't exist in valid_columns BUT exists in all_db_columns, it's referencing
-///     a table to the right (error)
-///   - If it doesn't exist in either, it might be a SELECT alias (allow, will fail later if invalid)
+///   - If it doesn't exist in valid_columns BUT exists in all_db_columns, it's referencing a table
+///     to the right (error)
+///   - If it doesn't exist in either, it might be a SELECT alias (allow, will fail later if
+///     invalid)
 fn on_clause_references_unknown_table_or_column(
     expr: &vibesql_ast::Expression,
     valid_tables: &HashSet<String>,
@@ -1890,34 +1902,87 @@ fn on_clause_references_unknown_table_or_column(
             }
         }
         vibesql_ast::Expression::BinaryOp { left, right, .. } => {
-            on_clause_references_unknown_table_or_column(left, valid_tables, valid_columns, all_db_columns)
-                || on_clause_references_unknown_table_or_column(right, valid_tables, valid_columns, all_db_columns)
+            on_clause_references_unknown_table_or_column(
+                left,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            ) || on_clause_references_unknown_table_or_column(
+                right,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            )
         }
         vibesql_ast::Expression::UnaryOp { expr, .. } => {
-            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns, all_db_columns)
+            on_clause_references_unknown_table_or_column(
+                expr,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            )
         }
         vibesql_ast::Expression::IsNull { expr, .. } => {
-            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns, all_db_columns)
+            on_clause_references_unknown_table_or_column(
+                expr,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            )
         }
         vibesql_ast::Expression::Between { expr, low, high, .. } => {
-            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns, all_db_columns)
-                || on_clause_references_unknown_table_or_column(low, valid_tables, valid_columns, all_db_columns)
-                || on_clause_references_unknown_table_or_column(high, valid_tables, valid_columns, all_db_columns)
+            on_clause_references_unknown_table_or_column(
+                expr,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            ) || on_clause_references_unknown_table_or_column(
+                low,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            ) || on_clause_references_unknown_table_or_column(
+                high,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            )
         }
         vibesql_ast::Expression::InList { expr, values, .. } => {
-            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns, all_db_columns)
-                || values
-                    .iter()
-                    .any(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns))
+            on_clause_references_unknown_table_or_column(
+                expr,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            ) || values.iter().any(|e| {
+                on_clause_references_unknown_table_or_column(
+                    e,
+                    valid_tables,
+                    valid_columns,
+                    all_db_columns,
+                )
+            })
         }
         vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
             operand
                 .as_ref()
-                .map(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns))
+                .map(|e| {
+                    on_clause_references_unknown_table_or_column(
+                        e,
+                        valid_tables,
+                        valid_columns,
+                        all_db_columns,
+                    )
+                })
                 .unwrap_or(false)
                 || when_clauses.iter().any(|case_when| {
                     case_when.conditions.iter().any(|c| {
-                        on_clause_references_unknown_table_or_column(c, valid_tables, valid_columns, all_db_columns)
+                        on_clause_references_unknown_table_or_column(
+                            c,
+                            valid_tables,
+                            valid_columns,
+                            all_db_columns,
+                        )
                     }) || on_clause_references_unknown_table_or_column(
                         &case_when.result,
                         valid_tables,
@@ -1927,36 +1992,75 @@ fn on_clause_references_unknown_table_or_column(
                 })
                 || else_result
                     .as_ref()
-                    .map(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns))
+                    .map(|e| {
+                        on_clause_references_unknown_table_or_column(
+                            e,
+                            valid_tables,
+                            valid_columns,
+                            all_db_columns,
+                        )
+                    })
                     .unwrap_or(false)
         }
-        vibesql_ast::Expression::Function { args, .. } => args
-            .iter()
-            .any(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns)),
+        vibesql_ast::Expression::Function { args, .. } => args.iter().any(|e| {
+            on_clause_references_unknown_table_or_column(
+                e,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            )
+        }),
         vibesql_ast::Expression::AggregateFunction { args, filter, .. } => {
-            args.iter()
-                .any(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns))
-                || filter
-                    .as_ref()
-                    .map(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns))
-                    .unwrap_or(false)
+            args.iter().any(|e| {
+                on_clause_references_unknown_table_or_column(
+                    e,
+                    valid_tables,
+                    valid_columns,
+                    all_db_columns,
+                )
+            }) || filter
+                .as_ref()
+                .map(|e| {
+                    on_clause_references_unknown_table_or_column(
+                        e,
+                        valid_tables,
+                        valid_columns,
+                        all_db_columns,
+                    )
+                })
+                .unwrap_or(false)
         }
         vibesql_ast::Expression::WindowFunction { function, over } => {
             let func_refs = match function {
                 vibesql_ast::WindowFunctionSpec::Aggregate { args, filter, .. } => {
                     args.iter().any(|e| {
-                        on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns)
+                        on_clause_references_unknown_table_or_column(
+                            e,
+                            valid_tables,
+                            valid_columns,
+                            all_db_columns,
+                        )
                     }) || filter
                         .as_ref()
                         .map(|e| {
-                            on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns)
+                            on_clause_references_unknown_table_or_column(
+                                e,
+                                valid_tables,
+                                valid_columns,
+                                all_db_columns,
+                            )
                         })
                         .unwrap_or(false)
                 }
                 vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
-                | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args
-                    .iter()
-                    .any(|e| on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns)),
+                | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args.iter().any(|e| {
+                    on_clause_references_unknown_table_or_column(
+                        e,
+                        valid_tables,
+                        valid_columns,
+                        all_db_columns,
+                    )
+                }),
             };
             func_refs
                 || over
@@ -1964,7 +2068,12 @@ fn on_clause_references_unknown_table_or_column(
                     .as_ref()
                     .map(|exprs| {
                         exprs.iter().any(|e| {
-                            on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns)
+                            on_clause_references_unknown_table_or_column(
+                                e,
+                                valid_tables,
+                                valid_columns,
+                                all_db_columns,
+                            )
                         })
                     })
                     .unwrap_or(false)
@@ -1984,11 +2093,19 @@ fn on_clause_references_unknown_table_or_column(
                     .unwrap_or(false)
         }
         vibesql_ast::Expression::Collate { expr, .. } => {
-            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns, all_db_columns)
+            on_clause_references_unknown_table_or_column(
+                expr,
+                valid_tables,
+                valid_columns,
+                all_db_columns,
+            )
         }
-        vibesql_ast::Expression::Cast { expr, .. } => {
-            on_clause_references_unknown_table_or_column(expr, valid_tables, valid_columns, all_db_columns)
-        }
+        vibesql_ast::Expression::Cast { expr, .. } => on_clause_references_unknown_table_or_column(
+            expr,
+            valid_tables,
+            valid_columns,
+            all_db_columns,
+        ),
         vibesql_ast::Expression::ScalarSubquery(select_stmt) => {
             // Pass only outer context - subquery_references_unknown_table will build up
             // the subquery's own tables as it checks nested joins
@@ -2009,25 +2126,20 @@ fn on_clause_references_unknown_table_or_column(
                 return true;
             }
             // Pass only outer context
-            subquery_references_unknown_table(
-                subquery,
-                valid_tables,
-                valid_columns,
-                all_db_columns,
-            )
+            subquery_references_unknown_table(subquery, valid_tables, valid_columns, all_db_columns)
         }
         vibesql_ast::Expression::Exists { subquery, .. } => {
             // Pass only outer context
-            subquery_references_unknown_table(
-                subquery,
+            subquery_references_unknown_table(subquery, valid_tables, valid_columns, all_db_columns)
+        }
+        vibesql_ast::Expression::Conjunction(exprs)
+        | vibesql_ast::Expression::Disjunction(exprs) => exprs.iter().any(|e| {
+            on_clause_references_unknown_table_or_column(
+                e,
                 valid_tables,
                 valid_columns,
                 all_db_columns,
             )
-        }
-        vibesql_ast::Expression::Conjunction(exprs)
-        | vibesql_ast::Expression::Disjunction(exprs) => exprs.iter().any(|e| {
-            on_clause_references_unknown_table_or_column(e, valid_tables, valid_columns, all_db_columns)
         }),
         _ => false,
     }
@@ -2043,7 +2155,10 @@ fn collect_tables_from_from_clause(
     }
 }
 
-fn collect_tables_from_from_clause_inner(from: &vibesql_ast::FromClause, tables: &mut HashSet<String>) {
+fn collect_tables_from_from_clause_inner(
+    from: &vibesql_ast::FromClause,
+    tables: &mut HashSet<String>,
+) {
     match from {
         vibesql_ast::FromClause::Table { name, alias, .. } => {
             let table_name = alias.as_ref().unwrap_or(name);
@@ -2128,13 +2243,9 @@ fn from_clause_references_unknown_table(
 ) -> bool {
     match from {
         vibesql_ast::FromClause::Table { .. } => false,
-        vibesql_ast::FromClause::Join {
-            left,
-            right,
-            condition,
-            ..
-        } => {
-            // Build valid tables for this join's ON clause: outer context + left + right of THIS join only
+        vibesql_ast::FromClause::Join { left, right, condition, .. } => {
+            // Build valid tables for this join's ON clause: outer context + left + right of THIS
+            // join only
             let mut join_valid_tables = valid_tables.clone();
             collect_tables_from_from_clause_inner(left, &mut join_valid_tables);
             collect_tables_from_from_clause_inner(right, &mut join_valid_tables);
@@ -2152,11 +2263,21 @@ fn from_clause_references_unknown_table(
             // Recursively check left side (with only outer context)
             // Then check right side (with outer context + left tables)
             let mut left_context = valid_tables.clone();
-            if from_clause_references_unknown_table(left, &left_context, valid_columns, all_db_columns) {
+            if from_clause_references_unknown_table(
+                left,
+                &left_context,
+                valid_columns,
+                all_db_columns,
+            ) {
                 return true;
             }
             collect_tables_from_from_clause_inner(left, &mut left_context);
-            from_clause_references_unknown_table(right, &left_context, valid_columns, all_db_columns)
+            from_clause_references_unknown_table(
+                right,
+                &left_context,
+                valid_columns,
+                all_db_columns,
+            )
         }
         vibesql_ast::FromClause::Subquery { query, .. } => {
             let mut subquery_valid_tables = valid_tables.clone();
