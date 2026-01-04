@@ -18,9 +18,9 @@ storage-memory = ["vibesql-storage/storage-memory"]
 # so that #[cfg(feature = "...")] checks work correctly in tests
 storage-all = ["vibesql-storage/storage-all", "opendal", "storage-memory"]
 # Comparison engines (for server benchmarks)
-mysql = ["dep:mysql"]
-duckdb = ["dep:duckdb"]
-sqlite = []  # SQLite is always available via dev-dependencies
+mysql = ["dep:mysql", "vibesql-bench-common/mysql"]
+duckdb = ["dep:duckdb", "vibesql-bench-common/duckdb"]
+sqlite = []  # SQLite is always available via dev-dependencies (bench-common/sqlite enabled in dev-deps)
 
 [lib]
 name = "vibesql_server"
@@ -108,7 +108,7 @@ tokio-postgres = "0.7"
 tower = { version = "0.5", features = ["util"] }
 reqwest = { version = "0.12", features = ["stream"] }
 # Shared benchmark infrastructure
-vibesql-bench-common = { version = "0.1.3", path = "../vibesql-bench-common" }
+vibesql-bench-common = { version = "0.1.3", path = "../vibesql-bench-common", features = ["vibesql", "sqlite"] }
 # Additional dependencies for server benchmarks (moved from vibesql-executor)
 rand_chacha = "0.9"
 rusqlite = { version = "0.38", features = ["bundled"] }
