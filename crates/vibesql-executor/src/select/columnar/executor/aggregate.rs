@@ -184,10 +184,7 @@ pub fn compute_i64_aggregate(
                     min = Some(min.map_or(v, |m| m.min(v)));
                 }
             }
-            min.map(SqlValue::Integer).ok_or_else(|| ExecutorError::SimdOperationFailed {
-                operation: "MIN".to_string(),
-                reason: "all values NULL".to_string(),
-            })
+            Ok(min.map(SqlValue::Integer).unwrap_or(SqlValue::Null))
         }
         AggregateOp::Max => {
             let mut max: Option<i64> = None;
@@ -196,10 +193,7 @@ pub fn compute_i64_aggregate(
                     max = Some(max.map_or(v, |m| m.max(v)));
                 }
             }
-            max.map(SqlValue::Integer).ok_or_else(|| ExecutorError::SimdOperationFailed {
-                operation: "MAX".to_string(),
-                reason: "all values NULL".to_string(),
-            })
+            Ok(max.map(SqlValue::Integer).unwrap_or(SqlValue::Null))
         }
     }
 }
@@ -287,10 +281,7 @@ pub fn compute_f64_aggregate(
                     min = Some(min.map_or(v, |m| m.min(v)));
                 }
             }
-            min.map(SqlValue::Double).ok_or_else(|| ExecutorError::SimdOperationFailed {
-                operation: "MIN".to_string(),
-                reason: "all values NULL".to_string(),
-            })
+            Ok(min.map(SqlValue::Double).unwrap_or(SqlValue::Null))
         }
         AggregateOp::Max => {
             let mut max: Option<f64> = None;
@@ -299,10 +290,7 @@ pub fn compute_f64_aggregate(
                     max = Some(max.map_or(v, |m| m.max(v)));
                 }
             }
-            max.map(SqlValue::Double).ok_or_else(|| ExecutorError::SimdOperationFailed {
-                operation: "MAX".to_string(),
-                reason: "all values NULL".to_string(),
-            })
+            Ok(max.map(SqlValue::Double).unwrap_or(SqlValue::Null))
         }
     }
 }
