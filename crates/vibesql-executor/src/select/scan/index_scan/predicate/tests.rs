@@ -1,6 +1,6 @@
 //! Tests for predicate extraction logic
 
-use vibesql_ast::BinaryOperator;
+use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
 
 use super::*;
