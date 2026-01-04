@@ -69,6 +69,8 @@ impl ToSql for BinaryOperator {
             BinaryOperator::BitwiseOr => "|".to_string(),
             BinaryOperator::LeftShift => "<<".to_string(),
             BinaryOperator::RightShift => ">>".to_string(),
+            BinaryOperator::JsonExtract => "->".to_string(),
+            BinaryOperator::JsonExtractText => "->>".to_string(),
         }
     }
 }
@@ -635,6 +637,8 @@ fn operator_precedence(op: &BinaryOperator) -> u8 {
         | BinaryOperator::Divide
         | BinaryOperator::IntegerDivide
         | BinaryOperator::Modulo => 8,
+        // JSON operators have highest precedence (postfix-like)
+        BinaryOperator::JsonExtract | BinaryOperator::JsonExtractText => 9,
     }
 }
 

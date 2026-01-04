@@ -22,6 +22,10 @@ pub enum MultiCharOperator {
     LeftShift,
     /// >> (right shift, SQLite bitwise)
     RightShift,
+    /// -> (JSON extract, returns JSON)
+    JsonExtract,
+    /// ->> (JSON extract, returns text)
+    JsonExtractText,
     /// <-> (cosine distance - pgvector compatible)
     CosineDistance,
     /// <#> (negative inner product - pgvector compatible)
@@ -41,6 +45,8 @@ impl fmt::Display for MultiCharOperator {
             MultiCharOperator::Concat => write!(f, "||"),
             MultiCharOperator::LeftShift => write!(f, "<<"),
             MultiCharOperator::RightShift => write!(f, ">>"),
+            MultiCharOperator::JsonExtract => write!(f, "->"),
+            MultiCharOperator::JsonExtractText => write!(f, "->>"),
             MultiCharOperator::CosineDistance => write!(f, "<->"),
             MultiCharOperator::NegativeInnerProduct => write!(f, "<#>"),
             MultiCharOperator::L2Distance => write!(f, "<=>"),

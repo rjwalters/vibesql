@@ -501,7 +501,9 @@ impl Parser {
                         MultiCharOperator::L2Distance => vibesql_ast::BinaryOperator::L2Distance,
                         MultiCharOperator::Concat
                         | MultiCharOperator::LeftShift
-                        | MultiCharOperator::RightShift => {
+                        | MultiCharOperator::RightShift
+                        | MultiCharOperator::JsonExtract
+                        | MultiCharOperator::JsonExtractText => {
                             return Err(ParseError {
                                 message: format!("Unexpected operator: {}", op),
                             })
@@ -677,12 +679,34 @@ impl Parser {
         }
     }
 
-    /// Parse postfix expressions (COLLATE)
-    /// COLLATE has high precedence, binding tighter than most operators
+    /// Parse postfix expressions (JSON operators ->, ->>, and COLLATE)
+    /// These have high precedence, binding tighter than most operators
     pub(super) fn parse_postfix_expression(
         &mut self,
     ) -> Result<vibesql_ast::Expression, ParseError> {
         let mut expr = self.parse_primary_expression()?;
+
+        // Handle JSON operators -> and ->> (high precedence, left-associative)
+        loop {
+            let op = match self.peek() {
+                Token::Operator(crate::token::MultiCharOperator::JsonExtract) => {
+                    vibesql_ast::BinaryOperator::JsonExtract
+                }
+                Token::Operator(crate::token::MultiCharOperator::JsonExtractText) => {
+                    vibesql_ast::BinaryOperator::JsonExtractText
+                }
+                _ => break,
+            };
+            self.advance();
+
+            // Parse the key/index expression (usually a string or integer)
+            let right = self.parse_primary_expression()?;
+            expr = vibesql_ast::Expression::BinaryOp {
+                op,
+                left: Box::new(expr),
+                right: Box::new(right),
+            };
+        }
 
         // Handle COLLATE postfix operator
         while self.peek_keyword(Keyword::Collate) {

@@ -35,7 +35,11 @@ pub enum BinaryOperator {
     // Vector distance operators (pgvector compatible)
     CosineDistance,       // <-> (1 - cosine_similarity)
     NegativeInnerProduct, // <#> (negative dot product for MIPS)
-    L2Distance,           /* <=> (Euclidean distance) */
+    L2Distance,           // <=> (Euclidean distance)
+
+    // JSON operators (SQLite/PostgreSQL compatible)
+    JsonExtract,     // -> (extract JSON value)
+    JsonExtractText, // ->> (extract as text)
 
                           /* Note: LIKE and IN are not simple binary operators. They are
                            * implemented as Expression variants in

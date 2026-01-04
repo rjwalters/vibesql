@@ -109,6 +109,23 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 Ok(Token::Symbol('~'))
             }
+            '-' => {
+                // Could be -> or ->> (JSON extract operators) or just -
+                self.advance();
+                if !self.is_eof() && self.current_char() == '>' {
+                    self.advance(); // consume '>'
+                    // Check for ->> (extract as text)
+                    if !self.is_eof() && self.current_char() == '>' {
+                        self.advance(); // consume second '>'
+                        Ok(Token::Operator(MultiCharOperator::JsonExtractText))
+                    } else {
+                        // Just -> (extract as JSON)
+                        Ok(Token::Operator(MultiCharOperator::JsonExtract))
+                    }
+                } else {
+                    Ok(Token::Symbol('-'))
+                }
+            }
             _ => {
                 self.advance();
                 Ok(Token::Symbol(ch))

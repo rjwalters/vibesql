@@ -165,10 +165,14 @@ impl<'a> Lexer<'a> {
                     Ok(Token::Symbol('.'))
                 }
             }
-            '+' | '-' | '*' | '/' | '%' => {
+            '+' | '*' | '/' | '%' => {
                 let symbol = ch;
                 self.advance();
                 Ok(Token::Symbol(symbol))
+            }
+            '-' => {
+                // Could be -> or ->> (JSON extract operators) or just -
+                self.tokenize_operator(ch)
             }
             '\'' => self.tokenize_string(),
             '"' => self.tokenize_delimited_identifier(),

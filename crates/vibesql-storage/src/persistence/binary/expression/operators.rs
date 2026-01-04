@@ -36,6 +36,9 @@ impl_simple_enum_serialization!(
         BinaryOperator::BitwiseOr => 51,
         BinaryOperator::LeftShift => 52,
         BinaryOperator::RightShift => 53,
+        // JSON operators
+        BinaryOperator::JsonExtract => 60,
+        BinaryOperator::JsonExtractText => 61,
     }
 );
 
