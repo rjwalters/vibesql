@@ -617,9 +617,9 @@ impl ExpressionEvaluator<'_> {
                 }
 
                 // Apply SQLite type affinity rules for IN comparisons
-                // e.g., NUMERIC column compared to '2' should coerce '2' to 2
+                // Note: IN expressions have different affinity rules than regular comparisons
                 let (expr_coerced, value_coerced) =
-                    self.apply_affinity_for_comparison(expr, expr_val.clone(), value_expr, value);
+                    self.apply_affinity_for_in_comparison(expr, expr_val.clone(), value_expr, value);
 
                 let eq_result = self.eval_binary_op(
                     &expr_coerced,
@@ -652,7 +652,7 @@ impl ExpressionEvaluator<'_> {
                     found_null = true;
                 } else {
                     // Apply SQLite type affinity rules for IN comparisons
-                    let (_, value_coerced) = self.apply_affinity_for_comparison(
+                    let (_, value_coerced) = self.apply_affinity_for_in_comparison(
                         expr,
                         expr_val.clone(),
                         value_expr,

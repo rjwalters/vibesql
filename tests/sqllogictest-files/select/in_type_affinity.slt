@@ -1,0 +1,72 @@
+# Test for issue #4879: Type affinity mismatch in IN expressions
+# SQLite has specific type affinity rules for IN expressions
+# String '1' should NOT equal integer 1 in IN expressions
+
+statement ok
+DROP TABLE IF EXISTS t0
+
+statement ok
+CREATE TABLE t0(c0 INT UNIQUE)
+
+statement ok
+INSERT INTO t0(c0) VALUES (1)
+
+# in-18.1: String literal '1' should NOT match integer column value 1
+# SQLite returns empty result (no rows)
+query I nosort
+SELECT * FROM t0 WHERE '1' IN (t0.c0)
+----
+
+# in-17.1: Integer 1 should NOT match string '1' in IN expression
+query I nosort
+SELECT 1 IN ('1')
+----
+0
+
+# in-17.2: Integer 1 should NOT match string '1' even with NOCASE collation
+query I nosort
+SELECT 1 IN ('1' COLLATE nocase)
+----
+0
+
+# in-17.3: Integer 1 should NOT match CAST('1' AS text)
+query I nosort
+SELECT 1 IN (CAST('1' AS text))
+----
+0
+
+# Additional test: verify the issue with different integer values
+statement ok
+INSERT INTO t0(c0) VALUES (42)
+
+query I nosort
+SELECT * FROM t0 WHERE '42' IN (t0.c0)
+----
+
+# Test that actual integer matches still work
+query I rowsort
+SELECT * FROM t0 WHERE 1 IN (t0.c0)
+----
+1
+
+# Test REAL affinity - strings SHOULD be coerced for REAL columns
+statement ok
+DROP TABLE IF EXISTS t1
+
+statement ok
+CREATE TABLE t1(c0 REAL UNIQUE)
+
+statement ok
+INSERT INTO t1(c0) VALUES (2.0625)
+
+# in-19.10: For REAL columns, string should be coerced and match
+query I nosort
+SELECT 1 FROM t1 WHERE c0 IN ('2.0625')
+----
+1
+
+# in-19.20: Test scalar context as well
+query I nosort
+SELECT c0 IN ('2.0625') FROM t1
+----
+1

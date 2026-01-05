@@ -283,6 +283,88 @@ impl ExpressionEvaluator<'_> {
         (left_val, right_val)
     }
 
+    /// Apply SQLite type affinity rules for IN expression comparisons.
+    ///
+    /// IN expressions have different affinity rules than regular comparisons:
+    /// - For INTEGER columns, string literals are NOT coerced to integers
+    /// - For REAL columns, string literals ARE coerced to REAL
+    /// - For TEXT columns, numeric literals are converted to text
+    pub(super) fn apply_affinity_for_in_comparison(
+        &self,
+        left_expr: &vibesql_ast::Expression,
+        left_val: SqlValue,
+        right_expr: &vibesql_ast::Expression,
+        right_val: SqlValue,
+    ) -> (SqlValue, SqlValue) {
+        let left_affinity = self.get_expression_affinity(left_expr);
+        let right_affinity = self.get_expression_affinity(right_expr);
+
+        // Case 1: Left is TEXT column, right is numeric literal
+        if left_affinity == Some(TypeAffinity::Text) && self.is_numeric_literal(right_expr) {
+            let right_as_text = match &right_val {
+                SqlValue::Integer(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Smallint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Bigint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Unsigned(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n as f64),
+                )),
+                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n),
+                )),
+                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n),
+                )),
+                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n),
+                )),
+                _ => right_val,
+            };
+            return (left_val, right_as_text);
+        }
+
+        // Case 2: Right is TEXT column, left is numeric literal
+        if right_affinity == Some(TypeAffinity::Text) && self.is_numeric_literal(left_expr) {
+            let left_as_text = match &left_val {
+                SqlValue::Integer(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Smallint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Bigint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Unsigned(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n as f64),
+                )),
+                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n),
+                )),
+                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n),
+                )),
+                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                    format_float_for_text_comparison(*n),
+                )),
+                _ => left_val,
+            };
+            return (left_as_text, right_val);
+        }
+
+        // Case 3: Left is REAL column, right is string literal
+        // REAL affinity DOES coerce strings to numbers in IN expressions
+        if left_affinity == Some(TypeAffinity::Real) && self.is_string_literal(right_expr) {
+            let right_coerced = Self::try_coerce_string_to_numeric(&right_val);
+            return (left_val, right_coerced);
+        }
+
+        // Case 4: Right is REAL column, left is string literal
+        if right_affinity == Some(TypeAffinity::Real) && self.is_string_literal(left_expr) {
+            let left_coerced = Self::try_coerce_string_to_numeric(&left_val);
+            return (left_coerced, right_val);
+        }
+
+        // For IN expressions, INTEGER affinity does NOT coerce strings
+        // (unlike regular comparison). No affinity conversion needed.
+        (left_val, right_val)
+    }
+
     /// Evaluate an expression in the context of a row
     #[inline]
     pub fn eval(
