@@ -160,6 +160,24 @@ impl SelectExecutor<'_> {
                         // This ensures USING columns appear first in SELECT * output
                         table_columns.sort_by_key(|(idx, _, _, is_joined)| (!*is_joined, *idx));
 
+                        // Deduplicate joined columns: for chained NATURAL JOINs like
+                        // t4 NATURAL RIGHT JOIN t5 NATURAL RIGHT JOIN t6, multiple columns
+                        // might be marked as "joined" with the same name (e.g., both t4.id
+                        // and t5.id). We should only output ONE column per joined column name.
+                        // Keep the first occurrence (which has the lowest index after sorting).
+                        let mut seen_joined_columns: std::collections::HashSet<String> =
+                            std::collections::HashSet::new();
+                        table_columns.retain(|(_, col_name, _, is_joined)| {
+                            if *is_joined {
+                                let col_lower = col_name.to_lowercase();
+                                if seen_joined_columns.contains(&col_lower) {
+                                    return false; // Skip duplicate joined column
+                                }
+                                seen_joined_columns.insert(col_lower);
+                            }
+                            true
+                        });
+
                         // Apply derived column list if present
                         if let Some(derived_cols) = alias {
                             if derived_cols.len() != table_columns.len() {
