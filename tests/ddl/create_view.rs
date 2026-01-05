@@ -90,6 +90,7 @@ fn test_drop_view_simple() {
             nullable: false,
             default_value: None,
             generated_expr: None,
+            is_exact_integer_type: true,
             collation: None,
         }],
     );
@@ -136,6 +137,7 @@ fn test_create_view_duplicate_error() {
             nullable: false,
             default_value: None,
             generated_expr: None,
+            is_exact_integer_type: true,
             collation: None,
         }],
     );
@@ -149,6 +151,7 @@ fn test_create_view_duplicate_error() {
             nullable: false,
             default_value: None,
             generated_expr: None,
+            is_exact_integer_type: true,
             collation: None,
         }],
     );
@@ -232,6 +235,7 @@ fn test_view_preserves_column_names_with_select_star() {
                 nullable: false,
                 default_value: None,
                 generated_expr: None,
+                is_exact_integer_type: true,
                 collation: None,
             },
             ColumnSchema {
@@ -240,6 +244,7 @@ fn test_view_preserves_column_names_with_select_star() {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                is_exact_integer_type: true,
                 collation: None,
             },
             ColumnSchema {
@@ -248,6 +253,7 @@ fn test_view_preserves_column_names_with_select_star() {
                 nullable: true,
                 default_value: None,
                 generated_expr: None,
+                is_exact_integer_type: true,
                 collation: None,
             },
         ],
