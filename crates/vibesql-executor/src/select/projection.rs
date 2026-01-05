@@ -43,8 +43,9 @@ pub(crate) fn project_row_combined(
                     // No USING/NATURAL JOIN - use natural order
                     (0..max_col).collect()
                 } else {
-                    // Collect visible column indices with their join status
-                    let mut joined_cols: Vec<usize> = Vec::new();
+                    // Collect visible column indices with their join status and column name
+                    // Store (abs_idx, col_name_lower, is_joined)
+                    let mut joined_cols: Vec<(usize, String)> = Vec::new();
                     let mut other_cols: Vec<usize> = Vec::new();
 
                     // Sort table_schemas by start_index for deterministic iteration order
@@ -84,10 +85,10 @@ pub(crate) fn project_row_combined(
                             };
 
                             if should_include {
-                                let is_joined =
-                                    schema.joined_columns.contains(&col_schema.name.to_lowercase());
+                                let col_name_lower = col_schema.name.to_lowercase();
+                                let is_joined = schema.joined_columns.contains(&col_name_lower);
                                 if is_joined {
-                                    joined_cols.push(abs_idx);
+                                    joined_cols.push((abs_idx, col_name_lower));
                                 } else {
                                     other_cols.push(abs_idx);
                                 }
@@ -96,11 +97,30 @@ pub(crate) fn project_row_combined(
                     }
 
                     // Sort each group by index to maintain relative order
-                    joined_cols.sort();
+                    joined_cols.sort_by_key(|(idx, _)| *idx);
                     other_cols.sort();
 
+                    // Deduplicate joined columns: for chained NATURAL JOINs like
+                    // t4 NATURAL RIGHT JOIN t5 NATURAL RIGHT JOIN t6, multiple columns
+                    // might be marked as "joined" with the same name (e.g., both t4.id
+                    // and t5.id). We should only output ONE column per joined column name.
+                    // Keep the first occurrence (which has the lowest index after sorting).
+                    let mut seen_joined_columns: std::collections::HashSet<String> =
+                        std::collections::HashSet::new();
+                    let deduped_joined: Vec<usize> = joined_cols
+                        .into_iter()
+                        .filter_map(|(idx, col_name)| {
+                            if seen_joined_columns.contains(&col_name) {
+                                None // Skip duplicate joined column
+                            } else {
+                                seen_joined_columns.insert(col_name);
+                                Some(idx)
+                            }
+                        })
+                        .collect();
+
                     // Concatenate: joined columns first, then others
-                    joined_cols.into_iter().chain(other_cols).collect()
+                    deduped_joined.into_iter().chain(other_cols).collect()
                 };
 
                 // Iterate through reordered columns, handling hidden columns with replacements
