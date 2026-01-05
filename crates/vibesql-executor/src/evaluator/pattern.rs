@@ -29,23 +29,41 @@ fn utf8_char_len(byte: u8) -> usize {
 /// The optional escape_char allows treating % and _ as literal characters
 /// when preceded by the escape character. E.g., LIKE 'a\_b' ESCAPE '\'
 /// would match the literal string 'a_b'.
-pub(crate) fn like_match(text: &str, pattern: &str, case_sensitive: bool, escape_char: Option<char>) -> bool {
+pub(crate) fn like_match(
+    text: &str,
+    pattern: &str,
+    case_sensitive: bool,
+    escape_char: Option<char>,
+) -> bool {
     // If escape character is provided, preprocess the pattern to handle escapes
     match escape_char {
         Some(esc) => {
             // Build a processed pattern with escape markers
             let pattern_bytes = pattern.as_bytes();
-            let esc_byte = esc as u8;
+
+            // Encode the escape character as UTF-8 bytes
+            let mut esc_buf = [0u8; 4];
+            let esc_str = esc.encode_utf8(&mut esc_buf);
+            let esc_bytes = esc_str.as_bytes();
+            let esc_len = esc_bytes.len();
+
             let mut i = 0;
-            let mut processed_pattern: Vec<PatternElement> = Vec::with_capacity(pattern_bytes.len());
+            let mut processed_pattern: Vec<PatternElement> =
+                Vec::with_capacity(pattern_bytes.len());
 
             while i < pattern_bytes.len() {
-                if pattern_bytes[i] == esc_byte {
-                    if i + 1 < pattern_bytes.len() {
-                        // Next character is escaped - treat as literal
-                        let next_char = pattern_bytes[i + 1];
-                        processed_pattern.push(PatternElement::Literal(next_char));
-                        i += 2;
+                // Check if pattern starts with the escape character (comparing full UTF-8 sequence)
+                if i + esc_len <= pattern_bytes.len() && &pattern_bytes[i..i + esc_len] == esc_bytes
+                {
+                    // Found escape character, next character is escaped
+                    i += esc_len;
+                    if i < pattern_bytes.len() {
+                        // Get the full UTF-8 character being escaped
+                        let next_char_len = utf8_char_len(pattern_bytes[i]);
+                        let end = (i + next_char_len).min(pattern_bytes.len());
+                        let escaped_bytes = pattern_bytes[i..end].to_vec();
+                        processed_pattern.push(PatternElement::LiteralBytes(escaped_bytes));
+                        i = end;
                     } else {
                         // Escape character at end of pattern with nothing to escape.
                         // Per SQLite documentation: "If there is no character following
@@ -60,24 +78,27 @@ pub(crate) fn like_match(text: &str, pattern: &str, case_sensitive: bool, escape
                     processed_pattern.push(PatternElement::AnyChar);
                     i += 1;
                 } else {
-                    processed_pattern.push(PatternElement::Literal(pattern_bytes[i]));
-                    i += 1;
+                    // Regular character - get full UTF-8 sequence
+                    let char_len = utf8_char_len(pattern_bytes[i]);
+                    let end = (i + char_len).min(pattern_bytes.len());
+                    processed_pattern
+                        .push(PatternElement::LiteralBytes(pattern_bytes[i..end].to_vec()));
+                    i = end;
                 }
             }
 
             like_match_with_elements(text.as_bytes(), &processed_pattern, 0, 0, case_sensitive)
         }
-        None => {
-            like_match_recursive(text.as_bytes(), pattern.as_bytes(), 0, 0, case_sensitive)
-        }
+        None => like_match_recursive(text.as_bytes(), pattern.as_bytes(), 0, 0, case_sensitive),
     }
 }
 
 /// Pattern elements for LIKE matching with escape support
 enum PatternElement {
-    Literal(u8),
-    AnySequence,  // %
-    AnyChar,      // _
+    /// A literal sequence of bytes to match (supports multi-byte UTF-8 characters)
+    LiteralBytes(Vec<u8>),
+    AnySequence, // %
+    AnyChar,     // _
 }
 
 /// Recursive LIKE matching with preprocessed pattern elements
@@ -98,7 +119,13 @@ fn like_match_with_elements(
         PatternElement::AnySequence => {
             // % matches zero or more characters
             for skip in 0..=(text.len() - text_pos) {
-                if like_match_with_elements(text, pattern, text_pos + skip, pattern_pos + 1, case_sensitive) {
+                if like_match_with_elements(
+                    text,
+                    pattern,
+                    text_pos + skip,
+                    pattern_pos + 1,
+                    case_sensitive,
+                ) {
                     return true;
                 }
             }
@@ -111,28 +138,52 @@ fn like_match_with_elements(
             }
             // Advance by the number of bytes in this UTF-8 character
             let char_len = utf8_char_len(text[text_pos]);
-            like_match_with_elements(text, pattern, text_pos + char_len, pattern_pos + 1, case_sensitive)
+            like_match_with_elements(
+                text,
+                pattern,
+                text_pos + char_len,
+                pattern_pos + 1,
+                case_sensitive,
+            )
         }
-        PatternElement::Literal(pattern_char) => {
-            if text_pos >= text.len() {
+        PatternElement::LiteralBytes(pattern_bytes) => {
+            // Check if we have enough text remaining
+            if text_pos + pattern_bytes.len() > text.len() {
                 return false;
             }
-            let text_char = text[text_pos];
+
+            let text_slice = &text[text_pos..text_pos + pattern_bytes.len()];
 
             let matches = if case_sensitive {
-                text_char == *pattern_char
+                // Exact byte match
+                text_slice == pattern_bytes.as_slice()
             } else {
-                if pattern_char.is_ascii_alphabetic() && text_char.is_ascii_alphabetic() {
-                    pattern_char.eq_ignore_ascii_case(&text_char)
+                // Case-insensitive: compare byte by byte, but ASCII letters are case-insensitive
+                // For multi-byte UTF-8 characters, they must match exactly (SQLite behavior)
+                if pattern_bytes.len() == 1 {
+                    let pattern_char = pattern_bytes[0];
+                    let text_char = text_slice[0];
+                    if pattern_char.is_ascii_alphabetic() && text_char.is_ascii_alphabetic() {
+                        pattern_char.eq_ignore_ascii_case(&text_char)
+                    } else {
+                        text_char == pattern_char
+                    }
                 } else {
-                    text_char == *pattern_char
+                    // Multi-byte characters: exact match (Unicode is case-sensitive in SQLite LIKE)
+                    text_slice == pattern_bytes.as_slice()
                 }
             };
 
             if !matches {
                 return false;
             }
-            like_match_with_elements(text, pattern, text_pos + 1, pattern_pos + 1, case_sensitive)
+            like_match_with_elements(
+                text,
+                pattern,
+                text_pos + pattern_bytes.len(),
+                pattern_pos + 1,
+                case_sensitive,
+            )
         }
     }
 }
@@ -288,7 +339,13 @@ fn like_match_recursive(
             // % matches zero or more characters
             // Try matching with % consuming 0 chars, 1 char, 2 chars, etc.
             for skip in 0..=(text.len() - text_pos) {
-                if like_match_recursive(text, pattern, text_pos + skip, pattern_pos + 1, case_sensitive) {
+                if like_match_recursive(
+                    text,
+                    pattern,
+                    text_pos + skip,
+                    pattern_pos + 1,
+                    case_sensitive,
+                ) {
                     return true;
                 }
             }
@@ -302,7 +359,13 @@ fn like_match_recursive(
             }
             // Advance by the number of bytes in this UTF-8 character
             let char_len = utf8_char_len(text[text_pos]);
-            like_match_recursive(text, pattern, text_pos + char_len, pattern_pos + 1, case_sensitive)
+            like_match_recursive(
+                text,
+                pattern,
+                text_pos + char_len,
+                pattern_pos + 1,
+                case_sensitive,
+            )
         }
         _ => {
             // Regular character comparison
@@ -330,5 +393,105 @@ fn like_match_recursive(
             // Characters match, continue
             like_match_recursive(text, pattern, text_pos + 1, pattern_pos + 1, case_sensitive)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_like_match_basic() {
+        // Basic patterns without escape
+        assert!(like_match("hello", "hello", false, None));
+        assert!(like_match("hello", "h%", false, None));
+        assert!(like_match("hello", "%o", false, None));
+        assert!(like_match("hello", "h_llo", false, None));
+        assert!(!like_match("hello", "h__llo", false, None));
+    }
+
+    #[test]
+    fn test_like_match_ascii_escape() {
+        // ASCII escape character (backslash)
+        assert!(like_match("a_c", r"a\_c", false, Some('\\')));
+        assert!(like_match("a%c", r"a\%c", false, Some('\\')));
+        assert!(!like_match("abc", r"a\_c", false, Some('\\'))); // _ is literal, not wildcard
+        assert!(!like_match("abc", r"a\%c", false, Some('\\'))); // % is literal, not wildcard
+
+        // Escape the escape character itself
+        assert!(like_match(r"a\c", r"a\\c", false, Some('\\')));
+    }
+
+    #[test]
+    fn test_like_match_multibyte_unicode_escape() {
+        // U+1234 (ሴ) is a 3-byte UTF-8 character: 0xE1 0x88 0xB4
+        let escape_char = '\u{1234}'; // ሴ
+
+        // Pattern: "aሴ_c" with escape ሴ means: match 'a', literal '_', 'c'
+        let pattern = "a\u{1234}_c";
+        assert!(like_match("a_c", pattern, false, Some(escape_char)));
+        assert!(!like_match("abc", pattern, false, Some(escape_char)));
+
+        // Pattern: "aሴ%c" with escape ሴ means: match 'a', literal '%', 'c'
+        let pattern = "a\u{1234}%c";
+        assert!(like_match("a%c", pattern, false, Some(escape_char)));
+        assert!(!like_match("abc", pattern, false, Some(escape_char)));
+
+        // Escape the escape character itself: "aሴሴc" means: match 'a', literal 'ሴ', 'c'
+        let pattern = "a\u{1234}\u{1234}c";
+        assert!(like_match("a\u{1234}c", pattern, false, Some(escape_char)));
+    }
+
+    #[test]
+    fn test_like_match_multibyte_unicode_escape_2byte() {
+        // U+00E9 (é) is a 2-byte UTF-8 character
+        let escape_char = '\u{00E9}';
+
+        let pattern = "a\u{00E9}_c";
+        assert!(like_match("a_c", pattern, false, Some(escape_char)));
+        assert!(!like_match("abc", pattern, false, Some(escape_char)));
+    }
+
+    #[test]
+    fn test_like_match_multibyte_unicode_escape_4byte() {
+        // U+1F600 (😀) is a 4-byte UTF-8 character
+        let escape_char = '\u{1F600}';
+
+        let pattern = "a\u{1F600}_c";
+        assert!(like_match("a_c", pattern, false, Some(escape_char)));
+        assert!(!like_match("abc", pattern, false, Some(escape_char)));
+    }
+
+    #[test]
+    fn test_like_match_escape_at_end() {
+        // Escape character at end of pattern should return false
+        assert!(!like_match("a", "a\\", false, Some('\\')));
+        assert!(!like_match("a", "a\u{1234}", false, Some('\u{1234}')));
+    }
+
+    #[test]
+    fn test_like_match_escape_multibyte_char() {
+        // Escaping a multi-byte Unicode character
+        let escape_char = '\\';
+
+        // Pattern: a\_c where _ is literal (escaping underscore works with any char)
+        assert!(like_match("a_c", r"a\_c", false, Some(escape_char)));
+
+        // Pattern with multi-byte char after escape
+        // \é should match literal é
+        assert!(like_match("aéc", "a\\\u{00E9}c", false, Some(escape_char)));
+    }
+
+    #[test]
+    fn test_like_match_hex_blob_escape() {
+        // Test case from the issue: x'e188b4' is the UTF-8 encoding of U+1234
+        // SELECT 'a_c' LIKE 'a' || x'e188b4' || '_c' ESCAPE x'e188b4';
+        // This should match because:
+        // - escape char is ሴ (U+1234)
+        // - pattern is 'aሴ_c' which means 'a' + escaped '_' + 'c'
+        // - text is 'a_c' which has a literal underscore
+        let escape_char = '\u{1234}';
+        let pattern = "a\u{1234}_c";
+        assert!(like_match("a_c", pattern, false, Some(escape_char)));
     }
 }
