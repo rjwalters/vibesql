@@ -1277,6 +1277,24 @@ pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertSt
             InsertSource::DefaultValues => InsertSource::DefaultValues,
         },
         conflict_clause: stmt.conflict_clause,
+        on_conflict: stmt.on_conflict.map(|clause| crate::OnConflictClause {
+            conflict_target: clause.conflict_target,
+            action: match clause.action {
+                crate::OnConflictAction::DoNothing => crate::OnConflictAction::DoNothing,
+                crate::OnConflictAction::DoUpdate { assignments, where_clause } => {
+                    crate::OnConflictAction::DoUpdate {
+                        assignments: assignments
+                            .into_iter()
+                            .map(|a| Assignment {
+                                column: a.column,
+                                value: transform_expression(visitor, a.value),
+                            })
+                            .collect(),
+                        where_clause: where_clause.map(|e| transform_expression(visitor, e)),
+                    }
+                }
+            },
+        }),
         on_duplicate_key_update: stmt.on_duplicate_key_update.map(|updates| {
             updates
                 .into_iter()

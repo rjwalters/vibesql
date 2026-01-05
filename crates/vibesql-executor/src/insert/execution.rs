@@ -229,7 +229,15 @@ fn execute_insert_internal(
     }; // Track UNIQUE values for each constraint
 
     // Check if IGNORE conflict clause is set - if so, skip rows with constraint violations
-    let use_ignore = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore));
+    // Also treat ON CONFLICT ... DO NOTHING as equivalent to IGNORE
+    let use_ignore = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore))
+        || matches!(
+            &stmt.on_conflict,
+            Some(vibesql_ast::OnConflictClause {
+                action: vibesql_ast::OnConflictAction::DoNothing,
+                ..
+            })
+        );
 
     // Track the first auto-generated ID for LAST_INSERT_ROWID() support
     // Per MySQL semantics, for multi-row inserts, LAST_INSERT_ID() returns
@@ -394,12 +402,14 @@ fn execute_insert_internal(
         }
 
         // Validate all constraints in a single pass and extract index keys
-        // Skip PK/UNIQUE duplicate checks if using REPLACE conflict clause or ON DUPLICATE KEY
-        // UPDATE. Also skip for IGNORE since we'll handle violations by skipping the row.
+        // Skip PK/UNIQUE duplicate checks if using REPLACE conflict clause, ON DUPLICATE KEY
+        // UPDATE, or ON CONFLICT clause. Also skip for IGNORE since we'll handle violations
+        // by skipping the row.
         let skip_duplicate_checks =
             matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace))
                 || matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore))
-                || stmt.on_duplicate_key_update.is_some();
+                || stmt.on_duplicate_key_update.is_some()
+                || stmt.on_conflict.is_some();
         let validator = super::row_validator::RowValidator::new(
             db,
             &schema,
@@ -483,6 +493,13 @@ fn execute_insert_internal(
 
     let use_batch_insert = stmt.on_duplicate_key_update.is_none()
         && !matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace))
+        && !matches!(
+            &stmt.on_conflict,
+            Some(vibesql_ast::OnConflictClause {
+                action: vibesql_ast::OnConflictAction::DoUpdate { .. },
+                ..
+            })
+        )
         && !has_insert_triggers;
 
     // Helper to create a Row with optional explicit rowid

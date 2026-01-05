@@ -1,7 +1,10 @@
 //! Arena-allocated INSERT statement parsing.
 
 use bumpalo::collections::Vec as BumpVec;
-use vibesql_ast::arena::{ConflictClause, InsertSource, InsertStmt, Symbol};
+use vibesql_ast::arena::{
+    Assignment, ConflictClause, InsertSource, InsertStmt, OnConflictAction, OnConflictClause,
+    Symbol,
+};
 
 use super::ArenaParser;
 use crate::{keywords::Keyword, token::Token, ParseError};
@@ -76,15 +79,22 @@ impl<'arena> ArenaParser<'arena> {
     ) -> Result<&'arena InsertStmt<'arena>, ParseError> {
         self.consume_keyword(Keyword::Insert)?;
 
-        // Check for conflict clause: INSERT OR REPLACE | INSERT OR IGNORE
+        // Check for conflict clause: INSERT OR REPLACE|IGNORE|ABORT|ROLLBACK|FAIL
         let conflict_clause = if self.try_consume_keyword(Keyword::Or) {
             if self.try_consume_keyword(Keyword::Replace) {
                 Some(ConflictClause::Replace)
             } else if self.try_consume_keyword(Keyword::Ignore) {
                 Some(ConflictClause::Ignore)
+            } else if self.try_consume_keyword(Keyword::Abort) {
+                Some(ConflictClause::Abort)
+            } else if self.try_consume_keyword(Keyword::Rollback) {
+                Some(ConflictClause::Rollback)
+            } else if self.try_consume_keyword(Keyword::Fail) {
+                Some(ConflictClause::Fail)
             } else {
                 return Err(ParseError {
-                    message: "Expected REPLACE or IGNORE after INSERT OR".to_string(),
+                    message: "Expected REPLACE, IGNORE, ABORT, ROLLBACK, or FAIL after INSERT OR"
+                        .to_string(),
                 });
             }
         } else {
@@ -124,15 +134,8 @@ impl<'arena> ArenaParser<'arena> {
             });
         };
 
-        // Parse optional ON DUPLICATE KEY UPDATE clause
-        let on_duplicate_key_update = if self.try_consume_keyword(Keyword::On) {
-            self.consume_keyword(Keyword::Duplicate)?;
-            self.consume_keyword(Keyword::Key)?;
-            self.consume_keyword(Keyword::Update)?;
-            Some(self.parse_assignments()?)
-        } else {
-            None
-        };
+        // Parse optional ON CONFLICT or ON DUPLICATE KEY UPDATE clause
+        let (on_conflict, on_duplicate_key_update) = self.parse_on_clause_for_insert()?;
 
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
@@ -146,6 +149,7 @@ impl<'arena> ArenaParser<'arena> {
             columns,
             source,
             conflict_clause,
+            on_conflict,
             on_duplicate_key_update,
         };
 
@@ -188,15 +192,8 @@ impl<'arena> ArenaParser<'arena> {
             });
         };
 
-        // Parse optional ON DUPLICATE KEY UPDATE clause
-        let on_duplicate_key_update = if self.try_consume_keyword(Keyword::On) {
-            self.consume_keyword(Keyword::Duplicate)?;
-            self.consume_keyword(Keyword::Key)?;
-            self.consume_keyword(Keyword::Update)?;
-            Some(self.parse_assignments()?)
-        } else {
-            None
-        };
+        // Parse optional ON CONFLICT or ON DUPLICATE KEY UPDATE clause
+        let (on_conflict, on_duplicate_key_update) = self.parse_on_clause_for_insert()?;
 
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
@@ -210,6 +207,7 @@ impl<'arena> ArenaParser<'arena> {
             columns,
             source,
             conflict_clause: Some(ConflictClause::Replace),
+            on_conflict,
             on_duplicate_key_update,
         };
 
@@ -235,5 +233,69 @@ impl<'arena> ArenaParser<'arena> {
         }
 
         Ok(rows)
+    }
+
+    /// Parse ON clause for INSERT statements (handles both ON CONFLICT and ON DUPLICATE KEY UPDATE)
+    fn parse_on_clause_for_insert(
+        &mut self,
+    ) -> Result<
+        (
+            Option<OnConflictClause<'arena>>,
+            Option<BumpVec<'arena, Assignment<'arena>>>,
+        ),
+        ParseError,
+    > {
+        if !self.try_consume_keyword(Keyword::On) {
+            return Ok((None, None));
+        }
+
+        if self.try_consume_keyword(Keyword::Conflict) {
+            // SQLite/PostgreSQL: ON CONFLICT [(cols)] DO {NOTHING | UPDATE SET ...}
+
+            // Parse optional conflict target (column list)
+            let conflict_target = if self.try_consume(&Token::LParen) {
+                let cols = self.parse_identifier_list()?;
+                self.expect_token(Token::RParen)?;
+                Some(cols)
+            } else {
+                None
+            };
+
+            self.consume_keyword(Keyword::Do)?;
+
+            let action = if self.try_consume_keyword(Keyword::Nothing) {
+                OnConflictAction::DoNothing
+            } else if self.try_consume_keyword(Keyword::Update) {
+                self.consume_keyword(Keyword::Set)?;
+
+                // Parse assignment list
+                let assignments = self.parse_assignments()?;
+
+                // Parse optional WHERE clause
+                let where_clause = if self.try_consume_keyword(Keyword::Where) {
+                    Some(self.parse_expression()?)
+                } else {
+                    None
+                };
+
+                OnConflictAction::DoUpdate { assignments, where_clause }
+            } else {
+                return Err(ParseError {
+                    message: "Expected NOTHING or UPDATE after DO".to_string(),
+                });
+            };
+
+            Ok((Some(OnConflictClause { conflict_target, action }), None))
+        } else if self.try_consume_keyword(Keyword::Duplicate) {
+            // MySQL: ON DUPLICATE KEY UPDATE ...
+            self.consume_keyword(Keyword::Key)?;
+            self.consume_keyword(Keyword::Update)?;
+            let assignments = self.parse_assignments()?;
+            Ok((None, Some(assignments)))
+        } else {
+            Err(ParseError {
+                message: "Expected CONFLICT or DUPLICATE after ON".to_string(),
+            })
+        }
     }
 }

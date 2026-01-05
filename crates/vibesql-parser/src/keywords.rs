@@ -346,6 +346,7 @@ pub enum Keyword {
     Abort,
     Fail,
     Conflict,
+    Nothing,
 }
 
 impl Keyword {
@@ -697,6 +698,7 @@ impl fmt::Display for Keyword {
             Keyword::Abort => "ABORT",
             Keyword::Fail => "FAIL",
             Keyword::Conflict => "CONFLICT",
+            Keyword::Nothing => "NOTHING",
         };
         write!(f, "{}", keyword_str)
     }

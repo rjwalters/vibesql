@@ -342,6 +342,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "ABORT" => Keyword::Abort,
     "FAIL" => Keyword::Fail,
     "CONFLICT" => Keyword::Conflict,
+    "NOTHING" => Keyword::Nothing,
 };
 
 /// Map an uppercase string to its corresponding Keyword using perfect hash lookup.

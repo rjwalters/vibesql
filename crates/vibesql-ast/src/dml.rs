@@ -52,6 +52,52 @@ pub enum ConflictClause {
     Rollback,
 }
 
+// ============================================================================
+// ON CONFLICT (Upsert) Clause
+// ============================================================================
+
+/// Action to take when a conflict occurs (SQLite upsert clause)
+///
+/// Part of the `ON CONFLICT` clause syntax:
+/// ```sql
+/// INSERT INTO t VALUES (...) ON CONFLICT (cols) DO NOTHING;
+/// INSERT INTO t VALUES (...) ON CONFLICT (cols) DO UPDATE SET col = val WHERE ...;
+/// ```
+///
+/// See: <https://www.sqlite.org/lang_upsert.html>
+#[derive(Debug, Clone, PartialEq)]
+pub enum OnConflictAction {
+    /// DO NOTHING - Skip the conflicting row
+    DoNothing,
+    /// DO UPDATE SET ... [WHERE ...] - Update the conflicting row
+    DoUpdate {
+        /// Assignments for the update (SET col = val, ...)
+        assignments: Vec<Assignment>,
+        /// Optional WHERE clause for the update
+        where_clause: Option<Expression>,
+    },
+}
+
+/// ON CONFLICT clause for INSERT statements (SQLite upsert)
+///
+/// Syntax:
+/// ```sql
+/// INSERT INTO t VALUES (...) ON CONFLICT [(column_list)] DO {NOTHING | UPDATE SET ...};
+/// ```
+///
+/// The conflict target (column list) is optional. When omitted, the conflict
+/// clause applies to any unique constraint violation.
+///
+/// See: <https://www.sqlite.org/lang_upsert.html>
+#[derive(Debug, Clone, PartialEq)]
+pub struct OnConflictClause {
+    /// Optional list of indexed columns to match for conflict detection.
+    /// When None, matches any unique constraint violation.
+    pub conflict_target: Option<Vec<String>>,
+    /// The action to take when a conflict occurs.
+    pub action: OnConflictAction,
+}
+
 /// INSERT statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertStmt {
@@ -70,7 +116,11 @@ pub struct InsertStmt {
     pub columns: Vec<String>,
     pub source: InsertSource,
     /// Conflict resolution strategy (None = fail on conflict)
+    /// Used for INSERT OR REPLACE/IGNORE/etc. syntax
     pub conflict_clause: Option<ConflictClause>,
+    /// ON CONFLICT clause (SQLite upsert)
+    /// Used for INSERT ... ON CONFLICT (cols) DO NOTHING/UPDATE syntax
+    pub on_conflict: Option<OnConflictClause>,
     /// ON DUPLICATE KEY UPDATE clause (MySQL-style upsert)
     pub on_duplicate_key_update: Option<Vec<Assignment>>,
 }
