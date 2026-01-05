@@ -616,9 +616,34 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             columns: stmt.columns.iter().map(|s| self.resolve(*s)).collect(),
             source: self.convert_insert_source(&stmt.source),
             conflict_clause: stmt.conflict_clause.map(ConflictClause::from),
+            on_conflict: stmt.on_conflict.as_ref().map(|c| self.convert_on_conflict_clause(c)),
             on_duplicate_key_update: stmt.on_duplicate_key_update.as_ref().map(|assignments| {
                 assignments.iter().map(|a| self.convert_assignment(a)).collect()
             }),
+        }
+    }
+
+    fn convert_on_conflict_clause(
+        &self,
+        clause: &arena_dml::OnConflictClause<'arena>,
+    ) -> crate::OnConflictClause {
+        crate::OnConflictClause {
+            conflict_target: clause
+                .conflict_target
+                .as_ref()
+                .map(|cols| cols.iter().map(|s| self.resolve(*s)).collect()),
+            action: match &clause.action {
+                arena_dml::OnConflictAction::DoNothing => crate::OnConflictAction::DoNothing,
+                arena_dml::OnConflictAction::DoUpdate { assignments, where_clause } => {
+                    crate::OnConflictAction::DoUpdate {
+                        assignments: assignments
+                            .iter()
+                            .map(|a| self.convert_assignment(a))
+                            .collect(),
+                        where_clause: where_clause.as_ref().map(|e| self.convert_expression(e)),
+                    }
+                }
+            },
         }
     }
 

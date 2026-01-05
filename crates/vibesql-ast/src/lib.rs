@@ -181,7 +181,8 @@ pub use ddl::{
     VectorDistanceMetric,
 };
 pub use dml::{
-    Assignment, ConflictClause, DeleteStmt, InsertSource, InsertStmt, UpdateStmt, WhereClause,
+    Assignment, ConflictClause, DeleteStmt, InsertSource, InsertStmt, OnConflictAction,
+    OnConflictClause, UpdateStmt, WhereClause,
 };
 pub use expression::{
     CaseWhen, CharacterUnit, Expression, FrameBound, FrameExclude, FrameUnit, FulltextMode,

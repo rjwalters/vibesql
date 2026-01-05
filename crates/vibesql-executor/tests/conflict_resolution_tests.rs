@@ -46,6 +46,7 @@ fn insert_user(db: &mut Database, id: i64, email: &str, name: &str) {
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(name))),
         ]]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();
@@ -77,6 +78,7 @@ fn test_insert_or_ignore_primary_key_conflict() {
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Bob"))),
         ]]),
         conflict_clause: Some(ConflictClause::Ignore),
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
 
@@ -113,6 +115,7 @@ fn test_insert_or_ignore_unique_constraint_conflict() {
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice 2"))),
         ]]),
         conflict_clause: Some(ConflictClause::Ignore),
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
 
@@ -163,6 +166,7 @@ fn test_insert_or_ignore_multi_row() {
             ],
         ]),
         conflict_clause: Some(ConflictClause::Ignore),
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
 
@@ -193,6 +197,7 @@ fn test_insert_or_ignore_no_conflict() {
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: Some(ConflictClause::Ignore),
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
 
@@ -472,6 +477,7 @@ fn test_insert_or_ignore_not_null_violation() {
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: Some(ConflictClause::Ignore),
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
 
@@ -515,4 +521,125 @@ fn test_update_or_ignore_not_null_violation() {
     let table = db.get_table("users").unwrap();
     let alice = &table.scan()[0];
     assert_eq!(alice.values[1], SqlValue::Varchar(arcstr::ArcStr::from("alice@test.com")));
+}
+
+// ============================================================================
+// ON CONFLICT ... DO NOTHING Tests (SQLite Upsert Clause)
+// ============================================================================
+
+#[test]
+fn test_insert_on_conflict_do_nothing_primary_key() {
+    use vibesql_ast::{OnConflictAction, OnConflictClause};
+
+    let mut db = Database::new();
+    setup_users_table(&mut db);
+
+    // Insert initial row
+    insert_user(&mut db, 1, "alice@test.com", "Alice");
+
+    // Try to insert conflicting row with ON CONFLICT DO NOTHING
+    let stmt = InsertStmt {
+        with_clause: None,
+        schema_name: None,
+        schema_quoted: false,
+        table_name: "users".to_string(),
+        table_quoted: false,
+        columns: vec![],
+        source: InsertSource::Values(vec![vec![
+            Expression::Literal(SqlValue::Integer(1)), // Duplicate id
+            Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("duplicate@test.com"))),
+            Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Duplicate"))),
+        ]]),
+        conflict_clause: None,
+        on_conflict: Some(OnConflictClause {
+            conflict_target: Some(vec!["id".to_string()]),
+            action: OnConflictAction::DoNothing,
+        }),
+        on_duplicate_key_update: None,
+    };
+
+    let rows_inserted = InsertExecutor::execute(&mut db, &stmt).unwrap();
+    assert_eq!(rows_inserted, 0, "Conflicting insert should be ignored by ON CONFLICT DO NOTHING");
+
+    // Verify original row is unchanged
+    let table = db.get_table("users").unwrap();
+    assert_eq!(table.row_count(), 1);
+    let alice = &table.scan()[0];
+    assert_eq!(alice.values[1], SqlValue::Varchar(arcstr::ArcStr::from("alice@test.com")));
+}
+
+#[test]
+fn test_insert_on_conflict_do_nothing_without_target() {
+    use vibesql_ast::{OnConflictAction, OnConflictClause};
+
+    let mut db = Database::new();
+    setup_users_table(&mut db);
+
+    // Insert initial row
+    insert_user(&mut db, 1, "alice@test.com", "Alice");
+
+    // Try to insert conflicting row with ON CONFLICT DO NOTHING (no conflict target)
+    // This should ignore any constraint violation
+    let stmt = InsertStmt {
+        with_clause: None,
+        schema_name: None,
+        schema_quoted: false,
+        table_name: "users".to_string(),
+        table_quoted: false,
+        columns: vec![],
+        source: InsertSource::Values(vec![vec![
+            Expression::Literal(SqlValue::Integer(1)), // Duplicate id
+            Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("dup@test.com"))),
+            Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Dup"))),
+        ]]),
+        conflict_clause: None,
+        on_conflict: Some(OnConflictClause {
+            conflict_target: None, // No specific conflict target
+            action: OnConflictAction::DoNothing,
+        }),
+        on_duplicate_key_update: None,
+    };
+
+    let rows_inserted = InsertExecutor::execute(&mut db, &stmt).unwrap();
+    assert_eq!(rows_inserted, 0, "Conflicting insert should be ignored by ON CONFLICT DO NOTHING");
+
+    // Verify original row is unchanged
+    let table = db.get_table("users").unwrap();
+    assert_eq!(table.row_count(), 1);
+}
+
+#[test]
+fn test_insert_on_conflict_do_nothing_no_conflict() {
+    use vibesql_ast::{OnConflictAction, OnConflictClause};
+
+    let mut db = Database::new();
+    setup_users_table(&mut db);
+
+    // Insert with ON CONFLICT DO NOTHING when there's no conflict - should succeed
+    let stmt = InsertStmt {
+        with_clause: None,
+        schema_name: None,
+        schema_quoted: false,
+        table_name: "users".to_string(),
+        table_quoted: false,
+        columns: vec![],
+        source: InsertSource::Values(vec![vec![
+            Expression::Literal(SqlValue::Integer(1)),
+            Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("alice@test.com"))),
+            Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
+        ]]),
+        conflict_clause: None,
+        on_conflict: Some(OnConflictClause {
+            conflict_target: Some(vec!["id".to_string()]),
+            action: OnConflictAction::DoNothing,
+        }),
+        on_duplicate_key_update: None,
+    };
+
+    let rows_inserted = InsertExecutor::execute(&mut db, &stmt).unwrap();
+    assert_eq!(rows_inserted, 1, "Non-conflicting insert should succeed");
+
+    // Verify row was inserted
+    let table = db.get_table("users").unwrap();
+    assert_eq!(table.row_count(), 1);
 }
