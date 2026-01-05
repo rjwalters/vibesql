@@ -88,19 +88,78 @@ pub(super) fn build_merged_outer_row<'a>(
 /// Handles wildcards by expanding them using table schemas from the database
 ///
 /// Issue #3562: Added CTE context so wildcards can be expanded for CTE references
+/// Issue #4881: Validates set operation column count mismatches (UNION, INTERSECT, EXCEPT)
 pub fn compute_select_list_column_count(
     stmt: &vibesql_ast::SelectStmt,
     database: &vibesql_storage::Database,
     cte_results: Option<&HashMap<String, CteResult>>,
 ) -> Result<usize, ExecutorError> {
+    let left_count = compute_single_select_column_count(&stmt.select_list, &stmt.from, database, cte_results)?;
+
+    // Issue #4881: Validate set operation column counts
+    // If this SELECT has a set operation (UNION, INTERSECT, EXCEPT),
+    // validate that left and right sides have the same number of columns.
+    // This produces SQLite-compatible error messages for column count mismatches.
+    if let Some(set_op) = &stmt.set_operation {
+        validate_set_operation_column_counts(left_count, set_op, database, cte_results)?;
+    }
+
+    Ok(left_count)
+}
+
+/// Validate column counts for a chain of set operations
+/// Returns SetOperationColumnMismatch error if any operation has mismatched column counts
+fn validate_set_operation_column_counts(
+    left_count: usize,
+    set_op: &vibesql_ast::SetOperation,
+    database: &vibesql_storage::Database,
+    cte_results: Option<&HashMap<String, CteResult>>,
+) -> Result<(), ExecutorError> {
+    let right_stmt = &set_op.right;
+    let right_count = compute_single_select_column_count(
+        &right_stmt.select_list,
+        &right_stmt.from,
+        database,
+        cte_results,
+    )?;
+
+    if left_count != right_count {
+        let operator = match (&set_op.op, set_op.all) {
+            (vibesql_ast::SetOperator::Union, true) => "UNION ALL",
+            (vibesql_ast::SetOperator::Union, false) => "UNION",
+            (vibesql_ast::SetOperator::Intersect, true) => "INTERSECT ALL",
+            (vibesql_ast::SetOperator::Intersect, false) => "INTERSECT",
+            (vibesql_ast::SetOperator::Except, true) => "EXCEPT ALL",
+            (vibesql_ast::SetOperator::Except, false) => "EXCEPT",
+        };
+        return Err(ExecutorError::SetOperationColumnMismatch {
+            operator: operator.to_string(),
+        });
+    }
+
+    // Recursively validate nested set operations
+    if let Some(next_set_op) = &right_stmt.set_operation {
+        validate_set_operation_column_counts(right_count, next_set_op, database, cte_results)?;
+    }
+
+    Ok(())
+}
+
+/// Compute column count for a single SELECT statement (without considering set operations)
+fn compute_single_select_column_count(
+    select_list: &[vibesql_ast::SelectItem],
+    from: &Option<vibesql_ast::FromClause>,
+    database: &vibesql_storage::Database,
+    cte_results: Option<&HashMap<String, CteResult>>,
+) -> Result<usize, ExecutorError> {
     let mut count = 0;
 
-    for item in &stmt.select_list {
+    for item in select_list {
         match item {
             vibesql_ast::SelectItem::Wildcard { .. } => {
                 // Expand * to count all columns from all tables in FROM clause
-                if let Some(from) = &stmt.from {
-                    count += count_columns_in_from_clause(from, database, cte_results)?;
+                if let Some(from_clause) = from {
+                    count += count_columns_in_from_clause(from_clause, database, cte_results)?;
                 } else {
                     // SELECT * without FROM is an error (should be caught earlier)
                     return Err(ExecutorError::UnsupportedFeature(
