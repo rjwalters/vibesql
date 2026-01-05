@@ -1,0 +1,192 @@
+# Issue #4890: USING column incorrectly resolved in WHERE/ORDER BY with FULL JOIN
+#
+# When a USING column is referenced in a WHERE, ORDER BY, or HAVING clause
+# with a FULL JOIN, VibeSQL should use COALESCE(left.col, right.col) semantics,
+# not resolve to a specific table's column.
+
+statement ok
+CREATE TABLE fj_t1(a INTEGER)
+
+statement ok
+INSERT INTO fj_t1 VALUES(1), (2)
+
+statement ok
+CREATE TABLE fj_t2(a INTEGER, c INTEGER)
+
+statement ok
+INSERT INTO fj_t2 VALUES(1, 10), (2, 20)
+
+statement ok
+CREATE TABLE fj_t3(a INTEGER, d INTEGER)
+
+statement ok
+INSERT INTO fj_t3 VALUES(2, 200), (3, 300)
+
+# Base query without WHERE - should return 3 rows
+query III rowsort
+SELECT a, c, d FROM fj_t1 INNER JOIN fj_t2 USING(a) FULL JOIN fj_t3 USING(a)
+----
+1 10 NULL
+2 20 200
+3 NULL 300
+
+# WHERE a >= 1 should return all 3 rows (including a=1 which comes from left only)
+query III rowsort
+SELECT a, c, d FROM fj_t1 INNER JOIN fj_t2 USING(a) FULL JOIN fj_t3 USING(a) WHERE a >= 1
+----
+1 10 NULL
+2 20 200
+3 NULL 300
+
+# WHERE a <= 2 should return 2 rows
+query III rowsort
+SELECT a, c, d FROM fj_t1 INNER JOIN fj_t2 USING(a) FULL JOIN fj_t3 USING(a) WHERE a <= 2
+----
+1 10 NULL
+2 20 200
+
+# WHERE a = 1 should return 1 row (from left side only, right side NULL)
+query III rowsort
+SELECT a, c, d FROM fj_t1 INNER JOIN fj_t2 USING(a) FULL JOIN fj_t3 USING(a) WHERE a = 1
+----
+1 10 NULL
+
+# WHERE a = 3 should return 1 row (from right side only, left side NULL)
+query III rowsort
+SELECT a, c, d FROM fj_t1 INNER JOIN fj_t2 USING(a) FULL JOIN fj_t3 USING(a) WHERE a = 3
+----
+3 NULL 300
+
+# ORDER BY on USING column should work correctly
+query III nosort
+SELECT a, c, d FROM fj_t1 INNER JOIN fj_t2 USING(a) FULL JOIN fj_t3 USING(a) ORDER BY a
+----
+1 10 NULL
+2 20 200
+3 NULL 300
+
+# ORDER BY DESC on USING column
+query III nosort
+SELECT a, c, d FROM fj_t1 INNER JOIN fj_t2 USING(a) FULL JOIN fj_t3 USING(a) ORDER BY a DESC
+----
+3 NULL 300
+2 20 200
+1 10 NULL
+
+# Test with more complex nested joins (original test case from issue)
+statement ok
+CREATE TABLE fj_t4(a INTEGER)
+
+statement ok
+INSERT INTO fj_t4 VALUES(11), (12), (13), (15)
+
+statement ok
+CREATE TABLE fj_t5(a INTEGER, e INTEGER)
+
+statement ok
+INSERT INTO fj_t5 VALUES(12, 32), (15, 35)
+
+statement ok
+CREATE TABLE fj_t6(a INTEGER, f INTEGER, g INTEGER)
+
+statement ok
+INSERT INTO fj_t6 VALUES(12, 32, 32), (15, 35, 35)
+
+statement ok
+CREATE TABLE fj_t7(a INTEGER, h INTEGER)
+
+statement ok
+INSERT INTO fj_t7 VALUES(11, 31), (13, 33), (15, 35), (19, 39)
+
+# Complex nested join without WHERE
+query IIIII rowsort
+SELECT a, e, f, g, h
+FROM fj_t4
+INNER JOIN (fj_t5 INNER JOIN fj_t6 USING(a)) USING(a)
+FULL JOIN fj_t7 USING(a)
+----
+11 NULL NULL NULL 31
+12 32 32 32 NULL
+13 NULL NULL NULL 33
+15 35 35 35 35
+19 NULL NULL NULL 39
+
+# With WHERE a<=18 - should return 4 rows including a=12
+query IIIII rowsort
+SELECT a, e, f, g, h
+FROM fj_t4
+INNER JOIN (fj_t5 INNER JOIN fj_t6 USING(a)) USING(a)
+FULL JOIN fj_t7 USING(a)
+WHERE a<=18
+----
+11 NULL NULL NULL 31
+12 32 32 32 NULL
+13 NULL NULL NULL 33
+15 35 35 35 35
+
+# Simple FULL JOIN USING with WHERE
+statement ok
+CREATE TABLE fj_left(a INTEGER, b INTEGER)
+
+statement ok
+INSERT INTO fj_left VALUES(1, 10), (2, 20)
+
+statement ok
+CREATE TABLE fj_right(a INTEGER, c INTEGER)
+
+statement ok
+INSERT INTO fj_right VALUES(2, 200), (3, 300)
+
+# Without WHERE - 3 rows
+query III rowsort
+SELECT a, b, c FROM fj_left FULL JOIN fj_right USING(a)
+----
+1 10 NULL
+2 20 200
+3 NULL 300
+
+# WHERE on USING column - all conditions should use COALESCE semantics
+query III rowsort
+SELECT a, b, c FROM fj_left FULL JOIN fj_right USING(a) WHERE a >= 2
+----
+2 20 200
+3 NULL 300
+
+query III rowsort
+SELECT a, b, c FROM fj_left FULL JOIN fj_right USING(a) WHERE a <= 2
+----
+1 10 NULL
+2 20 200
+
+query III rowsort
+SELECT a, b, c FROM fj_left FULL JOIN fj_right USING(a) WHERE a BETWEEN 1 AND 2
+----
+1 10 NULL
+2 20 200
+
+statement ok
+DROP TABLE fj_t1
+
+statement ok
+DROP TABLE fj_t2
+
+statement ok
+DROP TABLE fj_t3
+
+statement ok
+DROP TABLE fj_t4
+
+statement ok
+DROP TABLE fj_t5
+
+statement ok
+DROP TABLE fj_t6
+
+statement ok
+DROP TABLE fj_t7
+
+statement ok
+DROP TABLE fj_left
+
+statement ok
+DROP TABLE fj_right
