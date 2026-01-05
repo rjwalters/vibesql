@@ -213,33 +213,72 @@ impl Parser {
                 // It's NOT IN
                 self.consume_keyword(Keyword::In)?;
 
-                // Expect opening paren
-                self.expect_token(Token::LParen)?;
+                // Check if it's NOT IN table_name (SQLite syntax) or NOT IN (...)
+                if self.peek() != &Token::LParen {
+                    // SQLite compatibility: NOT IN table_name is equivalent to NOT IN (SELECT *
+                    // FROM table_name) Parse the table name and expand to a
+                    // subquery
+                    let table_ref = self.parse_table_ref()?;
+                    let table_name = table_ref.full_name();
+                    let quoted = table_ref.is_any_quoted();
 
-                // Check if it's a subquery (SELECT ...) or a value list
-                if self.peek_keyword(Keyword::Select) {
-                    // It's a subquery: NOT IN (SELECT ...)
-                    let subquery = self.parse_select_statement()?;
-                    self.expect_token(Token::RParen)?;
+                    // Create a SELECT * FROM table_name subquery
+                    let subquery = vibesql_ast::SelectStmt {
+                        with_clause: None,
+                        distinct: false,
+                        select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
+                        into_table: None,
+                        into_variables: None,
+                        from: Some(vibesql_ast::FromClause::Table {
+                            name: table_name,
+                            alias: None,
+                            column_aliases: None,
+                            quoted,
+                        }),
+                        where_clause: None,
+                        group_by: None,
+                        having: None,
+                        order_by: None,
+                        limit: None,
+                        offset: None,
+                        set_operation: None,
+                        values: None,
+                    };
 
-                    // Don't return - assign to left and continue to check for IS NULL
                     left = vibesql_ast::Expression::In {
                         expr: Box::new(left),
                         subquery: Box::new(subquery),
                         negated: true,
                     };
                 } else {
-                    // It's a value list: NOT IN (val1, val2, ...)
-                    let values = self.parse_expression_list()?;
-                    self.expect_token(Token::RParen)?;
+                    // Standard syntax: NOT IN (...)
+                    self.expect_token(Token::LParen)?;
 
-                    // Empty IN lists are allowed per SQL:1999 (evaluates to TRUE for NOT IN)
-                    // Don't return - assign to left and continue to check for IS NULL
-                    left = vibesql_ast::Expression::InList {
-                        expr: Box::new(left),
-                        values,
-                        negated: true,
-                    };
+                    // Check if it's a subquery (SELECT ...) or a value list
+                    if self.peek_keyword(Keyword::Select) {
+                        // It's a subquery: NOT IN (SELECT ...)
+                        let subquery = self.parse_select_statement()?;
+                        self.expect_token(Token::RParen)?;
+
+                        // Don't return - assign to left and continue to check for IS NULL
+                        left = vibesql_ast::Expression::In {
+                            expr: Box::new(left),
+                            subquery: Box::new(subquery),
+                            negated: true,
+                        };
+                    } else {
+                        // It's a value list: NOT IN (val1, val2, ...)
+                        let values = self.parse_expression_list()?;
+                        self.expect_token(Token::RParen)?;
+
+                        // Empty IN lists are allowed per SQL:1999 (evaluates to TRUE for NOT IN)
+                        // Don't return - assign to left and continue to check for IS NULL
+                        left = vibesql_ast::Expression::InList {
+                            expr: Box::new(left),
+                            values,
+                            negated: true,
+                        };
+                    }
                 }
             } else if self.peek_keyword(Keyword::Between) {
                 // It's NOT BETWEEN
@@ -315,9 +354,10 @@ impl Parser {
                     escape,
                 };
             } else if self.peek_keyword(Keyword::Null) {
-                // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS NOT NULL"
-                // BUT: In column definition context, "DEFAULT expr NOT NULL" should parse NOT NULL
-                // as a column constraint, not as part of the expression.
+                // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS NOT
+                // NULL" BUT: In column definition context, "DEFAULT expr NOT NULL"
+                // should parse NOT NULL as a column constraint, not as part of the
+                // expression.
                 //
                 // Heuristic: If the left expression is a simple literal and what follows NULL
                 // could be a column constraint context (`,` `)` or constraint keyword), then
@@ -326,19 +366,26 @@ impl Parser {
                 // But allows: WHERE col NOT NULL (col is not a literal)
                 self.consume_keyword(Keyword::Null)?;
 
-                // Check if left is a literal (in which case NOT NULL as an operator is semantically odd)
-                let left_is_literal = matches!(&left,
-                    vibesql_ast::Expression::Literal(_)
-                );
+                // Check if left is a literal (in which case NOT NULL as an operator is semantically
+                // odd)
+                let left_is_literal = matches!(&left, vibesql_ast::Expression::Literal(_));
 
                 // Check what comes after NULL
                 let next_could_be_column_constraint = match self.peek() {
                     Token::Comma | Token::RParen => true,
-                    Token::Keyword { keyword: kw, .. } => matches!(kw,
+                    Token::Keyword { keyword: kw, .. } => matches!(
+                        kw,
                         // Column constraint keywords that can follow NOT NULL
-                        Keyword::Check | Keyword::Unique | Keyword::Primary |
-                        Keyword::References | Keyword::Collate | Keyword::Default |
-                        Keyword::On | Keyword::Generated | Keyword::AutoIncrement | Keyword::Constraint
+                        Keyword::Check
+                            | Keyword::Unique
+                            | Keyword::Primary
+                            | Keyword::References
+                            | Keyword::Collate
+                            | Keyword::Default
+                            | Keyword::On
+                            | Keyword::Generated
+                            | Keyword::AutoIncrement
+                            | Keyword::Constraint
                     ),
                     Token::Semicolon | Token::Eof => false, // At end of query, treat as operator
                     _ => false,
@@ -350,44 +397,86 @@ impl Parser {
                     self.position = saved_pos;
                 } else {
                     // General case: expr NOT NULL is an operator
-                    return Ok(vibesql_ast::Expression::IsNull { expr: Box::new(left), negated: true });
+                    return Ok(vibesql_ast::Expression::IsNull {
+                        expr: Box::new(left),
+                        negated: true,
+                    });
                 }
             } else {
-                // Not "NOT IN", "NOT BETWEEN", "NOT LIKE", "NOT GLOB", or "NOT NULL", restore position and continue
-                // Note: NOT EXISTS is handled in parse_primary_expression()
+                // Not "NOT IN", "NOT BETWEEN", "NOT LIKE", "NOT GLOB", or "NOT NULL", restore
+                // position and continue Note: NOT EXISTS is handled in
+                // parse_primary_expression()
                 self.position = saved_pos;
             }
         } else if self.peek_keyword(Keyword::In) {
             // It's IN (not negated)
             self.consume_keyword(Keyword::In)?;
 
-            // Expect opening paren
-            self.expect_token(Token::LParen)?;
+            // Check if it's IN table_name (SQLite syntax) or IN (...)
+            if self.peek() != &Token::LParen {
+                // SQLite compatibility: IN table_name is equivalent to IN (SELECT * FROM
+                // table_name) Parse the table name and expand to a subquery
+                let table_ref = self.parse_table_ref()?;
+                let table_name = table_ref.full_name();
+                let quoted = table_ref.is_any_quoted();
 
-            // Check if it's a subquery (SELECT ...) or a value list
-            if self.peek_keyword(Keyword::Select) {
-                // It's a subquery: IN (SELECT ...)
-                let subquery = self.parse_select_statement()?;
-                self.expect_token(Token::RParen)?;
+                // Create a SELECT * FROM table_name subquery
+                let subquery = vibesql_ast::SelectStmt {
+                    with_clause: None,
+                    distinct: false,
+                    select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
+                    into_table: None,
+                    into_variables: None,
+                    from: Some(vibesql_ast::FromClause::Table {
+                        name: table_name,
+                        alias: None,
+                        column_aliases: None,
+                        quoted,
+                    }),
+                    where_clause: None,
+                    group_by: None,
+                    having: None,
+                    order_by: None,
+                    limit: None,
+                    offset: None,
+                    set_operation: None,
+                    values: None,
+                };
 
-                // Don't return - assign to left and continue to check for IS NULL
                 left = vibesql_ast::Expression::In {
                     expr: Box::new(left),
                     subquery: Box::new(subquery),
                     negated: false,
                 };
             } else {
-                // It's a value list: IN (val1, val2, ...)
-                let values = self.parse_expression_list()?;
-                self.expect_token(Token::RParen)?;
+                // Standard syntax: IN (...)
+                self.expect_token(Token::LParen)?;
 
-                // Empty IN lists are allowed per SQL:1999 (evaluates to FALSE)
-                // Don't return - assign to left and continue to check for IS NULL
-                left = vibesql_ast::Expression::InList {
-                    expr: Box::new(left),
-                    values,
-                    negated: false,
-                };
+                // Check if it's a subquery (SELECT ...) or a value list
+                if self.peek_keyword(Keyword::Select) {
+                    // It's a subquery: IN (SELECT ...)
+                    let subquery = self.parse_select_statement()?;
+                    self.expect_token(Token::RParen)?;
+
+                    // Don't return - assign to left and continue to check for IS NULL
+                    left = vibesql_ast::Expression::In {
+                        expr: Box::new(left),
+                        subquery: Box::new(subquery),
+                        negated: false,
+                    };
+                } else {
+                    // It's a value list: IN (val1, val2, ...)
+                    let values = self.parse_expression_list()?;
+                    self.expect_token(Token::RParen)?;
+
+                    // Empty IN lists are allowed per SQL:1999 (evaluates to FALSE)
+                    // Don't return - assign to left and continue to check for IS NULL
+                    left = vibesql_ast::Expression::InList {
+                        expr: Box::new(left),
+                        values,
+                        negated: false,
+                    };
+                }
             }
         } else if self.peek_keyword(Keyword::Between) {
             // It's BETWEEN (not negated)
