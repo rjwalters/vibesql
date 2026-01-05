@@ -126,6 +126,7 @@ fn insert_row(db: &mut Database, table_name: &str, values: Vec<SqlValue>) {
         columns: vec![],
         source: InsertSource::Values(vec![values.into_iter().map(Expression::Literal).collect()]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();

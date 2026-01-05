@@ -29,6 +29,7 @@ fn test_after_delete_trigger_fires() {
             )),
         ]]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(&mut db, &insert).expect("Failed to insert");
@@ -92,6 +93,7 @@ fn test_before_delete_trigger_fires() {
             )),
         ]]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(&mut db, &insert).expect("Failed to insert");

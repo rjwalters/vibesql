@@ -309,6 +309,7 @@ pub fn build_insert_values(
             .map(vibesql_ast::Expression::Literal)
             .collect()]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     }
 }
@@ -332,6 +333,7 @@ pub fn build_insert_columns(
             .map(vibesql_ast::Expression::Literal)
             .collect()]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     }
 }
