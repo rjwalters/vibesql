@@ -40,6 +40,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
             vibesql_ast::Expression::Literal(SqlValue::Integer(price)),
         ]]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();
@@ -60,6 +61,7 @@ fn replace_product(db: &mut Database, id: i64, name: &str, price: i64) {
             vibesql_ast::Expression::Literal(SqlValue::Integer(price)),
         ]]),
         conflict_clause: Some(vibesql_ast::ConflictClause::Replace),
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();
@@ -212,7 +214,8 @@ fn test_replace_unique_constraint_invalidates_cache() {
                 vibesql_ast::Expression::Literal(SqlValue::Integer(score)),
             ]]),
             conflict_clause: None,
-            on_duplicate_key_update: None,
+            on_conflict: None,
+        on_duplicate_key_update: None,
         };
         InsertExecutor::execute(db, &stmt).unwrap();
     };
@@ -237,6 +240,7 @@ fn test_replace_unique_constraint_invalidates_cache() {
             vibesql_ast::Expression::Literal(SqlValue::Integer(999)), // New score
         ]]),
         conflict_clause: Some(vibesql_ast::ConflictClause::Replace),
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(&mut db, &replace_stmt).unwrap();

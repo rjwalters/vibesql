@@ -44,6 +44,7 @@ fn insert_row(db: &mut Database, id: i64, name: &str, value: i64) {
             vibesql_ast::Expression::Literal(SqlValue::Integer(value)),
         ]]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();
@@ -357,6 +358,7 @@ fn test_alter_column_drop_not_null_invalidates_cache() {
             vibesql_ast::Expression::Literal(SqlValue::Integer(100)),
         ]]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -449,6 +451,7 @@ fn test_alter_column_drop_default_invalidates_cache() {
             vibesql_ast::Expression::Literal(SqlValue::Integer(100)),
         ]]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(&mut db, &stmt).unwrap();

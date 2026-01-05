@@ -23,6 +23,7 @@ fn test_insert_from_select_basic() {
             )),
         ]]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
@@ -77,6 +78,7 @@ fn test_insert_from_select_basic() {
         columns: vec![], // No explicit columns, use all
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
 
@@ -115,6 +117,7 @@ fn test_insert_from_select_with_where() {
             ],
         ]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
@@ -175,6 +178,7 @@ fn test_insert_from_select_with_where() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
 
@@ -205,6 +209,7 @@ fn test_insert_from_select_column_mismatch() {
             )),
         ]]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
@@ -264,6 +269,7 @@ fn test_insert_from_select_column_mismatch() {
         columns: vec![], // Should match all columns
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
 
@@ -313,6 +319,7 @@ fn test_insert_from_select_with_aggregates() {
             ],
         ]),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
@@ -388,6 +395,7 @@ fn test_insert_from_select_with_aggregates() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
         conflict_clause: None,
+        on_conflict: None,
         on_duplicate_key_update: None,
     };
     let rows = InsertExecutor::execute(&mut db, &insert_select_stmt).unwrap();
