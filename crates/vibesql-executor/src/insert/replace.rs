@@ -1,7 +1,14 @@
-use crate::{errors::ExecutorError, expression_index_maintenance};
+use crate::{errors::ExecutorError, expression_index_maintenance, TriggerFirer};
 
 /// Handle REPLACE logic: detect conflicts and delete conflicting rows
 /// Returns Ok(()) if no conflict or conflict was resolved
+///
+/// This function implements SQLite REPLACE semantics:
+/// 1. Find rows that conflict with the new row (by PK or UNIQUE constraints)
+/// 2. Fire BEFORE DELETE triggers for each conflicting row
+/// 3. Delete the conflicting rows
+/// 4. Fire AFTER DELETE triggers for each conflicting row
+/// 5. The caller then inserts the new row
 pub fn handle_replace_conflicts(
     db: &mut vibesql_storage::Database,
     table_name: &str,
@@ -72,6 +79,57 @@ pub fn handle_replace_conflicts(
             }
         }
 
+        // Check if this row matches any user-defined UNIQUE index
+        // (This handles CREATE UNIQUE INDEX statements, including partial indexes)
+        if !should_delete {
+            for index_name in db.list_indexes_for_table(table_name) {
+                if let Some(index_metadata) = db.get_index(&index_name) {
+                    if !index_metadata.unique {
+                        continue;
+                    }
+
+                    // Build key values for the new row
+                    let mut new_key_values = Vec::new();
+                    let mut existing_key_values = Vec::new();
+                    let mut valid_index = true;
+
+                    for index_col in &index_metadata.columns {
+                        let col_name = index_col.expect_column_name();
+                        if let Some(col_idx) = schema.get_column_index(col_name) {
+                            new_key_values.push(row_values[col_idx].clone());
+                            existing_key_values.push(row.values[col_idx].clone());
+                        } else {
+                            valid_index = false;
+                            break;
+                        }
+                    }
+
+                    if !valid_index {
+                        continue;
+                    }
+
+                    // Skip if new row has NULL in key columns
+                    if new_key_values.contains(&vibesql_types::SqlValue::Null) {
+                        continue;
+                    }
+
+                    // Skip if existing row has NULL in key columns
+                    if existing_key_values.contains(&vibesql_types::SqlValue::Null) {
+                        continue;
+                    }
+
+                    // Note: Partial index WHERE clause is not yet supported in VibeSQL.
+                    // For now, all unique indexes are treated as full indexes.
+
+                    // Check if key values match
+                    if new_key_values == existing_key_values {
+                        should_delete = true;
+                        break;
+                    }
+                }
+            }
+        }
+
         if should_delete {
             rows_to_delete.push((row_index, row.clone()));
         }
@@ -80,6 +138,27 @@ pub fn handle_replace_conflicts(
     // If no conflicts, nothing to delete
     if rows_to_delete.is_empty() {
         return Ok(());
+    }
+
+    // Check if any DELETE triggers exist for this table
+    let has_delete_triggers = db
+        .catalog
+        .get_triggers_for_table(table_name, Some(vibesql_ast::TriggerEvent::Delete))
+        .next()
+        .is_some();
+
+    // Fire BEFORE DELETE triggers for each conflicting row
+    // This must happen BEFORE actual deletion (SQLite semantics)
+    if has_delete_triggers {
+        for (_, row) in &rows_to_delete {
+            TriggerFirer::execute_before_triggers(
+                db,
+                table_name,
+                vibesql_ast::TriggerEvent::Delete,
+                Some(row),
+                None,
+            )?;
+        }
     }
 
     // Remove entries from user-defined indexes BEFORE deleting rows
@@ -92,10 +171,7 @@ pub fn handle_replace_conflicts(
     // Maintain expression indexes for each deleted row
     for (row_index, row) in &rows_to_delete {
         expression_index_maintenance::maintain_expression_indexes_for_delete(
-            db,
-            table_name,
-            row,
-            *row_index,
+            db, table_name, row, *row_index,
         );
     }
 
@@ -127,6 +203,20 @@ pub fn handle_replace_conflicts(
     // - Database-level cache: used by Database::get_columnar() for cached access
     if delete_result.deleted_count > 0 {
         db.invalidate_columnar_cache(table_name);
+    }
+
+    // Fire AFTER DELETE triggers for each deleted row
+    // This must happen AFTER actual deletion (SQLite semantics)
+    if has_delete_triggers {
+        for (_, row) in &rows_to_delete {
+            TriggerFirer::execute_after_triggers(
+                db,
+                table_name,
+                vibesql_ast::TriggerEvent::Delete,
+                Some(row),
+                None,
+            )?;
+        }
     }
 
     Ok(())

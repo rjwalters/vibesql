@@ -138,12 +138,13 @@ fn execute_insert_internal(
             // If we have a with_clause (CTEs), execute them first and pass to SelectExecutor
             let select_result = if let Some(ref cte_list) = stmt.with_clause {
                 // Execute CTEs first
-                let cte_results = crate::select::cte::execute_ctes(cte_list, |cte_query, prior_ctes| {
-                    let cte_executor = crate::SelectExecutor::new_with_cte(db, prior_ctes);
-                    cte_executor
-                        .execute_with_columns(cte_query)
-                        .map(|result| result.rows.into_iter().collect())
-                })?;
+                let cte_results =
+                    crate::select::cte::execute_ctes(cte_list, |cte_query, prior_ctes| {
+                        let cte_executor = crate::SelectExecutor::new_with_cte(db, prior_ctes);
+                        cte_executor
+                            .execute_with_columns(cte_query)
+                            .map(|result| result.rows.into_iter().collect())
+                    })?;
 
                 // Create executor with CTE results
                 let select_executor = crate::SelectExecutor::new_with_cte(db, &cte_results);
@@ -256,10 +257,8 @@ fn execute_insert_internal(
     // greater than both:
     // 1. The table's current max rowid
     // 2. Explicit rowids processed so far in the batch (NOT future rows)
-    let table_max_rowid = db
-        .get_table(&storage_table_name)
-        .map(|t| t.row_count() as u64)
-        .unwrap_or(0);
+    let table_max_rowid =
+        db.get_table(&storage_table_name).map(|t| t.row_count() as u64).unwrap_or(0);
 
     // Track maximum rowid seen so far (updated as we process each row)
     let mut batch_max_rowid = table_max_rowid;
@@ -515,10 +514,8 @@ fn execute_insert_internal(
         let optimal_batch_size = optimizer.optimal_insert_batch_size(validated_rows.len());
 
         // Track initial row count for expression index maintenance
-        let initial_row_count = db
-            .get_table(&storage_table_name)
-            .map(|t| t.row_count())
-            .unwrap_or(0);
+        let initial_row_count =
+            db.get_table(&storage_table_name).map(|t| t.row_count()).unwrap_or(0);
 
         // If optimal batch size is smaller than total rows, insert in batches
         if optimal_batch_size < validated_rows.len() {
@@ -550,9 +547,10 @@ fn execute_insert_internal(
             let rows: Vec<vibesql_storage::Row> =
                 validated_rows.into_iter().map(make_row).collect();
 
-            rows_inserted = db.insert_rows_batch(&storage_table_name, rows.clone()).map_err(|e| {
-                ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
-            })?;
+            rows_inserted =
+                db.insert_rows_batch(&storage_table_name, rows.clone()).map_err(|e| {
+                    ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
+                })?;
 
             // Maintain expression indexes for each inserted row
             for (i, row) in rows.iter().enumerate() {
@@ -586,10 +584,35 @@ fn execute_insert_internal(
                 // No conflict, fall through to insert
             } else if matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace)) {
                 // If REPLACE conflict clause, delete conflicting rows first
+                // This also fires DELETE triggers which may create new constraints violations
                 super::replace::handle_replace_conflicts(
                     db,
                     table_name,
                     &schema,
+                    &full_row_values,
+                )?;
+
+                // After REPLACE conflict handling (which fires triggers), re-validate constraints.
+                // Triggers may have inserted new rows that conflict with the row we want to insert.
+                // Pass empty batch values since we're only checking against existing table data.
+                super::constraints::enforce_primary_key_constraint(
+                    db,
+                    &schema,
+                    table_name,
+                    &full_row_values,
+                    &[], // No batch values to check against
+                )?;
+                super::constraints::enforce_unique_constraints(
+                    db,
+                    &schema,
+                    table_name,
+                    &full_row_values,
+                    &[], // No batch values to check against
+                )?;
+                super::constraints::enforce_unique_indexes(
+                    db,
+                    &schema,
+                    table_name,
                     &full_row_values,
                 )?;
             }
@@ -911,8 +934,11 @@ fn execute_insert_on_view(
         vibesql_ast::InsertSource::Values(values) => values.clone(),
         vibesql_ast::InsertSource::DefaultValues => {
             // For DEFAULT VALUES on a view, create a single row with DEFAULT for all target columns
-            let target_col_count =
-                if stmt.columns.is_empty() { view_schema.columns.len() } else { stmt.columns.len() };
+            let target_col_count = if stmt.columns.is_empty() {
+                view_schema.columns.len()
+            } else {
+                stmt.columns.len()
+            };
             let default_row = vec![vibesql_ast::Expression::Default; target_col_count];
             vec![default_row]
         }
@@ -1086,10 +1112,7 @@ fn execute_insert_sqlite_stat1(
     for row in values {
         // Extract tbl value
         let tbl = extract_string_value(&row[tbl_idx]).ok_or_else(|| {
-            ExecutorError::Other(format!(
-                "sqlite_stat1.tbl must be TEXT, got {:?}",
-                row[tbl_idx]
-            ))
+            ExecutorError::Other(format!("sqlite_stat1.tbl must be TEXT, got {:?}", row[tbl_idx]))
         })?;
 
         // Extract idx value (nullable)
@@ -1105,10 +1128,7 @@ fn execute_insert_sqlite_stat1(
 
         // Extract stat value
         let stat = extract_string_value(&row[stat_idx]).ok_or_else(|| {
-            ExecutorError::Other(format!(
-                "sqlite_stat1.stat must be TEXT, got {:?}",
-                row[stat_idx]
-            ))
+            ExecutorError::Other(format!("sqlite_stat1.stat must be TEXT, got {:?}", row[stat_idx]))
         })?;
 
         // Insert into database's sqlite_stat1 storage
