@@ -20,11 +20,23 @@ use super::RowWithSortKeys;
 /// smaller ones based on the global ParallelConfig thresholds.
 ///
 /// When the `parallel` feature is disabled, this always uses sequential sort.
+///
+/// # Tie-Breaking with rowid
+///
+/// When ORDER BY expressions are equal, SQLite uses rowid as a secondary sort key
+/// to maintain deterministic ordering. This function implements the same behavior
+/// by comparing row_id values when sort keys are equal (issue #4893).
 pub(super) fn sort_rows(rows: &mut [RowWithSortKeys]) {
-    let comparison_fn = |(_, keys_a): &RowWithSortKeys, (_, keys_b): &RowWithSortKeys| {
+    let comparison_fn = |(row_a, keys_a): &RowWithSortKeys, (row_b, keys_b): &RowWithSortKeys| {
         let keys_a = keys_a.as_ref().unwrap();
         let keys_b = keys_b.as_ref().unwrap();
-        compare_rows_by_sort_keys(keys_a, keys_b)
+        let sort_cmp = compare_rows_by_sort_keys(keys_a, keys_b);
+        if sort_cmp != std::cmp::Ordering::Equal {
+            return sort_cmp;
+        }
+        // Use rowid as tie-breaker for deterministic ordering matching SQLite behavior
+        // When sort keys are equal, order by rowid (insertion order) ascending
+        row_a.row_id.cmp(&row_b.row_id)
     };
 
     #[cfg(feature = "parallel")]

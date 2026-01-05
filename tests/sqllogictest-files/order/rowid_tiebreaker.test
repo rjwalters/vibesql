@@ -1,0 +1,171 @@
+# Issue #4893: Row ordering with rowid tie-breaking
+# When ORDER BY doesn't fully determine row order, SQLite uses rowid as a
+# secondary sort key for deterministic ordering. VibeSQL should match this.
+
+statement ok
+CREATE TABLE t1(a INTEGER, b INTEGER, c INTEGER)
+
+statement ok
+INSERT INTO t1 VALUES(4, 1, 0)
+
+statement ok
+INSERT INTO t1 VALUES(4, 0, 1)
+
+# When ORDER BY on column 'a' produces ties, rows should be ordered by rowid (insertion order)
+query III rowsort
+SELECT * FROM t1 ORDER BY a
+----
+4 0 1
+4 1 0
+
+# Explicit test: verify insertion order is preserved for equal ORDER BY keys
+query III nosort
+SELECT * FROM t1 ORDER BY a
+----
+4 1 0
+4 0 1
+
+statement ok
+DROP TABLE t1
+
+# Test with more rows to verify consistent behavior
+statement ok
+CREATE TABLE t2(x INTEGER, y TEXT)
+
+statement ok
+INSERT INTO t2 VALUES(1, 'first')
+
+statement ok
+INSERT INTO t2 VALUES(2, 'second')
+
+statement ok
+INSERT INTO t2 VALUES(1, 'third')
+
+statement ok
+INSERT INTO t2 VALUES(2, 'fourth')
+
+statement ok
+INSERT INTO t2 VALUES(1, 'fifth')
+
+# Rows with x=1 should appear in insertion order: 'first', 'third', 'fifth'
+# Rows with x=2 should appear in insertion order: 'second', 'fourth'
+query IT nosort
+SELECT * FROM t2 ORDER BY x
+----
+1 first
+1 third
+1 fifth
+2 second
+2 fourth
+
+statement ok
+DROP TABLE t2
+
+# Test with DESC ordering - rowid should still be used as ASC tie-breaker
+statement ok
+CREATE TABLE t3(a INTEGER, b INTEGER)
+
+statement ok
+INSERT INTO t3 VALUES(1, 10)
+
+statement ok
+INSERT INTO t3 VALUES(2, 20)
+
+statement ok
+INSERT INTO t3 VALUES(1, 30)
+
+statement ok
+INSERT INTO t3 VALUES(2, 40)
+
+# With DESC on 'a', rows with equal 'a' should still be in rowid order (ascending)
+query II nosort
+SELECT * FROM t3 ORDER BY a DESC
+----
+2 20
+2 40
+1 10
+1 30
+
+statement ok
+DROP TABLE t3
+
+# Test with multi-column ORDER BY
+statement ok
+CREATE TABLE t4(a INTEGER, b INTEGER, c INTEGER)
+
+statement ok
+INSERT INTO t4 VALUES(1, 1, 100)
+
+statement ok
+INSERT INTO t4 VALUES(1, 2, 200)
+
+statement ok
+INSERT INTO t4 VALUES(1, 1, 300)
+
+statement ok
+INSERT INTO t4 VALUES(1, 2, 400)
+
+# When both ORDER BY columns are equal, use rowid
+query III nosort
+SELECT * FROM t4 ORDER BY a, b
+----
+1 1 100
+1 1 300
+1 2 200
+1 2 400
+
+statement ok
+DROP TABLE t4
+
+# Reproduce the exact test case from issue (where-21.1 from where.test)
+statement ok
+CREATE TABLE t12(a INTEGER, b INTEGER, c INTEGER)
+
+statement ok
+INSERT INTO t12 VALUES(3, 0, 1)
+
+statement ok
+INSERT INTO t12 VALUES(3, 1, 0)
+
+statement ok
+INSERT INTO t12 VALUES(4, 1, 0)
+
+statement ok
+INSERT INTO t12 VALUES(4, 0, 1)
+
+statement ok
+INSERT INTO t12 VALUES(5, 0, 1)
+
+statement ok
+INSERT INTO t12 VALUES(5, 1, 0)
+
+statement ok
+CREATE TABLE t13(x INTEGER)
+
+statement ok
+INSERT INTO t13 VALUES(1)
+
+statement ok
+INSERT INTO t13 VALUES(2)
+
+statement ok
+INSERT INTO t13 VALUES(3)
+
+statement ok
+INSERT INTO t13 VALUES(4)
+
+# The original failing test from where.test
+# With a=4 and (b=1 OR c=1), we should get rows in rowid order: (4,1,0) then (4,0,1)
+query III nosort
+SELECT * FROM t12 WHERE
+a = (SELECT * FROM (SELECT count(*) FROM t13 LIMIT 5) ORDER BY 1 LIMIT 10)
+AND (b=1 OR c=1)
+----
+4 1 0
+4 0 1
+
+statement ok
+DROP TABLE t12
+
+statement ok
+DROP TABLE t13
