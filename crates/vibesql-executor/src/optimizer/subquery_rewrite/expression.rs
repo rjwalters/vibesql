@@ -56,7 +56,7 @@ pub(super) fn rewrite_expression_with_context(
             if is_correlated(subquery) && is_simple_column {
                 // Correlated subquery with simple column: Rewrite IN → EXISTS
                 // This allows database to stop after first match and better leverage indexes
-                rewrite_in_to_exists(in_expr, subquery, *negated)
+                rewrite_in_to_exists(in_expr, subquery, *negated, outer_tables)
             } else if is_correlated(subquery) && !is_simple_column {
                 // Correlated subquery with complex expression: skip IN → EXISTS
                 // Complex expressions can't be safely used in correlation predicates

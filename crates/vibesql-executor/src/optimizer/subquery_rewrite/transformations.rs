@@ -4,7 +4,7 @@
 //! - Correlated IN → EXISTS with LIMIT 1 for early termination
 //! - Uncorrelated IN → IN with DISTINCT to reduce duplicates
 
-use vibesql_ast::{BinaryOperator, Expression, SelectItem, SelectStmt};
+use vibesql_ast::{BinaryOperator, ColumnIdentifier, Expression, SelectItem, SelectStmt};
 
 /// Rewrite correlated IN subquery to EXISTS with correlation predicate
 ///
@@ -22,10 +22,15 @@ use vibesql_ast::{BinaryOperator, Expression, SelectItem, SelectStmt};
 /// - Stop after finding first match (LIMIT 1 enables early termination)
 /// - Better leverage indexes on the correlation column
 /// - Potentially use better query plans
+///
+/// **Important**: When the left expression contains unqualified column references,
+/// they must be qualified with the outer table name to prevent incorrect resolution
+/// in the EXISTS subquery context (issue #4880).
 pub(super) fn rewrite_in_to_exists(
     in_expr: &Expression,
     subquery: &SelectStmt,
     negated: bool,
+    outer_tables: &[String],
 ) -> Expression {
     // Create rewritten subquery
     let mut exists_subquery = subquery.clone();
@@ -49,11 +54,17 @@ pub(super) fn rewrite_in_to_exists(
     // Extract the correlation column expression from original SELECT list
     // This assumes single-column subquery (already validated by executor)
     if let Some(SelectItem::Expression { expr: subquery_col, .. }) = subquery.select_list.first() {
+        // Fix for issue #4880: Qualify unqualified column references in the left expression
+        // When IN is rewritten to EXISTS, the left expression becomes part of the EXISTS
+        // subquery's WHERE clause. Without qualification, unqualified column refs would
+        // resolve to the subquery's tables instead of the outer query's tables.
+        let qualified_in_expr = qualify_outer_column_refs(in_expr, outer_tables);
+
         // Create correlation predicate: subquery_col = in_expr
         let correlation_predicate = Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(subquery_col.clone()),
-            right: Box::new(in_expr.clone()),
+            right: Box::new(qualified_in_expr),
         };
 
         // Combine with existing WHERE clause using AND
@@ -70,6 +81,82 @@ pub(super) fn rewrite_in_to_exists(
 
     // Create EXISTS expression
     Expression::Exists { subquery: Box::new(exists_subquery), negated }
+}
+
+/// Qualify unqualified column references in an expression with an outer table name.
+///
+/// This is needed when moving an expression from an outer query context into a subquery.
+/// Without qualification, unqualified column refs would resolve to the subquery's tables
+/// instead of the outer query's tables (issue #4880).
+///
+/// # Arguments
+/// * `expr` - The expression to qualify
+/// * `outer_tables` - List of outer table names/aliases to use for qualification
+///
+/// # Returns
+/// A new expression with unqualified column refs qualified using the first outer table
+fn qualify_outer_column_refs(expr: &Expression, outer_tables: &[String]) -> Expression {
+    // If no outer tables available, return expression unchanged
+    // This shouldn't happen in practice for correlated IN subqueries
+    let outer_table = match outer_tables.first() {
+        Some(t) => t,
+        None => return expr.clone(),
+    };
+
+    match expr {
+        Expression::ColumnRef(col_id) => {
+            // Only qualify if the column reference is unqualified (no table name)
+            if col_id.table_canonical().is_none() {
+                // Create a new qualified column identifier using the outer table
+                // Use display form for column name to preserve user's casing
+                let qualified_col = ColumnIdentifier::qualified(
+                    outer_table,                  // table
+                    false,                        // table_quoted (outer tables from FROM are unquoted)
+                    col_id.column_display(),      // column
+                    false,                        // column_quoted (assume unquoted for simplicity)
+                );
+                Expression::ColumnRef(qualified_col)
+            } else {
+                // Already qualified, return unchanged
+                expr.clone()
+            }
+        }
+
+        // Recursively qualify nested expressions
+        Expression::BinaryOp { op, left, right } => Expression::BinaryOp {
+            op: *op,
+            left: Box::new(qualify_outer_column_refs(left, outer_tables)),
+            right: Box::new(qualify_outer_column_refs(right, outer_tables)),
+        },
+
+        Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
+            op: *op,
+            expr: Box::new(qualify_outer_column_refs(inner, outer_tables)),
+        },
+
+        Expression::IsNull { expr: inner, negated } => Expression::IsNull {
+            expr: Box::new(qualify_outer_column_refs(inner, outer_tables)),
+            negated: *negated,
+        },
+
+        Expression::Between { expr: inner, low, high, negated, symmetric } => Expression::Between {
+            expr: Box::new(qualify_outer_column_refs(inner, outer_tables)),
+            low: Box::new(qualify_outer_column_refs(low, outer_tables)),
+            high: Box::new(qualify_outer_column_refs(high, outer_tables)),
+            negated: *negated,
+            symmetric: *symmetric,
+        },
+
+        Expression::Cast { expr: inner, data_type } => Expression::Cast {
+            expr: Box::new(qualify_outer_column_refs(inner, outer_tables)),
+            data_type: data_type.clone(),
+        },
+
+        // For other expression types (including complex ones like CASE, Function, etc.),
+        // return unchanged. These are less common in IN left-side expressions.
+        // If needed, we can add more cases later.
+        _ => expr.clone(),
+    }
 }
 
 /// Attempt to rewrite correlated EXISTS to uncorrelated IN
