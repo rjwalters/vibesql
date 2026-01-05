@@ -91,13 +91,20 @@ pub fn execute_sql(
                         .values
                         .iter()
                         .enumerate()
-                        .map(|(i, val)| ColumnSchema {
-                            name: format!("col{}", i),
-                            data_type: val.get_type(),
-                            nullable: val.is_null(),
-                            default_value: None,
-                            generated_expr: None,
-                            collation: None,
+                        .map(|(i, val)| {
+                            let data_type = val.get_type();
+                            ColumnSchema {
+                                name: format!("col{}", i),
+                                data_type: data_type.clone(),
+                                nullable: val.is_null(),
+                                default_value: None,
+                                generated_expr: None,
+                                is_exact_integer_type: matches!(
+                                    data_type,
+                                    vibesql_types::DataType::Integer
+                                ),
+                                collation: None,
+                            }
                         })
                         .collect();
                     let table_schema = TableSchema::new("result".to_string(), columns);

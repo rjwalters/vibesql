@@ -150,6 +150,24 @@ impl SortKeyComparator {
         }
         Ordering::Equal
     }
+
+    /// Compare two rows by their sort keys, using rowid as tie-breaker
+    ///
+    /// When ORDER BY expressions are equal, SQLite uses rowid as a secondary sort key
+    /// to maintain deterministic ordering. This function implements the same behavior
+    /// (issue #4893).
+    fn compare_with_rowid(
+        &self,
+        a: &RowWithKeys,
+        b: &RowWithKeys,
+    ) -> Ordering {
+        let key_cmp = self.compare(&a.1, &b.1);
+        if key_cmp != Ordering::Equal {
+            return key_cmp;
+        }
+        // Use rowid as tie-breaker for deterministic ordering
+        a.0.row_id.cmp(&b.0.row_id)
+    }
 }
 
 /// Compare two SqlValue instances
@@ -236,9 +254,9 @@ impl ExternalSort {
             return Ok(());
         }
 
-        // Sort the buffer
+        // Sort the buffer with rowid tie-breaking for SQLite-compatible ordering
         let comparator = self.comparator.clone();
-        self.buffer.sort_by(|a, b| comparator.compare(&a.1, &b.1));
+        self.buffer.sort_by(|a, b| comparator.compare_with_rowid(a, b));
 
         // Create spill file
         let temp_dir = self.reservation.temp_directory();
@@ -273,10 +291,10 @@ impl ExternalSort {
     ///
     /// This completes the sort phase and prepares for the merge phase.
     pub fn finish(mut self) -> io::Result<SortedIterator> {
-        // Sort any remaining buffer
+        // Sort any remaining buffer with rowid tie-breaking for SQLite-compatible ordering
         if !self.buffer.is_empty() {
             let comparator = self.comparator.clone();
-            self.buffer.sort_by(|a, b| comparator.compare(&a.1, &b.1));
+            self.buffer.sort_by(|a, b| comparator.compare_with_rowid(a, b));
 
             // Keep in memory if we have no spilled runs
             if self.runs.is_empty() {
@@ -388,7 +406,12 @@ struct MergeEntry {
 
 impl PartialEq for MergeEntry {
     fn eq(&self, other: &Self) -> bool {
-        self.comparator.compare(&self.key, &other.key) == Ordering::Equal
+        // Compare keys first, then use rowid as tie-breaker
+        let key_cmp = self.comparator.compare(&self.key, &other.key);
+        if key_cmp != Ordering::Equal {
+            return false;
+        }
+        self.row.row_id == other.row.row_id
     }
 }
 
@@ -403,7 +426,14 @@ impl PartialOrd for MergeEntry {
 impl Ord for MergeEntry {
     fn cmp(&self, other: &Self) -> Ordering {
         // Reverse for min-heap (BinaryHeap is a max-heap)
-        self.comparator.compare(&other.key, &self.key)
+        // Compare keys first
+        let key_cmp = self.comparator.compare(&other.key, &self.key);
+        if key_cmp != Ordering::Equal {
+            return key_cmp;
+        }
+        // Use rowid as tie-breaker for SQLite-compatible ordering (issue #4893)
+        // Note: reversed because we're in a max-heap (smaller rowid = higher priority)
+        other.row.row_id.cmp(&self.row.row_id)
     }
 }
 
