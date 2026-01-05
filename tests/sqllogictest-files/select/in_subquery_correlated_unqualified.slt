@@ -1,0 +1,62 @@
+# Issue #4880: Column resolution bug in correlated IN subqueries
+# When the left side of IN uses an unqualified column reference (e.g., `b`)
+# instead of a qualified one (e.g., `outside.b`), the IN→EXISTS rewrite
+# incorrectly resolved the column in the subquery context, causing wrong results.
+#
+# Bug: `b IN (SELECT ...)` returned TRUE when `outside.b IN (SELECT ...)` returned FALSE
+
+statement ok
+CREATE TABLE t7(a, b, c NOT NULL)
+
+statement ok
+INSERT INTO t7 VALUES(1, 1, 1)
+
+statement ok
+INSERT INTO t7 VALUES(2, 2, 2)
+
+statement ok
+INSERT INTO t7 VALUES(3, 3, 3)
+
+statement ok
+INSERT INTO t7 VALUES(NULL, 4, 4)
+
+statement ok
+INSERT INTO t7 VALUES(NULL, 5, 5)
+
+# Test 1: Non-correlated subquery - baseline test
+query II rowsort
+SELECT b, b IN (SELECT a FROM t7 WHERE b = 3) FROM t7 WHERE b = 1
+----
+1	0
+
+# Test 2: Correlated subquery with qualified column ref on left side
+# outside.b = 1, subquery returns [2, 3], so 1 NOT IN (2, 3) = FALSE (0)
+query II rowsort
+SELECT outside.b, outside.b IN (SELECT inside.a FROM t7 AS inside WHERE inside.b BETWEEN outside.b+1 AND outside.b+2) FROM t7 AS outside WHERE outside.b = 1
+----
+1	0
+
+# Test 3: Correlated subquery with UNqualified column ref on left side
+# This is the key test for issue #4880 - unqualified `b` must resolve to outer table
+# Previously returned 1 (TRUE), should return 0 (FALSE) - same as Test 2
+query II rowsort
+SELECT b, b IN (SELECT inside.a FROM t7 AS inside WHERE inside.b BETWEEN outside.b+1 AND outside.b+2) FROM t7 AS outside WHERE b = 1
+----
+1	0
+
+# Test 4: Verify qualified and unqualified return same result for all rows
+# Both columns should have identical values - if they differ, there's a column resolution bug
+query III rowsort
+SELECT b,
+       b IN (SELECT inside.a FROM t7 AS inside WHERE inside.b BETWEEN outside.b+1 AND outside.b+2) AS unqualified_in,
+       outside.b IN (SELECT inside.a FROM t7 AS inside WHERE inside.b BETWEEN outside.b+1 AND outside.b+2) AS qualified_in
+FROM t7 AS outside
+----
+1	0	0
+2	0	0
+3	0	0
+4	0	0
+5	0	0
+
+statement ok
+DROP TABLE t7
