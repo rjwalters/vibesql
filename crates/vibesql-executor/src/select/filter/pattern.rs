@@ -145,6 +145,13 @@ impl PredicatePattern {
 
             // Pattern: column op date_literal
             if let Expression::ColumnRef(col_id) = left.as_ref() {
+                // Issue #4890: For unqualified references to USING columns in FULL/RIGHT OUTER JOINs,
+                // we must NOT use specialized evaluators because they bypass COALESCE semantics.
+                if col_id.table_canonical().is_none() {
+                    if schema.get_using_coalesce_pair(col_id.column_canonical()).is_some() {
+                        return None; // Fall back to general evaluator with COALESCE support
+                    }
+                }
                 let col_idx =
                     schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
                 if let Expression::Literal(SqlValue::Date(date)) = right.as_ref() {
@@ -155,6 +162,13 @@ impl PredicatePattern {
             // Pattern: date_literal op column (need to reverse operator)
             if let Expression::Literal(SqlValue::Date(date)) = left.as_ref() {
                 if let Expression::ColumnRef(col_id) = right.as_ref() {
+                    // Issue #4890: For unqualified references to USING columns in FULL/RIGHT OUTER JOINs,
+                    // we must NOT use specialized evaluators because they bypass COALESCE semantics.
+                    if col_id.table_canonical().is_none() {
+                        if schema.get_using_coalesce_pair(col_id.column_canonical()).is_some() {
+                            return None; // Fall back to general evaluator with COALESCE support
+                        }
+                    }
                     let col_idx = schema
                         .get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
                     let reversed_op = match comp_op {
@@ -185,6 +199,14 @@ impl PredicatePattern {
             let col_idx =
                 schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
 
+            // Issue #4890: For unqualified references to USING columns in FULL/RIGHT OUTER JOINs,
+            // we must NOT use specialized evaluators because they bypass COALESCE semantics.
+            if col_id.table_canonical().is_none() {
+                if schema.get_using_coalesce_pair(col_id.column_canonical()).is_some() {
+                    return None; // Fall back to general evaluator with COALESCE support
+                }
+            }
+
             // Extract numeric bounds
             let min_val = Self::extract_f64_literal(low)?;
             let max_val = Self::extract_f64_literal(high)?;
@@ -206,6 +228,15 @@ impl PredicatePattern {
         if let Expression::ColumnRef(col_id) = left {
             let col_idx =
                 schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
+
+            // Issue #4890: For unqualified references to USING columns in FULL/RIGHT OUTER JOINs,
+            // we must NOT use specialized evaluators because they bypass COALESCE semantics.
+            // The column value should be COALESCE(left.col, right.col), not just the raw value.
+            if col_id.table_canonical().is_none() {
+                if schema.get_using_coalesce_pair(col_id.column_canonical()).is_some() {
+                    return None; // Fall back to general evaluator with COALESCE support
+                }
+            }
 
             // Try to extract integer constant FIRST (before f64)
             // This ensures Integer literals are detected as IntegerComparison
@@ -233,6 +264,14 @@ impl PredicatePattern {
         if let Expression::ColumnRef(col_id) = right {
             let col_idx =
                 schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
+
+            // Issue #4890: For unqualified references to USING columns in FULL/RIGHT OUTER JOINs,
+            // we must NOT use specialized evaluators because they bypass COALESCE semantics.
+            if col_id.table_canonical().is_none() {
+                if schema.get_using_coalesce_pair(col_id.column_canonical()).is_some() {
+                    return None; // Fall back to general evaluator with COALESCE support
+                }
+            }
 
             // Reverse the operator since constant is on left
             let reversed_op = match op {
