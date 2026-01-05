@@ -585,27 +585,22 @@ impl CombinedExpressionEvaluator<'_> {
 
                 // Try to resolve in inner schema first
                 if let Some(col_index) = self.get_column_index_cached(table, column) {
-                    // Issue #4783: USING column semantics differ from SQLite in OUTER JOINs
+                    // Issue #4783, #4903: USING column semantics differ from SQLite in OUTER JOINs
                     // For unqualified references to USING columns in RIGHT/FULL OUTER JOINs,
-                    // apply COALESCE(left.col, right.col) semantics.
+                    // apply N-way COALESCE semantics: return first non-NULL from chain.
                     // Qualified references (t1.col) should NOT use coalesce - they return the raw value.
                     if table.is_none() {
-                        if let Some((left_idx, right_idx)) =
-                            self.schema.get_using_coalesce_pair(column)
-                        {
-                            // Get left value (at col_index, which equals left_idx for USING columns)
-                            let left_val = row
-                                .get(left_idx)
-                                .cloned()
-                                .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: left_idx })?;
-
-                            // Apply COALESCE: if left is NULL, use right value
-                            if left_val == vibesql_types::SqlValue::Null {
-                                return row.get(right_idx).cloned().ok_or(
-                                    ExecutorError::ColumnIndexOutOfBounds { index: right_idx },
-                                );
+                        if let Some(indices) = self.schema.get_using_coalesce_indices(column) {
+                            // Apply N-way COALESCE: return first non-NULL value from chain
+                            for &idx in indices {
+                                if let Some(val) = row.get(idx) {
+                                    if *val != vibesql_types::SqlValue::Null {
+                                        return Ok(val.clone());
+                                    }
+                                }
                             }
-                            return Ok(left_val);
+                            // All values are NULL, return NULL
+                            return Ok(vibesql_types::SqlValue::Null);
                         }
                     }
 

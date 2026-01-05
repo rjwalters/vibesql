@@ -129,11 +129,13 @@ pub struct CombinedSchema {
     /// Stored as lowercase for case-insensitive matching.
     pub joined_columns: HashSet<String>,
     /// For USING columns in RIGHT/FULL OUTER JOINs, maps the unqualified column name
-    /// (lowercase) to (left_col_index, right_col_index) for COALESCE resolution.
+    /// (lowercase) to a list of column indices for N-way COALESCE resolution.
     /// When an unqualified reference is made to a USING column, we apply COALESCE
-    /// semantics: if the left value is NULL, use the right value.
-    /// Issue #4783: USING column semantics differ from SQLite in OUTER JOINs
-    pub using_coalesce_pairs: HashMap<String, (usize, usize)>,
+    /// semantics: return the first non-NULL value from the list of columns.
+    /// This supports chained joins like `t1 NATURAL FULL JOIN t2 NATURAL FULL JOIN t3`
+    /// where we need COALESCE(t1.id, t2.id, t3.id).
+    /// Issue #4783, #4903: USING column semantics differ from SQLite in OUTER JOINs
+    pub using_coalesce_indices: HashMap<String, Vec<usize>>,
     /// Column replacement map for RIGHT/FULL OUTER NATURAL JOINs in SELECT * expansion.
     /// Maps hidden_column_index -> replacement_column_index.
     /// When expanding SELECT *, if a column is hidden but has a replacement, output
@@ -157,7 +159,7 @@ impl CombinedSchema {
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
-            using_coalesce_pairs: HashMap::new(),
+            using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
         }
     }
@@ -178,7 +180,7 @@ impl CombinedSchema {
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
-            using_coalesce_pairs: HashMap::new(),
+            using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
         }
     }
@@ -219,7 +221,7 @@ impl CombinedSchema {
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
-            using_coalesce_pairs: HashMap::new(),
+            using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
         }
     }
@@ -263,7 +265,7 @@ impl CombinedSchema {
             outer_schema: left.outer_schema,
             duplicate_aliases,
             joined_columns: left.joined_columns,
-            using_coalesce_pairs: left.using_coalesce_pairs,
+            using_coalesce_indices: left.using_coalesce_indices,
             column_replacement_map: left.column_replacement_map,
         }
     }
@@ -324,10 +326,15 @@ impl CombinedSchema {
         let mut joined_columns = left.joined_columns;
         joined_columns.extend(right.joined_columns);
 
-        // Merge using_coalesce_pairs from both sides (adjusting right side indices)
-        let mut using_coalesce_pairs = left.using_coalesce_pairs;
-        for (col_name, (left_idx, right_idx)) in right.using_coalesce_pairs {
-            using_coalesce_pairs.insert(col_name, (left_total + left_idx, left_total + right_idx));
+        // Merge using_coalesce_indices from both sides (adjusting right side indices)
+        // For N-way coalescing, we extend existing Vec entries rather than overwriting
+        let mut using_coalesce_indices = left.using_coalesce_indices;
+        for (col_name, indices) in right.using_coalesce_indices {
+            let adjusted_indices: Vec<usize> = indices.iter().map(|idx| left_total + idx).collect();
+            using_coalesce_indices
+                .entry(col_name)
+                .or_insert_with(Vec::new)
+                .extend(adjusted_indices);
         }
 
         // Merge column_replacement_map from both sides (adjusting right side indices)
@@ -343,7 +350,7 @@ impl CombinedSchema {
             outer_schema: left.outer_schema,
             duplicate_aliases,
             joined_columns,
-            using_coalesce_pairs,
+            using_coalesce_indices,
             column_replacement_map,
         }
     }
@@ -668,20 +675,33 @@ impl CombinedSchema {
     /// Add a USING column coalesce pair for RIGHT/FULL OUTER JOINs.
     ///
     /// For USING columns in OUTER JOINs, unqualified references should use
-    /// COALESCE(left.col, right.col) semantics. This method records the
-    /// column indices for later coalesce evaluation.
+    /// COALESCE semantics. This method records a column index for later coalesce evaluation.
+    /// For chained joins, each call extends the existing Vec with new indices.
     ///
     /// # Arguments
     /// * `column` - The column name (will be normalized to lowercase)
-    /// * `left_idx` - Index of the left-side column
-    /// * `right_idx` - Index of the right-side column
+    /// * `left_idx` - Index of the left-side column (first in the chain)
+    /// * `right_idx` - Index of the right-side column (added to the chain)
     ///
-    /// Issue #4783: USING column semantics differ from SQLite in OUTER JOINs
+    /// Issue #4783, #4903: USING column semantics in OUTER JOINs with N-way coalescing
     pub fn add_using_coalesce_pair(&mut self, column: &str, left_idx: usize, right_idx: usize) {
-        self.using_coalesce_pairs.insert(column.to_lowercase(), (left_idx, right_idx));
+        let indices = self
+            .using_coalesce_indices
+            .entry(column.to_lowercase())
+            .or_insert_with(Vec::new);
+
+        // Only add left_idx if Vec is empty (first time for this column)
+        if indices.is_empty() {
+            indices.push(left_idx);
+        }
+        // Always add right_idx if not already present
+        if !indices.contains(&right_idx) {
+            indices.push(right_idx);
+        }
     }
 
     /// Get the coalesce pair for a USING column, if any.
+    /// For backwards compatibility, returns the first two indices as a pair.
     ///
     /// Returns Some((left_idx, right_idx)) if this column needs COALESCE
     /// semantics for OUTER JOIN USING, None otherwise.
@@ -689,7 +709,18 @@ impl CombinedSchema {
     /// # Arguments
     /// * `column` - The column name (will be normalized to lowercase)
     pub fn get_using_coalesce_pair(&self, column: &str) -> Option<(usize, usize)> {
-        self.using_coalesce_pairs.get(&column.to_lowercase()).copied()
+        self.using_coalesce_indices
+            .get(&column.to_lowercase())
+            .filter(|indices| indices.len() >= 2)
+            .map(|indices| (indices[0], indices[1]))
+    }
+
+    /// Get all coalesce indices for a USING column (for N-way COALESCE).
+    ///
+    /// Returns Some(&Vec<usize>) containing all column indices that should be
+    /// coalesced for this column name.
+    pub fn get_using_coalesce_indices(&self, column: &str) -> Option<&Vec<usize>> {
+        self.using_coalesce_indices.get(&column.to_lowercase())
     }
 
     /// Add a column replacement for SELECT * expansion (for RIGHT/FULL OUTER JOINs).
@@ -705,23 +736,64 @@ impl CombinedSchema {
         self.column_replacement_map.get(&hidden_idx).copied()
     }
 
-    /// Get the right-side column index for a left-side USING column (for COALESCE in SELECT *).
+    /// Get all indices for N-way COALESCE for a left-side USING column (for SELECT *).
     ///
     /// In FULL OUTER JOIN with USING clause, when expanding SELECT *, we need to apply
-    /// COALESCE(left_val, right_val) for USING columns. This method returns the right-side
-    /// index for a given left-side USING column index.
+    /// N-way COALESCE for USING columns. This method returns all indices except the first
+    /// (which is the "left" index) for coalescing.
+    ///
+    /// Returns Some(&[indices]) if the given index is a left-side USING column, None otherwise.
+    pub fn get_using_coalesce_rest_for_left(&self, left_idx: usize) -> Option<&[usize]> {
+        for indices in self.using_coalesce_indices.values() {
+            if !indices.is_empty() && indices[0] == left_idx && indices.len() > 1 {
+                return Some(&indices[1..]);
+            }
+        }
+        None
+    }
+
+    /// Get the right-side column index for a left-side USING column (for COALESCE in SELECT *).
+    /// For backwards compatibility - returns only the second index (first "right" index).
     ///
     /// Returns Some(right_idx) if the given index is a left-side USING column, None otherwise.
     pub fn get_using_coalesce_right_for_left(&self, left_idx: usize) -> Option<usize> {
-        self.using_coalesce_pairs.values().find(|(l, _)| *l == left_idx).map(|(_, r)| *r)
+        for indices in self.using_coalesce_indices.values() {
+            if !indices.is_empty() && indices[0] == left_idx && indices.len() > 1 {
+                return Some(indices[1]);
+            }
+        }
+        None
     }
 
-    /// Check if the given column index is the right-side of a USING coalesce pair.
+    /// Check if the given column index is a right-side of a USING coalesce chain.
     ///
     /// These columns should be skipped in SELECT * output because they're
-    /// represented by the left-side column with COALESCE applied.
-    pub fn is_using_coalesce_right_side(&self, right_idx: usize) -> bool {
-        self.using_coalesce_pairs.values().any(|(_, r)| *r == right_idx)
+    /// represented by the first column with COALESCE applied.
+    pub fn is_using_coalesce_right_side(&self, idx: usize) -> bool {
+        // Check if this index appears in any position other than the first
+        for indices in self.using_coalesce_indices.values() {
+            if indices.len() > 1 && indices[1..].contains(&idx) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Get all coalesce indices for a column that's anywhere in the chain.
+    ///
+    /// Unlike `get_using_coalesce_rest_for_left` which only works if the given index
+    /// is the FIRST in the chain, this method returns all indices in the chain if
+    /// the given index is found ANYWHERE in the chain. This is needed for N-way
+    /// coalescing where the visible column might be in the middle of the chain.
+    ///
+    /// Returns Some(&Vec<usize>) if the given index is part of a coalesce chain.
+    pub fn get_all_coalesce_indices_for_column(&self, idx: usize) -> Option<&Vec<usize>> {
+        for indices in self.using_coalesce_indices.values() {
+            if indices.contains(&idx) && indices.len() > 1 {
+                return Some(indices);
+            }
+        }
+        None
     }
 }
 
@@ -736,7 +808,7 @@ pub struct SchemaBuilder {
     hidden_columns: HashSet<usize>,
     duplicate_aliases: HashSet<TableIdentifier>,
     joined_columns: HashSet<String>,
-    using_coalesce_pairs: HashMap<String, (usize, usize)>,
+    using_coalesce_indices: HashMap<String, Vec<usize>>,
     column_replacement_map: HashMap<usize, usize>,
 }
 
@@ -749,7 +821,7 @@ impl SchemaBuilder {
             hidden_columns: HashSet::new(),
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
-            using_coalesce_pairs: HashMap::new(),
+            using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
         }
     }
@@ -765,7 +837,7 @@ impl SchemaBuilder {
             hidden_columns: schema.hidden_columns,
             duplicate_aliases: schema.duplicate_aliases,
             joined_columns: schema.joined_columns,
-            using_coalesce_pairs: schema.using_coalesce_pairs,
+            using_coalesce_indices: schema.using_coalesce_indices,
             column_replacement_map: schema.column_replacement_map,
         }
     }
@@ -804,7 +876,7 @@ impl SchemaBuilder {
             outer_schema: None,
             duplicate_aliases: self.duplicate_aliases,
             joined_columns: self.joined_columns,
-            using_coalesce_pairs: self.using_coalesce_pairs,
+            using_coalesce_indices: self.using_coalesce_indices,
             column_replacement_map: self.column_replacement_map,
         }
     }

@@ -133,7 +133,7 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
-            using_coalesce_pairs: HashMap::new(),
+            using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
         };
 

@@ -126,40 +126,52 @@ pub(crate) fn project_row_combined(
                 // Iterate through reordered columns, handling hidden columns with replacements
                 for idx in column_indices {
                     if schema.is_column_hidden(idx) {
-                        // Check if this hidden column has a replacement (for RIGHT/FULL OUTER
-                        // JOINs) The replacement maintains column ordering
-                        // from left table while using right values
-                        if let Some(replacement_idx) = schema.get_column_replacement(idx) {
+                        // For hidden USING columns in OUTER JOINs, check for coalesce chain first
+                        // This is needed for 3+ table FULL JOINs where the replacement always
+                        // points to the rightmost column, but we need N-way COALESCE semantics
+                        // to find the first non-NULL from ANY table in the chain.
+                        if let Some(all_indices) = schema.get_all_coalesce_indices_for_column(idx) {
+                            // Apply N-way COALESCE: return first non-NULL from entire chain
+                            let mut found = false;
+                            for &chain_idx in all_indices {
+                                if chain_idx < row.values.len() {
+                                    let val = &row.values[chain_idx];
+                                    if *val != vibesql_types::SqlValue::Null {
+                                        values.push(val.clone());
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if !found {
+                                values.push(vibesql_types::SqlValue::Null);
+                            }
+                        } else if let Some(replacement_idx) = schema.get_column_replacement(idx) {
+                            // Simple replacement without coalesce chain (2-table case)
                             if replacement_idx < row.values.len() {
                                 values.push(row.values[replacement_idx].clone());
                             }
-                        } else if let Some(right_idx) =
-                            schema.get_using_coalesce_right_for_left(idx)
-                        {
-                            // This is a hidden USING column in RIGHT/FULL OUTER JOIN
-                            // Apply COALESCE(left_val, right_val) semantics
-                            let left_val = &row.values[idx];
-                            if *left_val == vibesql_types::SqlValue::Null
-                                && right_idx < row.values.len()
-                            {
-                                values.push(row.values[right_idx].clone());
-                            } else {
-                                values.push(left_val.clone());
-                            }
                         }
-                        // If neither replacement nor coalesce pair, skip this hidden column
+                        // If neither coalesce chain nor replacement, skip this hidden column
                     } else {
-                        // Check if this is a left-side USING column that needs COALESCE
-                        // In FULL OUTER JOIN with USING, the visible left column should show
-                        // COALESCE(left_val, right_val) to handle unmatched rows from either side
-                        if let Some(right_idx) = schema.get_using_coalesce_right_for_left(idx) {
-                            let left_val = &row.values[idx];
-                            if *left_val == vibesql_types::SqlValue::Null
-                                && right_idx < row.values.len()
-                            {
-                                values.push(row.values[right_idx].clone());
-                            } else {
-                                values.push(left_val.clone());
+                        // Check if this column is part of a USING coalesce chain
+                        // In FULL OUTER JOIN with USING, the visible column should show
+                        // N-way COALESCE to handle unmatched rows from any side in the chain
+                        if let Some(all_indices) = schema.get_all_coalesce_indices_for_column(idx) {
+                            // Apply N-way COALESCE: return first non-NULL from entire chain
+                            let mut found = false;
+                            for &chain_idx in all_indices {
+                                if chain_idx < row.values.len() {
+                                    let val = &row.values[chain_idx];
+                                    if *val != vibesql_types::SqlValue::Null {
+                                        values.push(val.clone());
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if !found {
+                                values.push(vibesql_types::SqlValue::Null);
                             }
                         } else {
                             values.push(row.values[idx].clone());
