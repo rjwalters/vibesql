@@ -29,11 +29,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    errors::ExecutorError,
-    optimizer::PredicatePlan,
-    schema::CombinedSchema,
-    select::cte::CteResult,
-    timeout::TimeoutContext,
+    errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSchema,
+    select::cte::CteResult, timeout::TimeoutContext,
 };
 
 // Submodules
@@ -531,12 +528,13 @@ fn generate_natural_join_condition(
     // columns when there are multiple matches. This ensures the join condition uses
     // the correct column value.
     //
-    // Issue #4845: For chained NATURAL RIGHT JOINs (e.g., t4 NATURAL RIGHT JOIN t5 NATURAL RIGHT JOIN t6),
-    // when all matching columns are hidden, we must prefer REPLACEMENT TARGETS over replacement sources.
-    // The replacement target contains the actual value that should be used in the join condition.
-    // Example: After `t4 NATURAL RIGHT JOIN t5`, column_replacement_map has {0 -> 2}, meaning
-    // t5.id (idx 2) holds the value. When the second join is processed, we must use idx 2 (the target)
-    // rather than idx 0 (the source which is NULL for unmatched rows).
+    // Issue #4845: For chained NATURAL RIGHT JOINs (e.g., t4 NATURAL RIGHT JOIN t5 NATURAL RIGHT
+    // JOIN t6), when all matching columns are hidden, we must prefer REPLACEMENT TARGETS over
+    // replacement sources. The replacement target contains the actual value that should be used
+    // in the join condition. Example: After `t4 NATURAL RIGHT JOIN t5`, column_replacement_map
+    // has {0 -> 2}, meaning t5.id (idx 2) holds the value. When the second join is processed,
+    // we must use idx 2 (the target) rather than idx 0 (the source which is NULL for unmatched
+    // rows).
     let replacement_targets: std::collections::HashSet<usize> =
         left_schema.column_replacement_map.values().copied().collect();
 
@@ -625,6 +623,18 @@ fn generate_natural_join_condition(
         return Ok(None);
     }
 
+    // Issue #4903: Build index-to-column mapping for generating COALESCE expressions
+    // in chained NATURAL FULL JOINs. When the left side already has a coalesce chain
+    // for a column (e.g., from `t4 NATURAL FULL JOIN t6`), we need to use
+    // COALESCE(t4.id, t6.id) in the join condition instead of just t4.id.
+    let mut left_idx_to_col: HashMap<usize, (String, String)> = HashMap::new();
+    for (table_name, (start_idx, table_schema)) in &left_schema.table_schemas {
+        for (col_offset, col) in table_schema.columns.iter().enumerate() {
+            let absolute_idx = start_idx + col_offset;
+            left_idx_to_col.insert(absolute_idx, (table_name.to_string(), col.name.clone()));
+        }
+    }
+
     // Build the join condition as an AND chain of equalities
     let mut condition: Option<vibesql_ast::Expression> = None;
     for (left_table, left_col, right_table, right_col, right_table_start, collation) in
@@ -653,10 +663,65 @@ fn generate_natural_join_condition(
             right_col_expr
         };
 
+        // Issue #4903: Build left expression with COALESCE if this column has a coalesce chain
+        // For chained NATURAL FULL JOINs like `t4 NATURAL FULL JOIN t6 NATURAL FULL JOIN t5`,
+        // the join condition for the second join must be:
+        //   COALESCE(t4.id, t6.id) = t5.id
+        // instead of just:
+        //   t4.id = t5.id
+        // This ensures rows are properly matched even when some columns in the chain are NULL.
+        let left_col_lower = left_col.to_lowercase();
+        let left_expr: vibesql_ast::Expression = if let Some(coalesce_indices) =
+            left_schema.using_coalesce_indices.get(&left_col_lower)
+        {
+            if coalesce_indices.len() > 1 {
+                // Build COALESCE function with all indexed columns from the chain
+                let coalesce_args: Vec<vibesql_ast::Expression> = coalesce_indices
+                    .iter()
+                    .filter_map(|&idx| {
+                        left_idx_to_col.get(&idx).map(|(table, col)| {
+                            vibesql_ast::Expression::ColumnRef(
+                                vibesql_ast::ColumnIdentifier::qualified(table, false, col, false),
+                            )
+                        })
+                    })
+                    .collect();
+                if coalesce_args.len() > 1 {
+                    vibesql_ast::Expression::Function {
+                        name: "COALESCE".into(),
+                        args: coalesce_args,
+                        character_unit: None,
+                    }
+                } else {
+                    // Fallback to simple reference if we couldn't build COALESCE args
+                    vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                        &left_table,
+                        false,
+                        &left_col,
+                        false,
+                    ))
+                }
+            } else {
+                // Single index, no COALESCE needed
+                vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                    &left_table,
+                    false,
+                    &left_col,
+                    false,
+                ))
+            }
+        } else {
+            // No coalesce chain, use simple reference
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                &left_table,
+                false,
+                &left_col,
+                false,
+            ))
+        };
+
         let equality = vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(
-                vibesql_ast::ColumnIdentifier::qualified(&left_table, false, &left_col, false),
-            )),
+            left: Box::new(left_expr),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(right_col_with_collate),
         };
@@ -700,6 +765,17 @@ fn generate_using_join_condition(
     let right_table_names: std::collections::HashSet<_> =
         right_schema.table_schemas.keys().map(|k| k.canonical().to_lowercase()).collect();
     let is_self_join = !left_table_names.is_disjoint(&right_table_names);
+
+    // Issue #4903: Build index-to-column mapping for generating COALESCE expressions
+    // in chained USING JOINs. When the left side already has a coalesce chain
+    // for a column, we need to use COALESCE in the join condition.
+    let mut left_idx_to_col: HashMap<usize, (String, String)> = HashMap::new();
+    for (table_name, (start_idx, table_schema)) in &left_schema.table_schemas {
+        for (col_offset, col) in table_schema.columns.iter().enumerate() {
+            let absolute_idx = start_idx + col_offset;
+            left_idx_to_col.insert(absolute_idx, (table_name.to_string(), col.name.clone()));
+        }
+    }
 
     for col_name in columns {
         let col_lower = col_name.to_lowercase();
@@ -859,15 +935,63 @@ fn generate_using_join_condition(
             right_col_expr
         };
 
-        let equality = vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef(
-                vibesql_ast::ColumnIdentifier::qualified(
+        // Issue #4903: Build left expression with COALESCE if this column has a coalesce chain
+        // For chained USING JOINs like `t4 FULL JOIN t6 USING(id) FULL JOIN t5 USING(id)`,
+        // the join condition for the second join must be:
+        //   COALESCE(t4.id, t6.id) = t5.id
+        // instead of just:
+        //   t4.id = t5.id
+        let left_expr: vibesql_ast::Expression = if let Some(coalesce_indices) =
+            left_schema.using_coalesce_indices.get(&col_lower)
+        {
+            if coalesce_indices.len() > 1 {
+                // Build COALESCE function with all indexed columns from the chain
+                let coalesce_args: Vec<vibesql_ast::Expression> = coalesce_indices
+                    .iter()
+                    .filter_map(|&idx| {
+                        left_idx_to_col.get(&idx).map(|(table, col)| {
+                            vibesql_ast::Expression::ColumnRef(
+                                vibesql_ast::ColumnIdentifier::qualified(table, false, col, false),
+                            )
+                        })
+                    })
+                    .collect();
+                if coalesce_args.len() > 1 {
+                    vibesql_ast::Expression::Function {
+                        name: "COALESCE".into(),
+                        args: coalesce_args,
+                        character_unit: None,
+                    }
+                } else {
+                    // Fallback to simple reference
+                    vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                        &left_col.0.to_string(),
+                        false,
+                        &left_col.1,
+                        false,
+                    ))
+                }
+            } else {
+                // Single index, no COALESCE needed
+                vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
                     &left_col.0.to_string(),
                     false,
                     &left_col.1,
                     false,
-                ),
-            )),
+                ))
+            }
+        } else {
+            // No coalesce chain, use simple reference
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                &left_col.0.to_string(),
+                false,
+                &left_col.1,
+                false,
+            ))
+        };
+
+        let equality = vibesql_ast::Expression::BinaryOp {
+            left: Box::new(left_expr),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(right_col_with_collate),
         };
