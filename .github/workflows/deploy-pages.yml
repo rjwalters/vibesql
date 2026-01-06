@@ -91,7 +91,7 @@ jobs:
         if: inputs.rebuild-web-demo || github.event_name == 'workflow_dispatch'
         working-directory: web-demo
         env:
-          VITE_BASE_PATH: '/vibesql/'  # GitHub Pages requires subdirectory path
+          VITE_BASE_PATH: '/'  # Cloudflare Pages serves from root
         run: |
           # Use --ignore-workspace to prevent pnpm from using root workspace
           # web-demo has its own package.json and pnpm-lock.yaml
@@ -134,9 +134,9 @@ jobs:
 
       - name: Deployment summary
         run: |
-          echo "## 🚀 Deployed to GitHub Pages" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Deployed to Cloudflare Pages" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**URL:** https://rjwalters.github.io/vibesql/" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** https://vibesql.org/" >> $GITHUB_STEP_SUMMARY
           echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Benchmark Data" >> $GITHUB_STEP_SUMMARY
