@@ -12,7 +12,7 @@ import { initializeApp, setupThemeSync } from './app/initialization'
 import { createExecutionHandler } from './app/query-executor'
 import { initLocale, SUPPORTED_LOCALES } from './locale'
 import { initI18n, setI18nLocale, updateDOM, t } from './i18n'
-import { setBuildTimestamp } from './utils/build-timestamp'
+import { FooterComponent } from './components/Footer'
 
 async function bootstrap(): Promise<void> {
   // Initialize locale and i18n early so loading messages can be translated
@@ -154,8 +154,8 @@ async function bootstrap(): Promise<void> {
     // Initialize SQL:1999 Showcase navigation
     initShowcase()
 
-    // Set build timestamp in footer
-    setBuildTimestamp()
+    // Initialize footer with build timestamp
+    new FooterComponent(true)
 
     // Final UI setup complete
     progress.updateStep('ui', 95, 'loading')

@@ -2,6 +2,7 @@ import './styles/main.css'
 import { initTheme } from './theme'
 import { initLocale } from './locale'
 import { NavigationComponent } from './components/Navigation'
+import { FooterComponent } from './components/Footer'
 import { ConformanceReportComponent } from './components/ConformanceReport'
 import { initI18n, setI18nLocale, updateDOM } from './i18n'
 
@@ -28,6 +29,9 @@ function bootstrap(): void {
 
   // Initialize navigation component with theme and locale
   new NavigationComponent('conformance', theme, locale)
+
+  // Initialize footer with build timestamp
+  new FooterComponent(true)
 
   // Initialize conformance report component
   new ConformanceReportComponent()

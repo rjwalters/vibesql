@@ -9,6 +9,7 @@ import './styles/main.css';
 import { initTheme } from './theme';
 import { initLocale } from './locale';
 import { NavigationComponent } from './components/Navigation';
+import { FooterComponent } from './components/Footer';
 import { formatTime, formatBytes, formatMemory, formatTps } from './utils/measurement';
 import { initI18n, setI18nLocale, updateDOM, t } from './i18n';
 import { commitLink } from './components/CommitLink';
@@ -2959,6 +2960,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize navigation component with theme and locale
   new NavigationComponent('benchmarks', theme, locale);
+
+  // Initialize footer with build timestamp
+  new FooterComponent(true);
 
   // Initialize tabs
   initTabs();

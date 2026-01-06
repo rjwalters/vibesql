@@ -9,6 +9,7 @@ import './styles/main.css';
 import { initTheme } from './theme';
 import { initLocale } from './locale';
 import { NavigationComponent } from './components/Navigation';
+import { FooterComponent } from './components/Footer';
 import { initI18n, updateDOM } from './i18n';
 import { setCommitLink } from './components/CommitLink';
 
@@ -375,6 +376,9 @@ async function init(): Promise<void> {
 
   // Initialize navigation
   new NavigationComponent('trends', theme, locale);
+
+  // Initialize footer with build timestamp
+  new FooterComponent(true);
 
   // Load and render trend data
   const data = await loadTrendData();
