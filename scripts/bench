@@ -126,6 +126,72 @@ def clean_benchmark_crates():
     print("  ✓ Benchmark crates cleaned")
 
 
+def build_bench_and_get_binary(package: str, bench_name: str, features: Optional[List[str]] = None) -> Optional[str]:
+    """Build a benchmark and return the path to the compiled binary.
+
+    This function uses Cargo's --message-format=json to reliably get the
+    exact binary path, avoiding issues with stale binaries from different
+    feature configurations having different hashes.
+
+    Args:
+        package: The Cargo package name (e.g., "vibesql-server")
+        bench_name: The benchmark name (e.g., "sysbench_server")
+        features: Optional list of features to enable (e.g., ["mysql"])
+
+    Returns:
+        Path to the benchmark binary, or None if build failed
+    """
+    build_cmd = [
+        "cargo", "bench",
+        "--package", package,
+        "--bench", bench_name,
+        "--no-run",
+        "--message-format=json"
+    ]
+    if features:
+        build_cmd.extend(["--features", ",".join(features)])
+
+    result = subprocess.run(
+        build_cmd,
+        cwd=Path(__file__).parent.parent,
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode != 0:
+        # Print stderr for debugging
+        print(result.stderr)
+        return None
+
+    # Parse JSON output to find the benchmark binary
+    # Cargo emits one JSON object per line
+    import json
+    for line in result.stdout.strip().split('\n'):
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+            # Look for compiler-artifact messages for our benchmark
+            if msg.get("reason") == "compiler-artifact":
+                target = msg.get("target", {})
+                if target.get("name") == bench_name and target.get("kind") == ["bench"]:
+                    executable = msg.get("executable")
+                    if executable:
+                        return executable
+        except json.JSONDecodeError:
+            continue
+
+    # Fallback: parse the text output from stderr for the "Executable" line
+    # Format: "  Executable benches/foo.rs (target/release/deps/foo-hash)"
+    import re
+    for line in result.stderr.split('\n'):
+        match = re.search(rf'Executable\s+.*{bench_name}.*\((.*)\)', line)
+        if match:
+            return match.group(1)
+
+    return None
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create and configure argument parser."""
     parser = argparse.ArgumentParser(
@@ -805,20 +871,16 @@ def run_sysbench_server(config: BenchConfig) -> int:
     features = []
     if "mysql" in config.engines:
         features.append("mysql")
-    features_str = ",".join(features) if features else ""
 
-    # Build benchmark
-    build_cmd = ["cargo", "bench", "--package", "vibesql-server", "--bench", "sysbench_server", "--no-run"]
-    if features_str:
-        build_cmd.extend(["--features", features_str])
-
+    # Build benchmark and get the correct binary path
     print("Building Sysbench server benchmark...")
-    result = subprocess.run(build_cmd, cwd=Path(__file__).parent.parent)
+    bench_bin = build_bench_and_get_binary("vibesql-server", "sysbench_server", features if features else None)
 
-    if result.returncode != 0:
+    if not bench_bin:
         print("❌ Build failed")
         return 1
 
+    print(f"  ✓ Built: {bench_bin}")
     strip_quarantine()
 
     # Set up environment
@@ -843,17 +905,6 @@ def run_sysbench_server(config: BenchConfig) -> int:
             print(f"✓ MySQL ready: {env['MYSQL_URL']}")
         else:
             print("⚠ MySQL unavailable (Docker not available)")
-
-    # Find benchmark binary - use the most recently modified one
-    import glob
-    benchmarks = glob.glob("./target/release/deps/sysbench_server-*")
-    benchmarks = [b for b in benchmarks if not b.endswith((".d", ".o"))]
-
-    if not benchmarks:
-        print("❌ Benchmark binary not found")
-        return 1
-
-    bench_bin = max(benchmarks, key=lambda b: Path(b).stat().st_mtime)
 
     print(f"\nRunning Sysbench server (duration={duration}s)...")
     with open("/tmp/sysbench_server_results.txt", "w") as f:
@@ -897,20 +948,16 @@ def run_tpch_server(config: BenchConfig) -> int:
     features = []
     if "mysql" in config.engines:
         features.append("mysql")
-    features_str = ",".join(features) if features else ""
 
-    # Build benchmark
-    build_cmd = ["cargo", "bench", "--package", "vibesql-server", "--bench", "tpch_server", "--no-run"]
-    if features_str:
-        build_cmd.extend(["--features", features_str])
-
+    # Build benchmark and get the correct binary path
     print("Building TPC-H server benchmark...")
-    result = subprocess.run(build_cmd, cwd=Path(__file__).parent.parent)
+    bench_bin = build_bench_and_get_binary("vibesql-server", "tpch_server", features if features else None)
 
-    if result.returncode != 0:
+    if not bench_bin:
         print("❌ Build failed")
         return 1
 
+    print(f"  ✓ Built: {bench_bin}")
     strip_quarantine()
 
     # Set up environment
@@ -941,17 +988,6 @@ def run_tpch_server(config: BenchConfig) -> int:
             print(f"✓ MySQL ready: {env['MYSQL_URL']}")
         else:
             print("⚠ MySQL unavailable (Docker not available)")
-
-    # Find benchmark binary - use the most recently modified one
-    import glob
-    benchmarks = glob.glob("./target/release/deps/tpch_server-*")
-    benchmarks = [b for b in benchmarks if not b.endswith((".d", ".o"))]
-
-    if not benchmarks:
-        print("❌ Benchmark binary not found")
-        return 1
-
-    bench_bin = max(benchmarks, key=lambda b: Path(b).stat().st_mtime)
 
     print(f"\nRunning TPC-H server (SF={scale_factor})...")
     result = subprocess.run(
@@ -1019,20 +1055,16 @@ def run_tpcc_server(config: BenchConfig) -> int:
     features = []
     if "mysql" in config.engines:
         features.append("mysql")
-    features_str = ",".join(features) if features else ""
 
-    # Build benchmark
-    build_cmd = ["cargo", "bench", "--package", "vibesql-server", "--bench", "tpcc_server", "--no-run"]
-    if features_str:
-        build_cmd.extend(["--features", features_str])
-
+    # Build benchmark and get the correct binary path
     print("Building TPC-C server benchmark...")
-    result = subprocess.run(build_cmd, cwd=Path(__file__).parent.parent)
+    bench_bin = build_bench_and_get_binary("vibesql-server", "tpcc_server", features if features else None)
 
-    if result.returncode != 0:
+    if not bench_bin:
         print("❌ Build failed")
         return 1
 
+    print(f"  ✓ Built: {bench_bin}")
     strip_quarantine()
 
     # Set up environment
@@ -1064,17 +1096,6 @@ def run_tpcc_server(config: BenchConfig) -> int:
             print(f"✓ MySQL ready: {env['MYSQL_URL']}")
         else:
             print("⚠ MySQL unavailable (Docker not available)")
-
-    # Find benchmark binary - use the most recently modified one
-    import glob
-    benchmarks = glob.glob("./target/release/deps/tpcc_server-*")
-    benchmarks = [b for b in benchmarks if not b.endswith((".d", ".o"))]
-
-    if not benchmarks:
-        print("❌ Benchmark binary not found")
-        return 1
-
-    bench_bin = max(benchmarks, key=lambda b: Path(b).stat().st_mtime)
 
     # Build command with transaction filter if specified
     cmd = [bench_bin]

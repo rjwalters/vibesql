@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-06T08:04:40.908052Z",
+  "generated_at": "2026-01-06T09:38:02.763419Z",
   "version": "2.0",
   "summary": {
     "conformance": {
@@ -36,11 +36,11 @@
       "tests_count": 5
     },
     "tcl": {
-      "pass_rate": 94.1,
-      "passed": 23108,
-      "failed": 1440,
-      "skipped": 823,
-      "total_tests": 25371
+      "pass_rate": 94.6,
+      "passed": 57969,
+      "failed": 3285,
+      "skipped": 833,
+      "total_tests": 62087
     }
   },
   "benchmarks": {
@@ -246,8 +246,8 @@
     "sysbench": {
       "description": "Sysbench OLTP - Point operations",
       "latest": {
-        "timestamp": "2026-01-06T07:04:55.814528",
-        "commit": "074ed656"
+        "timestamp": "2026-01-06T09:37:45.186422",
+        "commit": "acaa4e2b"
       },
       "tests": {
         "point_select_10000": {
@@ -255,7 +255,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 48.42,
+              "mean_us": 64.49,
+              "std_dev_us": null
+            },
+            "mysql": {
+              "mean_us": 269.32,
               "std_dev_us": null
             }
           }
@@ -265,7 +269,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 55.72,
+              "mean_us": 69.41,
+              "std_dev_us": null
+            },
+            "mysql": {
+              "mean_us": 559.19,
               "std_dev_us": null
             }
           }
@@ -275,7 +283,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 53.74,
+              "mean_us": 54.19,
+              "std_dev_us": null
+            },
+            "mysql": {
+              "mean_us": 577.11,
               "std_dev_us": null
             }
           }
@@ -285,7 +297,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 48.33,
+              "mean_us": 49.23,
+              "std_dev_us": null
+            },
+            "mysql": {
+              "mean_us": 584.71,
               "std_dev_us": null
             }
           }
@@ -295,7 +311,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 1422.66,
+              "mean_us": 406.97,
+              "std_dev_us": null
+            },
+            "mysql": {
+              "mean_us": 369.21,
               "std_dev_us": null
             }
           }
@@ -348,7 +368,7 @@
   "timeline": [
     {
       "date": "2026-01-06",
-      "commit": "074ed6569",
+      "commit": "acaa4e2b4",
       "conformance_pass_rate": 100.0,
       "tpch_geo_mean_ms": 18.74,
       "tpch_passing": 22,
