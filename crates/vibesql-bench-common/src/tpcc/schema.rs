@@ -156,6 +156,8 @@ pub fn get_mysql_pool() -> Option<Pool> {
 /// Returns None if MYSQL_URL is not set or connection fails
 #[cfg(feature = "mysql")]
 pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
+    use mysql::prelude::Queryable;
+
     let url = std::env::var("MYSQL_URL").ok()?;
     let pool = Pool::new(url.as_str()).ok()?;
     let mut conn = pool.get_conn().ok()?;
@@ -164,6 +166,36 @@ pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
     let _ = conn.query_drop("SET SESSION use_secondary_engine=OFF");
 
     let mut data = TPCCData::new(scale_factor);
+    let expected_warehouses = data.num_warehouses();
+
+    // Check if data already exists with correct scale factor
+    // Skip loading if warehouse count matches (data loading is slow)
+    let existing_warehouses: Option<i64> = conn
+        .query_first("SELECT COUNT(*) FROM warehouse")
+        .ok()
+        .flatten();
+
+    if existing_warehouses == Some(expected_warehouses as i64) {
+        // Data already loaded, verify other tables have data
+        let customer_count: Option<i64> = conn
+            .query_first("SELECT COUNT(*) FROM customer")
+            .ok()
+            .flatten();
+        let expected_customers =
+            expected_warehouses as i64 * data.districts_per_warehouse() as i64 * 3000;
+        if customer_count.unwrap_or(0) >= expected_customers {
+            eprintln!(
+                "MySQL TPC-C data already loaded ({} warehouses), skipping reload",
+                expected_warehouses
+            );
+            return Some(conn);
+        }
+    }
+
+    eprintln!(
+        "Loading TPC-C data into MySQL ({} warehouses)...",
+        expected_warehouses
+    );
 
     // Create schema (drops and recreates tables)
     create_tpcc_schema_mysql(&mut conn);
@@ -188,6 +220,7 @@ pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
     // Compute statistics for query optimization (ensures fair comparison with VibeSQL)
     conn.query_drop("ANALYZE TABLE warehouse, district, customer, history, new_order, orders, order_line, item, stock").unwrap();
 
+    eprintln!("MySQL TPC-C data loaded successfully");
     Some(conn)
 }
 

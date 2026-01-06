@@ -193,6 +193,23 @@ const getFootprintArgs = (): Record<string, string | number> => {
   };
 };
 
+/** Get sysbench embedded benchmark args for translations */
+const getSysbenchEmbeddedArgs = (): Record<string, string | number> => {
+  const stats = getBenchmarkStats();
+  return {
+    pointVibesqlUs: stats.sysbenchPointVibesqlUs,
+    pointSqliteUs: stats.sysbenchPointSqliteUs,
+    pointRatio: stats.sysbenchPointRatio,
+    indexVibesqlUs: stats.sysbenchIndexVibesqlUs,
+    indexSqliteUs: stats.sysbenchIndexSqliteUs,
+    indexRatio: stats.sysbenchIndexRatio,
+    nonIndexVibesqlUs: stats.sysbenchNonIndexVibesqlUs,
+    nonIndexSqliteUs: stats.sysbenchNonIndexSqliteUs,
+    deleteVibesqlUs: stats.sysbenchDeleteVibesqlUs,
+    deleteSqliteUs: stats.sysbenchDeleteSqliteUs,
+  };
+};
+
 /** Generate a bullet list for discussion items */
 const bullets = (items: string[]): string =>
   `<ul class="list-disc list-inside space-y-1 text-gray-500 dark:text-gray-400 text-sm ml-2">
@@ -203,6 +220,15 @@ const bullets = (items: string[]): string =>
 const bulletsI18n = (itemKeys: { labelKey: string; descKey: string }[]): string =>
   `<ul class="list-disc list-inside space-y-1 text-gray-500 dark:text-gray-400 text-sm ml-2">
     ${itemKeys.map(k => bulletI18n(k.labelKey, k.descKey)).join('\n    ')}
+  </ul>`;
+
+/** Generate a bullet list from i18n keys with args for interpolation */
+const bulletsI18nWithArgs = (
+  itemKeys: { labelKey: string; descKey: string }[],
+  args: Record<string, string | number>
+): string =>
+  `<ul class="list-disc list-inside space-y-1 text-gray-500 dark:text-gray-400 text-sm ml-2">
+    ${itemKeys.map(k => `<li><strong>${t(k.labelKey)}:</strong> ${t(k.descKey, args)}</li>`).join('\n    ')}
   </ul>`;
 
 // ============================================================================
@@ -541,28 +567,31 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       ],
       [t('bench-sysbench-embedded-note')]
     ),
-    getDiscussion: () => discussion([
-      {
-        title: t('bench-sysbench-emb-disc-point-title'),
-        content: pI18n('bench-sysbench-emb-disc-point'),
-      },
-      {
-        title: t('bench-sysbench-emb-disc-index-title'),
-        content: pI18n('bench-sysbench-emb-disc-index'),
-      },
-      {
-        title: t('bench-sysbench-emb-disc-improve-title'),
-        content: bulletsI18n([
-          { labelKey: 'bench-bullet-bulk-inserts', descKey: 'bench-sysbench-emb-disc-bulk' },
-          { labelKey: 'bench-bullet-non-indexed', descKey: 'bench-sysbench-emb-disc-nonindex' },
-          { labelKey: 'bench-bullet-deletes', descKey: 'bench-sysbench-emb-disc-deletes' },
-        ]),
-      },
-      {
-        title: t('bench-sysbench-emb-disc-architecture-title'),
-        content: pI18n('bench-sysbench-emb-disc-architecture'),
-      },
-    ]),
+    getDiscussion: () => {
+      const args = getSysbenchEmbeddedArgs();
+      return discussion([
+        {
+          title: t('bench-sysbench-emb-disc-point-title', args),
+          content: pI18n('bench-sysbench-emb-disc-point', args),
+        },
+        {
+          title: t('bench-sysbench-emb-disc-index-title', args),
+          content: pI18n('bench-sysbench-emb-disc-index', args),
+        },
+        {
+          title: t('bench-sysbench-emb-disc-improve-title'),
+          content: bulletsI18nWithArgs([
+            { labelKey: 'bench-bullet-bulk-inserts', descKey: 'bench-sysbench-emb-disc-bulk' },
+            { labelKey: 'bench-bullet-non-indexed', descKey: 'bench-sysbench-emb-disc-nonindex' },
+            { labelKey: 'bench-bullet-deletes', descKey: 'bench-sysbench-emb-disc-deletes' },
+          ], args),
+        },
+        {
+          title: t('bench-sysbench-emb-disc-architecture-title'),
+          content: pI18n('bench-sysbench-emb-disc-architecture'),
+        },
+      ]);
+    },
   },
   'sysbench-server': {
     id: 'sysbench-server',
