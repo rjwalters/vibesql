@@ -396,8 +396,8 @@ bench-tpcc-delivery = Entrega - Procesamiento por lotes de pedidos pendientes
 bench-tpcc-stock-level = Nivel de Stock - Contar artículos bajo umbral en pedidos recientes
 
 # Discusión TPC-C
-bench-tpcc-disc-faster-title = 42x Más Rápido que SQLite
-bench-tpcc-disc-faster = VibeSQL logra <strong>~79,000 transacciones por segundo</strong> comparado con ~1,900 TPS de SQLite, una mejora de 42x. Esta aceleración dramática proviene de nuestra arquitectura MVCC sin bloqueos que evita el bloqueo de granularidad gruesa de SQLite en cada operación de escritura.
+bench-tpcc-disc-faster-title = { $speedup } Más Rápido que SQLite
+bench-tpcc-disc-faster = VibeSQL logra <strong>~79,000 transacciones por segundo</strong> comparado con ~{ $sqliteTps } TPS de SQLite, una mejora de 42x. Esta aceleración dramática proviene de nuestra arquitectura MVCC sin bloqueos que evita el bloqueo de granularidad gruesa de SQLite en cada operación de escritura.
 bench-tpcc-disc-dominates-title = Por Qué VibeSQL Domina OLTP
 bench-tpcc-disc-lockfree = MVCC permite que lectores y escritores procedan concurrentemente sin bloqueos
 bench-tpcc-disc-optimistic = Las transacciones solo entran en conflicto en el momento del commit, no durante la ejecución
@@ -512,9 +512,9 @@ bench-footprint-peak-memory = Memoria Máxima - Tamaño máximo del conjunto res
 
 # Discusión de Huella Embebida
 bench-footprint-emb-disc-size-title = Tamaño del Binario: Punto Medio
-bench-footprint-emb-disc-size = VibeSQL con <strong>~17MB</strong> se sitúa entre SQLite (~5MB) y DuckDB (~45MB). Esto refleja nuestra elección de incluir características avanzadas (funciones de ventana, CTEs, ejecución columnar) mientras mantenemos el binario manejable para despliegues embebidos.
+bench-footprint-emb-disc-size = VibeSQL con <strong>~{ $vibesqlBinaryMb }MB</strong> se sitúa entre SQLite (~{ $sqliteBinaryMb }MB) y DuckDB (~{ $duckdbBinaryMb }MB). Esto refleja nuestra elección de incluir características avanzadas (funciones de ventana, CTEs, ejecución columnar) mientras mantenemos el binario manejable para despliegues embebidos.
 bench-footprint-emb-disc-startup-title = Inicio: El Más Rápido en Frío
-bench-footprint-emb-disc-startup = VibeSQL logra <strong>~7.7ms de inicio en frío</strong>, ligeramente más rápido que SQLite (~8.2ms) y significativamente más rápido que DuckDB (~14.6ms). Nuestra ruta de inicialización mínima carga solo estructuras de metadatos esenciales al iniciar.
+bench-footprint-emb-disc-startup = VibeSQL logra <strong>~7.7ms de inicio en frío</strong>, ligeramente más rápido que SQLite (~{ $sqliteStartupMs }ms) y significativamente más rápido que DuckDB (~{ $duckdbStartupMs }ms). Nuestra ruta de inicialización mínima carga solo estructuras de metadatos esenciales al iniciar.
 bench-footprint-emb-disc-memory-title = Eficiencia de Memoria
 bench-footprint-emb-disc-memory = La memoria máxima durante el inicio es ~7MB para VibeSQL vs ~3MB para SQLite y ~11MB para DuckDB. La diferencia con SQLite refleja nuestro optimizador de consultas más sofisticado e infraestructura de ejecución columnar que se asigna por adelantado.
 bench-footprint-emb-disc-roadmap-title = Hoja de Ruta de Reducción de Tamaño
@@ -536,7 +536,7 @@ bench-footprint-wasm-gzip = WASM (gzip) - Tamaño comprimido para entrega web
 
 # Discusión de Huella Servidor
 bench-footprint-srv-disc-wasm-title = WASM: 2.2MB Comprimido
-bench-footprint-srv-disc-wasm = El módulo WebAssembly de VibeSQL se comprime a <strong>~2.2MB gzipped</strong>, habilitando cargas iniciales de página rápidas. Esta es una base de datos SQL:1999 completa con funciones de ventana, CTEs y transacciones ACID ejecutándose completamente en el navegador.
+bench-footprint-srv-disc-wasm = El módulo WebAssembly de VibeSQL se comprime a <strong>~{ $wasmSizeGzipMb }MB gzipped</strong>, habilitando cargas iniciales de página rápidas. Esta es una base de datos SQL:1999 completa con funciones de ventana, CTEs y transacciones ACID ejecutándose completamente en el navegador.
 bench-footprint-srv-disc-included-title = Qué Está Incluido
 bench-footprint-srv-disc-parser = Analizador SQL completo y optimizador de consultas
 bench-footprint-srv-disc-btree = Motor de almacenamiento B-tree con MVCC

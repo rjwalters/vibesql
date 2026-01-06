@@ -490,9 +490,9 @@ bench-footprint-peak-memory = Peak Memory - Maximum resident set size during ini
 
 # Footprint Embedded Discussion
 bench-footprint-emb-disc-size-title = Kích Thước Binary: Trung Dung
-bench-footprint-emb-disc-size = VibeSQL ở <strong>~17MB</strong> nằm giữa SQLite (~5MB) và DuckDB (~45MB). Điều này phản ánh lựa chọn của chúng tôi bao gồm các tính năng nâng cao (hàm cửa sổ, CTE, thực thi dạng cột) trong khi giữ binary có thể quản lý cho các triển khai nhúng.
+bench-footprint-emb-disc-size = VibeSQL ở <strong>~{ $vibesqlBinaryMb }MB</strong> nằm giữa SQLite (~{ $sqliteBinaryMb }MB) và DuckDB (~{ $duckdbBinaryMb }MB). Điều này phản ánh lựa chọn của chúng tôi bao gồm các tính năng nâng cao (hàm cửa sổ, CTE, thực thi dạng cột) trong khi giữ binary có thể quản lý cho các triển khai nhúng.
 bench-footprint-emb-disc-startup-title = Khởi Động: Khởi Động Lạnh Nhanh Nhất
-bench-footprint-emb-disc-startup = VibeSQL đạt được <strong>khởi động lạnh ~6ms</strong>, nhanh hơn SQLite (~6.5ms) và nhanh hơn đáng kể so với DuckDB (~13ms). Đường dẫn khởi tạo tối thiểu của chúng tôi chỉ tải các cấu trúc metadata thiết yếu khi khởi động.
+bench-footprint-emb-disc-startup = VibeSQL đạt được <strong>khởi động lạnh ~6ms</strong>, nhanh hơn SQLite (~{ $sqliteStartupMs }ms) và nhanh hơn đáng kể so với DuckDB (~{ $duckdbStartupMs }ms). Đường dẫn khởi tạo tối thiểu của chúng tôi chỉ tải các cấu trúc metadata thiết yếu khi khởi động.
 bench-footprint-emb-disc-memory-title = Hiệu Quả Bộ Nhớ
 bench-footprint-emb-disc-memory = Bộ nhớ đỉnh trong khi khởi động là ~7MB cho VibeSQL so với ~3MB cho SQLite và ~11MB cho DuckDB. Sự khác biệt so với SQLite phản ánh trình tối ưu hóa truy vấn tinh vi hơn và cơ sở hạ tầng thực thi dạng cột được cấp phát trước của chúng tôi.
 bench-footprint-emb-disc-roadmap-title = Lộ Trình Giảm Kích Thước
@@ -514,7 +514,7 @@ bench-footprint-wasm-gzip = WASM (gzip) - Compressed size for web delivery
 
 # Footprint Server Discussion
 bench-footprint-srv-disc-wasm-title = WASM: 1.5MB Nén
-bench-footprint-srv-disc-wasm = Module WebAssembly của VibeSQL nén xuống <strong>~1.5MB gzipped</strong>, cho phép tải trang ban đầu nhanh. Đây là cơ sở dữ liệu SQL:1999 đầy đủ với hàm cửa sổ, CTE và giao dịch ACID chạy hoàn toàn trong trình duyệt.
+bench-footprint-srv-disc-wasm = Module WebAssembly của VibeSQL nén xuống <strong>~{ $wasmSizeGzipMb }MB gzipped</strong>, cho phép tải trang ban đầu nhanh. Đây là cơ sở dữ liệu SQL:1999 đầy đủ với hàm cửa sổ, CTE và giao dịch ACID chạy hoàn toàn trong trình duyệt.
 bench-footprint-srv-disc-included-title = Bao Gồm Những Gì
 bench-footprint-srv-disc-parser = Parser SQL hoàn chỉnh và trình tối ưu hóa truy vấn
 bench-footprint-srv-disc-btree = Engine lưu trữ B-tree với MVCC
@@ -604,7 +604,7 @@ conformance-generate-coverage = # Generate coverage report
 conformance-open-coverage = # Open coverage report
 
 bench-table-query = Query
-bench-tpcc-disc-duckdb = DuckDB achieves only ~385 TPS on TPC-C (60x slower than VibeSQL, 12x slower than SQLite). This is expected: DuckDB is an <strong>analytical (OLAP) database</strong> optimized for large batch operations, not single-row transactions. Its columnar storage format excels at scanning millions of rows but adds overhead for point lookups and small updates that dominate OLTP workloads like TPC-C.
+bench-tpcc-disc-duckdb = DuckDB achieves only ~{ $duckdbTps } TPS on TPC-C (~{ $duckdbVsVibesql } slower than VibeSQL, 12x slower than SQLite). This is expected: DuckDB is an <strong>analytical (OLAP) database</strong> optimized for large batch operations, not single-row transactions. Its columnar storage format excels at scanning millions of rows but adds overhead for point lookups and small updates that dominate OLTP workloads like TPC-C.
 bench-tpcc-disc-duckdb-title = Why DuckDB Lags on OLTP
 bench-tpcc-transactions-label = transactions executed
 
@@ -645,9 +645,9 @@ conformance-pass-rates-mean = Our <strong>{ $sqltestRate }% sqltest pass rate</s
 conformance-passed = Passed
 conformance-philosophy-point = <span class="font-medium">Philosophy:</span> sqltest says "can you parse this?"; SQLLogicTest says "does this work correctly?"
 conformance-slt-ddl = DDL Tests
-conformance-slt-desc = Results from the comprehensive <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a> suite containing ~5.9 million tests across 623 test files from the official SQLite corpus.
+conformance-slt-desc = Results from the comprehensive <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a> suite containing ~{ $testCases } tests across { $testFiles } test files from the official SQLite corpus.
 conformance-slt-evidence = Evidence Tests
-conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a> is a comprehensive test suite originally developed for SQLite, containing ~5.9 million SQL test cases across 623 test files. It tests practical correctness by running real-world queries and validating results. This suite focuses on semantic correctness and edge cases rather than pure grammar conformance.
+conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a> is a comprehensive test suite originally developed for SQLite, containing ~{ $testCases } SQL test cases across { $testFiles } test files. It tests practical correctness by running real-world queries and validating results. This suite focuses on semantic correctness and edge cases rather than pure grammar conformance.
 conformance-slt-index = Index Tests
 conformance-slt-note = <strong>Note:</strong> SQLLogicTest provides a different perspective from sqltest. While sqltest focuses on BNF grammar conformance from the SQL:1999 specification, SQLLogicTest contains millions of real-world SQL queries testing practical correctness across a wide range of scenarios.
 conformance-slt-other = Other Tests

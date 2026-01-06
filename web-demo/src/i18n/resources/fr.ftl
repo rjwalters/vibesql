@@ -396,7 +396,7 @@ bench-tpcc-delivery = Livraison - Traitement par lots des commandes en attente
 bench-tpcc-stock-level = Niveau de Stock - Compter les articles sous le seuil dans les commandes récentes
 
 # Discussion TPC-C
-bench-tpcc-disc-faster-title = 42x Plus Rapide que SQLite
+bench-tpcc-disc-faster-title = { $speedup } Plus Rapide que SQLite
 bench-tpcc-disc-faster = VibeSQL atteint <strong>~79 000 transactions par seconde</strong> comparé à ~1 900 TPS de SQLite, une amélioration de 42x. Cette accélération spectaculaire vient de notre architecture MVCC sans verrou qui évite le verrouillage à gros grain de SQLite sur chaque opération d'écriture.
 bench-tpcc-disc-dominates-title = Pourquoi VibeSQL Domine l'OLTP
 bench-tpcc-disc-lockfree = MVCC permet aux lecteurs et écrivains de procéder concurremment sans blocage

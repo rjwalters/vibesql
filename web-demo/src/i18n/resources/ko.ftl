@@ -375,7 +375,7 @@ bench-tpcc-stock-level = Stock Level - Count items below threshold in recent ord
 
 # TPC-C Discussion
 bench-tpcc-disc-faster-title = SQLite보다 5배 빠름
-bench-tpcc-disc-faster = VibeSQL은 SQLite의 ~4,500 TPS에 비해 <strong>초당 약 23,000 트랜잭션</strong>을 달성하여 5배 향상되었습니다. 이 속도 향상은 모든 쓰기 작업에서 SQLite의 조대한 잠금을 피하는 락프리 MVCC 아키텍처에서 비롯됩니다.
+bench-tpcc-disc-faster = VibeSQL은 SQLite의 ~{ $sqliteTps } TPS에 비해 <strong>초당 약 23,000 트랜잭션</strong>을 달성하여 5배 향상되었습니다. 이 속도 향상은 모든 쓰기 작업에서 SQLite의 조대한 잠금을 피하는 락프리 MVCC 아키텍처에서 비롯됩니다.
 bench-tpcc-disc-dominates-title = VibeSQL이 OLTP를 지배하는 이유
 bench-tpcc-disc-lockfree = MVCC는 리더와 라이터가 블로킹 없이 동시에 진행할 수 있게 합니다
 bench-tpcc-disc-optimistic = 트랜잭션은 실행 중이 아닌 커밋 시에만 충돌합니다
@@ -486,7 +486,7 @@ bench-footprint-peak-memory = Peak Memory - Maximum resident set size during ini
 
 # Footprint Embedded Discussion
 bench-footprint-emb-disc-size-title = 바이너리 크기: 중간 지점
-bench-footprint-emb-disc-size = VibeSQL은 <strong>~17MB</strong>로 SQLite(~5MB)와 DuckDB(~45MB) 사이에 위치합니다. 이는 임베디드 배포를 위해 바이너리를 관리 가능하게 유지하면서 고급 기능(윈도우 함수, CTE, 컬럼형 실행)을 포함하는 선택을 반영합니다.
+bench-footprint-emb-disc-size = VibeSQL은 <strong>~{ $vibesqlBinaryMb }MB</strong>로 SQLite(~5MB)와 DuckDB(~45MB) 사이에 위치합니다. 이는 임베디드 배포를 위해 바이너리를 관리 가능하게 유지하면서 고급 기능(윈도우 함수, CTE, 컬럼형 실행)을 포함하는 선택을 반영합니다.
 bench-footprint-emb-disc-startup-title = 스타트업: 가장 빠른 콜드 스타트
 bench-footprint-emb-disc-startup = VibeSQL은 SQLite(~6.5ms)보다 빠르고 DuckDB(~13ms)보다 훨씬 빠른 <strong>~6ms 콜드 스타트업</strong>을 달성합니다. 최소한의 초기화 경로는 스타트업 시 필수 메타데이터 구조만 로드합니다.
 bench-footprint-emb-disc-memory-title = 메모리 효율성
@@ -510,7 +510,7 @@ bench-footprint-wasm-gzip = WASM (gzip) - Compressed size for web delivery
 
 # Footprint Server Discussion
 bench-footprint-srv-disc-wasm-title = WASM: 1.5MB 압축
-bench-footprint-srv-disc-wasm = VibeSQL의 WebAssembly 모듈은 <strong>~1.5MB gzipped</strong>로 압축되어 빠른 초기 페이지 로드를 가능하게 합니다. 이는 윈도우 함수, CTE 및 ACID 트랜잭션이 있는 완전한 SQL:1999 데이터베이스가 브라우저에서 완전히 실행됩니다.
+bench-footprint-srv-disc-wasm = VibeSQL의 WebAssembly 모듈은 <strong>~{ $wasmSizeGzipMb }MB gzipped</strong>로 압축되어 빠른 초기 페이지 로드를 가능하게 합니다. 이는 윈도우 함수, CTE 및 ACID 트랜잭션이 있는 완전한 SQL:1999 데이터베이스가 브라우저에서 완전히 실행됩니다.
 bench-footprint-srv-disc-included-title = 포함 내용
 bench-footprint-srv-disc-parser = 완전한 SQL 파서 및 쿼리 옵티마이저
 bench-footprint-srv-disc-btree = MVCC가 있는 B-tree 스토리지 엔진
@@ -644,9 +644,9 @@ conformance-pass-rates-mean = Our <strong>{ $sqltestRate }% sqltest pass rate</s
 conformance-passed = Passed
 conformance-philosophy-point = <span class="font-medium">Philosophy:</span> sqltest says "can you parse this?"; SQLLogicTest says "does this work correctly?"
 conformance-slt-ddl = DDL Tests
-conformance-slt-desc = Results from the comprehensive <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a> suite containing ~5.9 million tests across 623 test files from the official SQLite corpus.
+conformance-slt-desc = Results from the comprehensive <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a> suite containing ~{ $testCases } tests across { $testFiles } test files from the official SQLite corpus.
 conformance-slt-evidence = Evidence Tests
-conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a> is a comprehensive test suite originally developed for SQLite, containing ~5.9 million SQL test cases across 623 test files. It tests practical correctness by running real-world queries and validating results. This suite focuses on semantic correctness and edge cases rather than pure grammar conformance.
+conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a> is a comprehensive test suite originally developed for SQLite, containing ~{ $testCases } SQL test cases across { $testFiles } test files. It tests practical correctness by running real-world queries and validating results. This suite focuses on semantic correctness and edge cases rather than pure grammar conformance.
 conformance-slt-index = Index Tests
 conformance-slt-note = <strong>Note:</strong> SQLLogicTest provides a different perspective from sqltest. While sqltest focuses on BNF grammar conformance from the SQL:1999 specification, SQLLogicTest contains millions of real-world SQL queries testing practical correctness across a wide range of scenarios.
 conformance-slt-other = Other Tests

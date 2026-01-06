@@ -13,6 +13,7 @@ import { FooterComponent } from './components/Footer';
 import { formatTime, formatBytes, formatMemory, formatTps } from './utils/measurement';
 import { initI18n, setI18nLocale, updateDOM, t } from './i18n';
 import { commitLink } from './components/CommitLink';
+import { loadBenchmarkStats, getBenchmarkStats } from './utils/benchmarkStats';
 
 // Chart.js is loaded via CDN in benchmarks.html
 declare const Chart: any;
@@ -161,9 +162,36 @@ const discussion = (sections: { title: string; content: string }[]): string => `
   ${content}`).join('')}
 `;
 
-/** Generate a paragraph from i18n key */
-const pI18n = (key: string): string =>
-  `<p class="text-gray-500 dark:text-gray-400 mb-2">${t(key)}</p>`;
+/** Generate a paragraph from i18n key with optional args */
+const pI18n = (key: string, args?: Record<string, string | number>): string =>
+  `<p class="text-gray-500 dark:text-gray-400 mb-2">${t(key, args)}</p>`;
+
+/** Get TPC-C benchmark args for translations */
+const getTpccArgs = (): Record<string, string | number> => {
+  const stats = getBenchmarkStats();
+  return {
+    vibesqlTps: stats.tpccVibesqlTps.toLocaleString(),
+    sqliteTps: stats.tpccSqliteTps.toLocaleString(),
+    duckdbTps: stats.tpccDuckdbTps,
+    speedup: stats.tpccVibesqlVsSqlite,
+    duckdbVsVibesql: stats.tpccVibesqlVsDuckdb,
+    duckdbVsSqlite: stats.tpccSqliteVsDuckdb,
+  };
+};
+
+/** Get footprint benchmark args for translations */
+const getFootprintArgs = (): Record<string, string | number> => {
+  const stats = getBenchmarkStats();
+  return {
+    vibesqlBinaryMb: stats.vibesqlBinaryMb,
+    sqliteBinaryMb: stats.sqliteBinaryMb,
+    duckdbBinaryMb: stats.duckdbBinaryMb,
+    vibesqlStartupMs: stats.vibesqlStartupMs,
+    sqliteStartupMs: stats.sqliteStartupMs,
+    duckdbStartupMs: stats.duckdbStartupMs,
+    wasmSizeGzipMb: stats.wasmSizeGzipMb,
+  };
+};
 
 /** Generate a bullet list for discussion items */
 const bullets = (items: string[]): string =>
@@ -450,29 +478,32 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       ],
       [t('bench-tpcc-note-intro'), t('bench-tpcc-note-results')]
     ),
-    getDiscussion: () => discussion([
-      {
-        title: t('bench-tpcc-disc-faster-title'),
-        content: pI18n('bench-tpcc-disc-faster'),
-      },
-      {
-        title: t('bench-tpcc-disc-dominates-title'),
-        content: bulletsI18n([
-          { labelKey: 'bench-bullet-lock-free', descKey: 'bench-tpcc-disc-lockfree' },
-          { labelKey: 'bench-bullet-optimistic', descKey: 'bench-tpcc-disc-optimistic' },
-          { labelKey: 'bench-bullet-btree', descKey: 'bench-tpcc-disc-btree' },
-          { labelKey: 'bench-bullet-prepared', descKey: 'bench-tpcc-disc-prepared' },
-        ]),
-      },
-      {
-        title: t('bench-tpcc-disc-scaling-title'),
-        content: pI18n('bench-tpcc-disc-scaling'),
-      },
-      {
-        title: t('bench-tpcc-disc-duckdb-title'),
-        content: pI18n('bench-tpcc-disc-duckdb'),
-      },
-    ]),
+    getDiscussion: () => {
+      const tpccArgs = getTpccArgs();
+      return discussion([
+        {
+          title: t('bench-tpcc-disc-faster-title', tpccArgs),
+          content: pI18n('bench-tpcc-disc-faster', tpccArgs),
+        },
+        {
+          title: t('bench-tpcc-disc-dominates-title'),
+          content: bulletsI18n([
+            { labelKey: 'bench-bullet-lock-free', descKey: 'bench-tpcc-disc-lockfree' },
+            { labelKey: 'bench-bullet-optimistic', descKey: 'bench-tpcc-disc-optimistic' },
+            { labelKey: 'bench-bullet-btree', descKey: 'bench-tpcc-disc-btree' },
+            { labelKey: 'bench-bullet-prepared', descKey: 'bench-tpcc-disc-prepared' },
+          ]),
+        },
+        {
+          title: t('bench-tpcc-disc-scaling-title'),
+          content: pI18n('bench-tpcc-disc-scaling'),
+        },
+        {
+          title: t('bench-tpcc-disc-duckdb-title'),
+          content: pI18n('bench-tpcc-disc-duckdb', tpccArgs),
+        },
+      ]);
+    },
   },
   'sysbench-embedded': {
     id: 'sysbench-embedded',
@@ -739,28 +770,31 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       ],
       [t('bench-footprint-embedded-note')]
     ),
-    getDiscussion: () => discussion([
-      {
-        title: t('bench-footprint-emb-disc-size-title'),
-        content: pI18n('bench-footprint-emb-disc-size'),
-      },
-      {
-        title: t('bench-footprint-emb-disc-startup-title'),
-        content: pI18n('bench-footprint-emb-disc-startup'),
-      },
-      {
-        title: t('bench-footprint-emb-disc-memory-title'),
-        content: pI18n('bench-footprint-emb-disc-memory'),
-      },
-      {
-        title: t('bench-footprint-emb-disc-roadmap-title'),
-        content: bulletsI18n([
-          { labelKey: 'bench-bullet-feature-flags', descKey: 'bench-footprint-emb-disc-flags' },
-          { labelKey: 'bench-bullet-lto', descKey: 'bench-footprint-emb-disc-lto' },
-          { labelKey: 'bench-bullet-modular', descKey: 'bench-footprint-emb-disc-modular' },
-        ]),
-      },
-    ]),
+    getDiscussion: () => {
+      const fpArgs = getFootprintArgs();
+      return discussion([
+        {
+          title: t('bench-footprint-emb-disc-size-title'),
+          content: pI18n('bench-footprint-emb-disc-size', fpArgs),
+        },
+        {
+          title: t('bench-footprint-emb-disc-startup-title'),
+          content: pI18n('bench-footprint-emb-disc-startup', fpArgs),
+        },
+        {
+          title: t('bench-footprint-emb-disc-memory-title'),
+          content: pI18n('bench-footprint-emb-disc-memory'),
+        },
+        {
+          title: t('bench-footprint-emb-disc-roadmap-title'),
+          content: bulletsI18n([
+            { labelKey: 'bench-bullet-feature-flags', descKey: 'bench-footprint-emb-disc-flags' },
+            { labelKey: 'bench-bullet-lto', descKey: 'bench-footprint-emb-disc-lto' },
+            { labelKey: 'bench-bullet-modular', descKey: 'bench-footprint-emb-disc-modular' },
+          ]),
+        },
+      ]);
+    },
   },
   'footprint-server': {
     id: 'footprint-server',
@@ -787,34 +821,37 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       ],
       [t('bench-footprint-server-note'), t('bench-footprint-server-note2')]
     ),
-    getDiscussion: () => discussion([
-      {
-        title: t('bench-footprint-srv-disc-wasm-title'),
-        content: pI18n('bench-footprint-srv-disc-wasm'),
-      },
-      {
-        title: t('bench-footprint-srv-disc-included-title'),
-        content: bullets([
-          `<li>${t('bench-footprint-srv-disc-parser')}</li>`,
-          `<li>${t('bench-footprint-srv-disc-btree')}</li>`,
-          `<li>${t('bench-footprint-srv-disc-window')}</li>`,
-          `<li>${t('bench-footprint-srv-disc-cte')}</li>`,
-          `<li>${t('bench-footprint-srv-disc-acid')}</li>`,
-        ]),
-      },
-      {
-        title: t('bench-footprint-srv-disc-benefits-title'),
-        content: pI18n('bench-footprint-srv-disc-benefits'),
-      },
-      {
-        title: t('bench-footprint-srv-disc-roadmap-title'),
-        content: bulletsI18n([
-          { labelKey: 'bench-bullet-streaming', descKey: 'bench-footprint-srv-disc-streaming' },
-          { labelKey: 'bench-bullet-indexeddb', descKey: 'bench-footprint-srv-disc-indexeddb' },
-          { labelKey: 'bench-bullet-worker', descKey: 'bench-footprint-srv-disc-worker' },
-        ]),
-      },
-    ]),
+    getDiscussion: () => {
+      const fpArgs = getFootprintArgs();
+      return discussion([
+        {
+          title: t('bench-footprint-srv-disc-wasm-title', fpArgs),
+          content: pI18n('bench-footprint-srv-disc-wasm', fpArgs),
+        },
+        {
+          title: t('bench-footprint-srv-disc-included-title'),
+          content: bullets([
+            `<li>${t('bench-footprint-srv-disc-parser')}</li>`,
+            `<li>${t('bench-footprint-srv-disc-btree')}</li>`,
+            `<li>${t('bench-footprint-srv-disc-window')}</li>`,
+            `<li>${t('bench-footprint-srv-disc-cte')}</li>`,
+            `<li>${t('bench-footprint-srv-disc-acid')}</li>`,
+          ]),
+        },
+        {
+          title: t('bench-footprint-srv-disc-benefits-title'),
+          content: pI18n('bench-footprint-srv-disc-benefits'),
+        },
+        {
+          title: t('bench-footprint-srv-disc-roadmap-title'),
+          content: bulletsI18n([
+            { labelKey: 'bench-bullet-streaming', descKey: 'bench-footprint-srv-disc-streaming' },
+            { labelKey: 'bench-bullet-indexeddb', descKey: 'bench-footprint-srv-disc-indexeddb' },
+            { labelKey: 'bench-bullet-worker', descKey: 'bench-footprint-srv-disc-worker' },
+          ]),
+        },
+      ]);
+    },
   },
 };
 
@@ -2938,6 +2975,9 @@ function initTabs(): void {
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', () => {
+  // Preload benchmark stats for dynamic translations
+  loadBenchmarkStats().catch(console.error);
+
   // Initialize theme system
   const theme = initTheme();
 

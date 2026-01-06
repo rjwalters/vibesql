@@ -374,7 +374,7 @@ bench-tpcc-delivery = Delivery - Batch processing of pending orders
 bench-tpcc-stock-level = Stock Level - Count items below threshold in recent orders
 
 # TPC-C Discussion
-bench-tpcc-disc-faster-title = 5x Lebih Cepat dari SQLite
+bench-tpcc-disc-faster-title = { $speedup } Lebih Cepat dari SQLite
 bench-tpcc-disc-faster = VibeSQL mencapai <strong>~23.000 transaksi per detik</strong> dibandingkan ~4.500 TPS SQLite, peningkatan 5x. Percepatan ini berasal dari arsitektur MVCC bebas kunci kami yang menghindari penguncian kasar SQLite pada setiap operasi tulis.
 bench-tpcc-disc-dominates-title = Mengapa VibeSQL Mendominasi OLTP
 bench-tpcc-disc-lockfree = MVCC memungkinkan pembaca dan penulis melanjutkan secara bersamaan tanpa pemblokiran
@@ -486,9 +486,9 @@ bench-footprint-peak-memory = Peak Memory - Maximum resident set size during ini
 
 # Footprint Embedded Discussion
 bench-footprint-emb-disc-size-title = Ukuran Binary: Jalan Tengah
-bench-footprint-emb-disc-size = VibeSQL pada <strong>~17MB</strong> berada di antara SQLite (~5MB) dan DuckDB (~45MB). Ini mencerminkan pilihan kami untuk menyertakan fitur lanjutan (fungsi window, CTE, eksekusi kolumnar) sambil menjaga binary dapat dikelola untuk deployment embedded.
+bench-footprint-emb-disc-size = VibeSQL pada <strong>~{ $vibesqlBinaryMb }MB</strong> berada di antara SQLite (~{ $sqliteBinaryMb }MB) dan DuckDB (~{ $duckdbBinaryMb }MB). Ini mencerminkan pilihan kami untuk menyertakan fitur lanjutan (fungsi window, CTE, eksekusi kolumnar) sambil menjaga binary dapat dikelola untuk deployment embedded.
 bench-footprint-emb-disc-startup-title = Startup: Cold Start Tercepat
-bench-footprint-emb-disc-startup = VibeSQL mencapai <strong>cold startup ~6ms</strong>, lebih cepat dari SQLite (~6.5ms) dan jauh lebih cepat dari DuckDB (~13ms). Jalur inisialisasi minimal kami hanya memuat struktur metadata penting saat startup.
+bench-footprint-emb-disc-startup = VibeSQL mencapai <strong>cold startup ~6ms</strong>, lebih cepat dari SQLite (~{ $sqliteStartupMs }ms) dan jauh lebih cepat dari DuckDB (~{ $duckdbStartupMs }ms). Jalur inisialisasi minimal kami hanya memuat struktur metadata penting saat startup.
 bench-footprint-emb-disc-memory-title = Efisiensi Memori
 bench-footprint-emb-disc-memory = Memori puncak selama startup adalah ~7MB untuk VibeSQL vs ~3MB untuk SQLite dan ~11MB untuk DuckDB. Perbedaan dari SQLite mencerminkan optimizer kueri kami yang lebih canggih dan infrastruktur eksekusi kolumnar yang dialokasikan di awal.
 bench-footprint-emb-disc-roadmap-title = Roadmap Pengurangan Ukuran
@@ -510,7 +510,7 @@ bench-footprint-wasm-gzip = WASM (gzip) - Compressed size for web delivery
 
 # Footprint Server Discussion
 bench-footprint-srv-disc-wasm-title = WASM: 1.5MB Terkompresi
-bench-footprint-srv-disc-wasm = Modul WebAssembly VibeSQL dikompresi menjadi <strong>~1.5MB gzipped</strong>, memungkinkan pemuatan halaman awal yang cepat. Ini adalah database SQL:1999 lengkap dengan fungsi window, CTE, dan transaksi ACID yang berjalan sepenuhnya di browser.
+bench-footprint-srv-disc-wasm = Modul WebAssembly VibeSQL dikompresi menjadi <strong>~{ $wasmSizeGzipMb }MB gzipped</strong>, memungkinkan pemuatan halaman awal yang cepat. Ini adalah database SQL:1999 lengkap dengan fungsi window, CTE, dan transaksi ACID yang berjalan sepenuhnya di browser.
 bench-footprint-srv-disc-included-title = Yang Termasuk
 bench-footprint-srv-disc-parser = Parser SQL lengkap dan optimizer kueri
 bench-footprint-srv-disc-btree = Mesin penyimpanan B-tree dengan MVCC
@@ -644,9 +644,9 @@ conformance-pass-rates-mean = Our <strong>{ $sqltestRate }% sqltest pass rate</s
 conformance-passed = Passed
 conformance-philosophy-point = <span class="font-medium">Philosophy:</span> sqltest says "can you parse this?"; SQLLogicTest says "does this work correctly?"
 conformance-slt-ddl = DDL Tests
-conformance-slt-desc = Results from the comprehensive <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a> suite containing ~5.9 million tests across 623 test files from the official SQLite corpus.
+conformance-slt-desc = Results from the comprehensive <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a> suite containing ~{ $testCases } tests across { $testFiles } test files from the official SQLite corpus.
 conformance-slt-evidence = Evidence Tests
-conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a> is a comprehensive test suite originally developed for SQLite, containing ~5.9 million SQL test cases across 623 test files. It tests practical correctness by running real-world queries and validating results. This suite focuses on semantic correctness and edge cases rather than pure grammar conformance.
+conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a> is a comprehensive test suite originally developed for SQLite, containing ~{ $testCases } SQL test cases across { $testFiles } test files. It tests practical correctness by running real-world queries and validating results. This suite focuses on semantic correctness and edge cases rather than pure grammar conformance.
 conformance-slt-index = Index Tests
 conformance-slt-note = <strong>Note:</strong> SQLLogicTest provides a different perspective from sqltest. While sqltest focuses on BNF grammar conformance from the SQL:1999 specification, SQLLogicTest contains millions of real-world SQL queries testing practical correctness across a wide range of scenarios.
 conformance-slt-other = Other Tests

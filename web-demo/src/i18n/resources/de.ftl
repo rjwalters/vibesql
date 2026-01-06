@@ -396,7 +396,7 @@ bench-tpcc-delivery = Lieferung - Stapelverarbeitung ausstehender Bestellungen
 bench-tpcc-stock-level = Lagerbestand - Zählen von Artikeln unter dem Schwellenwert in aktuellen Bestellungen
 
 # TPC-C Diskussion
-bench-tpcc-disc-faster-title = 42x schneller als SQLite
+bench-tpcc-disc-faster-title = { $speedup } schneller als SQLite
 bench-tpcc-disc-faster = VibeSQL erreicht <strong>~79.000 Transaktionen pro Sekunde</strong> im Vergleich zu SQLites ~1.900 TPS, eine 42-fache Verbesserung. Diese dramatische Beschleunigung kommt von unserer sperrenfreien MVCC-Architektur, die SQLites grobkörnige Sperrung bei jeder Schreiboperation vermeidet.
 bench-tpcc-disc-dominates-title = Warum VibeSQL OLTP dominiert
 bench-tpcc-disc-lockfree = MVCC ermöglicht Lesern und Schreibern gleichzeitiges Fortschreiten ohne Blockierung
@@ -512,7 +512,7 @@ bench-footprint-peak-memory = Maximaler Speicher - Maximale Resident-Set-Größe
 
 # Footprint Eingebettet Diskussion
 bench-footprint-emb-disc-size-title = Binärgröße: Goldener Mittelweg
-bench-footprint-emb-disc-size = VibeSQL mit <strong>~17 MB</strong> liegt zwischen SQLite (~5 MB) und DuckDB (~45 MB). Dies spiegelt unsere Entscheidung wider, erweiterte Funktionen (Fensterfunktionen, CTEs, spaltenorientierte Ausführung) einzuschließen und gleichzeitig die Binärdatei für eingebettete Bereitstellungen handhabbar zu halten.
+bench-footprint-emb-disc-size = VibeSQL mit <strong>~{ $vibesqlBinaryMb }MB</strong> liegt zwischen SQLite (~{ $sqliteBinaryMb }MB) und DuckDB (~{ $duckdbBinaryMb }MB). Dies spiegelt unsere Entscheidung wider, erweiterte Funktionen (Fensterfunktionen, CTEs, spaltenorientierte Ausführung) einzuschließen und gleichzeitig die Binärdatei für eingebettete Bereitstellungen handhabbar zu halten.
 bench-footprint-emb-disc-startup-title = Start: Schnellster Kaltstart
 bench-footprint-emb-disc-startup = VibeSQL erreicht <strong>~7,7 ms Kaltstart</strong>, etwas schneller als SQLite (~8,2 ms) und deutlich schneller als DuckDB (~14,6 ms). Unser minimaler Initialisierungspfad lädt beim Start nur wesentliche Metadatenstrukturen.
 bench-footprint-emb-disc-memory-title = Speichereffizienz

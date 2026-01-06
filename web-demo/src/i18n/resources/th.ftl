@@ -375,7 +375,7 @@ bench-tpcc-stock-level = Stock Level - Count items below threshold in recent ord
 
 # TPC-C Discussion
 bench-tpcc-disc-faster-title = เร็วกว่า SQLite 5 เท่า
-bench-tpcc-disc-faster = VibeSQL บรรลุ <strong>ประมาณ 23,000 ธุรกรรมต่อวินาที</strong> เปรียบเทียบกับ ~4,500 TPS ของ SQLite เป็นการปรับปรุง 5 เท่า ความเร็วนี้มาจากสถาปัตยกรรม MVCC แบบไม่ล็อกของเราที่หลีกเลี่ยงการล็อกแบบหยาบของ SQLite ในทุกการดำเนินการเขียน
+bench-tpcc-disc-faster = VibeSQL บรรลุ <strong>ประมาณ 23,000 ธุรกรรมต่อวินาที</strong> เปรียบเทียบกับ ~{ $sqliteTps } TPS ของ SQLite เป็นการปรับปรุง 5 เท่า ความเร็วนี้มาจากสถาปัตยกรรม MVCC แบบไม่ล็อกของเราที่หลีกเลี่ยงการล็อกแบบหยาบของ SQLite ในทุกการดำเนินการเขียน
 bench-tpcc-disc-dominates-title = เหตุใด VibeSQL จึงครอง OLTP
 bench-tpcc-disc-lockfree = MVCC อนุญาตให้ผู้อ่านและผู้เขียนดำเนินการพร้อมกันโดยไม่มีการบล็อก
 bench-tpcc-disc-optimistic = ธุรกรรมขัดแย้งกันเฉพาะเวลาคอมมิตเท่านั้น ไม่ใช่ระหว่างการดำเนินการ
@@ -490,9 +490,9 @@ bench-footprint-peak-memory = Peak Memory - Maximum resident set size during ini
 
 # Footprint Embedded Discussion
 bench-footprint-emb-disc-size-title = ขนาดไบนารี: ทางสายกลาง
-bench-footprint-emb-disc-size = VibeSQL ที่ <strong>~17MB</strong> อยู่ระหว่าง SQLite (~5MB) และ DuckDB (~45MB) สิ่งนี้สะท้อนถึงการเลือกของเราที่จะรวมคุณสมบัติขั้นสูง (ฟังก์ชันหน้าต่าง, CTE, การดำเนินการแบบคอลัมน์) ในขณะที่รักษาไบนารีให้จัดการได้สำหรับการติดตั้งแบบฝังตัว
+bench-footprint-emb-disc-size = VibeSQL ที่ <strong>~{ $vibesqlBinaryMb }MB</strong> อยู่ระหว่าง SQLite (~{ $sqliteBinaryMb }MB) และ DuckDB (~{ $duckdbBinaryMb }MB) สิ่งนี้สะท้อนถึงการเลือกของเราที่จะรวมคุณสมบัติขั้นสูง (ฟังก์ชันหน้าต่าง, CTE, การดำเนินการแบบคอลัมน์) ในขณะที่รักษาไบนารีให้จัดการได้สำหรับการติดตั้งแบบฝังตัว
 bench-footprint-emb-disc-startup-title = การเริ่มต้น: การเริ่มต้นเย็นที่เร็วที่สุด
-bench-footprint-emb-disc-startup = VibeSQL บรรลุ <strong>การเริ่มต้นเย็น ~6ms</strong> เร็วกว่า SQLite (~6.5ms) และเร็วกว่า DuckDB (~13ms) อย่างมาก เส้นทางการเริ่มต้นขั้นต่ำของเราโหลดเฉพาะโครงสร้างเมตาดาต้าที่จำเป็นเมื่อเริ่มต้น
+bench-footprint-emb-disc-startup = VibeSQL บรรลุ <strong>การเริ่มต้นเย็น ~6ms</strong> เร็วกว่า SQLite (~{ $sqliteStartupMs }ms) และเร็วกว่า DuckDB (~{ $duckdbStartupMs }ms) อย่างมาก เส้นทางการเริ่มต้นขั้นต่ำของเราโหลดเฉพาะโครงสร้างเมตาดาต้าที่จำเป็นเมื่อเริ่มต้น
 bench-footprint-emb-disc-memory-title = ประสิทธิภาพหน่วยความจำ
 bench-footprint-emb-disc-memory = หน่วยความจำสูงสุดระหว่างการเริ่มต้นคือ ~7MB สำหรับ VibeSQL เทียบกับ ~3MB สำหรับ SQLite และ ~11MB สำหรับ DuckDB ความแตกต่างจาก SQLite สะท้อนถึงตัวเพิ่มประสิทธิภาพการสืบค้นที่ซับซ้อนกว่าและโครงสร้างพื้นฐานการดำเนินการแบบคอลัมน์ที่จัดสรรล่วงหน้าของเรา
 bench-footprint-emb-disc-roadmap-title = แผนงานการลดขนาด
@@ -514,7 +514,7 @@ bench-footprint-wasm-gzip = WASM (gzip) - Compressed size for web delivery
 
 # Footprint Server Discussion
 bench-footprint-srv-disc-wasm-title = WASM: 1.5MB บีบอัด
-bench-footprint-srv-disc-wasm = โมดูล WebAssembly ของ VibeSQL บีบอัดเป็น <strong>~1.5MB gzipped</strong> ทำให้สามารถโหลดหน้าเริ่มต้นได้อย่างรวดเร็ว นี่คือฐานข้อมูล SQL:1999 เต็มรูปแบบพร้อมฟังก์ชันหน้าต่าง, CTE และธุรกรรม ACID ที่ทำงานทั้งหมดในเบราว์เซอร์
+bench-footprint-srv-disc-wasm = โมดูล WebAssembly ของ VibeSQL บีบอัดเป็น <strong>~{ $wasmSizeGzipMb }MB gzipped</strong> ทำให้สามารถโหลดหน้าเริ่มต้นได้อย่างรวดเร็ว นี่คือฐานข้อมูล SQL:1999 เต็มรูปแบบพร้อมฟังก์ชันหน้าต่าง, CTE และธุรกรรม ACID ที่ทำงานทั้งหมดในเบราว์เซอร์
 bench-footprint-srv-disc-included-title = สิ่งที่รวมอยู่
 bench-footprint-srv-disc-parser = ตัวแยกวิเคราะห์ SQL และตัวเพิ่มประสิทธิภาพการสืบค้นที่สมบูรณ์
 bench-footprint-srv-disc-btree = เครื่องยนต์จัดเก็บ B-tree พร้อม MVCC
@@ -645,9 +645,9 @@ conformance-pass-rates-mean = Our <strong>{ $sqltestRate }% sqltest pass rate</s
 conformance-passed = Passed
 conformance-philosophy-point = <span class="font-medium">Philosophy:</span> sqltest says "can you parse this?"; SQLLogicTest says "does this work correctly?"
 conformance-slt-ddl = DDL Tests
-conformance-slt-desc = Results from the comprehensive <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a> suite containing ~5.9 million tests across 623 test files from the official SQLite corpus.
+conformance-slt-desc = Results from the comprehensive <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a> suite containing ~{ $testCases } tests across { $testFiles } test files from the official SQLite corpus.
 conformance-slt-evidence = Evidence Tests
-conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a> is a comprehensive test suite originally developed for SQLite, containing ~5.9 million SQL test cases across 623 test files. It tests practical correctness by running real-world queries and validating results. This suite focuses on semantic correctness and edge cases rather than pure grammar conformance.
+conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a> is a comprehensive test suite originally developed for SQLite, containing ~{ $testCases } SQL test cases across { $testFiles } test files. It tests practical correctness by running real-world queries and validating results. This suite focuses on semantic correctness and edge cases rather than pure grammar conformance.
 conformance-slt-index = Index Tests
 conformance-slt-note = <strong>Note:</strong> SQLLogicTest provides a different perspective from sqltest. While sqltest focuses on BNF grammar conformance from the SQL:1999 specification, SQLLogicTest contains millions of real-world SQL queries testing practical correctness across a wide range of scenarios.
 conformance-slt-other = Other Tests

@@ -375,7 +375,7 @@ bench-tpcc-stock-level = Stock Level - Count items below threshold in recent ord
 
 # TPC-C Discussion
 bench-tpcc-disc-faster-title = SQLite से 5 गुना तेज
-bench-tpcc-disc-faster = VibeSQL SQLite के ~4,500 TPS की तुलना में <strong>~23,000 ट्रांजैक्शन प्रति सेकंड</strong> प्राप्त करता है, 5 गुना सुधार। यह स्पीडअप हमारी लॉक-फ्री MVCC आर्किटेक्चर से आता है जो हर राइट ऑपरेशन पर SQLite की कोर्स-ग्रेन्ड लॉकिंग से बचता है।
+bench-tpcc-disc-faster = VibeSQL SQLite के ~{ $sqliteTps } TPS की तुलना में <strong>~23,000 ट्रांजैक्शन प्रति सेकंड</strong> प्राप्त करता है, 5 गुना सुधार। यह स्पीडअप हमारी लॉक-फ्री MVCC आर्किटेक्चर से आता है जो हर राइट ऑपरेशन पर SQLite की कोर्स-ग्रेन्ड लॉकिंग से बचता है।
 bench-tpcc-disc-dominates-title = VibeSQL OLTP में क्यों हावी है
 bench-tpcc-disc-lockfree = MVCC रीडर्स और राइटर्स को बिना ब्लॉकिंग के समवर्ती रूप से आगे बढ़ने की अनुमति देता है
 bench-tpcc-disc-optimistic = ट्रांजैक्शन केवल कमिट टाइम पर कॉन्फ्लिक्ट करते हैं, एक्जीक्यूशन के दौरान नहीं
@@ -490,9 +490,9 @@ bench-footprint-peak-memory = Peak Memory - Maximum resident set size during ini
 
 # Footprint Embedded Discussion
 bench-footprint-emb-disc-size-title = बाइनरी साइज: मध्य मार्ग
-bench-footprint-emb-disc-size = VibeSQL <strong>~17MB</strong> पर SQLite (~5MB) और DuckDB (~45MB) के बीच बैठता है। यह एंबेडेड डिप्लॉयमेंट के लिए बाइनरी को प्रबंधनीय रखते हुए उन्नत सुविधाओं (विंडो फ़ंक्शन, CTEs, कॉलमनर एक्जीक्यूशन) को शामिल करने के हमारे चयन को दर्शाता है।
+bench-footprint-emb-disc-size = VibeSQL <strong>~{ $vibesqlBinaryMb }MB</strong> पर SQLite (~{ $sqliteBinaryMb }MB) और DuckDB (~{ $duckdbBinaryMb }MB) के बीच बैठता है। यह एंबेडेड डिप्लॉयमेंट के लिए बाइनरी को प्रबंधनीय रखते हुए उन्नत सुविधाओं (विंडो फ़ंक्शन, CTEs, कॉलमनर एक्जीक्यूशन) को शामिल करने के हमारे चयन को दर्शाता है।
 bench-footprint-emb-disc-startup-title = स्टार्टअप: सबसे तेज़ कोल्ड स्टार्ट
-bench-footprint-emb-disc-startup = VibeSQL <strong>~6ms कोल्ड स्टार्टअप</strong> प्राप्त करता है, SQLite (~6.5ms) से तेज़ और DuckDB (~13ms) से काफी तेज़। हमारा न्यूनतम इनिशियलाइज़ेशन पाथ स्टार्टअप पर केवल आवश्यक मेटाडेटा स्ट्रक्चर लोड करता है।
+bench-footprint-emb-disc-startup = VibeSQL <strong>~6ms कोल्ड स्टार्टअप</strong> प्राप्त करता है, SQLite (~{ $sqliteStartupMs }ms) से तेज़ और DuckDB (~{ $duckdbStartupMs }ms) से काफी तेज़। हमारा न्यूनतम इनिशियलाइज़ेशन पाथ स्टार्टअप पर केवल आवश्यक मेटाडेटा स्ट्रक्चर लोड करता है।
 bench-footprint-emb-disc-memory-title = मेमोरी एफिशिएंसी
 bench-footprint-emb-disc-memory = स्टार्टअप के दौरान पीक मेमोरी VibeSQL के लिए ~7MB बनाम SQLite के लिए ~3MB और DuckDB के लिए ~11MB है। SQLite से अंतर हमारे अधिक परिष्कृत क्वेरी ऑप्टिमाइज़र और पहले से एलोकेटेड कॉलमनर एक्जीक्यूशन इंफ्रास्ट्रक्चर को दर्शाता है।
 bench-footprint-emb-disc-roadmap-title = साइज रिडक्शन रोडमैप
@@ -514,7 +514,7 @@ bench-footprint-wasm-gzip = WASM (gzip) - Compressed size for web delivery
 
 # Footprint Server Discussion
 bench-footprint-srv-disc-wasm-title = WASM: 1.5MB कंप्रेस्ड
-bench-footprint-srv-disc-wasm = VibeSQL का WebAssembly मॉड्यूल <strong>~1.5MB gzipped</strong> में कंप्रेस होता है, तेज़ इनिशियल पेज लोड सक्षम करता है। यह विंडो फ़ंक्शन, CTEs और ACID ट्रांजैक्शन के साथ एक फुल SQL:1999 डेटाबेस है जो पूरी तरह से ब्राउज़र में चलता है।
+bench-footprint-srv-disc-wasm = VibeSQL का WebAssembly मॉड्यूल <strong>~{ $wasmSizeGzipMb }MB gzipped</strong> में कंप्रेस होता है, तेज़ इनिशियल पेज लोड सक्षम करता है। यह विंडो फ़ंक्शन, CTEs और ACID ट्रांजैक्शन के साथ एक फुल SQL:1999 डेटाबेस है जो पूरी तरह से ब्राउज़र में चलता है।
 bench-footprint-srv-disc-included-title = क्या शामिल है
 bench-footprint-srv-disc-parser = पूर्ण SQL पार्सर और क्वेरी ऑप्टिमाइज़र
 bench-footprint-srv-disc-btree = MVCC के साथ B-tree स्टोरेज इंजन
@@ -604,7 +604,7 @@ conformance-generate-coverage = # Generate coverage report
 conformance-open-coverage = # Open coverage report
 
 bench-table-query = Query
-bench-tpcc-disc-duckdb = DuckDB achieves only ~385 TPS on TPC-C (60x slower than VibeSQL, 12x slower than SQLite). This is expected: DuckDB is an <strong>analytical (OLAP) database</strong> optimized for large batch operations, not single-row transactions. Its columnar storage format excels at scanning millions of rows but adds overhead for point lookups and small updates that dominate OLTP workloads like TPC-C.
+bench-tpcc-disc-duckdb = DuckDB achieves only ~{ $duckdbTps } TPS on TPC-C (~{ $duckdbVsVibesql } slower than VibeSQL, 12x slower than SQLite). This is expected: DuckDB is an <strong>analytical (OLAP) database</strong> optimized for large batch operations, not single-row transactions. Its columnar storage format excels at scanning millions of rows but adds overhead for point lookups and small updates that dominate OLTP workloads like TPC-C.
 bench-tpcc-disc-duckdb-title = Why DuckDB Lags on OLTP
 bench-tpcc-transactions-label = transactions executed
 
@@ -645,9 +645,9 @@ conformance-pass-rates-mean = Our <strong>{ $sqltestRate }% sqltest pass rate</s
 conformance-passed = Passed
 conformance-philosophy-point = <span class="font-medium">Philosophy:</span> sqltest says "can you parse this?"; SQLLogicTest says "does this work correctly?"
 conformance-slt-ddl = DDL Tests
-conformance-slt-desc = Results from the comprehensive <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a> suite containing ~5.9 million tests across 623 test files from the official SQLite corpus.
+conformance-slt-desc = Results from the comprehensive <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a> suite containing ~{ $testCases } tests across { $testFiles } test files from the official SQLite corpus.
 conformance-slt-evidence = Evidence Tests
-conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a> is a comprehensive test suite originally developed for SQLite, containing ~5.9 million SQL test cases across 623 test files. It tests practical correctness by running real-world queries and validating results. This suite focuses on semantic correctness and edge cases rather than pure grammar conformance.
+conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a> is a comprehensive test suite originally developed for SQLite, containing ~{ $testCases } SQL test cases across { $testFiles } test files. It tests practical correctness by running real-world queries and validating results. This suite focuses on semantic correctness and edge cases rather than pure grammar conformance.
 conformance-slt-index = Index Tests
 conformance-slt-note = <strong>Note:</strong> SQLLogicTest provides a different perspective from sqltest. While sqltest focuses on BNF grammar conformance from the SQL:1999 specification, SQLLogicTest contains millions of real-world SQL queries testing practical correctness across a wide range of scenarios.
 conformance-slt-other = Other Tests
