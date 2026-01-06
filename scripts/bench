@@ -1188,7 +1188,7 @@ def print_summary_table(results: Dict[str, BenchmarkResult]) -> None:
     print("\n" + "=" * 70)
     print("BENCHMARK SUMMARY")
     print("=" * 70)
-    print(f"{'Benchmark':<12} {'Status':<10} {'Duration':<12} {'Queries':<12} {'Notes'}")
+    print(f"{'Benchmark':<16} {'Status':<10} {'Duration':<12} {'Queries':<12} {'Notes'}")
     print("-" * 70)
 
     for test, result in results.items():
@@ -1203,7 +1203,7 @@ def print_summary_table(results: Dict[str, BenchmarkResult]) -> None:
             queries_str = "-"
 
         notes = result.error or ""
-        print(f"{test.upper():<12} {status_icon:<10} {duration_str:<12} {queries_str:<12} {notes}")
+        print(f"{test.upper():<16} {status_icon:<10} {duration_str:<12} {queries_str:<12} {notes}")
 
     print("=" * 70)
 
