@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-06T09:38:02.763419Z",
+  "generated_at": "2026-01-06T11:04:37.330878Z",
   "version": "2.0",
   "summary": {
     "conformance": {
@@ -20,16 +20,16 @@
     "tpch": {
       "queries_passing": 22,
       "queries_total": 22,
-      "geo_mean_ms": 18.74,
+      "geo_mean_ms": 19.29,
       "trend_7d_pct": null
     },
     "tpcds": {
       "queries_passing": 408,
       "queries_total": 408,
-      "geo_mean_ms": 9.58
+      "geo_mean_ms": 9.55
     },
     "tpcc": {
-      "vibesql_tps": 12008.83,
+      "vibesql_tps": 10592.43,
       "scale_factor": "1.0"
     },
     "sysbench": {
@@ -48,166 +48,166 @@
       "description": "TPC-H Decision Support - 22 analytical queries",
       "scale_factor": 0.01,
       "latest_run": {
-        "timestamp": "2026-01-06T06:23:45.765630",
-        "commit": "074ed656",
+        "timestamp": "2026-01-06T09:44:35.226079",
+        "commit": "0dd78213",
         "branch": "main"
       },
       "queries_passing": 22,
       "queries_total": 22,
-      "geo_mean_ms": 18.74,
+      "geo_mean_ms": 19.29,
       "queries": {
         "Q1": {
           "latest": {
-            "vibesql_ms": 230.01,
+            "vibesql_ms": 228.89,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q2": {
           "latest": {
-            "vibesql_ms": 1.61,
+            "vibesql_ms": 1.75,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q3": {
           "latest": {
-            "vibesql_ms": 26.93,
+            "vibesql_ms": 26.97,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q4": {
           "latest": {
-            "vibesql_ms": 1.81,
+            "vibesql_ms": 2.12,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q5": {
           "latest": {
-            "vibesql_ms": 12.54,
+            "vibesql_ms": 12.69,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q6": {
           "latest": {
-            "vibesql_ms": 1.67,
+            "vibesql_ms": 1.58,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q7": {
           "latest": {
-            "vibesql_ms": 10.37,
+            "vibesql_ms": 11.08,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q8": {
           "latest": {
-            "vibesql_ms": 15.37,
+            "vibesql_ms": 16.17,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q9": {
           "latest": {
-            "vibesql_ms": 70.42,
+            "vibesql_ms": 75.48,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q10": {
           "latest": {
-            "vibesql_ms": 13.25,
+            "vibesql_ms": 12.86,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q11": {
           "latest": {
-            "vibesql_ms": 7.33,
+            "vibesql_ms": 8.09,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q12": {
           "latest": {
-            "vibesql_ms": 4.25,
+            "vibesql_ms": 4.61,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q13": {
           "latest": {
-            "vibesql_ms": 65.42,
+            "vibesql_ms": 57.46,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q14": {
           "latest": {
-            "vibesql_ms": 115.46,
+            "vibesql_ms": 91.17,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q15": {
           "latest": {
-            "vibesql_ms": 1.58,
+            "vibesql_ms": 1.8,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q16": {
           "latest": {
-            "vibesql_ms": 12.48,
+            "vibesql_ms": 12.92,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q17": {
           "latest": {
-            "vibesql_ms": 122.22,
+            "vibesql_ms": 127.98,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q18": {
           "latest": {
-            "vibesql_ms": 23.55,
+            "vibesql_ms": 24.01,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q19": {
           "latest": {
-            "vibesql_ms": 89.44,
+            "vibesql_ms": 99.5,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q20": {
           "latest": {
-            "vibesql_ms": 82.32,
+            "vibesql_ms": 86.01,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q21": {
           "latest": {
-            "vibesql_ms": 124.34,
+            "vibesql_ms": 136.53,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         },
         "Q22": {
           "latest": {
-            "vibesql_ms": 14.62,
+            "vibesql_ms": 14.61,
             "status": "passed",
-            "timestamp": "2026-01-06T06:23:45.765630"
+            "timestamp": "2026-01-06T09:44:35.226079"
           }
         }
       }
@@ -216,28 +216,28 @@
       "description": "TPC-DS Decision Support - 99 complex queries",
       "queries_passing": 408,
       "queries_total": 408,
-      "geo_mean_ms": 9.58
+      "geo_mean_ms": 9.55
     },
     "tpcc": {
       "description": "TPC-C OLTP - Mixed read/write transactions",
       "scale_factor": "1.0",
       "latest": {
-        "timestamp": "2026-01-06T06:29:09.051214",
-        "commit": "074ed656",
-        "vibesql_tps": 12008.83,
+        "timestamp": "2026-01-06T09:50:07.028693",
+        "commit": "0dd78213",
+        "vibesql_tps": 10592.43,
         "transactions": {
           "mixed": {
             "vibesql": {
-              "tps": 12008.83,
-              "latency_us": 112.93
+              "tps": 10592.43,
+              "latency_us": 128.46
             },
             "sqlite": {
-              "tps": 3986.67,
-              "latency_us": 1163.37
+              "tps": 3692.97,
+              "latency_us": 1260.93
             },
             "duckdb": {
-              "tps": 390.6,
-              "latency_us": 2271.16
+              "tps": 375.24,
+              "latency_us": 2442.22
             }
           }
         }
@@ -246,8 +246,8 @@
     "sysbench": {
       "description": "Sysbench OLTP - Point operations",
       "latest": {
-        "timestamp": "2026-01-06T09:37:45.186422",
-        "commit": "acaa4e2b"
+        "timestamp": "2026-01-06T10:35:28.392641",
+        "commit": "0dd78213"
       },
       "tests": {
         "point_select_10000": {
@@ -255,11 +255,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 64.49,
+              "mean_us": 47.36,
               "std_dev_us": null
             },
             "mysql": {
-              "mean_us": 269.32,
+              "mean_us": 250.0,
               "std_dev_us": null
             }
           }
@@ -269,11 +269,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 69.41,
+              "mean_us": 55.77,
               "std_dev_us": null
             },
             "mysql": {
-              "mean_us": 559.19,
+              "mean_us": 512.99,
               "std_dev_us": null
             }
           }
@@ -283,11 +283,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 54.19,
+              "mean_us": 52.44,
               "std_dev_us": null
             },
             "mysql": {
-              "mean_us": 577.11,
+              "mean_us": 540.46,
               "std_dev_us": null
             }
           }
@@ -297,11 +297,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 49.23,
+              "mean_us": 47.32,
               "std_dev_us": null
             },
             "mysql": {
-              "mean_us": 584.71,
+              "mean_us": 554.93,
               "std_dev_us": null
             }
           }
@@ -311,11 +311,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 406.97,
+              "mean_us": 1421.59,
               "std_dev_us": null
             },
             "mysql": {
-              "mean_us": 369.21,
+              "mean_us": 363.17,
               "std_dev_us": null
             }
           }
@@ -368,11 +368,11 @@
   "timeline": [
     {
       "date": "2026-01-06",
-      "commit": "acaa4e2b4",
+      "commit": "0dd78213e",
       "conformance_pass_rate": 100.0,
-      "tpch_geo_mean_ms": 18.74,
+      "tpch_geo_mean_ms": 19.29,
       "tpch_passing": 22,
-      "tpcc_tps": 12008.83,
+      "tpcc_tps": 10592.43,
       "events": []
     }
   ],
