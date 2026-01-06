@@ -749,7 +749,7 @@ challenge-record-title = Người Giữ Kỷ Lục Hiện Tại
 challenge-record-days = { $days } ngày
 challenge-record-name = VibeSQL (Cơ Sở)
 challenge-record-date = Tháng 10 - Tháng 11 năm 2025
-challenge-record-beat = Phá kỷ lục này 5%? Đó là <strong>{ $target } ngày hoặc ít hơn</strong> để nhận cúp.
+challenge-record-beat = Phá kỷ lục này 5%? Đó là <strong>24 ngày hoặc ít hơn</strong> để nhận cúp.
 
 # Why This Challenge section
 challenge-why-title = Tại Sao Thử Thách Này?

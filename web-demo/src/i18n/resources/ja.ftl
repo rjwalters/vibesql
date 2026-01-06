@@ -768,7 +768,7 @@ challenge-record-title = 現在の記録保持者
 challenge-record-days = { $days }日
 challenge-record-name = VibeSQL（ベースライン）
 challenge-record-date = 2025年10月〜11月
-challenge-record-beat = これを5%上回りますか？トロフィーを獲得するには<strong>{ $target }日以下</strong>が必要です。
+challenge-record-beat = これを5%上回りますか？トロフィーを獲得するには<strong>24日以下</strong>が必要です。
 
 # なぜこのチャレンジかセクション
 challenge-why-title = なぜこのチャレンジ？

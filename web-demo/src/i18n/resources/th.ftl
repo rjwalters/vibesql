@@ -749,7 +749,7 @@ challenge-record-title = ผู้ถือสถิติปัจจุบั�
 challenge-record-days = { $days } วัน
 challenge-record-name = VibeSQL (พื้นฐาน)
 challenge-record-date = ตุลาคม - พฤศจิกายน 2025
-challenge-record-beat = ทำลายสถิตินี้ 5%? นั่นคือ<strong>{ $target } วันหรือน้อยกว่า</strong>เพื่อรับถ้วยรางวัล
+challenge-record-beat = ทำลายสถิตินี้ 5%? นั่นคือ<strong>24 วันหรือน้อยกว่า</strong>เพื่อรับถ้วยรางวัล
 
 # Why This Challenge section
 challenge-why-title = ทำไมต้องความท้าทายนี้?

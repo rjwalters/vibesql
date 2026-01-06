@@ -749,7 +749,7 @@ challenge-record-title = वर्तमान रिकॉर्ड धार�
 challenge-record-days = { $days } दिन
 challenge-record-name = VibeSQL (बेसलाइन)
 challenge-record-date = अक्टूबर - नवंबर 2025
-challenge-record-beat = इसे 5% से हराना चाहते हैं? इसका मतलब है ट्रॉफी का दावा करने के लिए <strong>{ $target } दिन या उससे कम</strong>।
+challenge-record-beat = इसे 5% से हराना चाहते हैं? इसका मतलब है ट्रॉफी का दावा करने के लिए <strong>24 दिन या उससे कम</strong>।
 
 # यह चुनौती क्यों सेक्शन
 challenge-why-title = यह चुनौती क्यों?
