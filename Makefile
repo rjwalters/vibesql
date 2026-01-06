@@ -124,10 +124,12 @@ help:
 	@echo "  make benchmark           - Run all benchmarks, VibeSQL only (~2.5 hours)"
 	@echo "  make benchmark-quick     - Quick CI run with reduced iterations (~25 min)"
 	@echo "  make benchmark-smoke     - Smoke test for pipeline validation (~30s)"
-	@echo "  make benchmark-all       - FULL matrix: embedded + server benchmarks"
+	@echo "  make benchmark-all       - FULL matrix: embedded + server + MySQL (requires Docker)"
 	@echo "  make benchmark-all-bg    - Run 'make benchmark-all' in background"
 	@echo "  make benchmark-logs      - Tail the background benchmark output"
 	@echo "  make benchmark-status    - Check if background benchmark is running"
+	@echo "  make start-mysql         - Start MySQL Docker container for benchmarks"
+	@echo "  make stop-mysql          - Stop MySQL Docker container"
 	@echo ""
 	@echo "Embedded benchmarks (VibeSQL, SQLite, DuckDB - in-process databases):"
 	@echo "  make benchmark-embedded-all  - All embedded benchmarks × all embedded engines"
@@ -136,7 +138,7 @@ help:
 	@echo "  make benchmark-tpcds         - TPC-DS decision support (embedded engines)"
 	@echo "  make benchmark-sysbench      - Sysbench OLTP (embedded engines)"
 	@echo ""
-	@echo "Server benchmarks (VibeSQL-server, MySQL - client-server databases):"
+	@echo "Server benchmarks (VibeSQL-server, MySQL - client-server, requires Docker for MySQL):"
 	@echo "  make benchmark-server-all    - All server benchmarks × all server engines"
 	@echo "  make benchmark-tpch-server   - TPC-H via client-server protocol"
 	@echo "  make benchmark-tpcc-server   - TPC-C OLTP via client-server protocol"
@@ -378,9 +380,19 @@ benchmark-quick:
 benchmark-smoke:
 	@./scripts/bench --smoke --all
 
+# Start MySQL Docker container for benchmarks
+# This is automatically called by benchmark-all, but can be run manually
+start-mysql:
+	@./scripts/ensure-mysql-docker.sh
+
+# Stop MySQL Docker container
+stop-mysql:
+	@docker stop vibesql-mysql-tpch 2>/dev/null || echo "MySQL container not running"
+
 # Full benchmark matrix: embedded + server benchmarks
 # Runs all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench) with timing report
 # Note: Tests are NOT included - run 'make test' separately
+# Note: Requires Docker for MySQL comparison benchmarks
 benchmark-all:
 	@./scripts/bench-all
 

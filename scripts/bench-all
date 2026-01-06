@@ -35,6 +35,63 @@ PHASE1_STATUS=""
 PHASE2_STATUS=""
 TOTAL_START=$(date +%s)
 
+# Ensure Docker is running for MySQL benchmarks
+ensure_docker() {
+    echo -e "${BOLD}Pre-flight check: Docker${NC}"
+
+    # Check if Docker is installed
+    if ! command -v docker &> /dev/null; then
+        echo -e "${RED}✗ Docker is not installed${NC}"
+        echo ""
+        echo "Docker is required for MySQL comparison benchmarks."
+        echo "Install Docker Desktop: https://docs.docker.com/get-docker/"
+        echo ""
+        echo "To run benchmarks without MySQL, use:"
+        echo "  make benchmark-embedded-all   # VibeSQL, SQLite, DuckDB only"
+        exit 1
+    fi
+
+    # Check if Docker daemon is running
+    if docker info &> /dev/null; then
+        echo -e "${GREEN}✓ Docker is running${NC}"
+        return 0
+    fi
+
+    # Docker not running - try to start it on macOS
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo -e "${YELLOW}Docker daemon not running. Starting Docker Desktop...${NC}"
+        open -a Docker 2>/dev/null || true
+
+        # Wait up to 60 seconds for Docker to start
+        local waited=0
+        local max_wait=60
+        while [ $waited -lt $max_wait ]; do
+            if docker info &> /dev/null; then
+                echo -e "${GREEN}✓ Docker is now running${NC}"
+                return 0
+            fi
+            sleep 2
+            waited=$((waited + 2))
+            if (( waited % 10 == 0 )); then
+                echo "  Waiting for Docker to start... (${waited}s)"
+            fi
+        done
+
+        echo -e "${RED}✗ Docker failed to start within ${max_wait}s${NC}"
+    else
+        echo -e "${RED}✗ Docker daemon is not running${NC}"
+    fi
+
+    echo ""
+    echo "Please start Docker manually and try again:"
+    echo "  - macOS: Open Docker Desktop application"
+    echo "  - Linux: sudo systemctl start docker"
+    echo ""
+    echo "To run benchmarks without MySQL, use:"
+    echo "  make benchmark-embedded-all   # VibeSQL, SQLite, DuckDB only"
+    exit 1
+}
+
 # Format seconds into human-readable duration
 format_duration() {
     local secs=$1
@@ -119,6 +176,11 @@ main() {
     echo -e "${BOLD}                    VIBESQL BENCHMARK-ALL                          ${NC}"
     echo -e "${BOLD}══════════════════════════════════════════════════════════════════${NC}"
     echo ""
+
+    # Pre-flight: Ensure Docker is available for MySQL benchmarks
+    ensure_docker
+    echo ""
+
     echo "Running full benchmark matrix:"
     echo "  1. Embedded benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)"
     echo "  2. Server benchmarks (PostgreSQL wire protocol)"
