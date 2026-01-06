@@ -193,12 +193,32 @@ pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
     // Disable HeatWave secondary engine to avoid errors on complex queries
     let _ = conn.query_drop("SET SESSION use_secondary_engine=OFF");
 
-    let mut data = TPCHData::new(scale_factor);
+    let data = TPCHData::new(scale_factor);
+
+    // Check if data already exists with correct scale factor
+    // Skip loading if lineitem count is reasonable (data loading is slow)
+    let existing_lineitem: Option<i64> = conn
+        .query_first("SELECT COUNT(*) FROM lineitem")
+        .ok()
+        .flatten();
+
+    // Expected lineitem count is approximately 6000 * scale_factor
+    let expected_lineitem = (6000.0 * scale_factor) as i64;
+    if existing_lineitem.unwrap_or(0) >= expected_lineitem {
+        eprintln!(
+            "MySQL TPC-H data already loaded (SF={}), skipping reload",
+            scale_factor
+        );
+        return Some(conn);
+    }
+
+    eprintln!("Loading TPC-H data into MySQL (SF={})...", scale_factor);
 
     // Create schema (drops and recreates tables)
     create_tpch_schema_mysql(&mut conn);
 
     // Load data
+    let mut data = TPCHData::new(scale_factor);
     load_region_mysql(&mut conn);
     load_nation_mysql(&mut conn);
     load_customer_mysql(&mut conn, &mut data);
@@ -208,6 +228,7 @@ pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
     load_orders_mysql(&mut conn, &mut data);
     load_lineitem_mysql(&mut conn, &mut data);
 
+    eprintln!("MySQL TPC-H data loaded successfully");
     Some(conn)
 }
 
