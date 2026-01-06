@@ -415,18 +415,16 @@ bench-sysbench-delete = 削除 - プライマリキーによる行の削除
 bench-sysbench-range-queries = 範囲クエリ - シンプル、SUM、ORDER BY、DISTINCTの範囲スキャン
 
 # Sysbench組み込みディスカッション
-bench-sysbench-emb-disc-point-title = ポイント検索: VibeSQLがリード
-bench-sysbench-emb-disc-point = VibeSQLの直接APIは<strong>ポイント選択あたり約137ns</strong>を達成し、SQLiteに匹敵し、DuckDB（約140µs）を大幅に上回ります。B-tree実装は、最小限のポインタチェイスとキャッシュフレンドリーなノードレイアウトで単一行検索に最適化されています。
-bench-sysbench-emb-disc-index-title = インデックス更新: 2倍高速
-bench-sysbench-emb-disc-index = VibeSQLのインデックス更新は<strong>約740ns vs SQLiteの約1.6µs</strong>で実行されます。MVCC設計により、各操作のwrite-aheadロギングオーバーヘッドなしでインプレースインデックス更新が可能です。
+bench-sysbench-emb-disc-point-title = ポイント検索: { $pointRatio }のギャップ
+bench-sysbench-emb-disc-point = VibeSQLのポイント選択は<strong>約{ $pointVibesqlUs }µs vs SQLiteの約{ $pointSqliteUs }µs</strong>で実行されます。この{ $pointRatio }のギャップは主要なOLTP最適化目標です。B-treeノードレイアウトとロックフリー読み取りパスを調査してこのギャップを縮小しています。
+bench-sysbench-emb-disc-index-title = インデックス更新: { $indexRatio }のギャップ
+bench-sysbench-emb-disc-index = VibeSQLのインデックス更新は<strong>約{ $indexVibesqlUs }µs vs SQLiteの約{ $indexSqliteUs }µs</strong>で実行されます。MVCC設計によるインデックスメンテナンスのオーバーヘッド削減に取り組んでいます。
 bench-sysbench-emb-disc-improve-title = 改善領域
 bench-sysbench-emb-disc-bulk = SQLiteのバッチ挿入パスは高度に最適化されており、バッチB-tree操作を追加中
-bench-sysbench-emb-disc-nonindex = 非インデックス列のフルテーブルスキャンにはプレディケートプッシュダウン最適化が必要
-bench-sysbench-emb-disc-deletes = トゥームストーンベースの削除にはクリーンアップオーバーヘッドがあり、コンパクション改善を計画中
-bench-sysbench-emb-disc-duckdb-title = DuckDB比較
-bench-sysbench-emb-disc-duckdb = DuckDBは分析ワークロード向けに最適化されており、マイクロ操作向けではありません。ここでの100-1000倍遅い結果は、単一行レイテンシをバルクスループットと引き換えにするアーキテクチャの選択（列指向ストレージ、ベクトル化実行）を反映しています。VibeSQLは両方のユースケースを対象としています。
+bench-sysbench-emb-disc-nonindex = 非インデックス更新は VibeSQL約{ $nonIndexVibesqlUs }µs vs SQLiteの約{ $nonIndexSqliteUs }µsを示しています
+bench-sysbench-emb-disc-deletes = 削除操作は VibeSQL約{ $deleteVibesqlUs }µs vs SQLiteの約{ $deleteSqliteUs }µsを示しています
 bench-sysbench-emb-disc-architecture-title = アーキテクチャのトレードオフ
-bench-sysbench-emb-disc-architecture = VibeSQLのハイブリッドアーキテクチャは、OLTPとOLAPの両方のワークロードを対象としています。B-treeストレージはSQLiteと同等のポイントルックアップ性能を提供し、列指向実行は分析クエリを効率的に処理します。これは、単一行レイテンシを犠牲にしてバルク操作のみを最適化するDuckDBのような純粋なOLAPデータベースとは異なります。
+bench-sysbench-emb-disc-architecture = VibeSQLのハイブリッドアーキテクチャは、OLTPとOLAPの両方のワークロードを対象としています。B-treeストレージはSQLiteと競合するポイントルックアップ性能を提供し、列指向実行は分析クエリを効率的に処理します。これは、単一行レイテンシを犠牲にしてバルク操作のみを最適化するDuckDBのような純粋なOLAPデータベースとは異なります。
 
 # Sysbenchサーバー固有
 bench-sysbench-server-name = Sysbench（サーバー）
