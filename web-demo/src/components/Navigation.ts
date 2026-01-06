@@ -74,13 +74,6 @@ export class NavigationComponent extends Component<NavigationState> {
         icon: this.getGithubIcon(),
         external: true,
       },
-      {
-        id: 'home',
-        label: t('nav-home'),
-        href: 'https://rjwalters.info',
-        icon: this.getHomeIcon(),
-        external: true,
-      },
     ]
 
     this.element.innerHTML = `
@@ -141,15 +134,6 @@ export class NavigationComponent extends Component<NavigationState> {
       >
         ${link.icon}
       </a>
-    `
-  }
-
-  private getHomeIcon(): string {
-    return `
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-        <polyline stroke-linecap="round" stroke-linejoin="round" stroke-width="2" points="9 22 9 12 15 12 15 22"></polyline>
-      </svg>
     `
   }
 
