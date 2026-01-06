@@ -3,6 +3,7 @@
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
 
+use super::range::extract_range_predicate;
 use super::*;
 
 #[test]

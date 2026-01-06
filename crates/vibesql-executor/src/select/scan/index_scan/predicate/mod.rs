@@ -52,23 +52,18 @@ pub(crate) enum IndexPredicate {
 
 // Re-export composite index functions
 pub(crate) use composite::{
-    build_residual_where_clause, extract_composite_equality_predicates,
-    extract_composite_predicates_with_in, extract_prefix_equality_predicates,
-    extract_prefix_with_trailing_range, generate_composite_keys,
-    where_clause_fully_satisfied_by_composite_key,
+    build_residual_where_clause, extract_composite_predicates_with_in,
+    extract_prefix_equality_predicates, extract_prefix_with_trailing_range,
+    generate_composite_keys, where_clause_fully_satisfied_by_composite_key,
 };
 
 // Re-export expression index functions
 pub(crate) use expression_index::{
-    extract_index_predicate_for_expression, extract_index_predicate_for_indexed_column,
-    where_clause_fully_satisfied_by_expression_index, where_clause_fully_satisfied_by_indexed_column,
+    extract_index_predicate_for_indexed_column, where_clause_fully_satisfied_by_indexed_column,
 };
 
 // Re-export main extraction function
 pub(crate) use in_list::{extract_index_predicate, where_clause_fully_satisfied_by_index};
-
-// Re-export range extraction for tests and index_scan module
-pub(in crate::select::scan::index_scan) use range::extract_range_predicate;
 
 #[cfg(test)]
 #[path = "tests.rs"]
