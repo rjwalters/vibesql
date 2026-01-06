@@ -1,0 +1,27 @@
+-- VibeSQL Database Dump
+-- Generated: 2026-01-05 22:11:20.151439 UTC
+--
+
+-- Schemas
+
+-- Roles
+
+-- Tables and Data
+CREATE TABLE t1 (X REAL);
+
+INSERT INTO t1 VALUES (0.5);
+INSERT INTO t1 VALUES (50.0);
+INSERT INTO t1 VALUES (0.005);
+INSERT INTO t1 VALUES (0.05);
+INSERT INTO t1 VALUES (-0.05);
+INSERT INTO t1 VALUES (-0.051);
+INSERT INTO t1 VALUES (50.0);
+INSERT INTO t1 VALUES (50.0);
+INSERT INTO t1 VALUES (500.0);
+INSERT INTO t1 VALUES (5000.0);
+
+-- Indexes
+
+-- Views
+
+-- End of dump

@@ -12,6 +12,7 @@ import { initializeApp, setupThemeSync } from './app/initialization'
 import { createExecutionHandler } from './app/query-executor'
 import { initLocale, SUPPORTED_LOCALES } from './locale'
 import { initI18n, setI18nLocale, updateDOM, t } from './i18n'
+import { setBuildTimestamp } from './utils/build-timestamp'
 
 async function bootstrap(): Promise<void> {
   // Initialize locale and i18n early so loading messages can be translated
@@ -154,25 +155,7 @@ async function bootstrap(): Promise<void> {
     initShowcase()
 
     // Set build timestamp in footer
-    const timestampElement = document.getElementById('build-timestamp')
-    if (timestampElement) {
-      try {
-        const timestamp = __BUILD_TIMESTAMP__
-        const date = new Date(timestamp)
-        const formattedDate = date.toLocaleString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-          timeZoneName: 'short',
-        })
-        timestampElement.textContent = `Deployed: ${formattedDate}`
-      } catch (error) {
-        console.warn('Failed to set build timestamp', error)
-        timestampElement.textContent = 'Deployed: Development build'
-      }
-    }
+    setBuildTimestamp()
 
     // Final UI setup complete
     progress.updateStep('ui', 95, 'loading')

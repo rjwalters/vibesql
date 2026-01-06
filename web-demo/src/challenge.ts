@@ -10,6 +10,7 @@ import { initTheme } from './theme';
 import { initLocale } from './locale';
 import { NavigationComponent } from './components/Navigation';
 import { initI18n, updateDOM, setI18nLocale, onI18nChange } from './i18n';
+import { setBuildTimestamp } from './utils/build-timestamp';
 
 // Chart.js is loaded via CDN in challenge.html
 declare const Chart: any;
@@ -291,6 +292,9 @@ async function init(): Promise<void> {
 
   // Initialize navigation
   new NavigationComponent('challenge', theme, locale);
+
+  // Set build timestamp in footer
+  setBuildTimestamp();
 
   // Load and render challenge data
   const data = await loadChallengeData();

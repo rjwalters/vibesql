@@ -1,0 +1,18 @@
+-- VibeSQL Database Dump
+-- Generated: 2026-01-05 22:56:41.352535 UTC
+--
+
+-- Schemas
+
+-- Roles
+
+-- Tables and Data
+CREATE TABLE t2 (name VARCHAR);
+
+INSERT INTO t2 VALUES (':memory:');
+
+-- Indexes
+
+-- Views
+
+-- End of dump
