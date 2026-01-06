@@ -424,18 +424,16 @@ bench-sysbench-delete = Eliminar - Eliminar filas por clave primaria
 bench-sysbench-range-queries = Consultas de Rango - Escaneos de rango Simple, SUM, ORDER BY y DISTINCT
 
 # Discusión Sysbench Embebido
-bench-sysbench-emb-disc-point-title = Búsquedas Puntuales: VibeSQL Lidera
-bench-sysbench-emb-disc-point = La API directa de VibeSQL logra <strong>~137ns por selección puntual</strong>, igualando a SQLite y superando vastamente a DuckDB (~140µs). Nuestra implementación B-tree está optimizada para búsquedas de una sola fila con mínimo seguimiento de punteros y diseños de nodos amigables con la caché.
-bench-sysbench-emb-disc-index-title = Actualizaciones de Índice: 2x Más Rápido
-bench-sysbench-emb-disc-index = Las actualizaciones indexadas de VibeSQL ejecutan a <strong>~740ns vs ~1.6µs de SQLite</strong>. Nuestro diseño MVCC permite actualizaciones de índice in situ sin sobrecarga de registro de escritura anticipada para cada operación.
+bench-sysbench-emb-disc-point-title = Búsquedas Puntuales: Brecha de { $pointRatio }
+bench-sysbench-emb-disc-point = Las selecciones puntuales de VibeSQL ejecutan a <strong>~{ $pointVibesqlUs }µs vs ~{ $pointSqliteUs }µs de SQLite</strong>. Esta brecha de { $pointRatio } representa nuestro objetivo principal de optimización OLTP - estamos investigando el diseño de nodos B-tree y rutas de lectura sin bloqueo para cerrar esta brecha.
+bench-sysbench-emb-disc-index-title = Actualizaciones de Índice: Brecha de { $indexRatio }
+bench-sysbench-emb-disc-index = Las actualizaciones indexadas de VibeSQL ejecutan a <strong>~{ $indexVibesqlUs }µs vs ~{ $indexSqliteUs }µs de SQLite</strong>. Esta es un área de optimización ya que nuestro diseño MVCC agrega sobrecarga para el mantenimiento de índices que estamos trabajando en reducir.
 bench-sysbench-emb-disc-improve-title = Áreas de Mejora
 bench-sysbench-emb-disc-bulk = La ruta de inserción por lotes de SQLite está altamente optimizada; estamos agregando operaciones B-tree por lotes
-bench-sysbench-emb-disc-nonindex = Los escaneos de tabla completa para columnas no indexadas necesitan optimización de pushdown de predicados
-bench-sysbench-emb-disc-deletes = Nuestra eliminación basada en tombstones tiene sobrecarga de limpieza; se planean mejoras de compactación
-bench-sysbench-emb-disc-duckdb-title = Comparación con DuckDB
-bench-sysbench-emb-disc-duckdb = DuckDB está optimizado para cargas de trabajo analíticas, no micro-operaciones. Sus resultados 100-1000x más lentos aquí reflejan elecciones arquitectónicas (almacenamiento columnar, ejecución vectorizada) que intercambian latencia de una sola fila por rendimiento en masa. VibeSQL apunta a ambos casos de uso.
-bench-sysbench-emb-disc-architecture-title = Architectural Trade-offs
-bench-sysbench-emb-disc-architecture = VibeSQL's hybrid architecture targets both OLTP and OLAP workloads. Our B-tree storage provides SQLite-competitive point lookup performance, while columnar execution handles analytical queries efficiently. This differs from pure OLAP databases like DuckDB that optimize exclusively for bulk operations at the cost of single-row latency.
+bench-sysbench-emb-disc-nonindex = Las actualizaciones sin índice muestran VibeSQL a ~{ $nonIndexVibesqlUs }µs vs ~{ $nonIndexSqliteUs }µs de SQLite
+bench-sysbench-emb-disc-deletes = Las operaciones de eliminación muestran VibeSQL a ~{ $deleteVibesqlUs }µs vs ~{ $deleteSqliteUs }µs de SQLite
+bench-sysbench-emb-disc-architecture-title = Compensaciones Arquitectónicas
+bench-sysbench-emb-disc-architecture = La arquitectura híbrida de VibeSQL apunta tanto a cargas OLTP como OLAP. Nuestro almacenamiento B-tree proporciona rendimiento de búsqueda puntual competitivo con SQLite, mientras que la ejecución columnar maneja consultas analíticas eficientemente. Esto difiere de bases de datos OLAP puras como DuckDB que optimizan exclusivamente para operaciones en masa a costa de la latencia de una sola fila.
 
 # Sysbench Servidor específico
 bench-sysbench-server-name = Sysbench (Servidor)

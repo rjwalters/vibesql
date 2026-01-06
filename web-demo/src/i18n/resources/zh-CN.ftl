@@ -402,16 +402,14 @@ bench-sysbench-delete = 删除 - 按主键删除行
 bench-sysbench-range-queries = 范围查询 - 简单、SUM、ORDER BY 和 DISTINCT 范围扫描
 
 # Sysbench 嵌入式讨论
-bench-sysbench-emb-disc-point-title = 点查询：VibeSQL 领先
-bench-sysbench-emb-disc-point = VibeSQL 的直接 API 实现了<strong>每次点查询约 137ns</strong>，与 SQLite 相当，大幅超越 DuckDB（约 140µs）。我们的 B-tree 实现针对单行查找进行了优化，具有最小的指针追踪和缓存友好的节点布局。
-bench-sysbench-emb-disc-index-title = 索引更新：快 2 倍
-bench-sysbench-emb-disc-index = VibeSQL 的索引更新在<strong>约 740ns vs SQLite 的约 1.6µs</strong>下运行。我们的 MVCC 设计允许就地索引更新，无需每次操作的预写日志开销。
+bench-sysbench-emb-disc-point-title = 点查询：{ $pointRatio } 差距
+bench-sysbench-emb-disc-point = VibeSQL 的点查询在<strong>约 { $pointVibesqlUs }µs vs SQLite 的约 { $pointSqliteUs }µs</strong>下运行。这个 { $pointRatio } 的差距是我们主要的 OLTP 优化目标 - 我们正在研究 B-tree 节点布局和无锁读取路径来缩小这个差距。
+bench-sysbench-emb-disc-index-title = 索引更新：{ $indexRatio } 差距
+bench-sysbench-emb-disc-index = VibeSQL 的索引更新在<strong>约 { $indexVibesqlUs }µs vs SQLite 的约 { $indexSqliteUs }µs</strong>下运行。这是一个优化领域，因为我们的 MVCC 设计增加了索引维护的开销，我们正在努力减少这种开销。
 bench-sysbench-emb-disc-improve-title = 改进领域
 bench-sysbench-emb-disc-bulk = SQLite 的批量插入路径高度优化；我们正在添加批量 B-tree 操作
-bench-sysbench-emb-disc-nonindex = 非索引列的全表扫描需要谓词下推优化
-bench-sysbench-emb-disc-deletes = 我们基于墓碑的删除有清理开销；计划进行压缩改进
-bench-sysbench-emb-disc-duckdb-title = DuckDB 比较
-bench-sysbench-emb-disc-duckdb = DuckDB 针对分析工作负载进行了优化，而不是微操作。这里 100-1000 倍较慢的结果反映了以单行延迟换取批量吞吐量的架构选择（列式存储、向量化执行）。VibeSQL 同时针对两种用例。
+bench-sysbench-emb-disc-nonindex = 非索引更新显示 VibeSQL 约 { $nonIndexVibesqlUs }µs vs SQLite 的约 { $nonIndexSqliteUs }µs
+bench-sysbench-emb-disc-deletes = 删除操作显示 VibeSQL 约 { $deleteVibesqlUs }µs vs SQLite 的约 { $deleteSqliteUs }µs
 bench-sysbench-emb-disc-architecture-title = 架构权衡
 bench-sysbench-emb-disc-architecture = VibeSQL 的混合架构同时针对 OLTP 和 OLAP 工作负载。我们的 B-tree 存储提供与 SQLite 相当的点查询性能，而列式执行高效处理分析查询。这与 DuckDB 等纯 OLAP 数据库不同，后者以单行延迟为代价专门优化批量操作。
 

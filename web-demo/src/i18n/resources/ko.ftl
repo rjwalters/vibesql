@@ -400,14 +400,14 @@ bench-sysbench-delete = Delete - Remove rows by primary key
 bench-sysbench-range-queries = Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans
 
 # Sysbench Embedded Discussion
-bench-sysbench-emb-disc-point-title = 포인트 조회: 동등
-bench-sysbench-emb-disc-point = VibeSQL의 포인트 선택은 SQLite의 ~0.36µs와 일치하는 <strong>~0.37µs</strong>에서 실행됩니다. 우리의 B-tree 구현은 최소한의 포인터 추적과 캐시 친화적인 노드 레이아웃으로 단일 행 조회에 최적화되어 있습니다.
-bench-sysbench-emb-disc-index-title = 인덱스 업데이트: 개선 여지
-bench-sysbench-emb-disc-index = VibeSQL의 인덱스 업데이트는 <strong>SQLite의 ~1.7µs 대비 ~4.3µs</strong>에서 실행됩니다. 이는 MVCC 설계가 인덱스 유지 관리에 오버헤드를 추가하기 때문에 최적화 영역이며, 이를 줄이기 위해 작업 중입니다.
+bench-sysbench-emb-disc-point-title = 포인트 조회: { $pointRatio } 격차
+bench-sysbench-emb-disc-point = VibeSQL의 포인트 선택은 <strong>~{ $pointVibesqlUs }µs vs SQLite의 ~{ $pointSqliteUs }µs</strong>에서 실행됩니다. 이 { $pointRatio } 격차는 주요 OLTP 최적화 목표입니다 - B-tree 노드 레이아웃과 잠금 없는 읽기 경로를 조사하여 이 격차를 줄이고 있습니다.
+bench-sysbench-emb-disc-index-title = 인덱스 업데이트: { $indexRatio } 격차
+bench-sysbench-emb-disc-index = VibeSQL의 인덱스 업데이트는 <strong>~{ $indexVibesqlUs }µs vs SQLite의 ~{ $indexSqliteUs }µs</strong>에서 실행됩니다. MVCC 설계가 인덱스 유지 관리에 오버헤드를 추가하기 때문에 이를 줄이기 위해 작업 중인 최적화 영역입니다.
 bench-sysbench-emb-disc-improve-title = 개선 영역
 bench-sysbench-emb-disc-bulk = SQLite의 배치 삽입 경로는 고도로 최적화되어 있습니다; 배치 B-tree 작업을 추가 중입니다
-bench-sysbench-emb-disc-nonindex = 비인덱스 업데이트는 SQLite의 ~1.4µs 대비 VibeSQL ~1.9µs로 거의 동등합니다
-bench-sysbench-emb-disc-deletes = 삭제 작업이 크게 개선되었습니다: 이제 SQLite의 ~3.8µs 대비 ~5.5µs(이전 1183µs)
+bench-sysbench-emb-disc-nonindex = 비인덱스 업데이트는 VibeSQL ~{ $nonIndexVibesqlUs }µs vs SQLite의 ~{ $nonIndexSqliteUs }µs를 보여줍니다
+bench-sysbench-emb-disc-deletes = 삭제 작업은 VibeSQL ~{ $deleteVibesqlUs }µs vs SQLite의 ~{ $deleteSqliteUs }µs를 보여줍니다
 bench-sysbench-emb-disc-architecture-title = 아키텍처 트레이드오프
 bench-sysbench-emb-disc-architecture = VibeSQL의 하이브리드 아키텍처는 OLTP와 OLAP 워크로드 모두를 대상으로 합니다. B-tree 스토리지는 SQLite 경쟁력 있는 포인트 조회 성능을 제공하고, 컬럼형 실행은 분석 쿼리를 효율적으로 처리합니다.
 
