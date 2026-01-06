@@ -52,9 +52,10 @@ pub(crate) enum IndexPredicate {
 
 // Re-export composite index functions
 pub(crate) use composite::{
-    build_residual_where_clause, extract_composite_predicates_with_in,
-    extract_prefix_equality_predicates, extract_prefix_with_trailing_range,
-    generate_composite_keys, where_clause_fully_satisfied_by_composite_key,
+    build_residual_where_clause, extract_composite_equality_predicates,
+    extract_composite_predicates_with_in, extract_prefix_equality_predicates,
+    extract_prefix_with_trailing_range, generate_composite_keys,
+    where_clause_fully_satisfied_by_composite_key,
 };
 
 // Re-export expression index functions
