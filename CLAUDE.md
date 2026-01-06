@@ -621,7 +621,7 @@ git add web-demo/public/benchmarks/ web-demo/public/data/
 git commit -m "chore(web): Update benchmark data"
 ```
 
-The website is automatically deployed to GitHub Pages on push to `main`.
+To deploy the website to Cloudflare, run `wrangler deploy` from the `main` branch.
 
 #### Analyzing Benchmark Results
 
