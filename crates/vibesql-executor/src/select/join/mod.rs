@@ -1438,10 +1438,31 @@ fn remove_duplicate_columns_for_natural_join(
 
                     // Add coalesce pair for COALESCE(left, right) semantics on unqualified references
                     // Use the first left column entry for the coalesce pair
+                    // Issue #4906: For nested parenthesized JOINs, the right_schema may already have
+                    // a coalesce chain for this column. We need to extend the chain with ALL indices
+                    // from the right side, not just the current right column.
                     if let Some((_, actual_name, left_idx)) = left_entries.first() {
-                        result
-                            .schema
-                            .add_using_coalesce_pair(actual_name, *left_idx, right_idx);
+                        // Check if right_schema already has a coalesce chain for this column
+                        if let Some(right_coalesce_indices) =
+                            right_schema.using_coalesce_indices.get(&lowercase)
+                        {
+                            // Add left_idx first
+                            result
+                                .schema
+                                .add_using_coalesce_pair(actual_name, *left_idx, *left_idx);
+                            // Then add all indices from the right side's chain
+                            for &existing_idx in right_coalesce_indices {
+                                let adjusted_idx = left_col_count + existing_idx;
+                                result
+                                    .schema
+                                    .add_using_coalesce_pair(actual_name, *left_idx, adjusted_idx);
+                            }
+                        } else {
+                            // No existing chain, just add the single pair
+                            result
+                                .schema
+                                .add_using_coalesce_pair(actual_name, *left_idx, right_idx);
+                        }
                     }
 
                     // Mark as joined column for ambiguity resolution
