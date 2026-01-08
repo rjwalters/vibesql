@@ -749,7 +749,7 @@ challenge-record-title = حامل الرقم القياسي الحالي
 challenge-record-days = { $days } يوم
 challenge-record-name = VibeSQL (الخط الأساسي)
 challenge-record-date = أكتوبر - نوفمبر 2025
-challenge-record-beat = تريد التغلب على هذا بنسبة 5%؟ هذا يعني <strong>{ $target } يوم أو أقل</strong> للمطالبة بالكأس.
+challenge-record-beat = تريد التغلب على هذا بنسبة 5%؟ هذا يعني <strong>24 يوم أو أقل</strong> للمطالبة بالكأس.
 
 # قسم لماذا هذا التحدي
 challenge-why-title = لماذا هذا التحدي؟

@@ -589,7 +589,22 @@ impl CombinedExpressionEvaluator<'_> {
                     // For unqualified references to USING columns in RIGHT/FULL OUTER JOINs,
                     // apply N-way COALESCE semantics: return first non-NULL from chain.
                     // Qualified references (t1.col) should NOT use coalesce - they return the raw value.
-                    if table.is_none() {
+                    //
+                    // Issue #4905: For alias table references (e.g., j1.id where j1 aliases a USING join),
+                    // we SHOULD apply COALESCE semantics because the alias table represents the
+                    // coalesced join result, not individual underlying tables.
+                    let should_coalesce = if table.is_none() {
+                        true // Unqualified references always use COALESCE for USING columns
+                    } else if let Some(table_name) = table {
+                        // Check if this is an alias table
+                        use vibesql_catalog::TableIdentifier;
+                        let table_id = TableIdentifier::unquoted(table_name);
+                        self.schema.alias_tables.contains(&table_id)
+                    } else {
+                        false
+                    };
+
+                    if should_coalesce {
                         if let Some(indices) = self.schema.get_using_coalesce_indices(column) {
                             // Apply N-way COALESCE: return first non-NULL value from chain
                             for &idx in indices {

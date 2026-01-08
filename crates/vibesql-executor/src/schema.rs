@@ -144,6 +144,12 @@ pub struct CombinedSchema {
     /// Example: In `t5 NATURAL RIGHT JOIN t4`, t5.id is hidden but should be replaced
     /// by t4.id to maintain the output order (id, y, x) instead of (y, id, x).
     pub column_replacement_map: HashMap<usize, usize>,
+    /// Alias tables that are added for parenthesized join expressions (issue #4905).
+    /// These are virtual tables that point to the same columns as existing tables
+    /// but should NOT be expanded in SELECT *. They only exist for column resolution
+    /// purposes (e.g., `j1.id` in `FROM t1 JOIN (t2 JOIN t3) AS j1 ON j1.id = t1.id`).
+    /// Stores the table identifiers of alias tables.
+    pub alias_tables: HashSet<TableIdentifier>,
 }
 
 impl CombinedSchema {
@@ -161,6 +167,7 @@ impl CombinedSchema {
             joined_columns: HashSet::new(),
             using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
+            alias_tables: HashSet::new(),
         }
     }
 
@@ -182,6 +189,7 @@ impl CombinedSchema {
             joined_columns: HashSet::new(),
             using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
+            alias_tables: HashSet::new(),
         }
     }
 
@@ -223,7 +231,94 @@ impl CombinedSchema {
             joined_columns: HashSet::new(),
             using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
+            alias_tables: HashSet::new(),
         }
+    }
+
+    /// Add an alias for a parenthesized join expression.
+    ///
+    /// This is used for expressions like `(t1 JOIN t2) AS j1` where `j1` becomes an
+    /// alias for the combined result. The alias is added as a virtual table containing
+    /// all visible columns, allowing references like `j1.column` to work.
+    ///
+    /// The alias table is marked as "alias-only" and will not be expanded in SELECT *.
+    ///
+    /// **Important**: The alias table uses start_idx=0 and stores the original column
+    /// indices in a mapping, so that `j1.column` resolves to the correct index in the
+    /// actual row data.
+    pub fn add_join_alias(mut self, alias: &str) -> Self {
+        // Build the alias table columns to match what SELECT * would output:
+        // 1. First: USING/NATURAL JOIN columns (from joined_columns)
+        // 2. Then: Other visible columns
+        //
+        // For USING columns, use the first index from using_coalesce_indices
+        // so that j1.id resolves to the correct column position.
+
+        // Collect USING column schemas (from joined_columns)
+        let mut joined_col_entries: Vec<(usize, vibesql_catalog::ColumnSchema)> = Vec::new();
+        for joined_col in &self.joined_columns {
+            // Find the first column with this name (it will be the leftmost in the join)
+            if let Some(indices) = self.using_coalesce_indices.get(joined_col) {
+                if let Some(&first_idx) = indices.first() {
+                    // Find the column schema for this index
+                    for (table_id, (start_idx, table_schema)) in &self.table_schemas {
+                        if self.alias_tables.contains(table_id) {
+                            continue;
+                        }
+                        for (col_idx, col) in table_schema.columns.iter().enumerate() {
+                            let absolute_idx = *start_idx + col_idx;
+                            if absolute_idx == first_idx {
+                                // Use the column name (lowercase matched the joined_col)
+                                // but the index should be the first coalesce index
+                                joined_col_entries.push((first_idx, col.clone()));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Collect all visible non-USING columns
+        let mut other_columns: Vec<(usize, vibesql_catalog::ColumnSchema)> = Vec::new();
+        for (table_id, (start_idx, table_schema)) in &self.table_schemas {
+            if self.alias_tables.contains(table_id) {
+                continue;
+            }
+            for (col_idx, col) in table_schema.columns.iter().enumerate() {
+                let absolute_idx = *start_idx + col_idx;
+                // Skip hidden columns
+                if self.hidden_columns.contains(&absolute_idx) {
+                    continue;
+                }
+                // Skip USING columns (already handled above)
+                let is_joined = self.joined_columns.contains(&col.name.to_lowercase());
+                if is_joined {
+                    continue;
+                }
+                other_columns.push((absolute_idx, col.clone()));
+            }
+        }
+
+        // Sort other columns by index
+        other_columns.sort_by_key(|(idx, _)| *idx);
+
+        // Combine: USING columns first (sorted by their index), then other columns
+        joined_col_entries.sort_by_key(|(idx, _)| *idx);
+        let mut all_columns = joined_col_entries;
+        all_columns.extend(other_columns);
+
+        let columns: Vec<vibesql_catalog::ColumnSchema> =
+            all_columns.iter().map(|(_, col)| col.clone()).collect();
+
+        let schema = vibesql_catalog::TableSchema::new(alias.to_string(), columns);
+        let table_id = TableIdentifier::unquoted(alias);
+        // Use start_idx = 0 so column resolution returns indices 0, 1, 2, ...
+        // The order matches the all_columns order, so j1.id maps to index 0 if id is first
+        self.table_schemas.insert(table_id.clone(), (0, schema));
+        self.alias_tables.insert(table_id);
+
+        self
     }
 
     /// Combine two schemas (for JOIN operations)
@@ -267,6 +362,7 @@ impl CombinedSchema {
             joined_columns: left.joined_columns,
             using_coalesce_indices: left.using_coalesce_indices,
             column_replacement_map: left.column_replacement_map,
+            alias_tables: left.alias_tables,
         }
     }
 
@@ -343,6 +439,10 @@ impl CombinedSchema {
             column_replacement_map.insert(left_total + hidden_idx, left_total + replacement_idx);
         }
 
+        // Merge alias_tables from both sides
+        let mut alias_tables = left.alias_tables;
+        alias_tables.extend(right.alias_tables);
+
         CombinedSchema {
             table_schemas,
             total_columns: left_total + right.total_columns,
@@ -352,6 +452,7 @@ impl CombinedSchema {
             joined_columns,
             using_coalesce_indices,
             column_replacement_map,
+            alias_tables,
         }
     }
 
@@ -368,6 +469,19 @@ impl CombinedSchema {
             // TableIdentifier normalizes to lowercase, so lookup is case-insensitive
             let table_id = TableIdentifier::unquoted(table_name);
             if let Some((start_index, schema)) = self.table_schemas.get(&table_id) {
+                // Special handling for alias tables (issue #4905)
+                // For alias tables, we need to find the actual column index in the
+                // underlying schema, not use start_index + idx (which would be wrong
+                // since alias tables have start_index=0 but columns are non-contiguous).
+                if self.alias_tables.contains(&table_id) {
+                    // Check if it's a USING column - use coalesce index
+                    let col_lower = column.to_lowercase();
+                    if let Some(indices) = self.using_coalesce_indices.get(&col_lower) {
+                        return indices.first().copied();
+                    }
+                    // Otherwise, find this column in the underlying (non-alias) tables
+                    return self.get_column_index(None, column);
+                }
                 schema.get_column_index(column).map(|idx| start_index + idx)
             } else {
                 None
@@ -388,7 +502,13 @@ impl CombinedSchema {
             let mut best_match: Option<usize> = None;
             let mut best_match_is_hidden = false;
 
-            for (start_index, schema) in self.table_schemas.values() {
+            for (table_id, (start_index, schema)) in &self.table_schemas {
+                // Skip alias tables for unqualified column resolution (issue #4905)
+                // Alias tables are virtual tables that should only be accessed via
+                // qualified references like `j1.column`, not unqualified references.
+                if self.alias_tables.contains(table_id) {
+                    continue;
+                }
                 if let Some(idx) = schema.get_column_index(column) {
                     let absolute_idx = start_index + idx;
                     let is_hidden = self.hidden_columns.contains(&absolute_idx);
@@ -452,7 +572,12 @@ impl CombinedSchema {
         }
 
         let mut match_count = 0;
-        for (_start_index, schema) in self.table_schemas.values() {
+        for (table_id, (_start_index, schema)) in &self.table_schemas {
+            // Skip alias tables - they're virtual tables for column resolution only
+            // and should not cause ambiguity for unqualified column references (issue #4905)
+            if self.alias_tables.contains(table_id) {
+                continue;
+            }
             if schema.get_column_index(column).is_some() {
                 match_count += 1;
                 if match_count > 1 {
@@ -810,6 +935,7 @@ pub struct SchemaBuilder {
     joined_columns: HashSet<String>,
     using_coalesce_indices: HashMap<String, Vec<usize>>,
     column_replacement_map: HashMap<usize, usize>,
+    alias_tables: HashSet<TableIdentifier>,
 }
 
 impl SchemaBuilder {
@@ -823,6 +949,7 @@ impl SchemaBuilder {
             joined_columns: HashSet::new(),
             using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
+            alias_tables: HashSet::new(),
         }
     }
 
@@ -839,6 +966,7 @@ impl SchemaBuilder {
             joined_columns: schema.joined_columns,
             using_coalesce_indices: schema.using_coalesce_indices,
             column_replacement_map: schema.column_replacement_map,
+            alias_tables: schema.alias_tables,
         }
     }
 
@@ -878,6 +1006,7 @@ impl SchemaBuilder {
             joined_columns: self.joined_columns,
             using_coalesce_indices: self.using_coalesce_indices,
             column_replacement_map: self.column_replacement_map,
+            alias_tables: self.alias_tables,
         }
     }
 

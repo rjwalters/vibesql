@@ -809,7 +809,7 @@ challenge-record-title = Current Record Holder
 challenge-record-days = { $days } days
 challenge-record-name = VibeSQL (Baseline)
 challenge-record-date = October - November 2025
-challenge-record-beat = Beat this by 5%? That's <strong>{ $target } days or less</strong> to claim the trophy.
+challenge-record-beat = Beat this by 5%? That's <strong>24 days or less</strong> to claim the trophy.
 
 # Why This Challenge section
 challenge-why-title = Why This Challenge?

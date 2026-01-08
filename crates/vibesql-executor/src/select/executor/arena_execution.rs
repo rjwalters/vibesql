@@ -131,6 +131,7 @@ impl SelectExecutor<'_> {
             joined_columns: HashSet::new(),
             using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
+            alias_tables: HashSet::new(),
         };
         let empty_row = Row::new(vec![]);
         let evaluator = ArenaExpressionEvaluator::new(&schema, params, interner);

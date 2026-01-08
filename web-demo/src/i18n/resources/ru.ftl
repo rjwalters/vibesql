@@ -758,7 +758,7 @@ challenge-record-title = Текущий рекордсмен
 challenge-record-days = { $days } дней
 challenge-record-name = VibeSQL (Базовый уровень)
 challenge-record-date = Октябрь - Ноябрь 2025
-challenge-record-beat = Хотите превзойти это на 5%? Это значит <strong>{ $target } дней или меньше</strong> для получения трофея.
+challenge-record-beat = Хотите превзойти это на 5%? Это значит <strong>24 дней или меньше</strong> для получения трофея.
 
 # Секция почему этот вызов
 challenge-why-title = Почему этот вызов?

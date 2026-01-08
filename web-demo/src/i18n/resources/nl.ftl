@@ -768,7 +768,7 @@ challenge-record-title = Huidige Recordhouder
 challenge-record-days = { $days } dagen
 challenge-record-name = VibeSQL (Baseline)
 challenge-record-date = Oktober - November 2025
-challenge-record-beat = Dit verslaan met 5%? Dat is <strong>{ $target } dagen of minder</strong> om de trofee te claimen.
+challenge-record-beat = Dit verslaan met 5%? Dat is <strong>24 dagen of minder</strong> om de trofee te claimen.
 
 # Why This Challenge section
 challenge-why-title = Waarom Deze Uitdaging?

@@ -204,10 +204,17 @@ where
     );
     if is_outer_join {
         if let Some(on_condition) = condition {
+            // Extract aliases from left and right side for parenthesized join expressions
+            // Example: `t1 JOIN (t2 JOIN t3) AS j1 ON j1.x = t1.x`
+            // The alias j1 should be recognized as a valid table in the ON clause
+            let left_alias = get_from_clause_alias(left);
+            let right_alias = get_from_clause_alias(right);
             validate_on_clause_table_references(
                 on_condition,
                 &left_result.schema,
                 &right_result.schema,
+                left_alias.as_deref(),
+                right_alias.as_deref(),
                 database,
             )?;
         }
@@ -321,6 +328,11 @@ where
             join_type,
         )?;
     }
+
+    // Note: Join aliases (parenthesized join expressions like `(t2 JOIN t3) AS j1`)
+    // are handled in execute_from_clause after the recursive join call returns.
+    // This ensures the alias is added exactly once at the right level.
+    // See issue #4905 for details.
 
     Ok(result)
 }
@@ -1009,6 +1021,18 @@ fn generate_using_join_condition(
     Ok(condition)
 }
 
+/// Extract the alias from a FromClause if it has one
+///
+/// Used to get the alias for parenthesized join expressions like `(t1 JOIN t2) AS j1`
+fn get_from_clause_alias(from: &vibesql_ast::FromClause) -> Option<String> {
+    match from {
+        vibesql_ast::FromClause::Table { alias, .. } => alias.clone(),
+        vibesql_ast::FromClause::Join { alias, .. } => alias.clone(),
+        vibesql_ast::FromClause::Subquery { alias, .. } => Some(alias.clone()),
+        vibesql_ast::FromClause::Values { alias, .. } => Some(alias.clone()),
+    }
+}
+
 /// Validate that an ON clause doesn't reference tables that aren't in the current join.
 ///
 /// SQLite requires that ON clauses only reference tables from the current join (left and right
@@ -1020,6 +1044,9 @@ fn generate_using_join_condition(
 /// 2. Unqualified references (e.g., `b`) - if the column doesn't exist in left/right schemas but
 ///    DOES exist in some table in the database, it's referencing a table to the right
 ///
+/// The `left_alias` and `right_alias` parameters allow parenthesized join expressions to be
+/// recognized by their alias name (e.g., `j1` in `(t2 JOIN t3) AS j1`).
+///
 /// Example that should fail:
 /// ```sql
 /// SELECT * FROM t1 INNER JOIN t2 ON t2.a = t3.x INNER JOIN t3
@@ -1029,6 +1056,8 @@ fn validate_on_clause_table_references(
     on_condition: &vibesql_ast::Expression,
     left_schema: &CombinedSchema,
     right_schema: &CombinedSchema,
+    left_alias: Option<&str>,
+    right_alias: Option<&str>,
     database: &vibesql_storage::Database,
 ) -> Result<(), ExecutorError> {
     // Collect all table names from both schemas (lowercase for case-insensitive comparison)
@@ -1038,6 +1067,13 @@ fn validate_on_clause_table_references(
     }
     for table_id in right_schema.table_schemas.keys() {
         valid_tables.insert(table_id.canonical().to_lowercase());
+    }
+    // Add aliases for parenthesized join expressions (e.g., `(t2 JOIN t3) AS j1`)
+    if let Some(alias) = left_alias {
+        valid_tables.insert(alias.to_lowercase());
+    }
+    if let Some(alias) = right_alias {
+        valid_tables.insert(alias.to_lowercase());
     }
 
     // Collect all column names from both schemas (lowercase for case-insensitive comparison)

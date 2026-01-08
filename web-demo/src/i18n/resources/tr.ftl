@@ -750,7 +750,7 @@ challenge-record-title = Mevcut Rekor Sahibi
 challenge-record-days = { $days } gün
 challenge-record-name = VibeSQL (Temel)
 challenge-record-date = Ekim - Kasım 2025
-challenge-record-beat = Bunu %5 yenin? Kupayı almak için <strong>{ $target } gün veya daha az</strong>.
+challenge-record-beat = Bunu %5 yenin? Kupayı almak için <strong>24 gün veya daha az</strong>.
 
 # Why This Challenge section
 challenge-why-title = Neden Bu Mücadele?
