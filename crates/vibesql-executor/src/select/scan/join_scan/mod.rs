@@ -458,6 +458,9 @@ fn remove_duplicate_columns_for_using_join(
         }
 
         // Now register coalesce pairs using the best left and right indices
+        // Issue #4906: For nested parenthesized JOINs, the right_schema may already have
+        // a coalesce chain for this column. We need to extend the chain with ALL indices
+        // from the right side, not just the best one.
         for (col_name, (right_rel_idx, _)) in &best_right_indices {
             let right_idx = left_col_count + right_rel_idx;
             if let Some(&(left_idx, _)) = leftmost_left_indices.get(col_name) {
@@ -467,7 +470,29 @@ fn remove_duplicate_columns_for_using_join(
                     .find(|c| c.to_lowercase() == *col_name)
                     .map(|s| s.as_str())
                     .unwrap_or(col_name);
-                result.schema.add_using_coalesce_pair(original_name, left_idx, right_idx);
+
+                // Check if right_schema already has a coalesce chain for this column
+                // (from a nested parenthesized JOIN like `(t5 NATURAL FULL JOIN t6)`)
+                if let Some(right_coalesce_indices) =
+                    right_schema.using_coalesce_indices.get(col_name)
+                {
+                    // Add left_idx first
+                    result
+                        .schema
+                        .add_using_coalesce_pair(original_name, left_idx, left_idx);
+                    // Then add all indices from the right side's chain
+                    for &existing_idx in right_coalesce_indices {
+                        let adjusted_idx = left_col_count + existing_idx;
+                        result
+                            .schema
+                            .add_using_coalesce_pair(original_name, left_idx, adjusted_idx);
+                    }
+                } else {
+                    // No existing chain, just add the single pair
+                    result
+                        .schema
+                        .add_using_coalesce_pair(original_name, left_idx, right_idx);
+                }
             }
         }
     } else {
@@ -635,6 +660,18 @@ fn generate_natural_join_condition(
         }
     }
 
+    // Issue #4906: Also build index-to-column mapping for right side to handle
+    // nested parenthesized NATURAL JOINs where the right side has COALESCE chains.
+    // For example: `(t3 NATURAL FULL JOIN t4) NATURAL FULL JOIN (t5 NATURAL FULL JOIN t6)`
+    // The right side `(t5 NATURAL FULL JOIN t6)` has a coalesce chain for `id`.
+    let mut right_idx_to_col: HashMap<usize, (String, String)> = HashMap::new();
+    for (table_name, (start_idx, table_schema)) in &right_schema.table_schemas {
+        for (col_offset, col) in table_schema.columns.iter().enumerate() {
+            let absolute_idx = start_idx + col_offset;
+            right_idx_to_col.insert(absolute_idx, (table_name.to_string(), col.name.clone()));
+        }
+    }
+
     // Build the join condition as an AND chain of equalities
     let mut condition: Option<vibesql_ast::Expression> = None;
     for (left_table, left_col, right_table, right_col, right_table_start, collation) in
@@ -649,11 +686,64 @@ fn generate_natural_join_condition(
             right_table
         };
 
-        // Build right column expression, applying COLLATE if the column has a collation
-        // defined. This ensures NATURAL JOIN respects column-level COLLATE declarations.
-        let right_col_expr = vibesql_ast::Expression::ColumnRef(
-            vibesql_ast::ColumnIdentifier::qualified(&right_table_ref, false, &right_col, false),
-        );
+        // Issue #4906: Build right expression with COALESCE if this column has a coalesce chain
+        // from a nested parenthesized NATURAL JOIN. For example:
+        //   `(t3 NATURAL FULL JOIN t4) NATURAL FULL JOIN (t5 NATURAL FULL JOIN t6)`
+        // The right side `(t5 NATURAL FULL JOIN t6)` has a coalesce chain for `id`, so the
+        // join condition must be:
+        //   COALESCE(t3.id, t4.id) = COALESCE(t5.id, t6.id)
+        let right_col_lower = right_col.to_lowercase();
+        let right_col_expr: vibesql_ast::Expression = if let Some(coalesce_indices) =
+            right_schema.using_coalesce_indices.get(&right_col_lower)
+        {
+            if coalesce_indices.len() > 1 {
+                // Build COALESCE function with all indexed columns from the chain
+                let coalesce_args: Vec<vibesql_ast::Expression> = coalesce_indices
+                    .iter()
+                    .filter_map(|&idx| {
+                        right_idx_to_col.get(&idx).map(|(table, col)| {
+                            vibesql_ast::Expression::ColumnRef(
+                                vibesql_ast::ColumnIdentifier::qualified(table, false, col, false),
+                            )
+                        })
+                    })
+                    .collect();
+                if coalesce_args.len() > 1 {
+                    vibesql_ast::Expression::Function {
+                        name: "COALESCE".into(),
+                        args: coalesce_args,
+                        character_unit: None,
+                    }
+                } else {
+                    // Fallback to simple reference
+                    vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                        &right_table_ref,
+                        false,
+                        &right_col,
+                        false,
+                    ))
+                }
+            } else {
+                // Single index, no COALESCE needed
+                vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                    &right_table_ref,
+                    false,
+                    &right_col,
+                    false,
+                ))
+            }
+        } else {
+            // No coalesce chain, use simple reference
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                &right_table_ref,
+                false,
+                &right_col,
+                false,
+            ))
+        };
+
+        // Apply COLLATE if the column has a collation defined.
+        // This ensures NATURAL JOIN respects column-level COLLATE declarations.
         let right_col_with_collate = if let Some(ref coll) = collation {
             vibesql_ast::Expression::Collate {
                 expr: Box::new(right_col_expr),
@@ -774,6 +864,19 @@ fn generate_using_join_condition(
         for (col_offset, col) in table_schema.columns.iter().enumerate() {
             let absolute_idx = start_idx + col_offset;
             left_idx_to_col.insert(absolute_idx, (table_name.to_string(), col.name.clone()));
+        }
+    }
+
+    // Issue #4906: Also build index-to-column mapping for right side to handle
+    // nested parenthesized JOINs where the right side has COALESCE chains.
+    // For example: `(t3 NATURAL FULL JOIN t4) NATURAL FULL JOIN (t5 NATURAL FULL JOIN t6)`
+    // The right side `(t5 NATURAL FULL JOIN t6)` has a coalesce chain for `id` that
+    // must be used in the join condition.
+    let mut right_idx_to_col: HashMap<usize, (String, String)> = HashMap::new();
+    for (table_name, (start_idx, table_schema)) in &right_schema.table_schemas {
+        for (col_offset, col) in table_schema.columns.iter().enumerate() {
+            let absolute_idx = start_idx + col_offset;
+            right_idx_to_col.insert(absolute_idx, (table_name.to_string(), col.name.clone()));
         }
     }
 
@@ -921,11 +1024,65 @@ fn generate_using_join_condition(
             right_col.0.to_string()
         };
 
-        // Build right column expression, applying COLLATE if the column has a collation
-        // defined. This ensures USING clause joins respect column-level COLLATE declarations.
-        let right_col_expr = vibesql_ast::Expression::ColumnRef(
-            vibesql_ast::ColumnIdentifier::qualified(&right_table_name, false, &right_col.1, false),
-        );
+        // Issue #4906: Build right expression with COALESCE if this column has a coalesce chain
+        // from a nested parenthesized JOIN. For example:
+        //   `(t3 NATURAL FULL JOIN t4) NATURAL FULL JOIN (t5 NATURAL FULL JOIN t6)`
+        // The right side `(t5 NATURAL FULL JOIN t6)` has a coalesce chain for `id`, so the
+        // join condition must be:
+        //   COALESCE(t3.id, t4.id) = COALESCE(t5.id, t6.id)
+        // instead of just:
+        //   COALESCE(t3.id, t4.id) = t5.id
+        let right_col_expr: vibesql_ast::Expression = if let Some(coalesce_indices) =
+            right_schema.using_coalesce_indices.get(&col_lower)
+        {
+            if coalesce_indices.len() > 1 {
+                // Build COALESCE function with all indexed columns from the chain
+                let coalesce_args: Vec<vibesql_ast::Expression> = coalesce_indices
+                    .iter()
+                    .filter_map(|&idx| {
+                        right_idx_to_col.get(&idx).map(|(table, col)| {
+                            vibesql_ast::Expression::ColumnRef(
+                                vibesql_ast::ColumnIdentifier::qualified(table, false, col, false),
+                            )
+                        })
+                    })
+                    .collect();
+                if coalesce_args.len() > 1 {
+                    vibesql_ast::Expression::Function {
+                        name: "COALESCE".into(),
+                        args: coalesce_args,
+                        character_unit: None,
+                    }
+                } else {
+                    // Fallback to simple reference
+                    vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                        &right_table_name,
+                        false,
+                        &right_col.1,
+                        false,
+                    ))
+                }
+            } else {
+                // Single index, no COALESCE needed
+                vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                    &right_table_name,
+                    false,
+                    &right_col.1,
+                    false,
+                ))
+            }
+        } else {
+            // No coalesce chain, use simple reference
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                &right_table_name,
+                false,
+                &right_col.1,
+                false,
+            ))
+        };
+
+        // Apply COLLATE if the column has a collation defined.
+        // This ensures USING clause joins respect column-level COLLATE declarations.
         let right_col_with_collate = if let Some(ref coll) = collation {
             vibesql_ast::Expression::Collate {
                 expr: Box::new(right_col_expr),
