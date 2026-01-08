@@ -126,15 +126,44 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
             hidden_columns.insert(left_total + idx);
         }
 
+        // Merge joined_columns from both sides
+        // These track columns from NATURAL/USING joins that shouldn't be considered ambiguous
+        let mut joined_columns = left_schema.joined_columns.clone();
+        joined_columns.extend(right_schema.joined_columns.iter().cloned());
+
+        // Merge using_coalesce_indices, adjusting right side indices
+        // These track USING columns that need COALESCE evaluation
+        let mut using_coalesce_indices = left_schema.using_coalesce_indices.clone();
+        for (col_name, indices) in &right_schema.using_coalesce_indices {
+            let adjusted_indices: Vec<usize> = indices.iter().map(|idx| left_total + idx).collect();
+            using_coalesce_indices
+                .entry(col_name.clone())
+                .or_default()
+                .extend(adjusted_indices);
+        }
+
+        // Merge column_replacement_map, adjusting right side indices
+        // These track hidden columns that should be replaced with visible ones
+        let mut column_replacement_map = left_schema.column_replacement_map.clone();
+        for (hidden_idx, replacement_idx) in &right_schema.column_replacement_map {
+            column_replacement_map.insert(left_total + hidden_idx, left_total + replacement_idx);
+        }
+
+        // Merge alias_tables from both sides
+        // These track virtual alias tables from parenthesized join expressions
+        let mut alias_tables = left_schema.alias_tables.clone();
+        alias_tables.extend(right_schema.alias_tables.iter().cloned());
+
         let combined_schema = CombinedSchema {
             table_schemas,
             total_columns: left_total + right_total,
             hidden_columns,
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
-            joined_columns: HashSet::new(),
-            using_coalesce_indices: HashMap::new(),
-            column_replacement_map: HashMap::new(),
+            joined_columns,
+            using_coalesce_indices,
+            column_replacement_map,
+            alias_tables,
         };
 
         let right_count = right_rows.len();

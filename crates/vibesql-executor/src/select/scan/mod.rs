@@ -153,21 +153,31 @@ where
             condition,
             using_columns,
             natural,
+            alias,
             ..
-        } => join_scan::execute_join(
-            left,
-            right,
-            join_type,
-            condition,
-            using_columns,
-            *natural,
-            cte_results,
-            database,
-            where_clause,
-            outer_row,
-            outer_schema,
-            execute_subquery,
-        ),
+        } => {
+            let mut result = join_scan::execute_join(
+                left,
+                right,
+                join_type,
+                condition,
+                using_columns,
+                *natural,
+                cte_results,
+                database,
+                where_clause,
+                outer_row,
+                outer_schema,
+                execute_subquery,
+            )?;
+            // If the join has an alias (parenthesized join expression),
+            // add it to the schema so column references like `j1.column` can be resolved.
+            // Issue #4905: Parenthesized JOIN expression aliases were being ignored.
+            if let Some(join_alias) = alias {
+                result.schema = result.schema.add_join_alias(join_alias);
+            }
+            Ok(result)
+        }
         vibesql_ast::FromClause::Subquery { query, alias, column_aliases } => {
             derived::execute_derived_table(query, alias, column_aliases.as_ref(), execute_subquery)
         }

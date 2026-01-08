@@ -105,6 +105,12 @@ impl SelectExecutor<'_> {
                         sorted_tables.sort_by_key(|(_, (start_index, _))| *start_index);
 
                         for (table_id, (start_index, table_schema)) in sorted_tables {
+                            // Skip alias tables (from parenthesized join expressions like `(...) AS j1`)
+                            // These are virtual tables for column resolution only, not for SELECT *
+                            if from_res.schema.alias_tables.contains(table_id) {
+                                continue;
+                            }
+
                             // Get the effective table name using TableIdentifier's display form
                             let effective_table_name = table_id.display().to_string();
 

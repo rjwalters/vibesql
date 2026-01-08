@@ -193,6 +193,7 @@ pub(super) fn build_combined_schema(
         joined_columns: HashSet::new(),
         using_coalesce_indices: HashMap::new(),
         column_replacement_map: HashMap::new(),
+        alias_tables: HashSet::new(),
     };
 
     for (table_name, alias, _batch, schema) in batches {

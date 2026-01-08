@@ -474,6 +474,7 @@ fn build_schema_from_tables(
             joined_columns: HashSet::new(),
             using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
+            alias_tables: HashSet::new(),
         })
     }
 }
