@@ -81,108 +81,105 @@ impl SelectExecutor<'_> {
                     // Respects full_column_names PRAGMA when there are multiple tables with
                     // duplicate columns
                     //
-                    // SQL Standard Column Ordering for USING/NATURAL JOINs:
-                    // According to SQL:2011, SELECT * from JOIN USING should output:
-                    // 1. The common/USING columns (merged) - appear FIRST
-                    // 2. Remaining columns from the left table
-                    // 3. Remaining columns from the right table
+                    // Issue #4916: SQLite's behavior for USING column reordering:
+                    // - Simple USING joins (no alias): columns stay in table order (a, b, c)
+                    // - Aliased USING joins ((t1 JOIN t2 USING(b)) AS j1): USING columns first (b, a, c)
+                    //
+                    // We detect aliased joins by checking if there's an alias table that shadows
+                    // all non-alias tables. In that case, we use the alias table's column order.
                     if let Some(from_res) = from_result {
-                        // Get all column names in order from the combined schema
-                        // Store (index, column_name, table_name_for_display, is_joined_column)
-                        let mut table_columns: Vec<(usize, String, String, bool)> = Vec::new();
+                        // Store (index, column_name, table_name_for_display)
+                        let mut table_columns: Vec<(usize, String, String)> = Vec::new();
 
-                        // Build a set of replacement target indices (columns that are replacement
-                        // sources) These should be skipped since they're
-                        // output via the hidden column's position
-                        let replacement_targets: std::collections::HashSet<usize> =
-                            from_res.schema.column_replacement_map.values().copied().collect();
-
-                        // Sort table_schemas by start_index for deterministic iteration order
-                        // HashMap iteration is non-deterministic; sorting ensures consistent
-                        // results
-                        let mut sorted_tables: Vec<_> =
-                            from_res.schema.table_schemas.iter().collect();
-                        sorted_tables.sort_by_key(|(_, (start_index, _))| *start_index);
-
-                        for (table_id, (start_index, table_schema)) in sorted_tables {
-                            // Skip alias tables (from parenthesized join expressions like `(...) AS j1`)
-                            // These are virtual tables for column resolution only, not for SELECT *
-                            if from_res.schema.alias_tables.contains(table_id) {
-                                continue;
-                            }
-
-                            // Get the effective table name using TableIdentifier's display form
-                            let effective_table_name = table_id.display().to_string();
-
-                            for (col_idx, col_schema) in table_schema.columns.iter().enumerate() {
-                                let abs_idx = start_index + col_idx;
-
-                                // Skip columns that are replacement targets (they're output via
-                                // replacement)
-                                if replacement_targets.contains(&abs_idx) {
-                                    continue;
-                                }
-
-                                // Skip right-side USING columns (they're output via the left-side
-                                // column with COALESCE applied)
-                                if from_res.schema.is_using_coalesce_right_side(abs_idx) {
-                                    continue;
-                                }
-
-                                // For hidden columns, check if they have a replacement or coalesce
-                                // pair If so, include the name
-                                // (value comes from replacement/coalesce)
-                                // If not, skip them
-                                if from_res.schema.is_column_hidden(abs_idx) {
-                                    let has_replacement =
-                                        from_res.schema.get_column_replacement(abs_idx).is_some();
-                                    let has_coalesce = from_res
+                        // Check if there's an alias table covering all non-alias tables
+                        let alias_covering_all =
+                            from_res.schema.alias_tables.iter().find(|alias_id| {
+                                if let Some(shadowed) =
+                                    from_res.schema.shadowed_tables.get(*alias_id)
+                                {
+                                    let non_alias_tables: Vec<_> = from_res
                                         .schema
-                                        .get_using_coalesce_right_for_left(abs_idx)
-                                        .is_some();
-                                    if !has_replacement && !has_coalesce {
-                                        continue;
+                                        .table_schemas
+                                        .keys()
+                                        .filter(|t| !from_res.schema.alias_tables.contains(*t))
+                                        .collect();
+                                    non_alias_tables.iter().all(|t| shadowed.contains(*t))
+                                } else {
+                                    false
+                                }
+                            });
+
+                        if let Some(alias_id) = alias_covering_all {
+                            // Aliased join: use alias table's column order
+                            if let Some((_, alias_schema)) =
+                                from_res.schema.table_schemas.get(alias_id)
+                            {
+                                let alias_name = alias_id.display().to_string();
+                                for col_schema in &alias_schema.columns {
+                                    if let Some(actual_idx) = from_res
+                                        .schema
+                                        .get_column_index(Some(&alias_name), &col_schema.name)
+                                    {
+                                        table_columns.push((
+                                            actual_idx,
+                                            col_schema.name.clone(),
+                                            alias_name.clone(),
+                                        ));
                                     }
                                 }
+                            }
+                        } else {
+                            // No covering alias: use table column order (no USING reordering)
+                            let replacement_targets: std::collections::HashSet<usize> =
+                                from_res.schema.column_replacement_map.values().copied().collect();
 
-                                let col_name = col_schema.name.clone();
-                                // Check if this is a USING/NATURAL JOIN column
-                                let is_joined = from_res
-                                    .schema
-                                    .joined_columns
-                                    .contains(&col_name.to_lowercase());
-                                table_columns.push((
-                                    abs_idx,
-                                    col_name,
-                                    effective_table_name.clone(),
-                                    is_joined,
-                                ));
+                            let mut sorted_tables: Vec<_> =
+                                from_res.schema.table_schemas.iter().collect();
+                            sorted_tables.sort_by_key(|(_, (start_index, _))| *start_index);
+
+                            for (table_id, (start_index, table_schema)) in sorted_tables {
+                                // Skip alias tables - they have incorrect row indices
+                                if from_res.schema.alias_tables.contains(table_id) {
+                                    continue;
+                                }
+
+                                let effective_table_name = table_id.display().to_string();
+
+                                for (col_idx, col_schema) in table_schema.columns.iter().enumerate()
+                                {
+                                    let abs_idx = start_index + col_idx;
+
+                                    // Skip replacement targets
+                                    if replacement_targets.contains(&abs_idx) {
+                                        continue;
+                                    }
+
+                                    // Skip right-side USING columns
+                                    if from_res.schema.is_using_coalesce_right_side(abs_idx) {
+                                        continue;
+                                    }
+
+                                    // For hidden columns, check if they have a replacement or coalesce
+                                    if from_res.schema.is_column_hidden(abs_idx) {
+                                        let has_replacement =
+                                            from_res.schema.get_column_replacement(abs_idx).is_some();
+                                        let has_coalesce = from_res
+                                            .schema
+                                            .get_using_coalesce_right_for_left(abs_idx)
+                                            .is_some();
+                                        if !has_replacement && !has_coalesce {
+                                            continue;
+                                        }
+                                    }
+
+                                    table_columns.push((
+                                        abs_idx,
+                                        col_schema.name.clone(),
+                                        effective_table_name.clone(),
+                                    ));
+                                }
                             }
                         }
-
-                        // Sort columns per SQL standard for USING/NATURAL JOINs:
-                        // 1. Joined columns first (in order of their original position)
-                        // 2. Then remaining columns (in order of their original position)
-                        // This ensures USING columns appear first in SELECT * output
-                        table_columns.sort_by_key(|(idx, _, _, is_joined)| (!*is_joined, *idx));
-
-                        // Deduplicate joined columns: for chained NATURAL JOINs like
-                        // t4 NATURAL RIGHT JOIN t5 NATURAL RIGHT JOIN t6, multiple columns
-                        // might be marked as "joined" with the same name (e.g., both t4.id
-                        // and t5.id). We should only output ONE column per joined column name.
-                        // Keep the first occurrence (which has the lowest index after sorting).
-                        let mut seen_joined_columns: std::collections::HashSet<String> =
-                            std::collections::HashSet::new();
-                        table_columns.retain(|(_, col_name, _, is_joined)| {
-                            if *is_joined {
-                                let col_lower = col_name.to_lowercase();
-                                if seen_joined_columns.contains(&col_lower) {
-                                    return false; // Skip duplicate joined column
-                                }
-                                seen_joined_columns.insert(col_lower);
-                            }
-                            true
-                        });
 
                         // Apply derived column list if present
                         if let Some(derived_cols) = alias {
@@ -198,7 +195,7 @@ impl SelectExecutor<'_> {
                             // BUT only when there's ambiguity (multiple tables or explicit alias)
                             let has_multiple_tables = from_res.schema.table_schemas.len() > 1;
 
-                            for (_, col_name, effective_table_name, _) in table_columns {
+                            for (_, col_name, effective_table_name) in table_columns {
                                 let display_name = match mode {
                                     ColumnNamingMode::Full if has_multiple_tables => {
                                         format!("{}.{}", effective_table_name, col_name)

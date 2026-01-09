@@ -158,9 +158,9 @@ where
         } => {
             // Pass the join alias to execute_join so it can:
             // 1. Recognize `j1.column` references in ON clause validation
-            // 2. Add the alias to the right side's schema so only right-side tables are shadowed
-            // Issue #4786: The alias must be added to the right side BEFORE combining with left side,
-            // otherwise the left side's tables would also be shadowed, causing missing columns.
+            // 2. Add the alias to the combined schema after the join, covering all joined tables
+            // Issue #4916: The alias is added AFTER combining left and right sides, so for
+            // `(t1 JOIN t2) AS j1`, the alias j1 covers both t1 and t2 columns.
             let result = join_scan::execute_join(
                 left,
                 right,
