@@ -683,12 +683,14 @@ impl SelectExecutor<'_> {
             );
             // Issue #4602: Compute left column count from AST for schema-level validation
             // This is needed when the left result set is empty (table has no rows)
+            // Issue #4922: Must propagate errors (not use .ok()) to catch column count mismatches
+            // in set operations like UNION/INTERSECT/EXCEPT
             let left_col_count = super::nonagg::compute_select_list_column_count(
                 stmt,
                 self.database,
                 Some(cte_results),
-            )
-            .ok();
+            )?;
+            let left_col_count = Some(left_col_count);
             results = self.execute_set_operations(
                 results,
                 set_op,
