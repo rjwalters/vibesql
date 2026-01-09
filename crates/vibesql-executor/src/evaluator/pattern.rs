@@ -251,9 +251,23 @@ fn glob_match_recursive(text: &[u8], pattern: &[u8], text_pos: usize, pattern_po
             let mut matched = false;
             let mut prev_char: Option<u8> = None;
 
-            // Parse the character class until we find ]
-            while pos < pattern.len() && pattern[pos] != b']' {
+            // Issue #4910: Handle ] as the first character in a character class.
+            // Per POSIX and SQLite, if ] appears immediately after [ (or [^ or [!),
+            // it's treated as a literal character to match, not as the closing bracket.
+            // For example: []abc] matches ], a, b, or c
+            //              [^]abc] matches any character except ], a, b, or c
+            let mut first_char_in_class = true;
+
+            // Parse the character class until we find the closing ]
+            while pos < pattern.len() {
                 let ch = pattern[pos];
+
+                // Check if this is the closing ] (but not if it's the first char)
+                if ch == b']' && !first_char_in_class {
+                    break;
+                }
+
+                first_char_in_class = false;
 
                 // Check for range (e.g., a-z)
                 if ch == b'-'
@@ -493,5 +507,59 @@ mod tests {
         let escape_char = '\u{1234}';
         let pattern = "a\u{1234}_c";
         assert!(like_match("a_c", pattern, false, Some(escape_char)));
+    }
+
+    #[test]
+    fn test_glob_match_basic() {
+        // Basic patterns
+        assert!(glob_match("hello", "hello"));
+        assert!(glob_match("hello", "h*"));
+        assert!(glob_match("hello", "*o"));
+        assert!(glob_match("hello", "h?llo"));
+        assert!(!glob_match("hello", "h??llo"));
+    }
+
+    #[test]
+    fn test_glob_match_character_class() {
+        // Basic character class
+        assert!(glob_match("abc", "a[bcd]c"));
+        assert!(!glob_match("aec", "a[bcd]c"));
+
+        // Range in character class
+        assert!(glob_match("abc", "a[a-z]c"));
+        assert!(!glob_match("a1c", "a[a-z]c"));
+
+        // Negated character class
+        assert!(!glob_match("abc", "a[^b]c"));
+        assert!(glob_match("adc", "a[^b]c"));
+        assert!(!glob_match("abc", "a[!b]c"));
+        assert!(glob_match("adc", "a[!b]c"));
+    }
+
+    #[test]
+    fn test_glob_match_bracket_first_char() {
+        // Issue #4910: ] as first character in character class
+        // Per POSIX and SQLite, ] immediately after [ is treated as a literal
+
+        // []b] matches ] or b
+        assert!(glob_match("abc", "a[]b]c")); // matches 'b' in the class
+        assert!(glob_match("a]c", "a[]b]c")); // matches ']' in the class
+        assert!(!glob_match("adc", "a[]b]c")); // 'd' not in class
+
+        // [^]b] matches anything except ] or b
+        assert!(glob_match("axc", "a[^]b]c")); // 'x' not in negated class
+        assert!(!glob_match("abc", "a[^]b]c")); // 'b' is in negated class
+        assert!(!glob_match("a]c", "a[^]b]c")); // ']' is in negated class
+
+        // [!]b] is same as [^]b] (alternate negation syntax)
+        assert!(glob_match("axc", "a[!]b]c"));
+        assert!(!glob_match("abc", "a[!]b]c"));
+        assert!(!glob_match("a]c", "a[!]b]c"));
+
+        // Uppercase variants (GLOB is case-sensitive)
+        assert!(glob_match("ABC", "A[]B]C")); // matches 'B' in the class
+        assert!(glob_match("A]C", "A[]B]C")); // matches ']' in the class
+        assert!(glob_match("AxC", "A[^]B]C")); // 'x' not in negated class
+        assert!(!glob_match("ABC", "A[^]B]C")); // 'B' is in negated class
     }
 }
