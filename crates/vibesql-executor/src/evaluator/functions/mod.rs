@@ -149,6 +149,9 @@ pub(super) fn eval_scalar_function(
         "GLOB" => sqlite_compat::glob(args),
         "LIKE" => sqlite_compat::like(args),
 
+        // JSON functions (SQLite JSON1 extension)
+        "JSON" => sqlite_compat::json(args),
+
         // Type conversion functions
         "TO_NUMBER" => conversion::to_number(args),
         "TO_DATE" => conversion::to_date(args),
