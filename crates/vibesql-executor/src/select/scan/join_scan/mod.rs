@@ -182,7 +182,7 @@ where
         }
         _ => where_clause.cloned(),
     };
-    let mut right_result = super::execute_from_clause(
+    let right_result = super::execute_from_clause(
         right,
         cte_results,
         database,
@@ -194,14 +194,9 @@ where
         execute_subquery,
     )?;
 
-    // Issue #4786: If the join has an alias (parenthesized join expression), add it to the
-    // right side's schema BEFORE combining with the left side. This ensures:
-    // 1. ON clause validation recognizes `j1.column` references
-    // 2. Only the right side's tables are shadowed by the alias, not the left side's tables
-    // 3. SELECT * outputs both left side columns AND alias columns correctly
-    if let Some(alias) = join_alias {
-        right_result.schema = right_result.schema.add_join_alias(alias);
-    }
+    // Note: Join alias (if any) is added AFTER the join completes, not here.
+    // This ensures the alias covers all tables in the combined result, not just the right side.
+    // ON clause validation receives the alias separately and doesn't need it in the schema.
 
     // Validate ON clause doesn't reference tables not yet introduced (to the right)
     // This is a SQLite-specific semantic check: ON clause can only reference tables
@@ -337,6 +332,13 @@ where
             using_cols,
             join_type,
         )?;
+    }
+
+    // Issue #4916: Add the join alias AFTER the join is complete.
+    // This ensures the alias covers ALL tables in the combined result (both left and right sides).
+    // For `(t1 JOIN t2 USING(b)) AS j1`, the alias j1 should include columns from both t1 and t2.
+    if let Some(alias) = join_alias {
+        result.schema = result.schema.add_join_alias(alias);
     }
 
     Ok(result)
