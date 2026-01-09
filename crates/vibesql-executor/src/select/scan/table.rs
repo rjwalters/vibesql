@@ -79,6 +79,36 @@ fn apply_column_aliases(
     Ok(schema)
 }
 
+/// Sort rows by INTEGER PRIMARY KEY column value (Issue #4926)
+///
+/// SQLite guarantees that tables with INTEGER PRIMARY KEY return rows in rowid order
+/// when no ORDER BY is specified. This function sorts rows by the INTEGER PRIMARY KEY
+/// column value to match SQLite's behavior.
+///
+/// # Arguments
+/// * `rows` - Mutable vector of rows to sort in place
+/// * `ipk_col_idx` - Column index of the INTEGER PRIMARY KEY column
+fn sort_rows_by_integer_primary_key(rows: &mut Vec<vibesql_storage::Row>, ipk_col_idx: usize) {
+    rows.sort_by(|a, b| {
+        let a_val = a.get(ipk_col_idx);
+        let b_val = b.get(ipk_col_idx);
+
+        match (a_val, b_val) {
+            (Some(vibesql_types::SqlValue::Integer(a)), Some(vibesql_types::SqlValue::Integer(b))) => a.cmp(b),
+            (Some(vibesql_types::SqlValue::Bigint(a)), Some(vibesql_types::SqlValue::Bigint(b))) => a.cmp(b),
+            (Some(vibesql_types::SqlValue::Unsigned(a)), Some(vibesql_types::SqlValue::Unsigned(b))) => a.cmp(b),
+            // Cross-type comparisons (SQLite INTEGER can be any of these)
+            (Some(vibesql_types::SqlValue::Integer(a)), Some(vibesql_types::SqlValue::Bigint(b))) => (*a).cmp(b),
+            (Some(vibesql_types::SqlValue::Bigint(a)), Some(vibesql_types::SqlValue::Integer(b))) => a.cmp(&(*b)),
+            // NULL handling: NULLs sort first (SQLite behavior)
+            (None, _) | (Some(vibesql_types::SqlValue::Null), _) => std::cmp::Ordering::Less,
+            (_, None) | (_, Some(vibesql_types::SqlValue::Null)) => std::cmp::Ordering::Greater,
+            // Fallback for unexpected types
+            _ => std::cmp::Ordering::Equal,
+        }
+    });
+}
+
 /// Execute a table scan with SQL:1999 identifier semantics
 ///
 /// This is the new entry point that properly handles case-sensitivity based on
@@ -445,9 +475,15 @@ pub(crate) fn execute_table_scan(
             // Return unfiltered rows for correlated subqueries
             // Filtering will happen later with full outer row context
             // Issue #3790: Must use scan_live_vec() to filter deleted rows
-            let live_rows = table.scan_live_vec();
+            let mut live_rows = table.scan_live_vec();
             // sqlite_search_count: Track rows examined during table scan
             database.increment_search_count(live_rows.len() as u64);
+            // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
+            if order_by.is_none() {
+                if let Some(ipk_col_idx) = table.schema.rowid_alias_column {
+                    sort_rows_by_integer_primary_key(&mut live_rows, ipk_col_idx);
+                }
+            }
             use crate::select::from_iterator::FromIterator;
             return Ok(super::FromResult::from_iterator(
                 schema,
@@ -507,8 +543,14 @@ pub(crate) fn execute_table_scan(
                 // For native columnar tables, use SIMD filtering on typed columns
                 // This avoids SqlValue overhead by working directly on i64/f64/String arrays
                 if table.is_native_columnar() && all_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
-                    if let Ok(filtered_rows) = filter_with_simd_columnar(table, &column_predicates)
+                    if let Ok(mut filtered_rows) = filter_with_simd_columnar(table, &column_predicates)
                     {
+                        // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
+                        if order_by.is_none() {
+                            if let Some(ipk_col_idx) = table.schema.rowid_alias_column {
+                                sort_rows_by_integer_primary_key(&mut filtered_rows, ipk_col_idx);
+                            }
+                        }
                         return Ok(super::FromResult::from_rows(schema, filtered_rows));
                     }
                     // Fall through to row-based path if SIMD fails
@@ -518,12 +560,18 @@ pub(crate) fn execute_table_scan(
                 // Issue #4136: Use database columnar cache for SIMD filtering, clone only passing
                 // rows
                 if all_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
-                    if let Ok(filtered_rows) = filter_with_cached_columnar(
+                    if let Ok(mut filtered_rows) = filter_with_cached_columnar(
                         database,
                         table_name,
                         all_rows,
                         &column_predicates,
                     ) {
+                        // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
+                        if order_by.is_none() {
+                            if let Some(ipk_col_idx) = table.schema.rowid_alias_column {
+                                sort_rows_by_integer_primary_key(&mut filtered_rows, ipk_col_idx);
+                            }
+                        }
                         return Ok(super::FromResult::from_rows(schema, filtered_rows));
                     }
                     // Fall through to row-based path if cached columnar fails
@@ -537,7 +585,7 @@ pub(crate) fn execute_table_scan(
                 // This is the key optimization: we skip cloning rows that don't pass
                 // Issue #4370: Preserve row_id for ROWID pseudo-column support
                 // Issue #4536: Preserve explicit row_id from INSERT INTO t(rowid, ...) VALUES(...)
-                let filtered_rows: Vec<_> = indices
+                let mut filtered_rows: Vec<_> = indices
                     .into_iter()
                     .filter(|&idx| !table.is_row_deleted(idx))
                     .filter_map(|idx| {
@@ -551,6 +599,12 @@ pub(crate) fn execute_table_scan(
                         })
                     })
                     .collect();
+                // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
+                if order_by.is_none() {
+                    if let Some(ipk_col_idx) = table.schema.rowid_alias_column {
+                        sort_rows_by_integer_primary_key(&mut filtered_rows, ipk_col_idx);
+                    }
+                }
                 return Ok(super::FromResult::from_rows(schema, filtered_rows));
             }
 
@@ -569,7 +623,7 @@ pub(crate) fn execute_table_scan(
             let live_rows = table.scan_live_vec();
             // sqlite_search_count: Track rows examined during table scan
             database.increment_search_count(live_rows.len() as u64);
-            let filtered_rows = apply_table_local_predicates(
+            let mut filtered_rows = apply_table_local_predicates(
                 live_rows,
                 schema.clone(),
                 &predicate_plan,
@@ -579,15 +633,29 @@ pub(crate) fn execute_table_scan(
                 None,
                 Some(cte_results), // CTE context for IN subqueries referencing CTEs
             )?;
+            // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
+            if order_by.is_none() {
+                if let Some(ipk_col_idx) = table.schema.rowid_alias_column {
+                    sort_rows_by_integer_primary_key(&mut filtered_rows, ipk_col_idx);
+                }
+            }
             return Ok(super::FromResult::from_rows(schema, filtered_rows));
         }
     }
 
     // No table-local predicates or no WHERE clause: return live rows
     // Issue #3790: Must filter deleted rows via scan_live_vec()
-    let live_rows = table.scan_live_vec();
+    let mut live_rows = table.scan_live_vec();
     // sqlite_search_count: Track rows examined during table scan
     database.increment_search_count(live_rows.len() as u64);
+
+    // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
+    // when no explicit ORDER BY is specified. Apply implicit sorting here.
+    if order_by.is_none() {
+        if let Some(ipk_col_idx) = table.schema.rowid_alias_column {
+            sort_rows_by_integer_primary_key(&mut live_rows, ipk_col_idx);
+        }
+    }
 
     #[cfg(feature = "parallel")]
     let rows = parallel_scan_materialize(&live_rows);
