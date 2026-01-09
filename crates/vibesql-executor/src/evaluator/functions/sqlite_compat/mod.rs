@@ -14,9 +14,11 @@
 //! - [`conditional_funcs`]: Conditional logic (IIF, IFNULL)
 //! - [`math_funcs`]: Math and query hints (RANDOM, LIKELY, UNLIKELY, LIKELIHOOD)
 //! - [`pattern_funcs`]: Pattern matching (LIKE, GLOB)
+//! - [`json_funcs`]: JSON functions (json, json_array, json_object, etc.)
 
 mod blob_funcs;
 mod conditional_funcs;
+mod json_funcs;
 mod math_funcs;
 mod pattern_funcs;
 mod string_funcs;
@@ -28,6 +30,8 @@ pub(super) use blob_funcs::{hex, quote, randomblob, unhex, zeroblob};
 pub(super) use conditional_funcs::ifnull;
 // Re-export conditional functions
 pub(super) use conditional_funcs::iif;
+// Re-export JSON functions
+pub(super) use json_funcs::json;
 // Re-export math/hint functions
 pub(super) use math_funcs::likelihood;
 pub(super) use math_funcs::{likely, random, unlikely};
