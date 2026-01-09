@@ -145,11 +145,16 @@ pub struct CombinedSchema {
     /// by t4.id to maintain the output order (id, y, x) instead of (y, id, x).
     pub column_replacement_map: HashMap<usize, usize>,
     /// Alias tables that are added for parenthesized join expressions (issue #4905).
-    /// These are virtual tables that point to the same columns as existing tables
-    /// but should NOT be expanded in SELECT *. They only exist for column resolution
-    /// purposes (e.g., `j1.id` in `FROM t1 JOIN (t2 JOIN t3) AS j1 ON j1.id = t1.id`).
+    /// These are virtual tables that point to the same columns as existing tables.
+    /// They exist for column resolution (e.g., `j1.id` in `FROM t1 JOIN (...) AS j1 ON j1.id = t1.id`).
     /// Stores the table identifiers of alias tables.
     pub alias_tables: HashSet<TableIdentifier>,
+    /// Tables that are shadowed by an alias table (issue #4786).
+    /// When a parenthesized join has an alias, the underlying tables are shadowed
+    /// and should be skipped in SELECT * expansion. Instead, the alias table's columns
+    /// should be used.
+    /// Maps: aliased table name -> tables shadowed by that alias
+    pub shadowed_tables: HashMap<TableIdentifier, HashSet<TableIdentifier>>,
 }
 
 impl CombinedSchema {
@@ -168,6 +173,7 @@ impl CombinedSchema {
             using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
             alias_tables: HashSet::new(),
+            shadowed_tables: HashMap::new(),
         }
     }
 
@@ -190,6 +196,7 @@ impl CombinedSchema {
             using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
             alias_tables: HashSet::new(),
+            shadowed_tables: HashMap::new(),
         }
     }
 
@@ -232,6 +239,7 @@ impl CombinedSchema {
             using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
             alias_tables: HashSet::new(),
+            shadowed_tables: HashMap::new(),
         }
     }
 
@@ -316,7 +324,19 @@ impl CombinedSchema {
         // Use start_idx = 0 so column resolution returns indices 0, 1, 2, ...
         // The order matches the all_columns order, so j1.id maps to index 0 if id is first
         self.table_schemas.insert(table_id.clone(), (0, schema));
-        self.alias_tables.insert(table_id);
+        self.alias_tables.insert(table_id.clone());
+
+        // Issue #4786: Mark all existing non-alias tables as shadowed by this alias.
+        // This ensures that in SELECT *, the alias table's columns are used instead of
+        // the individual base tables' columns. This is especially important for outer
+        // joins with ON clause, where the aliased join needs to appear as a single table.
+        let shadowed: HashSet<TableIdentifier> = self
+            .table_schemas
+            .keys()
+            .filter(|t| !self.alias_tables.contains(*t) && *t != &table_id)
+            .cloned()
+            .collect();
+        self.shadowed_tables.insert(table_id, shadowed);
 
         self
     }
@@ -363,6 +383,7 @@ impl CombinedSchema {
             using_coalesce_indices: left.using_coalesce_indices,
             column_replacement_map: left.column_replacement_map,
             alias_tables: left.alias_tables,
+            shadowed_tables: left.shadowed_tables,
         }
     }
 
@@ -443,6 +464,10 @@ impl CombinedSchema {
         let mut alias_tables = left.alias_tables;
         alias_tables.extend(right.alias_tables);
 
+        // Merge shadowed_tables from both sides
+        let mut shadowed_tables = left.shadowed_tables;
+        shadowed_tables.extend(right.shadowed_tables);
+
         CombinedSchema {
             table_schemas,
             total_columns: left_total + right.total_columns,
@@ -453,6 +478,7 @@ impl CombinedSchema {
             using_coalesce_indices,
             column_replacement_map,
             alias_tables,
+            shadowed_tables,
         }
     }
 
@@ -939,6 +965,7 @@ pub struct SchemaBuilder {
     using_coalesce_indices: HashMap<String, Vec<usize>>,
     column_replacement_map: HashMap<usize, usize>,
     alias_tables: HashSet<TableIdentifier>,
+    shadowed_tables: HashMap<TableIdentifier, HashSet<TableIdentifier>>,
 }
 
 impl SchemaBuilder {
@@ -953,6 +980,7 @@ impl SchemaBuilder {
             using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
             alias_tables: HashSet::new(),
+            shadowed_tables: HashMap::new(),
         }
     }
 
@@ -970,6 +998,7 @@ impl SchemaBuilder {
             using_coalesce_indices: schema.using_coalesce_indices,
             column_replacement_map: schema.column_replacement_map,
             alias_tables: schema.alias_tables,
+            shadowed_tables: schema.shadowed_tables,
         }
     }
 
@@ -1010,6 +1039,7 @@ impl SchemaBuilder {
             using_coalesce_indices: self.using_coalesce_indices,
             column_replacement_map: self.column_replacement_map,
             alias_tables: self.alias_tables,
+            shadowed_tables: self.shadowed_tables,
         }
     }
 

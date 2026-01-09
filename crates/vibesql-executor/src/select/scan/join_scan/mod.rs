@@ -54,6 +54,10 @@ const INL_MAX_THRESHOLD: usize = 100_000;
 const INL_SIZE_RATIO_THRESHOLD: usize = 10;
 
 /// Execute a JOIN operation
+///
+/// The `join_alias` parameter is the alias for a parenthesized join expression (e.g., `(A JOIN B) AS X`).
+/// This alias must be passed so that ON clause validation can recognize references like `X.column`.
+/// Issue #4786: ON clause validation was failing because the alias wasn't available.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_join<F>(
     left: &vibesql_ast::FromClause,
@@ -67,6 +71,7 @@ pub(crate) fn execute_join<F>(
     where_clause: Option<&vibesql_ast::Expression>,
     outer_row: Option<&vibesql_storage::Row>,
     outer_schema: Option<&crate::schema::CombinedSchema>,
+    join_alias: Option<&str>,
     execute_subquery: F,
 ) -> Result<super::FromResult, ExecutorError>
 where
@@ -177,7 +182,7 @@ where
         }
         _ => where_clause.cloned(),
     };
-    let right_result = super::execute_from_clause(
+    let mut right_result = super::execute_from_clause(
         right,
         cte_results,
         database,
@@ -188,6 +193,15 @@ where
         outer_schema,
         execute_subquery,
     )?;
+
+    // Issue #4786: If the join has an alias (parenthesized join expression), add it to the
+    // right side's schema BEFORE combining with the left side. This ensures:
+    // 1. ON clause validation recognizes `j1.column` references
+    // 2. Only the right side's tables are shadowed by the alias, not the left side's tables
+    // 3. SELECT * outputs both left side columns AND alias columns correctly
+    if let Some(alias) = join_alias {
+        right_result.schema = right_result.schema.add_join_alias(alias);
+    }
 
     // Validate ON clause doesn't reference tables not yet introduced (to the right)
     // This is a SQLite-specific semantic check: ON clause can only reference tables
@@ -204,11 +218,14 @@ where
     );
     if is_outer_join {
         if let Some(on_condition) = condition {
+            // Pass join_alias so validation recognizes references like `j1.column` as valid.
+            // Issue #4786: ON clause validation was failing for parenthesized join aliases.
             validate_on_clause_table_references(
                 on_condition,
                 &left_result.schema,
                 &right_result.schema,
                 database,
+                join_alias,
             )?;
         }
     }
@@ -472,6 +489,31 @@ fn remove_duplicate_columns_for_using_join(
         }
     } else {
         // For LEFT/INNER JOIN: hide right-side USING columns (original behavior)
+        //
+        // Issue #4786: Build map of leftmost left indices for coalesce pairs.
+        // Even though LEFT/INNER joins don't need COALESCE semantics for output,
+        // we need to add the left column to any existing coalesce chain from
+        // nested USING joins. This ensures is_using_coalesce_right_side() correctly
+        // filters out the nested join's visible column.
+        let mut leftmost_left_indices: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for (table_start_idx, table_schema) in left_schema.table_schemas.values() {
+            for (col_idx, col) in table_schema.columns.iter().enumerate() {
+                let lowercase = col.name.to_lowercase();
+                if using_cols_lower.contains(&lowercase) {
+                    let absolute_idx = table_start_idx + col_idx;
+                    leftmost_left_indices
+                        .entry(lowercase)
+                        .and_modify(|e| {
+                            if absolute_idx < *e {
+                                *e = absolute_idx
+                            }
+                        })
+                        .or_insert(absolute_idx);
+                }
+            }
+        }
+
         for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
             for (col_idx, col) in table_schema.columns.iter().enumerate() {
                 let lowercase = col.name.to_lowercase();
@@ -480,6 +522,17 @@ fn remove_duplicate_columns_for_using_join(
                     // Position in result = left_col_count + position_in_right_schema
                     let right_idx = left_col_count + table_start_idx + col_idx;
                     result.schema.hide_column(right_idx);
+
+                    // Issue #4786: Add coalesce pair so is_using_coalesce_right_side()
+                    // correctly filters the nested join's visible column.
+                    if let Some(&left_idx) = leftmost_left_indices.get(&lowercase) {
+                        let original_name = using_columns
+                            .iter()
+                            .find(|c| c.to_lowercase() == lowercase)
+                            .map(|s| s.as_str())
+                            .unwrap_or(&col.name);
+                        result.schema.add_using_coalesce_pair(original_name, left_idx, right_idx);
+                    }
                 }
             }
         }
@@ -1171,11 +1224,16 @@ fn generate_using_join_condition(
 /// SELECT * FROM t1 INNER JOIN t2 ON t2.a = t3.x INNER JOIN t3
 /// ```
 /// The ON clause for the t1/t2 join references t3, which hasn't been introduced yet.
+///
+/// The `join_alias` parameter is the alias for the parenthesized join expression on the right
+/// side (e.g., for `t1 JOIN (...) AS j1 ON j1.id = t1.id`, the alias is "j1").
+/// Issue #4786: This alias must be recognized as a valid table reference.
 fn validate_on_clause_table_references(
     on_condition: &vibesql_ast::Expression,
     left_schema: &CombinedSchema,
     right_schema: &CombinedSchema,
     database: &vibesql_storage::Database,
+    join_alias: Option<&str>,
 ) -> Result<(), ExecutorError> {
     // Collect all table names from both schemas (lowercase for case-insensitive comparison)
     let mut valid_tables: HashSet<String> = HashSet::new();
@@ -1184,6 +1242,11 @@ fn validate_on_clause_table_references(
     }
     for table_id in right_schema.table_schemas.keys() {
         valid_tables.insert(table_id.canonical().to_lowercase());
+    }
+    // Issue #4786: Add the join alias (if any) to valid tables so that references like
+    // `j1.column` are recognized when the right side is a parenthesized join with alias.
+    if let Some(alias) = join_alias {
+        valid_tables.insert(alias.to_lowercase());
     }
 
     // Collect all column names from both schemas (lowercase for case-insensitive comparison)

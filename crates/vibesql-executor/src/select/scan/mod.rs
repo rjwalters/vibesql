@@ -156,7 +156,12 @@ where
             alias,
             ..
         } => {
-            let mut result = join_scan::execute_join(
+            // Pass the join alias to execute_join so it can:
+            // 1. Recognize `j1.column` references in ON clause validation
+            // 2. Add the alias to the right side's schema so only right-side tables are shadowed
+            // Issue #4786: The alias must be added to the right side BEFORE combining with left side,
+            // otherwise the left side's tables would also be shadowed, causing missing columns.
+            let result = join_scan::execute_join(
                 left,
                 right,
                 join_type,
@@ -168,14 +173,9 @@ where
                 where_clause,
                 outer_row,
                 outer_schema,
+                alias.as_deref(),
                 execute_subquery,
             )?;
-            // If the join has an alias (parenthesized join expression),
-            // add it to the schema so column references like `j1.column` can be resolved.
-            // Issue #4905: Parenthesized JOIN expression aliases were being ignored.
-            if let Some(join_alias) = alias {
-                result.schema = result.schema.add_join_alias(join_alias);
-            }
             Ok(result)
         }
         vibesql_ast::FromClause::Subquery { query, alias, column_aliases } => {

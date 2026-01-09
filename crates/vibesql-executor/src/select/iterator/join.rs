@@ -154,6 +154,10 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
         let mut alias_tables = left_schema.alias_tables.clone();
         alias_tables.extend(right_schema.alias_tables.iter().cloned());
 
+        // Merge shadowed_tables from both sides
+        let mut shadowed_tables = left_schema.shadowed_tables.clone();
+        shadowed_tables.extend(right_schema.shadowed_tables.iter().map(|(k, v)| (k.clone(), v.clone())));
+
         let combined_schema = CombinedSchema {
             table_schemas,
             total_columns: left_total + right_total,
@@ -164,6 +168,7 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
             using_coalesce_indices,
             column_replacement_map,
             alias_tables,
+            shadowed_tables,
         };
 
         let right_count = right_rows.len();

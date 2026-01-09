@@ -1532,30 +1532,34 @@ fn remove_duplicate_columns_for_using_join(
     // - RIGHT OUTER: left can be NULL for unmatched rows from right
     // - FULL OUTER: either side can be NULL for unmatched rows
     // Issue #4783: USING column semantics differ from SQLite in OUTER JOINs
-    let needs_coalesce = matches!(
+    let _needs_coalesce = matches!(
         join_type,
         vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter
     );
 
     // Build a map of column name -> leftmost left column index
     // This is the index that unqualified references will resolve to
+    //
+    // Issue #4786: We ALWAYS need to build this map, not just for FULL/RIGHT joins.
+    // When a LEFT/INNER join has USING on a right side with nested USING joins,
+    // we need to add the left column to the coalesce chain so that the inner
+    // join's visible column becomes a non-first position and gets properly
+    // filtered by is_using_coalesce_right_side() in projection.
     let mut leftmost_left_indices: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
-    if needs_coalesce {
-        for (table_start_idx, table_schema) in left_schema.table_schemas.values() {
-            for (col_idx, col) in table_schema.columns.iter().enumerate() {
-                let lowercase = col.name.to_lowercase();
-                if using_cols_lower.contains(&lowercase) {
-                    let absolute_idx = table_start_idx + col_idx;
-                    leftmost_left_indices
-                        .entry(lowercase)
-                        .and_modify(|e| {
-                            if absolute_idx < *e {
-                                *e = absolute_idx
-                            }
-                        })
-                        .or_insert(absolute_idx);
-                }
+    for (table_start_idx, table_schema) in left_schema.table_schemas.values() {
+        for (col_idx, col) in table_schema.columns.iter().enumerate() {
+            let lowercase = col.name.to_lowercase();
+            if using_cols_lower.contains(&lowercase) {
+                let absolute_idx = table_start_idx + col_idx;
+                leftmost_left_indices
+                    .entry(lowercase)
+                    .and_modify(|e| {
+                        if absolute_idx < *e {
+                            *e = absolute_idx
+                        }
+                    })
+                    .or_insert(absolute_idx);
             }
         }
     }
@@ -1571,15 +1575,19 @@ fn remove_duplicate_columns_for_using_join(
                 let right_idx = left_col_count + table_start_idx + col_idx;
                 result.schema.hide_column(right_idx);
 
-                // If coalescing is needed, register the coalesce pair in the schema
-                // This maps the column name to (left_idx, right_idx) so the evaluator
-                // can apply COALESCE semantics for unqualified column references
-                if needs_coalesce {
-                    if let Some(&left_idx) = leftmost_left_indices.get(&lowercase) {
-                        result
-                            .schema
-                            .add_using_coalesce_pair(&col.name, left_idx, right_idx);
-                    }
+                // Issue #4786: ALWAYS register the coalesce pair in the schema, not just
+                // for FULL/RIGHT joins. This ensures that when a nested USING join's
+                // visible column is hidden by an outer LEFT/INNER USING join, the
+                // is_using_coalesce_right_side() check in projection will correctly
+                // filter it out (because it's no longer first in the chain).
+                //
+                // For LEFT/INNER joins, the COALESCE semantics won't be applied in
+                // output (the left column value is used directly), but the chain
+                // structure is needed for correct column filtering.
+                if let Some(&left_idx) = leftmost_left_indices.get(&lowercase) {
+                    result
+                        .schema
+                        .add_using_coalesce_pair(&col.name, left_idx, right_idx);
                 }
             }
         }

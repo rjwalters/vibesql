@@ -55,7 +55,16 @@ pub(crate) fn project_row_combined(
 
                     // Build a reverse lookup: for each column index, find its name
                     // to check if it's a joined column
-                    for (_, (start_index, table_schema)) in sorted_tables {
+                    for (table_id, (start_index, table_schema)) in sorted_tables {
+                        // Issue #4786: Skip alias tables in SELECT * expansion.
+                        // Alias tables are virtual tables created for parenthesized join expressions
+                        // (e.g., `(...) AS j1`). They have start_index=0 which doesn't match the
+                        // actual row positions, so including them would produce wrong column values.
+                        // They exist only for qualified column resolution (`j1.column`), not for
+                        // SELECT * expansion. The base tables' visible columns are used instead.
+                        if schema.alias_tables.contains(table_id) {
+                            continue;
+                        }
                         for (col_idx, col_schema) in table_schema.columns.iter().enumerate() {
                             let abs_idx = start_index + col_idx;
                             if abs_idx >= max_col {
@@ -86,7 +95,24 @@ pub(crate) fn project_row_combined(
 
                             if should_include {
                                 let col_name_lower = col_schema.name.to_lowercase();
-                                let is_joined = schema.joined_columns.contains(&col_name_lower);
+                                // A column should be reordered to the front only if ALL of:
+                                // 1. Its name is in joined_columns (from USING/NATURAL JOIN)
+                                // 2. It's the FIRST index in a using_coalesce_indices chain
+                                // 3. That first index is 0 (meaning the USING is at top level)
+                                //
+                                // Condition 3 prevents reordering when the USING join is nested
+                                // inside a parenthesized expression with an ON join at the outer
+                                // level. E.g., for `t3 FULL JOIN (...) AS j1 ON j1.id=t3.id`,
+                                // the inner join's coalesced id starts at idx > 0, so it should
+                                // NOT be moved to the front of t3's columns.
+                                let is_joined = schema.joined_columns.contains(&col_name_lower)
+                                    && schema
+                                        .using_coalesce_indices
+                                        .get(&col_name_lower)
+                                        .map_or(false, |indices| {
+                                            // Must be first in chain AND chain starts at idx 0
+                                            indices.first() == Some(&abs_idx) && abs_idx == 0
+                                        });
                                 if is_joined {
                                     joined_cols.push((abs_idx, col_name_lower));
                                 } else {
