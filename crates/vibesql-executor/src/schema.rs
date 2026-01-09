@@ -815,11 +815,14 @@ impl CombinedSchema {
             .entry(column.to_lowercase())
             .or_insert_with(Vec::new);
 
-        // Only add left_idx if Vec is empty (first time for this column)
-        if indices.is_empty() {
-            indices.push(left_idx);
+        // Issue #4909: For chained NATURAL FULL JOINs like `t3 NATURAL FULL JOIN (inner)`,
+        // the Vec may already have entries from the inner join (e.g., [t4.id, t5.id]).
+        // We must INSERT left_idx at the BEGINNING if not present, to get [t3.id, t4.id, t5.id].
+        // This ensures COALESCE picks the leftmost non-NULL value.
+        if !indices.contains(&left_idx) {
+            indices.insert(0, left_idx);
         }
-        // Always add right_idx if not already present
+        // Always add right_idx at the end if not already present
         if !indices.contains(&right_idx) {
             indices.push(right_idx);
         }

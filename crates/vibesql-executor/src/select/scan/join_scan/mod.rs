@@ -204,17 +204,10 @@ where
     );
     if is_outer_join {
         if let Some(on_condition) = condition {
-            // Extract aliases from left and right side for parenthesized join expressions
-            // Example: `t1 JOIN (t2 JOIN t3) AS j1 ON j1.x = t1.x`
-            // The alias j1 should be recognized as a valid table in the ON clause
-            let left_alias = get_from_clause_alias(left);
-            let right_alias = get_from_clause_alias(right);
             validate_on_clause_table_references(
                 on_condition,
                 &left_result.schema,
                 &right_result.schema,
-                left_alias.as_deref(),
-                right_alias.as_deref(),
                 database,
             )?;
         }
@@ -328,11 +321,6 @@ where
             join_type,
         )?;
     }
-
-    // Note: Join aliases (parenthesized join expressions like `(t2 JOIN t3) AS j1`)
-    // are handled in execute_from_clause after the recursive join call returns.
-    // This ensures the alias is added exactly once at the right level.
-    // See issue #4905 for details.
 
     Ok(result)
 }
@@ -470,9 +458,6 @@ fn remove_duplicate_columns_for_using_join(
         }
 
         // Now register coalesce pairs using the best left and right indices
-        // Issue #4906: For nested parenthesized JOINs, the right_schema may already have
-        // a coalesce chain for this column. We need to extend the chain with ALL indices
-        // from the right side, not just the best one.
         for (col_name, (right_rel_idx, _)) in &best_right_indices {
             let right_idx = left_col_count + right_rel_idx;
             if let Some(&(left_idx, _)) = leftmost_left_indices.get(col_name) {
@@ -482,29 +467,7 @@ fn remove_duplicate_columns_for_using_join(
                     .find(|c| c.to_lowercase() == *col_name)
                     .map(|s| s.as_str())
                     .unwrap_or(col_name);
-
-                // Check if right_schema already has a coalesce chain for this column
-                // (from a nested parenthesized JOIN like `(t5 NATURAL FULL JOIN t6)`)
-                if let Some(right_coalesce_indices) =
-                    right_schema.using_coalesce_indices.get(col_name)
-                {
-                    // Add left_idx first
-                    result
-                        .schema
-                        .add_using_coalesce_pair(original_name, left_idx, left_idx);
-                    // Then add all indices from the right side's chain
-                    for &existing_idx in right_coalesce_indices {
-                        let adjusted_idx = left_col_count + existing_idx;
-                        result
-                            .schema
-                            .add_using_coalesce_pair(original_name, left_idx, adjusted_idx);
-                    }
-                } else {
-                    // No existing chain, just add the single pair
-                    result
-                        .schema
-                        .add_using_coalesce_pair(original_name, left_idx, right_idx);
-                }
+                result.schema.add_using_coalesce_pair(original_name, left_idx, right_idx);
             }
         }
     } else {
@@ -633,11 +596,21 @@ fn generate_natural_join_condition(
     // Store: (left_table, left_col, right_table, right_col, right_table_start_idx, collation)
     // Collation is taken from the left column (left takes precedence per SQLite semantics),
     // falling back to the right column's collation if the left has none.
+    //
+    // Issue #4909: We must deduplicate by column name. When the right side is a join result
+    // (e.g., `c NATURAL FULL JOIN d`), both c.id and d.id exist in table_schemas but they
+    // represent the same logical "id" column. We should only add ONE entry per column name.
     let mut common_columns: Vec<(String, String, String, String, usize, Option<String>)> =
         Vec::new();
+    let mut matched_column_names: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     for (table_name, (table_idx, table_schema)) in &right_schema.table_schemas {
         for col in &table_schema.columns {
             let lowercase_name = col.name.to_lowercase();
+            // Skip if we've already matched this column name
+            if matched_column_names.contains(&lowercase_name) {
+                continue;
+            }
             if let Some((left_table, left_col, _absolute_idx, left_collation, _is_hidden)) =
                 left_columns.get(&lowercase_name)
             {
@@ -651,6 +624,8 @@ fn generate_natural_join_condition(
                     *table_idx,
                     collation,
                 ));
+                // Mark this column name as matched so we don't match it again
+                matched_column_names.insert(lowercase_name);
             }
         }
     }
@@ -672,10 +647,9 @@ fn generate_natural_join_condition(
         }
     }
 
-    // Issue #4906: Also build index-to-column mapping for right side to handle
-    // nested parenthesized NATURAL JOINs where the right side has COALESCE chains.
-    // For example: `(t3 NATURAL FULL JOIN t4) NATURAL FULL JOIN (t5 NATURAL FULL JOIN t6)`
-    // The right side `(t5 NATURAL FULL JOIN t6)` has a coalesce chain for `id`.
+    // Issue #4909: Build index-to-column mapping for the right side as well
+    // When the right side is a join result (e.g., `c NATURAL FULL JOIN d`), we need
+    // to use COALESCE(c.id, d.id) in the join condition.
     let mut right_idx_to_col: HashMap<usize, (String, String)> = HashMap::new();
     for (table_name, (start_idx, table_schema)) in &right_schema.table_schemas {
         for (col_offset, col) in table_schema.columns.iter().enumerate() {
@@ -698,14 +672,13 @@ fn generate_natural_join_condition(
             right_table
         };
 
-        // Issue #4906: Build right expression with COALESCE if this column has a coalesce chain
-        // from a nested parenthesized NATURAL JOIN. For example:
-        //   `(t3 NATURAL FULL JOIN t4) NATURAL FULL JOIN (t5 NATURAL FULL JOIN t6)`
-        // The right side `(t5 NATURAL FULL JOIN t6)` has a coalesce chain for `id`, so the
-        // join condition must be:
-        //   COALESCE(t3.id, t4.id) = COALESCE(t5.id, t6.id)
+        // Issue #4909: Build right expression with COALESCE if this column has a coalesce chain
+        // For joins like `(a NATURAL FULL JOIN b) NATURAL FULL JOIN (c NATURAL FULL JOIN d)`,
+        // the join condition must use COALESCE on BOTH sides:
+        //   COALESCE(a.id, b.id) = COALESCE(c.id, d.id)
+        // This ensures rows are properly matched when some columns in either chain are NULL.
         let right_col_lower = right_col.to_lowercase();
-        let right_col_expr: vibesql_ast::Expression = if let Some(coalesce_indices) =
+        let right_base_expr: vibesql_ast::Expression = if let Some(coalesce_indices) =
             right_schema.using_coalesce_indices.get(&right_col_lower)
         {
             if coalesce_indices.len() > 1 {
@@ -714,8 +687,14 @@ fn generate_natural_join_condition(
                     .iter()
                     .filter_map(|&idx| {
                         right_idx_to_col.get(&idx).map(|(table, col)| {
+                            let table_ref = if is_self_join {
+                                let adjusted_start = left_schema.total_columns + idx;
+                                format!("__selfjoin_right_{}_{}", table.to_lowercase(), adjusted_start)
+                            } else {
+                                table.clone()
+                            };
                             vibesql_ast::Expression::ColumnRef(
-                                vibesql_ast::ColumnIdentifier::qualified(table, false, col, false),
+                                vibesql_ast::ColumnIdentifier::qualified(&table_ref, false, col, false),
                             )
                         })
                     })
@@ -727,7 +706,7 @@ fn generate_natural_join_condition(
                         character_unit: None,
                     }
                 } else {
-                    // Fallback to simple reference
+                    // Fallback to simple reference if we couldn't build COALESCE args
                     vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
                         &right_table_ref,
                         false,
@@ -754,15 +733,14 @@ fn generate_natural_join_condition(
             ))
         };
 
-        // Apply COLLATE if the column has a collation defined.
-        // This ensures NATURAL JOIN respects column-level COLLATE declarations.
+        // Apply COLLATE if the column has a collation defined
         let right_col_with_collate = if let Some(ref coll) = collation {
             vibesql_ast::Expression::Collate {
-                expr: Box::new(right_col_expr),
+                expr: Box::new(right_base_expr),
                 collation: coll.clone(),
             }
         } else {
-            right_col_expr
+            right_base_expr
         };
 
         // Issue #4903: Build left expression with COALESCE if this column has a coalesce chain
@@ -879,11 +857,9 @@ fn generate_using_join_condition(
         }
     }
 
-    // Issue #4906: Also build index-to-column mapping for right side to handle
-    // nested parenthesized JOINs where the right side has COALESCE chains.
-    // For example: `(t3 NATURAL FULL JOIN t4) NATURAL FULL JOIN (t5 NATURAL FULL JOIN t6)`
-    // The right side `(t5 NATURAL FULL JOIN t6)` has a coalesce chain for `id` that
-    // must be used in the join condition.
+    // Issue #4909: Build index-to-column mapping for the right side as well
+    // When the right side is a join result (e.g., `(t4 FULL JOIN t5 USING(id))`),
+    // we need to use COALESCE in the join condition.
     let mut right_idx_to_col: HashMap<usize, (String, String)> = HashMap::new();
     for (table_name, (start_idx, table_schema)) in &right_schema.table_schemas {
         for (col_offset, col) in table_schema.columns.iter().enumerate() {
@@ -1036,15 +1012,11 @@ fn generate_using_join_condition(
             right_col.0.to_string()
         };
 
-        // Issue #4906: Build right expression with COALESCE if this column has a coalesce chain
-        // from a nested parenthesized JOIN. For example:
-        //   `(t3 NATURAL FULL JOIN t4) NATURAL FULL JOIN (t5 NATURAL FULL JOIN t6)`
-        // The right side `(t5 NATURAL FULL JOIN t6)` has a coalesce chain for `id`, so the
-        // join condition must be:
-        //   COALESCE(t3.id, t4.id) = COALESCE(t5.id, t6.id)
-        // instead of just:
-        //   COALESCE(t3.id, t4.id) = t5.id
-        let right_col_expr: vibesql_ast::Expression = if let Some(coalesce_indices) =
+        // Issue #4909: Build right expression with COALESCE if this column has a coalesce chain
+        // For joins like `t3 FULL JOIN (t4 FULL JOIN t5 USING(id)) USING(id)`,
+        // the join condition must use COALESCE on BOTH sides:
+        //   COALESCE(t3.id, ...) = COALESCE(t4.id, t5.id)
+        let right_base_expr: vibesql_ast::Expression = if let Some(coalesce_indices) =
             right_schema.using_coalesce_indices.get(&col_lower)
         {
             if coalesce_indices.len() > 1 {
@@ -1053,8 +1025,14 @@ fn generate_using_join_condition(
                     .iter()
                     .filter_map(|&idx| {
                         right_idx_to_col.get(&idx).map(|(table, col)| {
+                            let table_ref = if is_self_join {
+                                let adjusted_start = left_schema.total_columns + idx;
+                                format!("__selfjoin_right_{}_{}", table.to_lowercase(), adjusted_start)
+                            } else {
+                                table.clone()
+                            };
                             vibesql_ast::Expression::ColumnRef(
-                                vibesql_ast::ColumnIdentifier::qualified(table, false, col, false),
+                                vibesql_ast::ColumnIdentifier::qualified(&table_ref, false, col, false),
                             )
                         })
                     })
@@ -1093,15 +1071,14 @@ fn generate_using_join_condition(
             ))
         };
 
-        // Apply COLLATE if the column has a collation defined.
-        // This ensures USING clause joins respect column-level COLLATE declarations.
+        // Apply COLLATE if the column has a collation defined
         let right_col_with_collate = if let Some(ref coll) = collation {
             vibesql_ast::Expression::Collate {
-                expr: Box::new(right_col_expr),
+                expr: Box::new(right_base_expr),
                 collation: coll.clone(),
             }
         } else {
-            right_col_expr
+            right_base_expr
         };
 
         // Issue #4903: Build left expression with COALESCE if this column has a coalesce chain
@@ -1178,18 +1155,6 @@ fn generate_using_join_condition(
     Ok(condition)
 }
 
-/// Extract the alias from a FromClause if it has one
-///
-/// Used to get the alias for parenthesized join expressions like `(t1 JOIN t2) AS j1`
-fn get_from_clause_alias(from: &vibesql_ast::FromClause) -> Option<String> {
-    match from {
-        vibesql_ast::FromClause::Table { alias, .. } => alias.clone(),
-        vibesql_ast::FromClause::Join { alias, .. } => alias.clone(),
-        vibesql_ast::FromClause::Subquery { alias, .. } => Some(alias.clone()),
-        vibesql_ast::FromClause::Values { alias, .. } => Some(alias.clone()),
-    }
-}
-
 /// Validate that an ON clause doesn't reference tables that aren't in the current join.
 ///
 /// SQLite requires that ON clauses only reference tables from the current join (left and right
@@ -1201,9 +1166,6 @@ fn get_from_clause_alias(from: &vibesql_ast::FromClause) -> Option<String> {
 /// 2. Unqualified references (e.g., `b`) - if the column doesn't exist in left/right schemas but
 ///    DOES exist in some table in the database, it's referencing a table to the right
 ///
-/// The `left_alias` and `right_alias` parameters allow parenthesized join expressions to be
-/// recognized by their alias name (e.g., `j1` in `(t2 JOIN t3) AS j1`).
-///
 /// Example that should fail:
 /// ```sql
 /// SELECT * FROM t1 INNER JOIN t2 ON t2.a = t3.x INNER JOIN t3
@@ -1213,8 +1175,6 @@ fn validate_on_clause_table_references(
     on_condition: &vibesql_ast::Expression,
     left_schema: &CombinedSchema,
     right_schema: &CombinedSchema,
-    left_alias: Option<&str>,
-    right_alias: Option<&str>,
     database: &vibesql_storage::Database,
 ) -> Result<(), ExecutorError> {
     // Collect all table names from both schemas (lowercase for case-insensitive comparison)
@@ -1224,13 +1184,6 @@ fn validate_on_clause_table_references(
     }
     for table_id in right_schema.table_schemas.keys() {
         valid_tables.insert(table_id.canonical().to_lowercase());
-    }
-    // Add aliases for parenthesized join expressions (e.g., `(t2 JOIN t3) AS j1`)
-    if let Some(alias) = left_alias {
-        valid_tables.insert(alias.to_lowercase());
-    }
-    if let Some(alias) = right_alias {
-        valid_tables.insert(alias.to_lowercase());
     }
 
     // Collect all column names from both schemas (lowercase for case-insensitive comparison)
