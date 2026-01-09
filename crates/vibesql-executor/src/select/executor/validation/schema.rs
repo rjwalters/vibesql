@@ -475,6 +475,7 @@ fn build_schema_from_tables(
             using_coalesce_indices: HashMap::new(),
             column_replacement_map: HashMap::new(),
             alias_tables: HashSet::new(),
+            shadowed_tables: HashMap::new(),
         })
     }
 }
