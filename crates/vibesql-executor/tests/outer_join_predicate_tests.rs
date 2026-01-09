@@ -157,3 +157,138 @@ fn test_left_join_left_side_predicate() {
 
     assert_eq!(values, vec![2, 3], "Left-side predicate should filter correctly");
 }
+
+// =============================================================================
+// Issue #4918: Unqualified column predicates with views in FULL OUTER JOIN
+// =============================================================================
+
+/// Setup a database with views for testing NATURAL FULL JOIN
+fn setup_view_join_db() -> Database {
+    let mut db = Database::new();
+
+    // Create t4 table
+    let t4_schema = TableSchema::with_primary_key(
+        "T4".to_string(),
+        vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("x".to_string(), DataType::Varchar { max_length: None }, true),
+        ],
+        vec!["id".to_string()],
+    );
+    db.create_table(t4_schema).unwrap();
+    db.insert_row(
+        "T4",
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("alice".into())]),
+    )
+    .unwrap();
+    db.insert_row(
+        "T4",
+        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar("bob".into())]),
+    )
+    .unwrap();
+    db.insert_row(
+        "T4",
+        Row::new(vec![SqlValue::Integer(6), SqlValue::Varchar("cindy".into())]),
+    )
+    .unwrap();
+
+    // Create t5 table
+    let t5_schema = TableSchema::with_primary_key(
+        "T5".to_string(),
+        vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("y".to_string(), DataType::Varchar { max_length: None }, true),
+        ],
+        vec!["id".to_string()],
+    );
+    db.create_table(t5_schema).unwrap();
+    db.insert_row(
+        "T5",
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("orange".into())]),
+    )
+    .unwrap();
+    db.insert_row(
+        "T5",
+        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar("green".into())]),
+    )
+    .unwrap();
+
+    // Create view v4 - parse the SELECT statement and extract the SelectStmt
+    let view_select = match Parser::parse_sql("SELECT id, x FROM t4") {
+        Ok(vibesql_ast::Statement::Select(select)) => *select,
+        _ => panic!("Failed to parse view SELECT"),
+    };
+    db.catalog
+        .create_view(vibesql_catalog::ViewDefinition::new_with_sql(
+            "v4".to_string(),
+            None,
+            view_select,
+            false,
+            "SELECT id, x FROM t4".to_string(),
+        ))
+        .unwrap();
+
+    db
+}
+
+/// Issue #4918 regression test: Unqualified column IS NULL with view in NATURAL FULL JOIN
+///
+/// The bug was that predicates like `x IS NULL` were being pushed down to the view scan
+/// before the FULL JOIN, incorrectly filtering out all view rows.
+#[test]
+fn test_issue_4918_unqualified_is_null_with_view_full_join() {
+    let db = setup_view_join_db();
+
+    // Test 1: x IS NULL should return 0 rows (no actual NULL x values)
+    let sql = "SELECT id, x, y FROM v4 NATURAL FULL JOIN t5 WHERE x IS NULL ORDER BY 1";
+    let select = parse_select(sql);
+    let result = SelectExecutor::new(&db).execute(&select).unwrap();
+    assert_eq!(
+        result.len(),
+        0,
+        "x IS NULL should return 0 rows - no actual NULL x values"
+    );
+
+    // Test 2: x IS NOT NULL should return all 3 rows
+    let sql = "SELECT id, x, y FROM v4 NATURAL FULL JOIN t5 WHERE x IS NOT NULL ORDER BY 1";
+    let select = parse_select(sql);
+    let result = SelectExecutor::new(&db).execute(&select).unwrap();
+    assert_eq!(result.len(), 3, "x IS NOT NULL should return all 3 rows");
+
+    // Test 3: x <> 'bob' OR x IS NULL should return 2 rows (ids 2 and 6)
+    let sql = "SELECT id, x, y FROM v4 NATURAL FULL JOIN t5 WHERE x <> 'bob' OR x IS NULL ORDER BY 1";
+    let select = parse_select(sql);
+    let result = SelectExecutor::new(&db).execute(&select).unwrap();
+    assert_eq!(result.len(), 2, "Should return 2 rows (alice and cindy)");
+
+    // Verify the row values are correct (not NULL)
+    let first_x = match &result[0].values[1] {
+        SqlValue::Varchar(s) => s.as_str(),
+        _ => panic!("Expected varchar for x"),
+    };
+    assert_eq!(first_x, "alice", "First row should have x='alice'");
+}
+
+/// Test qualified column references still work correctly
+#[test]
+fn test_qualified_column_with_view_full_join() {
+    let db = setup_view_join_db();
+
+    // Qualified reference (v4.x) should work correctly
+    let sql = "SELECT id, x, y FROM v4 NATURAL FULL JOIN t5 WHERE v4.x IS NULL ORDER BY 1";
+    let select = parse_select(sql);
+    let result = SelectExecutor::new(&db).execute(&select).unwrap();
+    assert_eq!(result.len(), 0, "v4.x IS NULL should return 0 rows");
+}
+
+/// Test with direct tables (no views) to ensure the fix doesn't break basic functionality
+#[test]
+fn test_unqualified_is_null_with_tables_full_join() {
+    let db = setup_view_join_db();
+
+    // Direct table reference should work correctly
+    let sql = "SELECT id, x, y FROM t4 NATURAL FULL JOIN t5 WHERE x IS NULL ORDER BY 1";
+    let select = parse_select(sql);
+    let result = SelectExecutor::new(&db).execute(&select).unwrap();
+    assert_eq!(result.len(), 0, "Direct table: x IS NULL should return 0 rows");
+}
