@@ -51,8 +51,14 @@ pub(super) fn predicate_references_only_tables(
             if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
         {
             // Unqualified column - can't determine which table, assume it might be from nullable
-            // side Return false to be conservative (keep the predicate)
-            false
+            // side. Return true to indicate "might reference only nullable tables" so that the
+            // caller (filter_out_nullable_side_predicates) will REMOVE this predicate from the
+            // pushdown set and evaluate it post-join.
+            //
+            // Bug fix for #4918: Previously returned false, which caused predicates like
+            // `x IS NULL` to be pushed down to views in NATURAL FULL JOIN, incorrectly
+            // filtering out all view rows before the join.
+            true
         }
         vibesql_ast::Expression::ColumnRef(_) => {
             // Schema-qualified or other cases, be conservative
