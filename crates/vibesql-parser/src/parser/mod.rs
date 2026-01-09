@@ -2,6 +2,11 @@ use std::fmt;
 
 use crate::{keywords::Keyword, lexer::Lexer, token::Token};
 
+/// Maximum number of terms allowed in an ORDER BY clause.
+/// This matches SQLite's SQLITE_MAX_COLUMN default of 2000.
+/// See: https://www.sqlite.org/limits.html
+pub const MAX_ORDER_BY_TERMS: usize = 2000;
+
 mod advanced_objects;
 mod alter;
 mod create;
@@ -930,6 +935,13 @@ impl Parser {
 
                 Ok(vibesql_ast::OrderByItem { expr, direction, nulls_order })
             })?;
+
+            // Check for too many ORDER BY terms (SQLite compatibility)
+            if order_items.len() > MAX_ORDER_BY_TERMS {
+                return Err(ParseError {
+                    message: "too many terms in ORDER BY clause".to_string(),
+                });
+            }
 
             Some(order_items)
         } else {
