@@ -676,20 +676,45 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
         // Get case_sensitive_like setting from database (default: false = case-insensitive)
         let case_sensitive = self.database.map(|db| db.case_sensitive_like()).unwrap_or(false);
 
-        match (value, pattern) {
-            (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-            (SqlValue::Varchar(s), SqlValue::Varchar(p))
-            | (SqlValue::Character(s), SqlValue::Varchar(p))
-            | (SqlValue::Varchar(s), SqlValue::Character(p))
-            | (SqlValue::Character(s), SqlValue::Character(p)) => {
-                let matches = super::pattern::like_match(s, p, case_sensitive, escape_char);
-                Ok(SqlValue::Boolean(if negated { !matches } else { matches }))
+        // Issue #4913: SQLite coerces numeric types to strings for LIKE comparison
+        let text = match value {
+            SqlValue::Null => return Ok(SqlValue::Null),
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
+            SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Blob(b) => {
+                let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+                arcstr::ArcStr::from(hex)
             }
-            _ => Err(ExecutorError::TypeError(format!(
-                "LIKE requires string operands, got {:?} and {:?}",
-                value, pattern
-            ))),
-        }
+            _ => {
+                return Err(ExecutorError::TypeError(format!(
+                    "LIKE requires string operands, got {:?} and {:?}",
+                    value, pattern
+                )))
+            }
+        };
+
+        let pattern_str = match pattern {
+            SqlValue::Null => return Ok(SqlValue::Null),
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
+            SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            _ => {
+                return Err(ExecutorError::TypeError(format!(
+                    "LIKE requires string operands, got {:?} and {:?}",
+                    value, pattern
+                )))
+            }
+        };
+
+        let matches = super::pattern::like_match(&text, &pattern_str, case_sensitive, escape_char);
+        Ok(SqlValue::Boolean(if negated { !matches } else { matches }))
     }
 
     /// Evaluate GLOB pattern matching (SQLite).
@@ -699,20 +724,45 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
         pattern: &SqlValue,
         negated: bool,
     ) -> Result<SqlValue, ExecutorError> {
-        match (value, pattern) {
-            (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
-            (SqlValue::Varchar(s), SqlValue::Varchar(p))
-            | (SqlValue::Character(s), SqlValue::Varchar(p))
-            | (SqlValue::Varchar(s), SqlValue::Character(p))
-            | (SqlValue::Character(s), SqlValue::Character(p)) => {
-                let matches = super::pattern::glob_match(s, p);
-                Ok(SqlValue::Boolean(if negated { !matches } else { matches }))
+        // Issue #4913: SQLite coerces numeric types to strings for GLOB comparison
+        let text = match value {
+            SqlValue::Null => return Ok(SqlValue::Null),
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
+            SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Blob(b) => {
+                let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+                arcstr::ArcStr::from(hex)
             }
-            _ => Err(ExecutorError::TypeError(format!(
-                "GLOB requires string operands, got {:?} and {:?}",
-                value, pattern
-            ))),
-        }
+            _ => {
+                return Err(ExecutorError::TypeError(format!(
+                    "GLOB requires string operands, got {:?} and {:?}",
+                    value, pattern
+                )))
+            }
+        };
+
+        let pattern_str = match pattern {
+            SqlValue::Null => return Ok(SqlValue::Null),
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
+            SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            _ => {
+                return Err(ExecutorError::TypeError(format!(
+                    "GLOB requires string operands, got {:?} and {:?}",
+                    value, pattern
+                )))
+            }
+        };
+
+        let matches = super::pattern::glob_match(&text, &pattern_str);
+        Ok(SqlValue::Boolean(if negated { !matches } else { matches }))
     }
 
     /// Evaluate POSITION function.

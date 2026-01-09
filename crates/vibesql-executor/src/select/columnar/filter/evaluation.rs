@@ -155,11 +155,37 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
             passes_low && passes_high
         }
         ColumnPredicate::Like { pattern, negated, .. } => {
-            // Extract string value
-            let text = match value {
-                SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
+            // Issue #4913: SQLite coerces numeric types to strings for LIKE comparison
+            let text_owned: String;
+            let text: &str = match value {
+                SqlValue::Character(s) | SqlValue::Varchar(s) => s,
                 SqlValue::Null => return false,
-                _ => return false, // Non-string types don't match LIKE patterns
+                // SQLite coerces numeric types to strings for LIKE comparison
+                SqlValue::Integer(i) => {
+                    text_owned = i.to_string();
+                    &text_owned
+                }
+                SqlValue::Bigint(i) => {
+                    text_owned = i.to_string();
+                    &text_owned
+                }
+                SqlValue::Float(f) => {
+                    text_owned = f.to_string();
+                    &text_owned
+                }
+                SqlValue::Double(f) => {
+                    text_owned = f.to_string();
+                    &text_owned
+                }
+                SqlValue::Real(f) => {
+                    text_owned = f.to_string();
+                    &text_owned
+                }
+                SqlValue::Blob(b) => {
+                    text_owned = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+                    &text_owned
+                }
+                _ => return false,
             };
 
             let matches = like_match(text, pattern);

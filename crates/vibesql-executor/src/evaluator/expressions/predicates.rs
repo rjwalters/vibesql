@@ -451,11 +451,23 @@ impl ExpressionEvaluator<'_> {
         let expr_val = self.eval(expr, row)?;
         let pattern_val = self.eval(pattern, row)?;
 
-        let text = match expr_val {
-            vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => {
+        // Issue #4913: SQLite coerces numeric types to strings for LIKE comparison
+        let text = match &expr_val {
+            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
                 s.clone()
             }
             vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+            // SQLite coerces numeric types to strings for LIKE comparison
+            vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
+            vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
+            vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            // Blob values are coerced to hex representation in SQLite
+            vibesql_types::SqlValue::Blob(b) => {
+                let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+                arcstr::ArcStr::from(hex)
+            }
             _ => {
                 return Err(ExecutorError::TypeMismatch {
                     left: expr_val,
@@ -465,11 +477,17 @@ impl ExpressionEvaluator<'_> {
             }
         };
 
-        let pattern_str = match pattern_val {
-            vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => {
+        let pattern_str = match &pattern_val {
+            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
                 s.clone()
             }
             vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+            // SQLite coerces numeric types to strings for LIKE comparison
+            vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
+            vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
+            vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
             _ => {
                 return Err(ExecutorError::TypeMismatch {
                     left: expr_val,
@@ -542,11 +560,23 @@ impl ExpressionEvaluator<'_> {
         let expr_val = self.eval(expr, row)?;
         let pattern_val = self.eval(pattern, row)?;
 
-        let text = match expr_val {
-            vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => {
+        // Issue #4913: SQLite coerces numeric types to strings for GLOB comparison
+        let text = match &expr_val {
+            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
                 s.clone()
             }
             vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+            // SQLite coerces numeric types to strings for GLOB comparison
+            vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
+            vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
+            vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            // Blob values are coerced to hex representation in SQLite
+            vibesql_types::SqlValue::Blob(b) => {
+                let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+                arcstr::ArcStr::from(hex)
+            }
             _ => {
                 return Err(ExecutorError::TypeMismatch {
                     left: expr_val,
@@ -556,11 +586,17 @@ impl ExpressionEvaluator<'_> {
             }
         };
 
-        let pattern_str = match pattern_val {
-            vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => {
+        let pattern_str = match &pattern_val {
+            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
                 s.clone()
             }
             vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+            // SQLite coerces numeric types to strings for GLOB comparison
+            vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
+            vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
+            vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
             _ => {
                 return Err(ExecutorError::TypeMismatch {
                     left: expr_val,
