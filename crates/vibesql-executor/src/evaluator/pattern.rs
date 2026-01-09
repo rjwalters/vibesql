@@ -14,6 +14,47 @@ fn utf8_char_len(byte: u8) -> usize {
     }
 }
 
+/// Decode a UTF-8 character from bytes, returning the Unicode code point and byte length.
+/// Returns None if the bytes don't form a valid UTF-8 character.
+#[inline]
+fn decode_utf8_char(bytes: &[u8], pos: usize) -> Option<(u32, usize)> {
+    if pos >= bytes.len() {
+        return None;
+    }
+
+    let first = bytes[pos];
+    let len = utf8_char_len(first);
+
+    if pos + len > bytes.len() {
+        return None;
+    }
+
+    let codepoint = match len {
+        1 => first as u32,
+        2 => {
+            let b1 = bytes[pos + 1];
+            ((first as u32 & 0x1F) << 6) | (b1 as u32 & 0x3F)
+        }
+        3 => {
+            let b1 = bytes[pos + 1];
+            let b2 = bytes[pos + 2];
+            ((first as u32 & 0x0F) << 12) | ((b1 as u32 & 0x3F) << 6) | (b2 as u32 & 0x3F)
+        }
+        4 => {
+            let b1 = bytes[pos + 1];
+            let b2 = bytes[pos + 2];
+            let b3 = bytes[pos + 3];
+            ((first as u32 & 0x07) << 18)
+                | ((b1 as u32 & 0x3F) << 12)
+                | ((b2 as u32 & 0x3F) << 6)
+                | (b3 as u32 & 0x3F)
+        }
+        _ => return None,
+    };
+
+    Some((codepoint, len))
+}
+
 /// SQL LIKE pattern matching
 /// Supports wildcards:
 /// - % matches any sequence of characters (including empty)
@@ -237,7 +278,12 @@ fn glob_match_recursive(text: &[u8], pattern: &[u8], text_pos: usize, pattern_po
                 return false;
             }
 
-            let text_char = text[text_pos];
+            // Decode the text character as a Unicode code point
+            let (text_codepoint, text_char_len) = match decode_utf8_char(text, text_pos) {
+                Some(result) => result,
+                None => return false,
+            };
+
             let mut pos = pattern_pos + 1;
 
             // Check for negation
@@ -249,7 +295,8 @@ fn glob_match_recursive(text: &[u8], pattern: &[u8], text_pos: usize, pattern_po
             };
 
             let mut matched = false;
-            let mut prev_char: Option<u8> = None;
+            // Store the previous character as a Unicode code point for range comparisons
+            let mut prev_char: Option<u32> = None;
 
             // Issue #4910: Handle ] as the first character in a character class.
             // Per POSIX and SQLite, if ] appears immediately after [ (or [^ or [!),
@@ -269,26 +316,46 @@ fn glob_match_recursive(text: &[u8], pattern: &[u8], text_pos: usize, pattern_po
 
                 first_char_in_class = false;
 
-                // Check for range (e.g., a-z)
-                if ch == b'-'
-                    && prev_char.is_some()
-                    && pos + 1 < pattern.len()
-                    && pattern[pos + 1] != b']'
-                {
-                    let range_end = pattern[pos + 1];
-                    let range_start = prev_char.unwrap();
-                    if text_char >= range_start && text_char <= range_end {
-                        matched = true;
+                // Check for range (e.g., a-z or Unicode ranges like \u1233-\u1235)
+                if ch == b'-' && prev_char.is_some() && pos + 1 < pattern.len() {
+                    // Decode the range end character
+                    if let Some((range_end, range_end_len)) = decode_utf8_char(pattern, pos + 1) {
+                        // Don't treat as range if range_end is ]
+                        if pattern[pos + 1] == b']' {
+                            // Just a literal '-'
+                            if text_codepoint == b'-' as u32 {
+                                matched = true;
+                            }
+                            prev_char = Some(b'-' as u32);
+                            pos += 1;
+                        } else {
+                            let range_start = prev_char.unwrap();
+                            if text_codepoint >= range_start && text_codepoint <= range_end {
+                                matched = true;
+                            }
+                            pos += 1 + range_end_len; // Skip - and the end character
+                            prev_char = Some(range_end);
+                        }
+                    } else {
+                        // Invalid UTF-8 in pattern, treat '-' as literal
+                        if text_codepoint == b'-' as u32 {
+                            matched = true;
+                        }
+                        prev_char = Some(b'-' as u32);
+                        pos += 1;
                     }
-                    pos += 2; // Skip - and the end character
-                    prev_char = Some(range_end);
                 } else {
-                    // Single character
-                    if text_char == ch {
-                        matched = true;
+                    // Single character (may be multi-byte Unicode)
+                    if let Some((pattern_codepoint, char_len)) = decode_utf8_char(pattern, pos) {
+                        if text_codepoint == pattern_codepoint {
+                            matched = true;
+                        }
+                        prev_char = Some(pattern_codepoint);
+                        pos += char_len;
+                    } else {
+                        // Invalid UTF-8, skip one byte
+                        pos += 1;
                     }
-                    prev_char = Some(ch);
-                    pos += 1;
                 }
             }
 
@@ -297,8 +364,8 @@ fn glob_match_recursive(text: &[u8], pattern: &[u8], text_pos: usize, pattern_po
                 pos += 1;
             } else {
                 // Malformed pattern, treat [ as literal
-                return if text_char == b'[' {
-                    glob_match_recursive(text, pattern, text_pos + 1, pattern_pos + 1)
+                return if text_codepoint == b'[' as u32 {
+                    glob_match_recursive(text, pattern, text_pos + text_char_len, pattern_pos + 1)
                 } else {
                     false
                 };
@@ -306,7 +373,7 @@ fn glob_match_recursive(text: &[u8], pattern: &[u8], text_pos: usize, pattern_po
 
             let class_matches = if negated { !matched } else { matched };
             if class_matches {
-                glob_match_recursive(text, pattern, text_pos + 1, pos)
+                glob_match_recursive(text, pattern, text_pos + text_char_len, pos)
             } else {
                 false
             }
@@ -561,5 +628,62 @@ mod tests {
         assert!(glob_match("A]C", "A[]B]C")); // matches ']' in the class
         assert!(glob_match("AxC", "A[^]B]C")); // 'x' not in negated class
         assert!(!glob_match("ABC", "A[^]B]C")); // 'B' is in negated class
+    }
+
+    #[test]
+    fn test_glob_match_unicode_character_class() {
+        // Issue #4920: Unicode characters in GLOB character classes
+        // U+1234 (ሴ) is a 3-byte UTF-8 character (codepoint 4660 decimal)
+
+        // Character class with Unicode literal: [xሴy] should match x, ሴ, or y
+        let text_with_unicode = "a\u{1234}b"; // "aሴb"
+        let pattern_with_unicode = "a[x\u{1234}y]b"; // "a[xሴy]b"
+        assert!(glob_match(text_with_unicode, pattern_with_unicode));
+
+        // Should NOT match when text char is not in class
+        assert!(!glob_match("azb", pattern_with_unicode));
+
+        // Unicode character range: [\u1233-\u1235] should match codepoints 4659-4661
+        let pattern_range = "a[\u{1233}-\u{1235}]b";
+        assert!(glob_match("a\u{1233}b", pattern_range)); // Start of range
+        assert!(glob_match("a\u{1234}b", pattern_range)); // Middle of range
+        assert!(glob_match("a\u{1235}b", pattern_range)); // End of range
+        assert!(!glob_match("a\u{1232}b", pattern_range)); // Before range
+        assert!(!glob_match("a\u{1236}b", pattern_range)); // After range
+
+        // Mixed ASCII/Unicode range: [a-\u1235] should match 'a' through codepoint 4661
+        let pattern_mixed = "x[a-\u{1235}]y";
+        assert!(glob_match("xay", pattern_mixed)); // 'a' is in range
+        assert!(glob_match("xzy", pattern_mixed)); // 'z' is in range
+        assert!(glob_match("x\u{1234}y", pattern_mixed)); // ሴ is in range
+        assert!(!glob_match("x\u{1236}y", pattern_mixed)); // After range
+
+        // Negated Unicode character class
+        let pattern_negated = "a[^\u{1234}]b";
+        assert!(!glob_match("a\u{1234}b", pattern_negated)); // ሴ is excluded
+        assert!(glob_match("axb", pattern_negated)); // 'x' is not excluded
+        assert!(glob_match("a\u{1235}b", pattern_negated)); // Next codepoint is not excluded
+
+        // 4-byte emoji in character class
+        let pattern_emoji = "a[\u{1F600}\u{1F601}]b"; // [😀😁]
+        assert!(glob_match("a\u{1F600}b", pattern_emoji)); // 😀 matches
+        assert!(glob_match("a\u{1F601}b", pattern_emoji)); // 😁 matches
+        assert!(!glob_match("axb", pattern_emoji)); // 'x' doesn't match
+
+        // 2-byte character (é = U+00E9) in character class
+        let pattern_2byte = "a[\u{00E8}-\u{00EA}]b"; // [è-ê]
+        assert!(glob_match("a\u{00E8}b", pattern_2byte)); // è matches
+        assert!(glob_match("a\u{00E9}b", pattern_2byte)); // é matches
+        assert!(glob_match("a\u{00EA}b", pattern_2byte)); // ê matches
+        assert!(!glob_match("a\u{00EB}b", pattern_2byte)); // ë doesn't match
+    }
+
+    #[test]
+    fn test_glob_match_unicode_outside_class() {
+        // Verify Unicode characters work outside of character classes too
+        assert!(glob_match("a\u{1234}b", "a\u{1234}b")); // Exact match
+        assert!(glob_match("a\u{1234}b", "a?b")); // ? matches one Unicode char
+        assert!(glob_match("a\u{1234}b", "a*b")); // * matches Unicode char
+        assert!(glob_match("\u{1234}\u{1235}", "*")); // * matches multiple Unicode chars
     }
 }
