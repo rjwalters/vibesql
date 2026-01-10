@@ -295,7 +295,7 @@ fn apply_width(s: &str, spec: &FormatSpec) -> String {
 }
 
 fn format_int_with_spec(val: &SqlValue, spec: &FormatSpec) -> String {
-    let i = match val {
+    let i64_val = match val {
         SqlValue::Null => return "(null)".to_string(),
         SqlValue::Integer(i) => *i,
         SqlValue::Bigint(i) => *i,
@@ -312,6 +312,10 @@ fn format_int_with_spec(val: &SqlValue, spec: &FormatSpec) -> String {
         }
         _ => 0,
     };
+
+    // SQLite's %d format treats values as 32-bit signed integers.
+    // Cast to i32 to properly interpret values like 0xffffffff as -1.
+    let i = i64_val as i32;
 
     let abs_str = i.unsigned_abs().to_string();
     let sign = if i < 0 {
@@ -380,7 +384,7 @@ fn format_string_with_spec(val: &SqlValue, spec: &FormatSpec) -> String {
 }
 
 fn format_hex_with_spec(val: &SqlValue, uppercase: bool, spec: &FormatSpec) -> String {
-    let i = match val {
+    let i64_val = match val {
         SqlValue::Null => return "(null)".to_string(),
         SqlValue::Integer(i) => *i,
         SqlValue::Bigint(i) => *i,
@@ -391,7 +395,14 @@ fn format_hex_with_spec(val: &SqlValue, uppercase: bool, spec: &FormatSpec) -> S
         _ => 0,
     };
 
-    let hex = if uppercase { format!("{:X}", i) } else { format!("{:x}", i) };
+    // SQLite's %x format uses 32-bit representation
+    let i = i64_val as u32;
+
+    let hex = if uppercase {
+        format!("{:X}", i)
+    } else {
+        format!("{:x}", i)
+    };
 
     // Per C standard: # flag adds 0x/0X prefix, but NOT for zero values
     if spec.alternate && i != 0 {
@@ -403,7 +414,7 @@ fn format_hex_with_spec(val: &SqlValue, uppercase: bool, spec: &FormatSpec) -> S
 }
 
 fn format_octal_with_spec(val: &SqlValue, spec: &FormatSpec) -> String {
-    let i = match val {
+    let i64_val = match val {
         SqlValue::Null => return "(null)".to_string(),
         SqlValue::Integer(i) => *i,
         SqlValue::Bigint(i) => *i,
@@ -413,6 +424,9 @@ fn format_octal_with_spec(val: &SqlValue, spec: &FormatSpec) -> String {
         SqlValue::Double(d) => *d as i64,
         _ => 0,
     };
+
+    // SQLite's %o format uses 32-bit representation
+    let i = i64_val as u32;
 
     let oct = format!("{:o}", i);
 
