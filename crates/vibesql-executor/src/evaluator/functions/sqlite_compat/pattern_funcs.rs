@@ -60,16 +60,24 @@ pub(crate) fn like(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     // Optional escape character (3rd argument)
     let escape_char: Option<char> = if args.len() >= 3 {
         match &args[2] {
-            SqlValue::Varchar(s) | SqlValue::Character(s) if s.len() == 1 => s.chars().next(),
-            SqlValue::Integer(n) => {
-                let s = n.to_string();
-                if s.len() == 1 {
-                    s.chars().next()
-                } else {
-                    None
+            SqlValue::Null => return Ok(SqlValue::Null),
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                let mut chars = s.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(c), None) => Some(c), // Exactly one character
+                    _ => {
+                        // Empty string or multi-character string: error per SQLite
+                        return Err(ExecutorError::SqliteCompatError(
+                            "ESCAPE expression must be a single character".to_string(),
+                        ));
+                    }
                 }
             }
-            _ => None,
+            _ => {
+                return Err(ExecutorError::SqliteCompatError(
+                    "ESCAPE expression must be a single character".to_string(),
+                ));
+            }
         }
     } else {
         None

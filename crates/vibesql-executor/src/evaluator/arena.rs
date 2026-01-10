@@ -437,8 +437,8 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                             let mut chars = s.chars();
                             match (chars.next(), chars.next()) {
                                 (Some(c), None) => Some(c), // Exactly one character
-                                (None, _) => None,          // Empty string
                                 _ => {
+                                    // Empty string or multi-character string: error per SQLite
                                     return Err(ExecutorError::SqliteCompatError(
                                         "ESCAPE expression must be a single character".to_string(),
                                     ))
