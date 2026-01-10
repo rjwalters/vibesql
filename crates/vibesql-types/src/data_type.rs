@@ -462,8 +462,37 @@ impl DataType {
             // Vector → NONE affinity (custom type)
             DataType::Vector { .. } => TypeAffinity::None,
 
-            // User-defined and NULL → NONE affinity
-            DataType::UserDefined { .. } | DataType::Null => TypeAffinity::None,
+            // NULL → NONE affinity
+            DataType::Null => TypeAffinity::None,
+
+            // User-defined types: Apply SQLite's affinity rules based on type name.
+            // SQLite determines affinity by checking if the type name contains:
+            // 1. "INT" → INTEGER affinity
+            // 2. "CHAR", "CLOB", or "TEXT" → TEXT affinity
+            // 3. "BLOB" or no type → NONE/BLOB affinity
+            // 4. "REAL", "FLOA", or "DOUB" → REAL affinity
+            // 5. Otherwise → NUMERIC affinity
+            //
+            // This handles multi-word types like "LARGE BLOB", "NATIVE CHARACTER",
+            // "VARYING CHARACTER", "UNSIGNED BIG INT", etc.
+            DataType::UserDefined { type_name } => {
+                let upper = type_name.to_uppercase();
+                if upper.contains("INT") {
+                    TypeAffinity::Integer
+                } else if upper.contains("CHAR") || upper.contains("CLOB") || upper.contains("TEXT")
+                {
+                    TypeAffinity::Text
+                } else if upper.contains("BLOB") {
+                    TypeAffinity::None
+                } else if upper.contains("REAL")
+                    || upper.contains("FLOA")
+                    || upper.contains("DOUB")
+                {
+                    TypeAffinity::Real
+                } else {
+                    TypeAffinity::Numeric
+                }
+            }
         }
     }
 }
