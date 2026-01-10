@@ -35,6 +35,10 @@ pub struct ExecutionContext<'a> {
     pub outer_row: Option<&'a vibesql_storage::Row>,
     /// Optional outer schema for correlated subqueries
     pub outer_schema: Option<&'a CombinedSchema>,
+    /// Optional all outer rows for outer-correlated aggregates (issue #4930)
+    /// When an aggregate in a scalar subquery references only outer columns,
+    /// it should aggregate over ALL outer rows, not just the current one.
+    pub outer_rows: Option<&'a [vibesql_storage::Row]>,
     /// Optional procedural context for stored procedures/functions
     pub procedural_context: Option<&'a procedural::ExecutionContext>,
     /// Optional CTE context for WITH clause results
@@ -55,6 +59,7 @@ impl<'a> ExecutionContext<'a> {
             database,
             outer_row: None,
             outer_schema: None,
+            outer_rows: None,
             procedural_context: None,
             cte_context: None,
             window_mapping: None,
@@ -74,6 +79,20 @@ impl<'a> ExecutionContext<'a> {
     ) -> Self {
         self.outer_row = Some(outer_row);
         self.outer_schema = Some(outer_schema);
+        self
+    }
+
+    /// Add all outer rows for outer-correlated aggregates (issue #4930).
+    ///
+    /// When an aggregate function in a scalar subquery references only outer columns,
+    /// it should aggregate over ALL outer rows, not just the current one. This enables
+    /// queries like `SELECT (SELECT string_agg(a1,'x') FROM t2) FROM t1` to work correctly.
+    ///
+    /// # Arguments
+    /// * `outer_rows` - All rows from the outer query
+    #[must_use]
+    pub fn with_outer_rows(mut self, outer_rows: &'a [vibesql_storage::Row]) -> Self {
+        self.outer_rows = Some(outer_rows);
         self
     }
 
@@ -123,11 +142,13 @@ impl<'a> ExecutionContext<'a> {
     /// - `with_database_and_windows_and_cte()`
     ///
     /// By using a builder pattern, we consolidate all 8+ variants into a single method.
+    /// If outer_rows is set, it will be propagated to the evaluator for outer-correlated
+    /// aggregates (issue #4930).
     pub fn create_evaluator(&self) -> CombinedExpressionEvaluator<'a> {
         // Use the most complete constructor and set optional fields
         // We match on the combination of optional fields to call the right constructor
         // This is temporary until we refactor CombinedExpressionEvaluator itself
-        match (
+        let mut evaluator = match (
             self.outer_row,
             self.outer_schema,
             self.procedural_context,
@@ -202,7 +223,14 @@ impl<'a> ExecutionContext<'a> {
             // Unsupported combinations fall back to base
             // Note: outer + procedural is not a valid combination in current usage
             _ => CombinedExpressionEvaluator::with_database(self.schema, self.database),
+        };
+
+        // Set outer_rows if available (for outer-correlated aggregates, issue #4930)
+        if let Some(outer_rows) = self.outer_rows {
+            evaluator.set_outer_rows(outer_rows);
         }
+
+        evaluator
     }
 
     /// Check if this context has outer context (for correlated subqueries).

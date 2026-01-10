@@ -21,6 +21,10 @@ pub struct CombinedExpressionEvaluator<'a> {
     pub(super) database: Option<&'a vibesql_storage::Database>,
     pub(super) outer_row: Option<&'a vibesql_storage::Row>,
     pub(super) outer_schema: Option<&'a CombinedSchema>,
+    /// All outer rows for outer-correlated aggregates (issue #4930)
+    /// When an aggregate in a scalar subquery references only outer columns,
+    /// it should aggregate over ALL outer rows, not just the current one.
+    pub(super) outer_rows: Option<&'a [vibesql_storage::Row]>,
     /// Outer context for chained column resolution (SQLite-style context chaining)
     /// This enables proper scope shadowing for deeply nested subqueries (issue #4493)
     pub(super) outer_context: Option<&'a CombinedExpressionEvaluator<'a>>,
@@ -61,6 +65,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             database: None,
             outer_row: None,
             outer_schema: None,
+            outer_rows: None,
             outer_context: None,
             window_mapping: None,
             procedural_context: None,
@@ -85,6 +90,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             database: Some(database),
             outer_row: None,
             outer_schema: None,
+            outer_rows: None,
             outer_context: None,
             window_mapping: None,
             procedural_context: None,
@@ -112,6 +118,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             database: Some(database),
             outer_row: Some(outer_row),
             outer_schema: Some(outer_schema),
+            outer_rows: None,
             outer_context: None,
             window_mapping: None,
             procedural_context: None,
@@ -137,6 +144,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             database: Some(database),
             outer_row: None,
             outer_schema: None,
+            outer_rows: None,
             outer_context: None,
             window_mapping: Some(window_mapping),
             procedural_context: None,
@@ -165,6 +173,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             database: Some(database),
             outer_row: Some(outer_row),
             outer_schema: Some(outer_schema),
+            outer_rows: None,
             outer_context: None,
             window_mapping: Some(window_mapping),
             procedural_context: None,
@@ -191,6 +200,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             database: Some(database),
             outer_row: None,
             outer_schema: None,
+            outer_rows: None,
             outer_context: None,
             window_mapping: Some(window_mapping),
             procedural_context: None,
@@ -216,6 +226,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             database: Some(database),
             outer_row: None,
             outer_schema: None,
+            outer_rows: None,
             outer_context: None,
             window_mapping: None,
             procedural_context: Some(procedural_context),
@@ -241,6 +252,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             database: Some(database),
             outer_row: None,
             outer_schema: None,
+            outer_rows: None,
             outer_context: None,
             window_mapping: None,
             procedural_context: None,
@@ -268,6 +280,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             database: Some(database),
             outer_row: Some(outer_row),
             outer_schema: Some(outer_schema),
+            outer_rows: None,
             outer_context: None,
             window_mapping: None,
             procedural_context: None,
@@ -295,6 +308,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             database: Some(database),
             outer_row: None,
             outer_schema: None,
+            outer_rows: None,
             outer_context: None,
             window_mapping: None,
             procedural_context: Some(procedural_context),
@@ -313,6 +327,29 @@ impl<'a> CombinedExpressionEvaluator<'a> {
     /// Should be called before evaluating expressions for a new row in multi-row contexts
     pub(crate) fn clear_cse_cache(&self) {
         self.cse_cache.borrow_mut().clear();
+    }
+
+    /// Set all outer rows for outer-correlated aggregates (issue #4930).
+    ///
+    /// When an aggregate function in a scalar subquery references only outer columns,
+    /// it should aggregate over ALL outer rows, not just the current one.
+    pub fn set_outer_rows(&mut self, outer_rows: &'a [vibesql_storage::Row]) {
+        self.outer_rows = Some(outer_rows);
+    }
+
+    /// Get the outer rows if set
+    pub(crate) fn get_outer_rows(&self) -> Option<&'a [vibesql_storage::Row]> {
+        self.outer_rows
+    }
+
+    /// Get the outer schema if set
+    pub(crate) fn get_outer_schema(&self) -> Option<&'a CombinedSchema> {
+        self.outer_schema
+    }
+
+    /// Get the inner schema
+    pub(crate) fn get_schema(&self) -> &'a CombinedSchema {
+        self.schema
     }
 
     /// Compute hash key for column cache without allocating strings
@@ -358,6 +395,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             database: self.database,
             outer_row: self.outer_row,
             outer_schema: self.outer_schema,
+            outer_rows: self.outer_rows,
             outer_context: self.outer_context,
             window_mapping: self.window_mapping,
             procedural_context: self.procedural_context,
@@ -388,6 +426,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             database: self.database,
             outer_row: self.outer_row,
             outer_schema: self.outer_schema,
+            outer_rows: self.outer_rows,
             outer_context: self.outer_context,
             window_mapping: self.window_mapping,
             procedural_context: self.procedural_context,
@@ -494,6 +533,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             database,
             outer_row,
             outer_schema,
+            outer_rows: None,
             outer_context: None,
             window_mapping,
             procedural_context: None,

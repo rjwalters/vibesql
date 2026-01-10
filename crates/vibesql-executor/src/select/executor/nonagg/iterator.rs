@@ -74,6 +74,14 @@ impl SelectExecutor<'_> {
         // Handles: outer context (subqueries), procedural context, CTE context
         let cte_ctx = if !cte_results.is_empty() { Some(cte_results) } else { self.cte_context };
 
+        // Issue #4930: Store rows for outer-correlated aggregates in scalar subqueries
+        // When a scalar subquery's aggregate references only outer columns,
+        // it needs access to ALL outer rows. We pass the main query's rows as outer_rows.
+        let local_rows_for_aggregates = rows.clone();
+        let outer_rows_for_aggregates: &[vibesql_storage::Row] = self
+            .outer_rows
+            .unwrap_or(&local_rows_for_aggregates);
+
         let mut ctx = ExecutionContext::new(&schema, self.database);
         if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
             ctx = ctx.with_outer_context(outer_row, outer_schema);
@@ -83,6 +91,7 @@ impl SelectExecutor<'_> {
         if let Some(cte_ctx) = cte_ctx {
             ctx = ctx.with_cte_context(cte_ctx);
         }
+        ctx = ctx.with_outer_rows(outer_rows_for_aggregates);
         let evaluator = ctx.create_evaluator();
 
         // Resolve SELECT aliases in WHERE clause (SQLite extension)

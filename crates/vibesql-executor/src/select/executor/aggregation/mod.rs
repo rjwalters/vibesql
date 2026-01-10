@@ -273,6 +273,12 @@ impl SelectExecutor<'_> {
         if let Some(cte_ctx) = cte_ctx {
             ctx = ctx.with_cte_context(cte_ctx);
         }
+        // Issue #4930: Pass outer_rows for outer-correlated aggregates
+        // When an aggregate in a scalar subquery references only outer columns,
+        // it needs access to ALL outer rows, not just the current row.
+        if let Some(outer_rows) = self.outer_rows {
+            ctx = ctx.with_outer_rows(outer_rows);
+        }
         let evaluator = ctx.create_evaluator();
 
         // Expand wildcards in SELECT list to explicit column references
