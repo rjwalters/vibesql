@@ -46,6 +46,8 @@ impl Clone for Database {
             persistence_engine: None,
             // Preserve table ID counter for consistency
             next_table_id: self.next_table_id,
+            // Clone resets reserved rowids - each database instance tracks independently
+            reserved_rowids: HashMap::new(),
         }
     }
 }
@@ -72,6 +74,7 @@ impl Database {
             search_count: AtomicU64::new(0),
             persistence_engine: None,
             next_table_id: 1,
+            reserved_rowids: HashMap::new(),
         }
     }
 

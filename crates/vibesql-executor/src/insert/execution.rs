@@ -180,8 +180,10 @@ fn execute_insert_internal(
     };
 
     // Validate each row has correct number of values
-    // If rowid is specified, the expected count includes the rowid column
-    let expected_value_count = if rowid_position.is_some() {
+    // If a pseudo-column rowid is specified (rowid, _rowid_, oid), the expected count
+    // includes the rowid column. If rowid comes from an INTEGER PRIMARY KEY column,
+    // it's already in target_column_info.
+    let expected_value_count = if resolved_columns.rowid_is_pseudo_column {
         target_column_info.len() + 1
     } else {
         target_column_info.len()
@@ -275,19 +277,35 @@ fn execute_insert_internal(
             let rowid_expr = &value_exprs[rowid_pos];
 
             // Extract literal value from expression
+            // For INTEGER PRIMARY KEY columns (rowid_is_pseudo_column=false), allow any integer
+            // For pseudo-columns (rowid, _rowid_, oid), only allow positive integers
             match rowid_expr {
                 vibesql_ast::Expression::Literal(val) => {
-                    // Convert to u64 for row_id
                     match val {
-                        vibesql_types::SqlValue::Integer(i) if *i > 0 => {
+                        vibesql_types::SqlValue::Integer(i) => {
+                            // For pseudo-columns, require positive; for IPK columns, allow any value
+                            if resolved_columns.rowid_is_pseudo_column && *i <= 0 {
+                                return Err(ExecutorError::UnsupportedExpression(
+                                    "ROWID must be a positive integer".to_string(),
+                                ));
+                            }
                             let rowid = *i as u64;
                             // Update batch_max_rowid for subsequent NULL auto-assignments
-                            batch_max_rowid = batch_max_rowid.max(rowid);
+                            if *i > 0 {
+                                batch_max_rowid = batch_max_rowid.max(rowid);
+                            }
                             Some(rowid)
                         }
-                        vibesql_types::SqlValue::Bigint(i) if *i > 0 => {
+                        vibesql_types::SqlValue::Bigint(i) => {
+                            if resolved_columns.rowid_is_pseudo_column && *i <= 0 {
+                                return Err(ExecutorError::UnsupportedExpression(
+                                    "ROWID must be a positive integer".to_string(),
+                                ));
+                            }
                             let rowid = *i as u64;
-                            batch_max_rowid = batch_max_rowid.max(rowid);
+                            if *i > 0 {
+                                batch_max_rowid = batch_max_rowid.max(rowid);
+                            }
                             Some(rowid)
                         }
                         vibesql_types::SqlValue::Null => {
@@ -298,6 +316,43 @@ fn execute_insert_internal(
                         _ => {
                             return Err(ExecutorError::UnsupportedExpression(
                                 "ROWID must be a positive integer".to_string(),
+                            ));
+                        }
+                    }
+                }
+                vibesql_ast::Expression::Default => {
+                    // DEFAULT means auto-assign, like NULL
+                    batch_max_rowid += 1;
+                    Some(batch_max_rowid)
+                }
+                vibesql_ast::Expression::UnaryOp {
+                    op: vibesql_ast::UnaryOperator::Minus,
+                    expr,
+                } => {
+                    // Handle negative integers (parsed as unary minus)
+                    match expr.as_ref() {
+                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(i)) => {
+                            let neg_val = -(*i);
+                            if resolved_columns.rowid_is_pseudo_column && neg_val <= 0 {
+                                return Err(ExecutorError::UnsupportedExpression(
+                                    "ROWID must be a positive integer".to_string(),
+                                ));
+                            }
+                            // Note: negative rowid as u64 wraps, but SQLite allows this for IPK
+                            Some(neg_val as u64)
+                        }
+                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Bigint(i)) => {
+                            let neg_val = -(*i);
+                            if resolved_columns.rowid_is_pseudo_column && neg_val <= 0 {
+                                return Err(ExecutorError::UnsupportedExpression(
+                                    "ROWID must be a positive integer".to_string(),
+                                ));
+                            }
+                            Some(neg_val as u64)
+                        }
+                        _ => {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                "ROWID value must be a literal integer".to_string(),
                             ));
                         }
                     }
@@ -313,16 +368,19 @@ fn execute_insert_internal(
         };
 
         // Filter out the rowid value when iterating over column values
-        let column_values: Vec<_> = if let Some(rowid_pos) = rowid_position {
-            value_exprs
-                .iter()
-                .enumerate()
-                .filter(|(idx, _)| *idx != rowid_pos)
-                .map(|(_, expr)| expr)
-                .collect()
-        } else {
-            value_exprs.iter().collect()
-        };
+        // Only filter if it's a pseudo-column (rowid, _rowid_, oid) that's not in the schema
+        // For INTEGER PRIMARY KEY columns, the value IS part of the columns list
+        let column_values: Vec<_> =
+            if let Some(rowid_pos) = rowid_position.filter(|_| resolved_columns.rowid_is_pseudo_column) {
+                value_exprs
+                    .iter()
+                    .enumerate()
+                    .filter(|(idx, _)| *idx != rowid_pos)
+                    .map(|(_, expr)| expr)
+                    .collect()
+            } else {
+                value_exprs.iter().collect()
+            };
 
         // Track which columns have been assigned (SQLite uses first occurrence for duplicates)
         let mut assigned_columns = std::collections::HashSet::new();
@@ -564,7 +622,7 @@ fn execute_insert_internal(
         }
     } else {
         // Slow path: Insert rows one by one (needed for triggers, special clauses)
-        for (full_row_values, explicit_rowid) in validated_rows {
+        for (mut full_row_values, mut explicit_rowid) in validated_rows {
             // Check if ON DUPLICATE KEY UPDATE is specified
             if let Some(ref assignments) = stmt.on_duplicate_key_update {
                 // Try to update an existing row if there's a conflict
@@ -583,18 +641,55 @@ fn execute_insert_internal(
                 }
                 // No conflict, fall through to insert
             } else if matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace)) {
+                // SQLite REPLACE semantics: allocate the rowid for the new row BEFORE firing
+                // BEFORE DELETE triggers. This ensures that any INSERT within those triggers
+                // that tries to allocate the same rowid will fail with a UNIQUE constraint
+                // violation on rowid.
+                //
+                // Compute the rowid for the new row and reserve it.
+                // Track whether the rowid is explicitly specified (INTEGER PRIMARY KEY)
+                // or auto-allocated, as this affects how conflicts are handled.
+                let is_explicit = explicit_rowid.is_some();
+                let reserved_rowid = if let Some(rowid) = explicit_rowid {
+                    rowid
+                } else {
+                    // Auto-allocate: next available rowid is physical row count + 1
+                    // (physical includes deleted rows since rowid is based on physical index)
+                    let current_physical = db
+                        .get_table(&storage_table_name)
+                        .map(|t| t.physical_row_count() as u64)
+                        .unwrap_or(0);
+                    current_physical + 1
+                };
+
+                // Reserve the rowid before firing triggers
+                db.reserve_rowid(&storage_table_name, reserved_rowid, is_explicit);
+
                 // If REPLACE conflict clause, delete conflicting rows first
-                // This also fires DELETE triggers which may create new constraints violations
-                super::replace::handle_replace_conflicts(
+                // This also fires DELETE triggers which may create new constraints violations.
+                // handle_replace_conflicts() releases the reserved rowid after BEFORE DELETE
+                // triggers but before AFTER DELETE triggers.
+                let replace_result = super::replace::handle_replace_conflicts(
                     db,
                     table_name,
+                    &storage_table_name,
                     &schema,
                     &full_row_values,
-                )?;
+                );
+
+                // On error, ensure the reserved rowid is released and propagate the error.
+                // Note: The reserved rowid may already be released if the error occurred
+                // after BEFORE DELETE triggers, but release_reserved_rowid is idempotent.
+                if let Err(e) = replace_result {
+                    db.release_reserved_rowid(&storage_table_name);
+                    return Err(e);
+                }
 
                 // After REPLACE conflict handling (which fires triggers), re-validate constraints.
                 // Triggers may have inserted new rows that conflict with the row we want to insert.
                 // Pass empty batch values since we're only checking against existing table data.
+                // Note: The reserved rowid has already been released by handle_replace_conflicts()
+                // after BEFORE DELETE triggers, so no need to release on error here.
                 super::constraints::enforce_primary_key_constraint(
                     db,
                     &schema,
@@ -602,6 +697,7 @@ fn execute_insert_internal(
                     &full_row_values,
                     &[], // No batch values to check against
                 )?;
+
                 super::constraints::enforce_unique_constraints(
                     db,
                     &schema,
@@ -609,12 +705,22 @@ fn execute_insert_internal(
                     &full_row_values,
                     &[], // No batch values to check against
                 )?;
+
                 super::constraints::enforce_unique_indexes(
                     db,
                     &schema,
                     table_name,
                     &full_row_values,
                 )?;
+
+                // Use the reserved rowid for the REPLACE INSERT to match SQLite semantics.
+                // This ensures the new row gets the rowid that was reserved before triggers fired.
+                explicit_rowid = Some(reserved_rowid);
+
+                // Release the reservation now that all delete triggers have fired.
+                // The REPLACE INSERT will use explicit_rowid which already has the reserved value.
+                // This prevents the REPLACE INSERT from failing on its own reservation.
+                db.release_reserved_rowid(&storage_table_name);
             }
 
             // Fire BEFORE INSERT triggers only if triggers exist
@@ -629,14 +735,55 @@ fn execute_insert_internal(
                 )?;
             }
 
-            // Get row count before insert to enable rollback
-            let row_count_before = db
+            // Get physical row count before insert to enable rollback and rowid calculation
+            let table_ref = db
                 .get_table(&storage_table_name)
-                .ok_or_else(|| ExecutorError::TableNotFound(full_table_name.clone()))?
-                .row_count();
+                .ok_or_else(|| ExecutorError::TableNotFound(full_table_name.clone()))?;
+            let row_count_before = table_ref.row_count();
+            let physical_row_count_before = table_ref.physical_row_count();
+
+            // SQLite REPLACE semantics: Check if the rowid we're about to use is reserved.
+            // During REPLACE, the rowid for the new row is allocated BEFORE firing triggers.
+            // The behavior depends on the type of reservation:
+            // - Auto-allocated reservation: BEFORE DELETE trigger INSERTs fail on rowid conflict
+            // - Explicit reservation: AFTER DELETE trigger auto-INSERTs skip to next rowid
+            //   (SQLite reuses freed rowids, but VibeSQL doesn't, so we skip instead)
+            let mut final_explicit_rowid = explicit_rowid;
+            let rowid_to_use = explicit_rowid.unwrap_or((physical_row_count_before + 1) as u64);
+            if let Some((reserved_rowid, is_explicit_reservation)) =
+                db.get_reserved_rowid_info(&storage_table_name)
+            {
+                if rowid_to_use == reserved_rowid {
+                    if !is_explicit_reservation {
+                        // Auto-allocated REPLACE rowid: trigger INSERT must fail
+                        return Err(ExecutorError::SqliteCompatError(format!(
+                            "UNIQUE constraint failed: {}.rowid",
+                            table_name
+                        )));
+                    } else if explicit_rowid.is_none() {
+                        // Explicit REPLACE rowid: auto-allocated trigger INSERT skips to next rowid
+                        // This approximates SQLite's rowid reuse behavior
+                        let new_rowid = reserved_rowid + 1;
+                        final_explicit_rowid = Some(new_rowid);
+
+                        // Also update the INTEGER PRIMARY KEY column value to match the new rowid
+                        // The column value was auto-generated earlier but now we're using a different rowid
+                        if let Some(ipk_idx) = ipk_col_idx {
+                            full_row_values[ipk_idx] =
+                                vibesql_types::SqlValue::Integer(new_rowid as i64);
+                        }
+                    } else {
+                        // Explicit REPLACE rowid and explicit trigger INSERT with same rowid: fail
+                        return Err(ExecutorError::SqliteCompatError(format!(
+                            "UNIQUE constraint failed: {}.rowid",
+                            table_name
+                        )));
+                    }
+                }
+            }
 
             // Insert the row
-            let row = make_row((full_row_values, explicit_rowid));
+            let row = make_row((full_row_values, final_explicit_rowid));
             db.insert_row(&storage_table_name, row.clone()).map_err(|e| {
                 ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
             })?;

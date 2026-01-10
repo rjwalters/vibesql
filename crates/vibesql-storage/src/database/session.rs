@@ -188,6 +188,52 @@ impl Database {
     }
 
     // ============================================================================
+    // Reserved Rowids (SQLite REPLACE semantics)
+    // ============================================================================
+
+    /// Reserve a rowid for a table during REPLACE operations
+    ///
+    /// During REPLACE INTO, SQLite allocates the rowid for the new row BEFORE
+    /// firing BEFORE DELETE triggers. Any INSERT within those triggers that
+    /// tries to allocate the same rowid will fail with a UNIQUE constraint
+    /// violation on rowid.
+    ///
+    /// # Arguments
+    /// * `table_name` - The table name (case-insensitive)
+    /// * `rowid` - The rowid to reserve
+    /// * `is_explicit` - True if the rowid comes from an explicit INTEGER PRIMARY KEY
+    ///   value, false if it's auto-allocated. This affects how conflicts are handled
+    ///   in AFTER DELETE triggers.
+    pub fn reserve_rowid(&mut self, table_name: &str, rowid: u64, is_explicit: bool) {
+        self.reserved_rowids.insert(table_name.to_lowercase(), (rowid, is_explicit));
+    }
+
+    /// Release a reserved rowid after REPLACE completes
+    pub fn release_reserved_rowid(&mut self, table_name: &str) {
+        self.reserved_rowids.remove(&table_name.to_lowercase());
+    }
+
+    /// Check if a rowid is reserved for a table and get the reservation details
+    ///
+    /// Returns Some((rowid, is_explicit)) if a rowid is reserved, None otherwise.
+    pub fn get_reserved_rowid_info(&self, table_name: &str) -> Option<(u64, bool)> {
+        self.reserved_rowids.get(&table_name.to_lowercase()).copied()
+    }
+
+    /// Check if a rowid is reserved for a table
+    pub fn is_rowid_reserved(&self, table_name: &str, rowid: u64) -> bool {
+        self.reserved_rowids
+            .get(&table_name.to_lowercase())
+            .map(|(r, _)| *r == rowid)
+            .unwrap_or(false)
+    }
+
+    /// Get the reserved rowid for a table, if any
+    pub fn get_reserved_rowid(&self, table_name: &str) -> Option<u64> {
+        self.reserved_rowids.get(&table_name.to_lowercase()).map(|(r, _)| *r)
+    }
+
+    // ============================================================================
     // SQL Mode
     // ============================================================================
 

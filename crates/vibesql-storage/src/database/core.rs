@@ -82,6 +82,14 @@ pub struct Database {
     pub(super) persistence_engine: Option<PersistenceEngine>,
     /// Next table ID to assign (for WAL table_id tracking)
     pub(super) next_table_id: u32,
+    /// Reserved rowids for REPLACE operations (SQLite semantics)
+    /// During REPLACE, the rowid for the new row is allocated BEFORE firing
+    /// BEFORE DELETE triggers. Any INSERT within those triggers that tries
+    /// to allocate the same rowid will fail with a UNIQUE constraint violation.
+    /// Maps table name to (reserved_rowid, is_explicit).
+    /// - is_explicit: true if the rowid comes from an explicit INTEGER PRIMARY KEY value
+    ///   in the REPLACE statement, false if it's auto-allocated.
+    pub(super) reserved_rowids: HashMap<String, (u64, bool)>,
 }
 
 impl Database {
