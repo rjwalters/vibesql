@@ -2835,99 +2835,58 @@ proc db_leave {db} {
 }
 
 proc sqlite3_mprintf_int {args} {
-    # Stub for SQLite printf with integers
-    # Handles SQLite-specific behavior: # flag doesn't add 0x/0 prefix for zero values
+    # Call VibeSQL's printf function to ensure consistent behavior
+    # with the actual database implementation.
     set fmt [lindex $args 0]
     set vals [lrange $args 1 end]
 
-    # Pre-process format string to handle # flag with zero values
-    # For each format specifier with #, check if corresponding value is 0
-    set result ""
-    set val_idx 0
-    set i 0
-    set len [string length $fmt]
+    # Escape single quotes in format string for SQL
+    set escaped_fmt [string map {"'" "''"} $fmt]
 
-    while {$i < $len} {
-        set c [string index $fmt $i]
-        if {$c ne "%"} {
-            append result $c
-            incr i
-            continue
-        }
+    # Build the SQL query: SELECT printf('format', val1, val2, ...);
+    set sql "SELECT printf('$escaped_fmt'"
+    foreach val $vals {
+        append sql ", $val"
+    }
+    append sql ");"
 
-        # Found %, parse the format specifier
-        set spec_start $i
-        incr i
+    # Execute via VibeSQL
+    set tmpfile "/tmp/vibesql_mprintf_[pid]_[clock microseconds].sql"
+    set fd [open $tmpfile w]
+    puts -nonewline $fd $sql
+    close $fd
 
-        # Check for %%
-        if {$i < $len && [string index $fmt $i] eq "%"} {
-            append result "%"
-            incr i
-            continue
-        }
-
-        # Parse flags
-        set has_alt 0
-        set flags ""
-        while {$i < $len} {
-            set c [string index $fmt $i]
-            if {$c eq "#"} {
-                set has_alt 1
-                append flags $c
-                incr i
-            } elseif {$c in {- + " " 0}} {
-                append flags $c
-                incr i
-            } else {
-                break
-            }
-        }
-
-        # Parse width
-        set width ""
-        while {$i < $len && [string is digit [string index $fmt $i]]} {
-            append width [string index $fmt $i]
-            incr i
-        }
-
-        # Parse precision
-        set prec ""
-        if {$i < $len && [string index $fmt $i] eq "."} {
-            append prec "."
-            incr i
-            while {$i < $len && [string is digit [string index $fmt $i]]} {
-                append prec [string index $fmt $i]
-                incr i
-            }
-        }
-
-        # Parse conversion specifier
-        set conv ""
-        if {$i < $len} {
-            set conv [string index $fmt $i]
-            incr i
-        }
-
-        # Get the value for this specifier
-        if {$val_idx < [llength $vals]} {
-            set val [lindex $vals $val_idx]
-            incr val_idx
-        } else {
-            set val 0
-        }
-
-        # Per C standard: # flag for x/X/o should NOT add prefix for zero values
-        if {$has_alt && $val == 0 && $conv in {x X o}} {
-            # Remove the # flag for zero values
-            set flags [string map {"#" ""} $flags]
-        }
-
-        # Reconstruct and format
-        set new_fmt "%${flags}${width}${prec}${conv}"
-        append result [format $new_fmt $val]
+    if {$::db_file eq ""} {
+        set result [exec $::vibesql_path < $tmpfile 2>@1]
+    } else {
+        set result [exec $::vibesql_path $::db_file < $tmpfile 2>@1]
     }
 
-    return $result
+    file delete -force $tmpfile
+
+    # Parse the result - VibeSQL returns a table with header and data rows
+    # Format: | value |
+    set lines [split $result "\n"]
+    foreach line $lines {
+        # Skip header separator lines and empty lines
+        if {[string match "*---*" $line] || [string trim $line] eq ""} {
+            continue
+        }
+        # Skip header row (contains "printf")
+        if {[string match "*printf*" $line]} {
+            continue
+        }
+        # Skip row count line
+        if {[string match "*row*" $line]} {
+            continue
+        }
+        # Extract value from between pipes: | value |
+        if {[regexp {^\|\s*(.*?)\s*\|$} $line -> value]} {
+            return $value
+        }
+    }
+
+    return ""
 }
 
 proc sqlite3_mprintf_str {args} {
