@@ -244,6 +244,13 @@ impl Parser {
                 Ok(vibesql_ast::OrderByItem { expr, direction, nulls_order })
             })?;
 
+            // Check for too many ORDER BY terms (SQLite compatibility)
+            if order_items.len() > super::super::MAX_ORDER_BY_TERMS {
+                return Err(ParseError {
+                    message: "too many terms in ORDER BY clause".to_string(),
+                });
+            }
+
             Some(order_items)
         } else {
             None
@@ -613,6 +620,13 @@ impl Parser {
 
                 Ok(vibesql_ast::OrderByItem { expr, direction, nulls_order: None })
             })?;
+
+            // Check for too many ORDER BY terms (SQLite compatibility)
+            if order_items.len() > super::super::MAX_ORDER_BY_TERMS {
+                return Err(ParseError {
+                    message: "too many terms in ORDER BY clause".to_string(),
+                });
+            }
 
             Some(order_items)
         } else {

@@ -225,6 +225,13 @@ impl Parser {
                 }
             }
 
+            // Check for too many ORDER BY terms (SQLite compatibility)
+            if order_items.len() > super::super::MAX_ORDER_BY_TERMS {
+                return Err(ParseError {
+                    message: "too many terms in ORDER BY clause".to_string(),
+                });
+            }
+
             order_by = Some(order_items);
             self.expect_token(Token::RParen)?;
         } else {
@@ -299,6 +306,13 @@ impl Parser {
                     } else {
                         break;
                     }
+                }
+
+                // Check for too many ORDER BY terms (SQLite compatibility)
+                if order_items.len() > super::super::MAX_ORDER_BY_TERMS {
+                    return Err(ParseError {
+                        message: "too many terms in ORDER BY clause".to_string(),
+                    });
                 }
 
                 order_by = Some(order_items);
