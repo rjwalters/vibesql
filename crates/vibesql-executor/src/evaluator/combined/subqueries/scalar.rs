@@ -100,7 +100,27 @@ impl CombinedExpressionEvaluator<'_> {
                 // Fall through to execute without caching
                 let merged_schema = build_merged_outer_schema(self.schema, self.outer_schema);
                 let merged_row = build_merged_outer_row(row, self.outer_row);
-                let select_executor = if let Some(cte_ctx) = self.cte_context {
+                let select_executor = if let Some(outer_rows) = self.outer_rows {
+                    // Pass outer_rows for outer-correlated aggregates (issue #4930)
+                    if let Some(cte_ctx) = self.cte_context {
+                        crate::select::SelectExecutor::new_with_outer_rows_and_cte_and_depth(
+                            database,
+                            &merged_row,
+                            &merged_schema,
+                            outer_rows,
+                            cte_ctx,
+                            self.depth,
+                        )
+                    } else {
+                        crate::select::SelectExecutor::new_with_outer_rows_and_depth(
+                            database,
+                            &merged_row,
+                            &merged_schema,
+                            outer_rows,
+                            self.depth,
+                        )
+                    }
+                } else if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
                         database,
                         &merged_row,
@@ -126,7 +146,27 @@ impl CombinedExpressionEvaluator<'_> {
             // FIX for issue #4618 (subquery-3.3.4)
             let merged_schema = build_merged_outer_schema(self.schema, self.outer_schema);
             let merged_row = build_merged_outer_row(row, self.outer_row);
-            let select_executor = if let Some(cte_ctx) = self.cte_context {
+            let select_executor = if let Some(outer_rows) = self.outer_rows {
+                // Pass outer_rows for outer-correlated aggregates (issue #4930)
+                if let Some(cte_ctx) = self.cte_context {
+                    crate::select::SelectExecutor::new_with_outer_rows_and_cte_and_depth(
+                        database,
+                        &merged_row,
+                        &merged_schema,
+                        outer_rows,
+                        cte_ctx,
+                        self.depth,
+                    )
+                } else {
+                    crate::select::SelectExecutor::new_with_outer_rows_and_depth(
+                        database,
+                        &merged_row,
+                        &merged_schema,
+                        outer_rows,
+                        self.depth,
+                    )
+                }
+            } else if let Some(cte_ctx) = self.cte_context {
                 crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
                     database,
                     &merged_row,
@@ -178,7 +218,18 @@ impl CombinedExpressionEvaluator<'_> {
                 (&merged_schema, &merged_row)
             {
                 // Execute with outer context for column resolution
-                if let Some(cte_ctx) = self.cte_context {
+                if let Some(outer_rows) = self.outer_rows {
+                    // Pass outer_rows for outer-correlated aggregates (issue #4930)
+                    if let Some(cte_ctx) = self.cte_context {
+                        crate::select::SelectExecutor::new_with_outer_rows_and_cte_and_depth(
+                            database, outer_row, schema, outer_rows, cte_ctx, self.depth,
+                        )
+                    } else {
+                        crate::select::SelectExecutor::new_with_outer_rows_and_depth(
+                            database, outer_row, schema, outer_rows, self.depth,
+                        )
+                    }
+                } else if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
                         database, outer_row, schema, cte_ctx, self.depth,
                     )

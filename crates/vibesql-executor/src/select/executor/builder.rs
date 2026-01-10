@@ -19,6 +19,10 @@ pub struct SelectExecutor<'a> {
     pub(super) database: &'a vibesql_storage::Database,
     pub(super) outer_row: Option<&'a vibesql_storage::Row>,
     pub(super) outer_schema: Option<&'a crate::schema::CombinedSchema>,
+    /// All outer rows for outer-correlated aggregates (issue #4930).
+    /// When an aggregate in a scalar subquery references only outer columns,
+    /// it should aggregate over ALL outer rows, not just the current one.
+    pub(super) outer_rows: Option<&'a [vibesql_storage::Row]>,
     /// Procedural context for stored procedure/function variable resolution
     pub(super) procedural_context: Option<&'a crate::procedural::ExecutionContext>,
     /// CTE (Common Table Expression) context for accessing WITH clause results
@@ -71,6 +75,7 @@ impl<'a> SelectExecutor<'a> {
             database,
             outer_row: None,
             outer_schema: None,
+            outer_rows: None,
             procedural_context: None,
             cte_context: None,
             subquery_depth: 0,
@@ -104,6 +109,7 @@ impl<'a> SelectExecutor<'a> {
             database,
             outer_row: Some(outer_row),
             outer_schema: Some(outer_schema),
+            outer_rows: None,
             procedural_context: None,
             cte_context: None,
             subquery_depth: 0,
@@ -125,6 +131,7 @@ impl<'a> SelectExecutor<'a> {
             database,
             outer_row: None,
             outer_schema: None,
+            outer_rows: None,
             procedural_context: None,
             cte_context: None,
             subquery_depth: parent_depth + 1,
@@ -165,6 +172,7 @@ impl<'a> SelectExecutor<'a> {
             database,
             outer_row: Some(outer_row),
             outer_schema: Some(outer_schema),
+            outer_rows: None,
             procedural_context: None,
             cte_context: None,
             subquery_depth: parent_depth + 1,
@@ -188,6 +196,7 @@ impl<'a> SelectExecutor<'a> {
             database,
             outer_row: None,
             outer_schema: None,
+            outer_rows: None,
             procedural_context: Some(procedural_context),
             cte_context: None,
             subquery_depth: 0,
@@ -213,6 +222,7 @@ impl<'a> SelectExecutor<'a> {
             database,
             outer_row: None,
             outer_schema: None,
+            outer_rows: None,
             procedural_context: None,
             cte_context: Some(cte_context),
             subquery_depth: parent_depth + 1,
@@ -240,6 +250,65 @@ impl<'a> SelectExecutor<'a> {
             database,
             outer_row: Some(outer_row),
             outer_schema: Some(outer_schema),
+            outer_rows: None,
+            procedural_context: None,
+            cte_context: Some(cte_context),
+            subquery_depth: parent_depth + 1,
+            memory_used_bytes: Cell::new(0),
+            memory_warning_logged: Cell::new(false),
+            start_time: Instant::now(),
+            timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
+            aggregate_cache: OnceCell::new(),
+            arena: OnceCell::new(),
+            pivot_group: RefCell::new(None),
+            aggregate_representative_row_idx: RefCell::new(None),
+        }
+    }
+
+    /// Create a new SELECT executor with outer context, outer rows, and depth tracking
+    /// Used for outer-correlated aggregates (issue #4930) where aggregates in scalar
+    /// subqueries need access to ALL outer rows, not just the current one.
+    pub fn new_with_outer_rows_and_depth(
+        database: &'a vibesql_storage::Database,
+        outer_row: &'a vibesql_storage::Row,
+        outer_schema: &'a crate::schema::CombinedSchema,
+        outer_rows: &'a [vibesql_storage::Row],
+        parent_depth: usize,
+    ) -> Self {
+        SelectExecutor {
+            database,
+            outer_row: Some(outer_row),
+            outer_schema: Some(outer_schema),
+            outer_rows: Some(outer_rows),
+            procedural_context: None,
+            cte_context: None,
+            subquery_depth: parent_depth + 1,
+            memory_used_bytes: Cell::new(0),
+            memory_warning_logged: Cell::new(false),
+            start_time: Instant::now(),
+            timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
+            aggregate_cache: OnceCell::new(),
+            arena: OnceCell::new(),
+            pivot_group: RefCell::new(None),
+            aggregate_representative_row_idx: RefCell::new(None),
+        }
+    }
+
+    /// Create a new SELECT executor with outer context, outer rows, CTE, and depth tracking
+    /// Used for outer-correlated aggregates (issue #4930) with CTE support
+    pub fn new_with_outer_rows_and_cte_and_depth(
+        database: &'a vibesql_storage::Database,
+        outer_row: &'a vibesql_storage::Row,
+        outer_schema: &'a crate::schema::CombinedSchema,
+        outer_rows: &'a [vibesql_storage::Row],
+        cte_context: &'a HashMap<String, super::super::cte::CteResult>,
+        parent_depth: usize,
+    ) -> Self {
+        SelectExecutor {
+            database,
+            outer_row: Some(outer_row),
+            outer_schema: Some(outer_schema),
+            outer_rows: Some(outer_rows),
             procedural_context: None,
             cte_context: Some(cte_context),
             subquery_depth: parent_depth + 1,

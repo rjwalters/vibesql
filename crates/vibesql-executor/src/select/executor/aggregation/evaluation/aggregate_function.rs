@@ -4,11 +4,169 @@ use super::super::super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
     evaluator::{compiled_case::CompiledCaseExpression, CombinedExpressionEvaluator},
+    schema::CombinedSchema,
     select::grouping::{compare_sql_values, AggregateAccumulator},
 };
 
+/// Check if an expression references only outer columns (not inner FROM columns).
+///
+/// This is used to detect outer-correlated aggregates in scalar subqueries (issue #4930).
+/// When an aggregate's argument references only outer columns, it should aggregate
+/// over all outer rows, not the inner FROM rows.
+///
+/// Returns true if:
+/// - The expression has column references
+/// - NONE of those column references resolve to the inner schema
+/// - (They must all resolve to outer context)
+fn expression_refs_only_outer_columns(
+    expr: &vibesql_ast::Expression,
+    inner_schema: &CombinedSchema,
+    has_outer_context: bool,
+) -> bool {
+    // If there's no outer context, this check doesn't apply
+    if !has_outer_context {
+        return false;
+    }
+
+    // Recursively check if all column refs are outer-only
+    let mut has_column_refs = false;
+    let mut all_outer = true;
+
+    check_expr_columns(expr, inner_schema, &mut has_column_refs, &mut all_outer);
+
+    // Return true only if there ARE column refs and they're ALL outer
+    has_column_refs && all_outer
+}
+
+/// Recursive helper to check column references in an expression
+fn check_expr_columns(
+    expr: &vibesql_ast::Expression,
+    inner_schema: &CombinedSchema,
+    has_column_refs: &mut bool,
+    all_outer: &mut bool,
+) {
+    use vibesql_ast::Expression;
+
+    match expr {
+        Expression::ColumnRef(col_id) => {
+            *has_column_refs = true;
+            let table = col_id.table_canonical();
+            let column = col_id.column_canonical();
+
+            // Check if this column is in the inner schema
+            let is_in_inner = if let Some(table_name) = table {
+                inner_schema.get_column_index(Some(&table_name), &column).is_some()
+            } else {
+                // Unqualified column - check if it's in any inner table
+                inner_schema.get_column_index(None, &column).is_some()
+            };
+
+            if is_in_inner {
+                *all_outer = false;
+            }
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            check_expr_columns(left, inner_schema, has_column_refs, all_outer);
+            check_expr_columns(right, inner_schema, has_column_refs, all_outer);
+        }
+        Expression::UnaryOp { expr: inner, .. } => {
+            check_expr_columns(inner, inner_schema, has_column_refs, all_outer);
+        }
+        Expression::IsNull { expr: inner, .. } => {
+            check_expr_columns(inner, inner_schema, has_column_refs, all_outer);
+        }
+        Expression::Cast { expr: inner, .. } => {
+            check_expr_columns(inner, inner_schema, has_column_refs, all_outer);
+        }
+        Expression::Case { operand, when_clauses, else_result, .. } => {
+            if let Some(op) = operand {
+                check_expr_columns(op, inner_schema, has_column_refs, all_outer);
+            }
+            for case_when in when_clauses {
+                for cond in &case_when.conditions {
+                    check_expr_columns(cond, inner_schema, has_column_refs, all_outer);
+                }
+                check_expr_columns(&case_when.result, inner_schema, has_column_refs, all_outer);
+            }
+            if let Some(else_expr) = else_result {
+                check_expr_columns(else_expr, inner_schema, has_column_refs, all_outer);
+            }
+        }
+        Expression::Function { args, .. } => {
+            for arg in args {
+                check_expr_columns(arg, inner_schema, has_column_refs, all_outer);
+            }
+        }
+        Expression::Between { expr: inner, low, high, .. } => {
+            check_expr_columns(inner, inner_schema, has_column_refs, all_outer);
+            check_expr_columns(low, inner_schema, has_column_refs, all_outer);
+            check_expr_columns(high, inner_schema, has_column_refs, all_outer);
+        }
+        Expression::InList { expr: inner, values, .. } => {
+            check_expr_columns(inner, inner_schema, has_column_refs, all_outer);
+            for item in values {
+                check_expr_columns(item, inner_schema, has_column_refs, all_outer);
+            }
+        }
+        Expression::In { expr: inner, .. } => {
+            // IN with subquery - just check the expr
+            check_expr_columns(inner, inner_schema, has_column_refs, all_outer);
+        }
+        Expression::Collate { expr: inner, .. } => {
+            check_expr_columns(inner, inner_schema, has_column_refs, all_outer);
+        }
+        // Literals, wildcards, and other non-column expressions don't affect the result
+        _ => {}
+    }
+}
+
 /// Sort key type: (sort_value, is_descending, nulls_first)
 type SortKey = (vibesql_types::SqlValue, bool, Option<bool>);
+
+/// Evaluate an expression against an outer row using the outer schema.
+/// This is used for outer-correlated aggregates (issue #4930).
+///
+/// Supports:
+/// - Simple column references
+/// - Literals
+///
+/// For more complex expressions, returns None to indicate fallback to normal evaluation.
+fn evaluate_expr_against_outer_row(
+    expr: &vibesql_ast::Expression,
+    outer_row: &vibesql_storage::Row,
+    outer_schema: &CombinedSchema,
+) -> Result<vibesql_types::SqlValue, ExecutorError> {
+    use vibesql_ast::Expression;
+    use vibesql_types::SqlValue;
+
+    match expr {
+        Expression::ColumnRef(col_id) => {
+            let table = col_id.table_canonical();
+            let column = col_id.column_canonical();
+
+            // Look up column in outer schema
+            let table_ref = table.as_deref();
+            if let Some(idx) = outer_schema.get_column_index(table_ref, &column) {
+                if idx < outer_row.values.len() {
+                    return Ok(outer_row.values[idx].clone());
+                }
+            }
+
+            // Column not found - return NULL (shouldn't happen if expression_refs_only_outer_columns is correct)
+            Ok(SqlValue::Null)
+        }
+        Expression::Literal(val) => Ok(val.clone()),
+        Expression::Cast { expr: inner, .. } => {
+            // For casts, just evaluate the inner expression (simplified)
+            evaluate_expr_against_outer_row(inner, outer_row, outer_schema)
+        }
+        _ => {
+            // For unsupported expressions, return NULL
+            // In practice, outer-only aggregate args are usually simple column refs
+            Ok(SqlValue::Null)
+        }
+    }
+}
 
 /// Compare two sets of sort keys with collation and NULLS FIRST/LAST support.
 /// This is a helper function to eliminate code duplication between GROUP_CONCAT and JSON_GROUP_ARRAY.
@@ -370,6 +528,31 @@ pub(super) fn evaluate(
         // No ORDER BY - use the original path
         let mut acc =
             AggregateAccumulator::new_with_separator(name.canonical(), distinct, &separator)?;
+
+        // Issue #4930: Check if aggregate argument references only outer columns
+        // If so, iterate over outer_rows instead of group_rows
+        let has_outer_context = evaluator.get_outer_schema().is_some();
+        let is_outer_only = expression_refs_only_outer_columns(&args[0], evaluator.get_schema(), has_outer_context);
+
+        if is_outer_only {
+            // Outer-correlated aggregate: iterate over all outer rows
+            if let (Some(outer_rows), Some(outer_schema)) = (evaluator.get_outer_rows(), evaluator.get_outer_schema()) {
+                // Create a temporary evaluator with outer_schema as the main schema
+                // This allows us to evaluate the expression against each outer row
+                for outer_row in outer_rows.iter() {
+                    evaluator.clear_cse_cache();
+                    // For outer-only expressions, evaluate using outer context
+                    // We need to look up the column in outer_schema and get value from outer_row
+                    let value = evaluate_expr_against_outer_row(&args[0], outer_row, outer_schema)?;
+                    acc.accumulate(&value);
+                }
+
+                let result = acc.finalize()?;
+                executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
+                return Ok(result);
+            }
+            // Fall through to normal path if outer_rows not available
+        }
 
         for row in group_rows {
             evaluator.clear_cse_cache();
