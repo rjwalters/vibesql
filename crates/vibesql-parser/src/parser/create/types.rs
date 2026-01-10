@@ -34,6 +34,8 @@ impl Parser {
             Token::Keyword { keyword: Keyword::Set, .. } => "set".to_string(),
             Token::Keyword { keyword: Keyword::Year, .. } => "year".to_string(),
             Token::Keyword { keyword: Keyword::Fixed, .. } => "fixed".to_string(),
+            // SQLite type aliases - VARYING can start multi-word types like VARYING CHARACTER
+            Token::Keyword { keyword: Keyword::Varying, .. } => "varying".to_string(),
             _ => return Err(ParseError { message: "Expected data type".to_string() }),
         };
         self.advance();
@@ -683,9 +685,56 @@ impl Parser {
                 // SQLite compatibility: Accept ANY string as a type name.
                 // SQLite uses type affinity rules to determine storage, but accepts
                 // any type name including typos like "IMTEGES" or "INTEGES".
-                // Map all unknown types to UserDefined, which provides BLOB/NUMERIC
-                // affinity behavior in the executor.
-                Ok((vibesql_types::DataType::UserDefined { type_name }, false))
+                //
+                // Multi-word types are common in SQLite:
+                // - LARGE BLOB, NATIVE CHARACTER(n), VARYING CHARACTER(n)
+                // - UNSIGNED BIG INT, LONG VARCHAR, etc.
+                //
+                // Continue consuming identifiers and type-related keywords to build
+                // the complete type name, then apply SQLite's affinity rules.
+                let mut full_type_name = type_name.clone();
+
+                loop {
+                    match self.peek() {
+                        // Continue with identifier tokens
+                        Token::Identifier(next) => {
+                            full_type_name.push(' ');
+                            full_type_name.push_str(next);
+                            self.advance();
+                        }
+                        // Also allow CHARACTER keyword in multi-word types
+                        Token::Keyword { keyword: Keyword::Character, .. } => {
+                            full_type_name.push_str(" character");
+                            self.advance();
+                        }
+                        // Stop at length specifier, constraint, or delimiter
+                        _ => break,
+                    }
+                }
+
+                // Handle optional length specifier for multi-word types like
+                // NATIVE CHARACTER(70) or VARYING CHARACTER(255)
+                if matches!(self.peek(), Token::LParen) {
+                    self.advance(); // consume (
+                    match self.peek() {
+                        Token::Number(n) => {
+                            // Validate and consume the length (we don't store it for
+                            // UserDefined types - affinity is what matters in SQLite)
+                            let _ = n.parse::<usize>().map_err(|_| ParseError {
+                                message: format!("Invalid {} length", full_type_name),
+                            })?;
+                            self.advance();
+                        }
+                        _ => {
+                            return Err(ParseError {
+                                message: format!("Expected number after {}(", full_type_name),
+                            })
+                        }
+                    }
+                    self.expect_token(Token::RParen)?;
+                }
+
+                Ok((vibesql_types::DataType::UserDefined { type_name: full_type_name }, false))
             }
         }
     }
