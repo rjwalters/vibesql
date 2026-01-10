@@ -7,6 +7,10 @@ pub struct ResolvedInsertColumns {
     /// Position of rowid pseudo-column in the input column list, if specified
     /// This allows extracting the rowid value from VALUES for explicit rowid inserts
     pub rowid_position: Option<usize>,
+    /// True if rowid_position refers to a separate pseudo-column (rowid, _rowid_, oid)
+    /// False if rowid_position refers to an INTEGER PRIMARY KEY column
+    /// This affects value count validation - pseudo-columns add 1 to the expected count
+    pub rowid_is_pseudo_column: bool,
 }
 
 /// Check if a column name is a ROWID pseudo-column (SQLite compatibility)
@@ -27,21 +31,70 @@ pub fn resolve_target_columns_with_rowid(
         // No columns specified: INSERT INTO t VALUES (...)
         // Use all non-generated columns in schema order
         // Generated columns (those with generated_expr) are excluded per SQLite behavior
+        let columns: Vec<_> = schema
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, col)| col.generated_expr.is_none())
+            .map(|(idx, col)| (idx, col.data_type.clone()))
+            .collect();
+
+        // Detect INTEGER PRIMARY KEY column for rowid aliasing
+        // When a single-column INTEGER PRIMARY KEY exists, that column's value
+        // becomes the explicit rowid. Find its position in the filtered column list.
+        let rowid_position = if let Some(ref pk_cols) = schema.primary_key {
+            if pk_cols.len() == 1 {
+                // Check if the PK column is INTEGER type (rowid alias)
+                if let Some(pk_idx) = schema.get_column_index(&pk_cols[0]) {
+                    let pk_col = &schema.columns[pk_idx];
+                    // INTEGER PRIMARY KEY is a rowid alias if is_exact_integer_type is true
+                    if pk_col.is_exact_integer_type {
+                        // Find this column's position in the filtered column list
+                        columns.iter().position(|(idx, _)| *idx == pk_idx)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         Ok(ResolvedInsertColumns {
-            columns: schema
-                .columns
-                .iter()
-                .enumerate()
-                .filter(|(_, col)| col.generated_expr.is_none())
-                .map(|(idx, col)| (idx, col.data_type.clone()))
-                .collect(),
-            rowid_position: None,
+            columns,
+            rowid_position,
+            rowid_is_pseudo_column: false, // INTEGER PRIMARY KEY, not a pseudo-column
         })
     } else {
         // Columns specified: INSERT INTO t (col1, col2) VALUES (...)
         // Validate and resolve columns, handling rowid pseudo-column specially
         let mut columns = Vec::new();
         let mut rowid_position = None;
+        let mut rowid_is_pseudo_column = false;
+
+        // Get INTEGER PRIMARY KEY column info if it exists (single-column INTEGER PK)
+        let integer_pk_col_name = if let Some(ref pk_cols) = schema.primary_key {
+            if pk_cols.len() == 1 {
+                if let Some(pk_idx) = schema.get_column_index(&pk_cols[0]) {
+                    let pk_col = &schema.columns[pk_idx];
+                    if pk_col.is_exact_integer_type {
+                        Some(pk_cols[0].to_lowercase())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         for (input_idx, col_name) in specified_columns.iter().enumerate() {
             // First check if there's a real column with this name
@@ -54,6 +107,16 @@ pub fn resolve_target_columns_with_rowid(
                     });
                 }
                 columns.push((schema_idx, col.data_type.clone()));
+
+                // Check if this is the INTEGER PRIMARY KEY column (rowid alias)
+                if let Some(ref pk_name) = integer_pk_col_name {
+                    if col_name.to_lowercase() == *pk_name {
+                        // This column's value in VALUES will be the explicit rowid
+                        rowid_position = Some(input_idx);
+                        // Not a pseudo-column - it's a real column that aliases rowid
+                        rowid_is_pseudo_column = false;
+                    }
+                }
             } else if is_rowid_pseudo_column(col_name) {
                 // It's a rowid pseudo-column - record its position but don't add to columns
                 if rowid_position.is_some() {
@@ -62,6 +125,7 @@ pub fn resolve_target_columns_with_rowid(
                     ));
                 }
                 rowid_position = Some(input_idx);
+                rowid_is_pseudo_column = true;
             } else {
                 // Column not found and not a pseudo-column
                 // Use SQLite-compatible error: "table T has no column named C"
@@ -72,7 +136,11 @@ pub fn resolve_target_columns_with_rowid(
             }
         }
 
-        Ok(ResolvedInsertColumns { columns, rowid_position })
+        Ok(ResolvedInsertColumns {
+            columns,
+            rowid_position,
+            rowid_is_pseudo_column,
+        })
     }
 }
 

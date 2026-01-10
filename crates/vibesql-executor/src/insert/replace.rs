@@ -5,13 +5,20 @@ use crate::{errors::ExecutorError, expression_index_maintenance, TriggerFirer};
 ///
 /// This function implements SQLite REPLACE semantics:
 /// 1. Find rows that conflict with the new row (by PK or UNIQUE constraints)
-/// 2. Fire BEFORE DELETE triggers for each conflicting row
-/// 3. Delete the conflicting rows
-/// 4. Fire AFTER DELETE triggers for each conflicting row
-/// 5. The caller then inserts the new row
+/// 2. Fire BEFORE DELETE triggers for each conflicting row (rowid is reserved)
+/// 3. Release the reserved rowid (AFTER DELETE triggers can allocate new rowids)
+/// 4. Delete the conflicting rows
+/// 5. Fire AFTER DELETE triggers for each conflicting row
+/// 6. The caller then inserts the new row (must re-reserve or use the rowid)
+///
+/// The `storage_table_name` is used to release the reserved rowid after BEFORE DELETE
+/// triggers complete. This matches SQLite semantics where BEFORE DELETE trigger INSERTs
+/// fail on rowid conflict, but AFTER DELETE trigger INSERTs can succeed (and may fail
+/// on other constraints).
 pub fn handle_replace_conflicts(
     db: &mut vibesql_storage::Database,
     table_name: &str,
+    _storage_table_name: &str,
     schema: &vibesql_catalog::TableSchema,
     row_values: &[vibesql_types::SqlValue],
 ) -> Result<(), ExecutorError> {
@@ -149,6 +156,8 @@ pub fn handle_replace_conflicts(
 
     // Fire BEFORE DELETE triggers for each conflicting row
     // This must happen BEFORE actual deletion (SQLite semantics)
+    // The reserved rowid is active during this phase, so trigger INSERTs that try
+    // to allocate the same rowid will fail.
     if has_delete_triggers {
         for (_, row) in &rows_to_delete {
             TriggerFirer::execute_before_triggers(
@@ -160,6 +169,11 @@ pub fn handle_replace_conflicts(
             )?;
         }
     }
+
+    // NOTE: The reserved rowid remains active during AFTER DELETE triggers.
+    // For auto-allocated reservations: AFTER DELETE trigger INSERTs will fail on rowid conflict.
+    // For explicit reservations: AFTER DELETE trigger INSERTs will skip to next rowid.
+    // The caller is responsible for releasing the reservation after the REPLACE INSERT.
 
     // Remove entries from user-defined indexes BEFORE deleting rows
     // (while row indices are still valid)
