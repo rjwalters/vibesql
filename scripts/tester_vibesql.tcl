@@ -408,6 +408,15 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "datatype mismatch"
     }
 
+    # LIMIT/OFFSET value must be integer
+    # "LIMIT value ... must be an integer" -> "datatype mismatch"
+    if {[regexp -nocase {LIMIT value.*must be an integer} $error_msg]} {
+        return "datatype mismatch"
+    }
+    if {[regexp -nocase {OFFSET value.*must be an integer} $error_msg]} {
+        return "datatype mismatch"
+    }
+
     # If no specific translation, return original (without prefix)
     return $error_msg
 }
@@ -1045,8 +1054,18 @@ proc execsql {sql {db ""}} {
 
         # Check for unsupported PRAGMAs (allow supported PRAGMAs through)
         if {[string match "PRAGMA*" $sql_upper]} {
+            # case_sensitive_like PRAGMA query-only (no =value) returns nothing in SQLite
+            # Strip it out since we track the state in the shim and VibeSQL returns a row
+            if {[regexp -nocase {^PRAGMA\s+(?:database\.)?case_sensitive_like\s*;} [string trim $sql] match]} {
+                set rest [string range [string trim $sql] [string length $match] end]
+                set sql [string trim $rest]
+                if {$sql eq ""} {
+                    return {}  ;# Nothing left after stripping PRAGMA
+                }
+                continue  ;# Check for more statements
+            }
             if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check)} [string trim $sql]]} {
-                # This PRAGMA is supported - stop stripping
+                # This PRAGMA is supported (with =value) - stop stripping
                 break
             } else {
                 # Strip this unsupported PRAGMA statement from the SQL
@@ -2636,8 +2655,36 @@ proc do_vmstep_test {name sql limit expected} {
 
 proc normalize_result {val} {
     # Normalize result for comparison
-    # Convert to string and normalize whitespace
+    # 1. Treat as TCL list to strip protective braces around elements
+    #    (TCL adds braces around elements containing special chars like [ ] ,)
+    # 2. Normalize whitespace
+    # 3. Rebuild space-separated string
+
     set val [string trim $val]
+
+    # Try to parse as TCL list and rebuild without braces
+    # This handles cases like: {[1,2,3]} {[4,5,6]} -> [1,2,3] [4,5,6]
+    if {![catch {llength $val}]} {
+        # It's a valid TCL list - extract elements to strip protective braces
+        set elements {}
+        foreach elem $val {
+            lappend elements $elem
+        }
+        # Rebuild as space-separated string
+        # For elements that still need quoting (contain spaces), use proper TCL escaping
+        set result {}
+        foreach elem $elements {
+            if {[string first " " $elem] >= 0 || [string first "\t" $elem] >= 0} {
+                # Element contains whitespace - needs quoting
+                append result "\{$elem\} "
+            } else {
+                append result "$elem "
+            }
+        }
+        set val [string trimright $result]
+    }
+
+    # Normalize multiple whitespace to single space
     regsub -all {\s+} $val " " val
     return $val
 }

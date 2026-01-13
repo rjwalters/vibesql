@@ -4,7 +4,11 @@
 
 use vibesql_types::SqlValue;
 
-use crate::{errors::ExecutorError, evaluator::casting::{string_to_number, to_i64}};
+use crate::{
+    errors::ExecutorError,
+    evaluator::casting::{string_to_number, to_i64},
+    evaluator::operators::is_truthy_string,
+};
 
 /// Evaluate a unary operation
 ///
@@ -75,10 +79,11 @@ pub(crate) fn eval_unary_op(
         (Not, SqlValue::Real(f)) => Ok(SqlValue::Boolean(!(*f != 0.0))),
         (Not, SqlValue::Double(f)) => Ok(SqlValue::Boolean(!(*f != 0.0))),
         (Not, SqlValue::Numeric(d)) => Ok(SqlValue::Boolean(!(*d != 0.0))),
-        (Not, SqlValue::Character(_)) => Ok(SqlValue::Boolean(false)), /* Non-empty character is */
-        // truthy, so NOT is
-        // false
-        (Not, SqlValue::Varchar(_)) => Ok(SqlValue::Boolean(false)), /* Non-empty varchar is truthy, so NOT is false */
+        // SQLite parses the leading numeric portion of strings for boolean context
+        // e.g., '0x' → 0 (falsey), '1x' → 1 (truthy), 'abc' → 0 (falsey)
+        (Not, SqlValue::Character(s)) | (Not, SqlValue::Varchar(s)) => {
+            Ok(SqlValue::Boolean(!is_truthy_string(s)))
+        }
         (Not, SqlValue::Date(_)) => Ok(SqlValue::Boolean(false)),    // Date values are truthy
         (Not, SqlValue::Time(_)) => Ok(SqlValue::Boolean(false)),    // Time values are truthy
         (Not, SqlValue::Timestamp(_)) => Ok(SqlValue::Boolean(false)), /* Timestamp values are */
@@ -166,15 +171,34 @@ mod tests {
 
     #[test]
     fn test_not_varchar() {
-        // Non-empty varchar is truthy, so NOT should return false
+        // SQLite parses leading numeric for string truthiness
+        // 'hello' → 0 (no leading numeric) → falsey → NOT returns true
         assert_eq!(
             eval_unary_op(&UnaryOperator::Not, &SqlValue::Varchar(arcstr::ArcStr::from("hello")))
                 .unwrap(),
-            SqlValue::Boolean(false)
+            SqlValue::Boolean(true)
         );
-        // Empty varchar is also considered truthy in this implementation
+        // Empty string → 0 → falsey → NOT returns true
         assert_eq!(
             eval_unary_op(&UnaryOperator::Not, &SqlValue::Varchar(arcstr::ArcStr::from("")))
+                .unwrap(),
+            SqlValue::Boolean(true)
+        );
+        // '0x' → 0 (leading 0) → falsey → NOT returns true
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Not, &SqlValue::Varchar(arcstr::ArcStr::from("0x")))
+                .unwrap(),
+            SqlValue::Boolean(true)
+        );
+        // '1x' → 1 (leading 1) → truthy → NOT returns false
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Not, &SqlValue::Varchar(arcstr::ArcStr::from("1x")))
+                .unwrap(),
+            SqlValue::Boolean(false)
+        );
+        // '42abc' → 42 → truthy → NOT returns false
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Not, &SqlValue::Varchar(arcstr::ArcStr::from("42abc")))
                 .unwrap(),
             SqlValue::Boolean(false)
         );
