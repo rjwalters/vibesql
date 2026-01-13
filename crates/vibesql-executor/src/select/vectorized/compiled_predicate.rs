@@ -29,6 +29,8 @@ enum CompiledPredicate {
     Between { column_idx: usize, low: SqlValue, high: SqlValue, negated: bool, symmetric: bool },
     /// IN list: column_idx IN (value1, value2, ...)
     InList { column_idx: usize, values: Vec<SqlValue>, negated: bool },
+    /// IS NULL / IS NOT NULL: column_idx IS [NOT] NULL
+    IsNull { column_idx: usize, negated: bool },
 }
 
 impl CompiledPredicate {
@@ -66,6 +68,12 @@ impl CompiledPredicate {
             }
             // NOT IN is very unselective (most rows pass)
             CompiledPredicate::InList { negated: true, .. } => 0.95,
+
+            // IS NULL is very selective (few rows are NULL, typically ~1%)
+            CompiledPredicate::IsNull { negated: false, .. } => 0.01,
+
+            // IS NOT NULL is very unselective (most rows are not NULL, ~99%)
+            CompiledPredicate::IsNull { negated: true, .. } => 0.99,
         }
     }
 
@@ -75,19 +83,21 @@ impl CompiledPredicate {
             CompiledPredicate::ColumnLiteral { column_idx, .. } => *column_idx,
             CompiledPredicate::Between { column_idx, .. } => *column_idx,
             CompiledPredicate::InList { column_idx, .. } => *column_idx,
+            CompiledPredicate::IsNull { column_idx, .. } => *column_idx,
         }
     }
 
     /// Check if this predicate is IS NULL check
     fn is_null_check(&self) -> bool {
-        matches!(
-            self,
-            CompiledPredicate::ColumnLiteral {
-                op: ComparisonOp::Equal,
-                literal: SqlValue::Null,
-                ..
-            }
-        )
+        matches!(self, CompiledPredicate::IsNull { negated: false, .. })
+            || matches!(
+                self,
+                CompiledPredicate::ColumnLiteral {
+                    op: ComparisonOp::Equal,
+                    literal: SqlValue::Null,
+                    ..
+                }
+            )
     }
 
     /// Check if this predicate requires non-null value (any comparison except IS NULL)
@@ -96,6 +106,9 @@ impl CompiledPredicate {
             CompiledPredicate::ColumnLiteral { literal, .. } => !matches!(literal, SqlValue::Null),
             CompiledPredicate::Between { .. } => true,
             CompiledPredicate::InList { .. } => true, // IN comparisons require non-null
+            // IS NULL checks don't require non-null (they check for NULL!)
+            // IS NOT NULL requires non-null values to pass
+            CompiledPredicate::IsNull { negated, .. } => *negated,
         }
     }
 }
@@ -321,6 +334,10 @@ impl CompiledWhereClause {
                 // Try to compile IN list predicate
                 Self::try_compile_in_list(col_expr, values, *negated, schema, predicates)
             }
+            Expression::IsNull { expr: col_expr, negated } => {
+                // Try to compile IS NULL / IS NOT NULL predicate
+                Self::try_compile_is_null(col_expr, *negated, schema, predicates)
+            }
             _ => {
                 // Try to compile as simple binary comparison
                 Self::try_compile_comparison(expr, schema, predicates)
@@ -414,6 +431,31 @@ impl CompiledWhereClause {
         }
 
         predicates.push(CompiledPredicate::Between { column_idx, low, high, negated, symmetric });
+
+        true
+    }
+
+    /// Try to compile an IS NULL / IS NOT NULL predicate
+    fn try_compile_is_null(
+        col_expr: &Expression,
+        negated: bool,
+        schema: &CombinedSchema,
+        predicates: &mut Vec<CompiledPredicate>,
+    ) -> bool {
+        // Extract column reference
+        let column_idx = match col_expr {
+            Expression::ColumnRef(col_id) => {
+                schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())
+            }
+            _ => return false, // Only support simple column references
+        };
+
+        let column_idx = match column_idx {
+            Some(idx) => idx,
+            None => return false,
+        };
+
+        predicates.push(CompiledPredicate::IsNull { column_idx, negated });
 
         true
     }
@@ -544,6 +586,13 @@ impl CompiledWhereClause {
                 let column_value = &row.values[*column_idx];
                 let result = self.is_in_list(column_value, values)?;
                 Ok(if *negated { !result } else { result })
+            }
+            CompiledPredicate::IsNull { column_idx, negated } => {
+                let column_value = &row.values[*column_idx];
+                let is_null = matches!(column_value, SqlValue::Null);
+                // IS NULL returns true if value is NULL
+                // IS NOT NULL (negated=true) returns true if value is NOT NULL
+                Ok(if *negated { !is_null } else { is_null })
             }
         }
     }
