@@ -75,7 +75,7 @@ pub(in crate::evaluator::functions) fn length(
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.len() != 1 {
         return Err(ExecutorError::UnsupportedFeature(
-            "wrong number of arguments to function length()".to_string(),
+            "wrong number of arguments to function LENGTH()".to_string(),
         ));
     }
 

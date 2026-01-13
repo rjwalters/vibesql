@@ -17,7 +17,9 @@ use crate::common::create_test_evaluator;
 // ============================================================================
 
 #[test]
-fn test_concat_null_propagation() {
+fn test_concat_null_propagates() {
+    // MySQL mode (default): NULL arguments cause NULL result
+    // SQLite mode would skip NULL and return "helloworld"
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
@@ -33,6 +35,7 @@ fn test_concat_null_propagation() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
+    // MySQL (default): NULL propagates
     assert_eq!(result, vibesql_types::SqlValue::Null);
 }
 

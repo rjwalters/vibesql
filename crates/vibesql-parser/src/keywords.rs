@@ -382,7 +382,15 @@ impl Keyword {
             Keyword::Nulls |
             // SQLite schema keywords: TEMP/TEMPORARY are valid schema names
             // Allows three-part qualified names like temp.t1.column
-            Keyword::Temp | Keyword::Temporary
+            Keyword::Temp | Keyword::Temporary |
+            // Procedure parameter direction keywords: OUT/INOUT are only meaningful
+            // in stored procedure contexts, safe to use as identifiers elsewhere
+            // SQLite TCL tests use 'out' as a CTE name
+            Keyword::Out | Keyword::InOut |
+            // Join keywords: SQLite allows these as identifiers (table/column/function names)
+            // when not in a join context. SQLite TCL tests (func8.test) use these extensively.
+            Keyword::Cross | Keyword::Full | Keyword::Inner | Keyword::Left |
+            Keyword::Natural | Keyword::Outer | Keyword::Right
         )
     }
 }

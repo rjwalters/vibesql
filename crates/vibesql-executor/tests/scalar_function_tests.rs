@@ -367,7 +367,9 @@ fn test_concat_with_null() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Null); // NULL in concat makes result NULL
+    // Default mode is MySQL: NULL propagates in CONCAT, so result is NULL
+    // (SQLite mode would skip NULL and return "Hello")
+    assert_eq!(result, vibesql_types::SqlValue::Null);
 }
 
 #[test]

@@ -1602,6 +1602,47 @@ fn collect_tables_from_from_clause_inner(
     }
 }
 
+/// Collect column names from tables in a FROM clause
+///
+/// This collects all column names that are valid to reference from the given FROM clause.
+/// It uses `all_db_columns` to look up which columns belong to which tables.
+/// For subqueries/VALUES, we don't know the columns statically, but that's OK because
+/// those references will be validated when the subquery executes.
+fn collect_columns_from_from_clause(
+    from: &Option<vibesql_ast::FromClause>,
+    all_db_columns: &HashSet<String>,
+    columns: &mut HashSet<String>,
+) {
+    if let Some(from_clause) = from {
+        collect_columns_from_from_clause_inner(from_clause, all_db_columns, columns);
+    }
+}
+
+fn collect_columns_from_from_clause_inner(
+    from: &vibesql_ast::FromClause,
+    all_db_columns: &HashSet<String>,
+    columns: &mut HashSet<String>,
+) {
+    match from {
+        vibesql_ast::FromClause::Table { .. } => {
+            // Add all columns that exist in the database for this table
+            // We use all_db_columns which already contains all column names from all tables
+            // For simplicity, we just add all of them - this is safe because we're being permissive
+            // The actual column resolution will happen during query execution
+            columns.extend(all_db_columns.iter().cloned());
+        }
+        vibesql_ast::FromClause::Join { left, right, .. } => {
+            collect_columns_from_from_clause_inner(left, all_db_columns, columns);
+            collect_columns_from_from_clause_inner(right, all_db_columns, columns);
+        }
+        vibesql_ast::FromClause::Subquery { .. } | vibesql_ast::FromClause::Values { .. } => {
+            // For subqueries and VALUES, we don't know the columns statically
+            // But any column reference will be validated when the subquery executes
+            // So we just pass through - this is permissive but safe
+        }
+    }
+}
+
 /// Check if a subquery's column references point to tables not in valid_tables
 fn subquery_references_unknown_table(
     select_stmt: &vibesql_ast::SelectStmt,
@@ -1614,12 +1655,18 @@ fn subquery_references_unknown_table(
     let mut subquery_all_tables = valid_tables.clone();
     collect_tables_from_from_clause(&select_stmt.from, &mut subquery_all_tables);
 
+    // Also collect valid columns from the subquery's FROM clause
+    // This fixes the bug where columns from the subquery's own tables (like SELECT x FROM t3)
+    // were incorrectly flagged as referencing "tables to the right"
+    let mut subquery_all_columns = valid_columns.clone();
+    collect_columns_from_from_clause(&select_stmt.from, all_db_columns, &mut subquery_all_columns);
+
     for item in &select_stmt.select_list {
         if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
             if on_clause_references_unknown_table_or_column(
                 expr,
                 &subquery_all_tables,
-                valid_columns,
+                &subquery_all_columns,
                 all_db_columns,
             ) {
                 return true;
@@ -1631,7 +1678,7 @@ fn subquery_references_unknown_table(
         if on_clause_references_unknown_table_or_column(
             where_expr,
             &subquery_all_tables,
-            valid_columns,
+            &subquery_all_columns,
             all_db_columns,
         ) {
             return true;
@@ -1642,7 +1689,7 @@ fn subquery_references_unknown_table(
         if on_clause_references_unknown_table_or_column(
             having_expr,
             &subquery_all_tables,
-            valid_columns,
+            &subquery_all_columns,
             all_db_columns,
         ) {
             return true;

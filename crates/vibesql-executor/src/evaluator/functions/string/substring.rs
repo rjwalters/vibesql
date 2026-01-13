@@ -22,7 +22,7 @@ pub(in crate::evaluator::functions) fn substring(
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.len() < 2 || args.len() > 3 {
         return Err(ExecutorError::UnsupportedFeature(
-            "wrong number of arguments to function substr()".to_string(),
+            "wrong number of arguments to function SUBSTR()".to_string(),
         ));
     }
 
@@ -118,10 +118,14 @@ fn sqlite_substr_bytes(bytes: &[u8], byte_count: i64, start: i64, length: Option
         } else if start < 0 {
             let start_from_end = (-start) as usize;
             if start_from_end > bytes.len() {
-                let effective_len = (len + start) as usize;
-                if effective_len == 0 || len + start <= 0 {
+                // Start is before beginning of data
+                // Adjust the length to account for "virtual" positions before the data
+                let bytes_before_data = start_from_end - bytes.len();
+                if len as usize <= bytes_before_data {
+                    // Length is not enough to reach the data
                     return Vec::new();
                 }
+                let effective_len = (len as usize) - bytes_before_data;
                 return bytes[..std::cmp::min(effective_len, bytes.len())].to_vec();
             }
             let start_idx = bytes.len() - start_from_end;
@@ -140,12 +144,28 @@ fn sqlite_substr_bytes(bytes: &[u8], byte_count: i64, start: i64, length: Option
         let abs_len = (-len) as usize;
 
         if start > 0 {
-            let end_pos = (start - 1) as usize;
-            if end_pos == 0 {
+            // Positive start, negative length
+            // Extracts bytes at positions (start - abs_len) to (start - 1) (1-based)
+            let requested_end = (start - 1) as usize;
+            let requested_start = (start as usize).saturating_sub(abs_len);
+
+            if requested_end == 0 {
                 return Vec::new();
             }
-            let start_pos = end_pos.saturating_sub(abs_len);
-            bytes[start_pos..end_pos].to_vec()
+
+            // Clamp to valid positions (1 to byte_count, 1-based)
+            let valid_start = std::cmp::max(requested_start, 1);
+            let valid_end = std::cmp::min(requested_end, bytes.len());
+
+            if valid_start > valid_end {
+                // No valid positions to extract
+                return Vec::new();
+            }
+
+            // Convert to 0-based indices
+            let start_idx = valid_start - 1;
+            let end_idx = valid_end;
+            bytes[start_idx..end_idx].to_vec()
         } else if start < 0 {
             let start_from_end = (-start) as usize;
             if start_from_end > bytes.len() {
@@ -220,15 +240,18 @@ fn sqlite_substr(chars: &[char], char_count: i64, start: i64, length: Option<i64
             // substr('hello', -2, 2) -> 'lo' (start at 2nd from end, take 2)
             let start_from_end = (-start) as usize;
             if start_from_end > chars.len() {
-                // Start is before beginning
-                // SQLite behavior: if start is before beginning, adjust
-                // Example: substr('hello', -5, 3) with len=5
-                //   start -5 means position 0 (before first char)
-                //   +3 chars = first 3 chars
-                let effective_len = (len + start) as usize; // len - abs(start) + char_count adjustment
-                if effective_len == 0 || len + start <= 0 {
+                // Start is before beginning of string
+                // SQLite behavior: adjust the length to account for "virtual" positions before the string
+                // Example: substr('Supercalifragilisticexpialidocious', -35, 2)
+                //   34-char string, start -35 = position 0 (before first char)
+                //   We want 2 chars, but we "use up" 1 char of length for the virtual position
+                //   So we get 1 char from the start of the string
+                let chars_before_string = start_from_end - chars.len();
+                if len as usize <= chars_before_string {
+                    // Length is not enough to reach the string
                     return String::new();
                 }
+                let effective_len = (len as usize) - chars_before_string;
                 return chars[..std::cmp::min(effective_len, chars.len())].iter().collect();
             }
             let start_idx = chars.len() - start_from_end;
@@ -251,14 +274,27 @@ fn sqlite_substr(chars: &[char], char_count: i64, start: i64, length: Option<i64
         if start > 0 {
             // Positive start, negative length
             // substr('hello', 3, -2) -> 'he' (from pos 3, go left 2 chars)
-            // Result is chars before position (start), specifically (start-1-abs_len) to (start-1)
-            // But SQLite's behavior: chars at positions (start-abs_len) to (start-1)
-            let end_pos = (start - 1) as usize; // The character before the start position
-            if end_pos == 0 {
+            // Extracts characters at positions (start - abs_len) to (start - 1) (1-based)
+            let requested_end = (start - 1) as usize;
+            let requested_start = (start as usize).saturating_sub(abs_len);
+
+            if requested_end == 0 {
                 return String::new();
             }
-            let start_pos = end_pos.saturating_sub(abs_len);
-            chars[start_pos..end_pos].iter().collect()
+
+            // Clamp to valid positions (1 to char_count, 1-based)
+            let valid_start = std::cmp::max(requested_start, 1);
+            let valid_end = std::cmp::min(requested_end, chars.len());
+
+            if valid_start > valid_end {
+                // No valid positions to extract
+                return String::new();
+            }
+
+            // Convert to 0-based indices
+            let start_idx = valid_start - 1;
+            let end_idx = valid_end;
+            chars[start_idx..end_idx].iter().collect()
         } else if start < 0 {
             // Negative start, negative length
             // This is an unusual case

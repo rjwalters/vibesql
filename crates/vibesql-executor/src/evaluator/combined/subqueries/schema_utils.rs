@@ -196,6 +196,96 @@ fn compute_single_select_column_count(
     Ok(count)
 }
 
+/// Get the type affinity of a subquery's first SELECT expression
+///
+/// This is used for IN subquery comparisons where the affinity of the subquery's
+/// result affects the comparison behavior. For example, if the subquery selects
+/// from an INTEGER column, comparisons should use integer affinity rules.
+///
+/// # Returns
+/// - Some(TypeAffinity) if the first expression is a column reference with known affinity
+/// - None if the expression doesn't have a determinable affinity (e.g., function, literal, complex expr)
+pub fn get_subquery_first_column_affinity(
+    stmt: &vibesql_ast::SelectStmt,
+    database: &vibesql_storage::Database,
+) -> Option<vibesql_types::TypeAffinity> {
+    // Get the first item from the select list
+    let first_item = stmt.select_list.first()?;
+
+    // We only handle Expression items - wildcards expand to multiple columns
+    let expr = match first_item {
+        vibesql_ast::SelectItem::Expression { expr, .. } => expr,
+        _ => return None, // Wildcards don't have a single affinity
+    };
+
+    // Get affinity based on expression type
+    get_expression_affinity_from_from_clause(expr, &stmt.from, database)
+}
+
+/// Get the type affinity of an expression given a FROM clause context
+///
+/// This resolves column references by looking up the table schema.
+fn get_expression_affinity_from_from_clause(
+    expr: &vibesql_ast::Expression,
+    from: &Option<vibesql_ast::FromClause>,
+    database: &vibesql_storage::Database,
+) -> Option<vibesql_types::TypeAffinity> {
+    match expr {
+        vibesql_ast::Expression::ColumnRef(col_id) => {
+            let table_name = col_id.table_canonical();
+            let column_name = col_id.column_canonical();
+
+            // If table qualifier is provided, use it directly
+            if let Some(table) = table_name {
+                if let Some(tbl) = database.get_table(&table) {
+                    if let Some(col_idx) = tbl.schema.get_column_index(&column_name) {
+                        return Some(tbl.schema.columns[col_idx].data_type.sqlite_affinity());
+                    }
+                }
+                return None;
+            }
+
+            // No table qualifier - search tables in FROM clause
+            if let Some(from_clause) = from {
+                return find_column_affinity_in_from_clause(&column_name, from_clause, database);
+            }
+            None
+        }
+        // For COLLATE expressions, get affinity of the inner expression
+        vibesql_ast::Expression::Collate { expr: inner, .. } => {
+            get_expression_affinity_from_from_clause(inner, from, database)
+        }
+        // For CAST expressions, use the target type's affinity
+        vibesql_ast::Expression::Cast { data_type, .. } => Some(data_type.sqlite_affinity()),
+        // Literals, functions, and other expressions don't have column affinity
+        _ => None,
+    }
+}
+
+/// Search for a column in a FROM clause and return its affinity
+fn find_column_affinity_in_from_clause(
+    column_name: &str,
+    from: &vibesql_ast::FromClause,
+    database: &vibesql_storage::Database,
+) -> Option<vibesql_types::TypeAffinity> {
+    match from {
+        vibesql_ast::FromClause::Table { name, .. } => {
+            let table = database.get_table(name)?;
+            let col_idx = table.schema.get_column_index(column_name)?;
+            Some(table.schema.columns[col_idx].data_type.sqlite_affinity())
+        }
+        vibesql_ast::FromClause::Join { left, right, .. } => {
+            // Try left first, then right
+            find_column_affinity_in_from_clause(column_name, left, database)
+                .or_else(|| find_column_affinity_in_from_clause(column_name, right, database))
+        }
+        vibesql_ast::FromClause::Subquery { .. } | vibesql_ast::FromClause::Values { .. } => {
+            // Subqueries and VALUES don't preserve affinity easily
+            None
+        }
+    }
+}
+
 /// Count total columns in a FROM clause (handles joins and multiple tables)
 ///
 /// Issue #3562: Added CTE context so CTEs can be resolved in FROM clause
@@ -224,13 +314,14 @@ fn count_columns_in_from_clause(
             let right_count = count_columns_in_from_clause(right, database, cte_results)?;
             Ok(left_count + right_count)
         }
-        vibesql_ast::FromClause::Subquery { .. } => {
-            // For subqueries in FROM, we'd need to execute them to know column count
-            // This is complex, so for now we'll return an error
-            // In practice, this case is rare in IN subqueries
-            Err(ExecutorError::UnsupportedFeature(
-                "Subqueries in FROM clause within IN predicates are not yet supported for schema validation".to_string(),
-            ))
+        vibesql_ast::FromClause::Subquery { query, column_aliases, .. } => {
+            // For subqueries in FROM, use column_aliases if provided,
+            // otherwise recursively compute the column count of the inner query
+            if let Some(aliases) = column_aliases {
+                Ok(aliases.len())
+            } else {
+                compute_select_list_column_count(query, database, cte_results)
+            }
         }
         vibesql_ast::FromClause::Values { rows, column_aliases, .. } => {
             // VALUES clause column count is determined by either:

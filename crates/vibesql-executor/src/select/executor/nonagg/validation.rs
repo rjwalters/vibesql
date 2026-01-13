@@ -206,6 +206,12 @@ fn compute_single_select_column_count(
                     count += get_sqlite_schema_table_schema().columns.len();
                     continue;
                 }
+                // Check for views before regular tables
+                if let Some(view) = database.catalog.get_view(qualifier) {
+                    count +=
+                        compute_select_list_column_count(&view.query, database, cte_results)?;
+                    continue;
+                }
                 let tbl = database
                     .get_table(qualifier)
                     .ok_or_else(|| ExecutorError::TableNotFound(qualifier.clone()))?;
@@ -243,6 +249,11 @@ fn count_columns_in_from_clause(
             if is_sqlite_schema_table(name) {
                 return Ok(get_sqlite_schema_table_schema().columns.len());
             }
+            // Check for views before regular tables
+            if let Some(view) = database.catalog.get_view(name) {
+                // Count columns from view definition
+                return compute_select_list_column_count(&view.query, database, cte_results);
+            }
             let table = database
                 .get_table(name)
                 .ok_or_else(|| ExecutorError::TableNotFound(name.clone()))?;
@@ -253,13 +264,14 @@ fn count_columns_in_from_clause(
             let right_count = count_columns_in_from_clause(right, database, cte_results)?;
             Ok(left_count + right_count)
         }
-        vibesql_ast::FromClause::Subquery { .. } => {
-            // For subqueries in FROM, we'd need to execute them to know column count
-            // This is complex, so for now we'll return an error
-            // In practice, this case is rare in IN subqueries
-            Err(ExecutorError::UnsupportedFeature(
-                "Subqueries in FROM clause within IN predicates are not yet supported for schema validation".to_string(),
-            ))
+        vibesql_ast::FromClause::Subquery { query, column_aliases, .. } => {
+            // For subqueries in FROM, use column_aliases if provided,
+            // otherwise recursively compute the column count of the inner query
+            if let Some(aliases) = column_aliases {
+                Ok(aliases.len())
+            } else {
+                compute_select_list_column_count(query, database, cte_results)
+            }
         }
         vibesql_ast::FromClause::Values { rows, column_aliases, .. } => {
             // VALUES clause column count is determined by either:

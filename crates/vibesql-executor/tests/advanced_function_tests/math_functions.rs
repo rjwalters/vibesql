@@ -44,14 +44,15 @@ fn test_ln_function() {
 fn test_log_alias() {
     let (evaluator, row) = create_test_evaluator();
 
+    // SQLite: LOG(x) is log base 10 (same as LOG10)
     let expr = vibesql_ast::Expression::Function {
         name: vibesql_ast::FunctionIdentifier::new("LOG"),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(2.718281828))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Double(10.0))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
 
-    // LOG is alias for LN
+    // LOG(10) = 1.0 for log base 10
     if let vibesql_types::SqlValue::Double(val) = result {
         assert!((val - 1.0).abs() < 0.0001);
     } else {

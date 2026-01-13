@@ -17,6 +17,12 @@ pub fn numeric_to_f64(val: &SqlValue) -> Result<f64, ExecutorError> {
         SqlValue::Float(f) => Ok(*f as f64),
         SqlValue::Double(f) => Ok(*f),
         SqlValue::Real(f) => Ok(*f as f64),
+        // SQLite compatibility: strings can be parsed as numbers
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            s.as_str().parse::<f64>().map_err(|_| {
+                ExecutorError::UnsupportedFeature(format!("Cannot convert '{}' to numeric", s))
+            })
+        }
         _ => Err(ExecutorError::UnsupportedFeature(format!("Cannot convert {:?} to numeric", val))),
     }
 }
@@ -136,6 +142,43 @@ pub fn ln(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 Ok(SqlValue::Double(x.ln()))
             }
         }
+    }
+}
+
+/// LOG(x) or LOG(base, x) - Logarithm function
+/// SQLite compatibility:
+/// - LOG(x) = log base 10 (same as LOG10)
+/// - LOG(base, x) = logarithm of x base `base`
+pub fn log(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    match args.len() {
+        1 => {
+            // LOG(x) = log base 10 (SQLite behavior)
+            log10(args)
+        }
+        2 => {
+            // LOG(base, x) = log base `base` of x
+            match (&args[0], &args[1]) {
+                (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
+                (base_val, x_val) => {
+                    let base = numeric_to_f64(base_val)?;
+                    let x = numeric_to_f64(x_val)?;
+                    if base <= 0.0 || base == 1.0 {
+                        // Invalid base for logarithm
+                        Ok(SqlValue::Null)
+                    } else if x <= 0.0 {
+                        // Log of non-positive number
+                        Ok(SqlValue::Null)
+                    } else {
+                        // log_base(x) = ln(x) / ln(base)
+                        Ok(SqlValue::Double(x.ln() / base.ln()))
+                    }
+                }
+            }
+        }
+        _ => Err(ExecutorError::UnsupportedFeature(format!(
+            "LOG requires 1 or 2 arguments, got {}",
+            args.len()
+        ))),
     }
 }
 

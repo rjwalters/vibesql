@@ -39,17 +39,27 @@ impl ExpressionEvaluator<'_> {
                     for condition_expr in &when_clause.conditions {
                         let condition_result = self.eval(condition_expr, row)?;
 
-                        // In SQL, truthiness is:
+                        // In SQLite, truthiness is:
                         // - Boolean(true) => true
                         // - Integer/Bigint non-zero => true
-                        // - Double/Float non-zero => true
-                        // - Everything else (Null, zero, strings) => false
-                        let is_truthy = match condition_result {
-                            vibesql_types::SqlValue::Boolean(b) => b,
-                            vibesql_types::SqlValue::Integer(n) => n != 0,
-                            vibesql_types::SqlValue::Bigint(n) => n != 0,
-                            vibesql_types::SqlValue::Double(n) => n != 0.0,
-                            vibesql_types::SqlValue::Float(n) => n != 0.0,
+                        // - Float/Real/Double/Numeric non-zero => true
+                        // - Strings: parse leading numeric, non-zero => true
+                        // - Null, zero => false
+                        let is_truthy = match &condition_result {
+                            vibesql_types::SqlValue::Boolean(b) => *b,
+                            vibesql_types::SqlValue::Integer(n) => *n != 0,
+                            vibesql_types::SqlValue::Bigint(n) => *n != 0,
+                            vibesql_types::SqlValue::Smallint(n) => *n != 0,
+                            vibesql_types::SqlValue::Unsigned(n) => *n != 0,
+                            vibesql_types::SqlValue::Double(n) => *n != 0.0,
+                            vibesql_types::SqlValue::Float(n) => *n != 0.0,
+                            vibesql_types::SqlValue::Real(n) => *n != 0.0,
+                            vibesql_types::SqlValue::Numeric(n) => *n != 0.0,
+                            // SQLite parses leading numeric from strings
+                            vibesql_types::SqlValue::Varchar(s)
+                            | vibesql_types::SqlValue::Character(s) => {
+                                super::super::operators::is_truthy_string(s)
+                            }
                             _ => false,
                         };
                         if is_truthy {
@@ -78,7 +88,7 @@ impl ExpressionEvaluator<'_> {
         // SQLite requires coalesce to have at least 2 arguments
         if args.len() < 2 {
             return Err(ExecutorError::WrongNumberOfArguments {
-                function_name: "coalesce".to_string(),
+                function_name: "COALESCE".to_string(),
             });
         }
 
@@ -241,7 +251,7 @@ impl ExpressionEvaluator<'_> {
         for arg in args {
             if matches!(arg, vibesql_ast::Expression::Wildcard) {
                 return Err(ExecutorError::WrongNumberOfArguments {
-                    function_name: name.to_lowercase(),
+                    function_name: name.to_uppercase(),
                 });
             }
         }

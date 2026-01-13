@@ -8,6 +8,69 @@ use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;
 
+/// Parse the leading numeric portion of a string, SQLite-style.
+///
+/// SQLite rules for string-to-numeric coercion:
+/// - Leading whitespace is skipped
+/// - Optional sign (+/-) is recognized
+/// - Digits and decimal point are parsed
+/// - Parsing stops at the first non-numeric character
+/// - Returns 0.0 if no numeric prefix is found
+///
+/// Examples:
+/// - "123" → 123.0
+/// - "123abc" → 123.0
+/// - "-45.6xyz" → -45.6
+/// - "abc" → 0.0
+/// - "" → 0.0
+/// Check if a string is truthy in SQLite boolean context.
+/// Parses leading numeric and returns true if non-zero.
+pub fn is_truthy_string(s: &str) -> bool {
+    parse_leading_numeric(s) != 0.0
+}
+
+fn parse_leading_numeric(s: &str) -> f64 {
+    let s = s.trim_start();
+    if s.is_empty() {
+        return 0.0;
+    }
+
+    let mut chars = s.chars().peekable();
+    let mut result = String::new();
+
+    // Handle optional sign
+    if let Some(&c) = chars.peek() {
+        if c == '+' || c == '-' {
+            result.push(c);
+            chars.next();
+        }
+    }
+
+    let mut has_digits = false;
+    let mut has_dot = false;
+
+    // Parse digits and decimal point
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_digit() {
+            result.push(c);
+            has_digits = true;
+            chars.next();
+        } else if c == '.' && !has_dot {
+            result.push(c);
+            has_dot = true;
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    if !has_digits {
+        return 0.0;
+    }
+
+    result.parse::<f64>().unwrap_or(0.0)
+}
+
 /// Convert a SqlValue to a boolean using SQLite truthiness rules.
 ///
 /// SQLite rules:
@@ -15,6 +78,7 @@ use crate::errors::ExecutorError;
 /// - Any other numeric value → true
 /// - Boolean values → as-is
 /// - NULL → None (three-valued logic)
+/// - Strings → try to parse as number, non-numeric strings are treated as 0 (false)
 /// - Other types → error
 fn to_boolean(value: &SqlValue) -> Result<Option<bool>, ExecutorError> {
     use SqlValue::*;
@@ -31,6 +95,16 @@ fn to_boolean(value: &SqlValue) -> Result<Option<bool>, ExecutorError> {
         Real(f) => Ok(Some(*f != 0.0)),
         Double(f) => Ok(Some(*f != 0.0)),
         Numeric(f) => Ok(Some(*f != 0.0)),
+        // String types: SQLite coerces strings to numeric for boolean context
+        // SQLite parses the leading numeric portion of the string
+        // e.g., '1x' → 1 (truthy), '0x' → 0 (falsy), 'abc' → 0 (falsy)
+        Varchar(s) | Character(s) => {
+            let trimmed = s.trim();
+            // SQLite parses the leading numeric portion of a string
+            // Use the parse_leading_numeric helper to match SQLite behavior
+            let numeric_value = parse_leading_numeric(trimmed);
+            Ok(Some(numeric_value != 0.0))
+        }
         // Other types are not supported in boolean context
         _ => Err(ExecutorError::TypeMismatch {
             left: value.clone(),
@@ -155,19 +229,37 @@ mod tests {
     }
 
     #[test]
-    fn test_type_error_unsupported_types() {
-        // Strings are not supported in boolean context
+    fn test_strings_in_boolean_context() {
+        // SQLite coerces strings to numeric for boolean context
+        // Non-numeric strings like "hello" parse to 0.0, which is falsy
         let result = LogicalOps::and(
             &SqlValue::Varchar(arcstr::ArcStr::from("hello")),
             &SqlValue::Boolean(true),
         );
-        assert!(result.is_err());
+        // "hello" → 0 (falsy), so false AND true = false
+        assert_eq!(result.unwrap(), SqlValue::Boolean(false));
 
         let result = LogicalOps::or(
             &SqlValue::Boolean(true),
             &SqlValue::Varchar(arcstr::ArcStr::from("world")),
         );
-        assert!(result.is_err());
+        // true OR "world" (falsy) = true
+        assert_eq!(result.unwrap(), SqlValue::Boolean(true));
+
+        // Numeric string prefix should work
+        let result = LogicalOps::and(
+            &SqlValue::Varchar(arcstr::ArcStr::from("1abc")),
+            &SqlValue::Boolean(true),
+        );
+        // "1abc" → 1 (truthy), so true AND true = true
+        assert_eq!(result.unwrap(), SqlValue::Boolean(true));
+
+        let result = LogicalOps::and(
+            &SqlValue::Varchar(arcstr::ArcStr::from("0")),
+            &SqlValue::Boolean(true),
+        );
+        // "0" → 0 (falsy), so false AND true = false
+        assert_eq!(result.unwrap(), SqlValue::Boolean(false));
     }
 
     #[test]

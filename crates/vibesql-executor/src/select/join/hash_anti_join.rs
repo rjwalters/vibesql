@@ -4,7 +4,8 @@ use ahash::AHashMap;
 
 use super::{
     combine_rows, hash_join::build_existence_hash_table_parallel,
-    hash_semi_join::partition_filter_predicates, FromResult,
+    hash_semi_join::{partition_filter_predicates, get_column_affinity, normalize_for_affinity_hash},
+    FromResult,
 };
 use crate::{
     errors::ExecutorError,
@@ -12,6 +13,7 @@ use crate::{
     schema::CombinedSchema,
     timeout::{TimeoutContext, CHECK_INTERVAL},
 };
+use vibesql_types::{SqlValue, TypeAffinity};
 
 /// Hash anti-join implementation
 ///
@@ -44,44 +46,128 @@ pub(super) fn hash_anti_join(
     // Use default timeout context (proper propagation from SelectExecutor is a future improvement)
     let timeout_ctx = TimeoutContext::new_default();
 
+    // Get column affinities for affinity-aware comparison
+    let left_affinity = get_column_affinity(&left.schema, left_col_idx);
+    let right_affinity = get_column_affinity(&right.schema, right_col_idx);
+
+    // Determine if we need affinity-aware hashing
+    let needs_affinity_aware = match (left_affinity, right_affinity) {
+        (Some(TypeAffinity::Text), Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric)) => true,
+        (Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric), Some(TypeAffinity::Text)) => true,
+        (Some(TypeAffinity::Integer), Some(TypeAffinity::Real)) => true,
+        (Some(TypeAffinity::Real), Some(TypeAffinity::Integer)) => true,
+        _ => false,
+    };
+
     // Use as_slice() for zero-cost access without triggering row materialization
     let left_slice = left.as_slice();
     let right_slice = right.as_slice();
 
-    // Build phase: Create hash table from right side (using parallel algorithm)
-    // Key: join column value
-    // Value: () (we only need to know if the key exists, not store row indices)
-    // Automatically uses parallel build when beneficial (based on row count and hardware)
-    let hash_table = build_existence_hash_table_parallel(right_slice, right_col_idx, &timeout_ctx)?;
+    if needs_affinity_aware {
+        hash_anti_join_with_affinity(
+            left_slice,
+            right_slice,
+            left_col_idx,
+            right_col_idx,
+            left_affinity,
+            right_affinity,
+            &timeout_ctx,
+            &left.schema,
+        )
+    } else {
+        // Build phase: Create hash table from right side (using parallel algorithm)
+        let hash_table = build_existence_hash_table_parallel(right_slice, right_col_idx, &timeout_ctx)?;
 
-    // Probe phase: Check each left row for absence of a match
-    // We only emit left rows that have NO match in the right table
+        // Probe phase: Check each left row for absence of a match
+        let estimated_capacity = left_slice.len().min(100_000);
+        let mut result_rows = Vec::with_capacity(estimated_capacity);
+
+        for (idx, left_row) in left_slice.iter().enumerate() {
+            if idx % CHECK_INTERVAL == 0 {
+                timeout_ctx.check()?;
+            }
+
+            let key = &left_row.values[left_col_idx];
+
+            // Skip NULL values - they never match in equi-joins, so they should be returned
+            if key == &SqlValue::Null {
+                result_rows.push(left_row.clone());
+                continue;
+            }
+
+            if !hash_table.contains_key(key) {
+                result_rows.push(left_row.clone());
+            }
+        }
+
+        Ok(FromResult::from_rows(left.schema.clone(), result_rows))
+    }
+}
+
+/// Affinity-aware hash anti-join for cross-type comparisons
+fn hash_anti_join_with_affinity(
+    left_slice: &[vibesql_storage::Row],
+    right_slice: &[vibesql_storage::Row],
+    left_col_idx: usize,
+    right_col_idx: usize,
+    left_affinity: Option<TypeAffinity>,
+    right_affinity: Option<TypeAffinity>,
+    timeout_ctx: &TimeoutContext,
+    left_schema: &CombinedSchema,
+) -> Result<FromResult, ExecutorError> {
+    use ahash::AHashSet;
+
+    // Determine the target affinity for normalization
+    let target_affinity = match (left_affinity, right_affinity) {
+        (_, Some(TypeAffinity::Integer)) => Some(TypeAffinity::Integer),
+        (_, Some(TypeAffinity::Real)) => Some(TypeAffinity::Real),
+        (_, Some(TypeAffinity::Numeric)) => Some(TypeAffinity::Numeric),
+        (Some(TypeAffinity::Integer), Some(TypeAffinity::Text)) => Some(TypeAffinity::Integer),
+        (Some(TypeAffinity::Real), Some(TypeAffinity::Text)) => Some(TypeAffinity::Real),
+        (Some(TypeAffinity::Numeric), Some(TypeAffinity::Text)) => Some(TypeAffinity::Numeric),
+        _ => right_affinity,
+    };
+
+    // Build phase: Create hash set with normalized keys
+    let mut hash_set: AHashSet<SqlValue> = AHashSet::with_capacity(right_slice.len());
+
+    for (idx, row) in right_slice.iter().enumerate() {
+        if idx % CHECK_INTERVAL == 0 {
+            timeout_ctx.check()?;
+        }
+
+        let key = &row.values[right_col_idx];
+        if key == &SqlValue::Null {
+            continue;
+        }
+
+        let normalized_key = normalize_for_affinity_hash(key, target_affinity);
+        hash_set.insert(normalized_key);
+    }
+
+    // Probe phase
     let estimated_capacity = left_slice.len().min(100_000);
     let mut result_rows = Vec::with_capacity(estimated_capacity);
 
     for (idx, left_row) in left_slice.iter().enumerate() {
-        // Check timeout periodically during probe phase
         if idx % CHECK_INTERVAL == 0 {
             timeout_ctx.check()?;
         }
 
         let key = &left_row.values[left_col_idx];
-
-        // Skip NULL values - they never match in equi-joins, so they should be returned
-        // for anti-join (since they have "no match")
-        if key == &vibesql_types::SqlValue::Null {
+        if key == &SqlValue::Null {
             result_rows.push(left_row.clone());
             continue;
         }
 
-        // If key does NOT exist in hash table, emit this left row
-        if !hash_table.contains_key(key) {
+        let normalized_key = normalize_for_affinity_hash(key, target_affinity);
+
+        if !hash_set.contains(&normalized_key) {
             result_rows.push(left_row.clone());
         }
     }
 
-    // Return result with left schema only (we don't combine with right schema)
-    Ok(FromResult::from_rows(left.schema.clone(), result_rows))
+    Ok(FromResult::from_rows(left_schema.clone(), result_rows))
 }
 
 /// Hash anti-join with additional filter conditions

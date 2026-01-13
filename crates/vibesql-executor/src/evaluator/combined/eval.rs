@@ -45,7 +45,7 @@ impl CombinedExpressionEvaluator<'_> {
     /// Returns Some(affinity) if the expression is a column reference and we can
     /// determine its declared type from the schema. Returns None for literals,
     /// function calls, and other non-column expressions.
-    fn get_expression_affinity(&self, expr: &vibesql_ast::Expression) -> Option<TypeAffinity> {
+    pub(in crate::evaluator) fn get_expression_affinity(&self, expr: &vibesql_ast::Expression) -> Option<TypeAffinity> {
         match expr {
             vibesql_ast::Expression::ColumnRef(col_id) => {
                 let table = col_id.table_canonical();

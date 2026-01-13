@@ -137,6 +137,12 @@ impl ExpressionEvaluator<'_> {
             return Ok(vibesql_types::SqlValue::Null);
         }
 
+        // Get affinities for coercion
+        // Left expression affinity (e.g., TEXT column from outer table)
+        let left_affinity = self.get_expression_affinity(expr);
+        // Subquery result affinity (e.g., INTEGER column from inner table)
+        let subquery_affinity = crate::evaluator::combined::subqueries::schema_utils::get_subquery_first_column_affinity(subquery, database);
+
         let mut found_null = false;
         for subquery_row in &rows {
             let subquery_val =
@@ -147,7 +153,18 @@ impl ExpressionEvaluator<'_> {
                 continue;
             }
 
-            if expr_val == *subquery_val {
+            // Apply affinity coercion before comparison
+            // SQLite IN subquery coercion rules:
+            // - If subquery has INTEGER/REAL/NUMERIC affinity and expr is TEXT, convert TEXT to numeric
+            // - If subquery has TEXT affinity and expr is numeric, convert numeric to TEXT
+            let (coerced_expr, coerced_subquery) = apply_in_subquery_affinity_coercion(
+                expr_val.clone(),
+                subquery_val.clone(),
+                left_affinity,
+                subquery_affinity,
+            );
+
+            if coerced_expr == coerced_subquery {
                 return Ok(vibesql_types::SqlValue::Boolean(!negated));
             }
         }
@@ -409,5 +426,112 @@ impl ExpressionEvaluator<'_> {
                 Self::eval_binary_op_static(left, op, right, vibesql_types::SqlMode::default())
             },
         )
+    }
+}
+
+/// Apply SQLite affinity coercion rules for IN subquery comparisons
+///
+/// SQLite uses the affinity of the subquery's first column to determine comparison rules:
+/// - If subquery has INTEGER/REAL/NUMERIC affinity and left is TEXT value, convert TEXT to numeric
+/// - If subquery has TEXT affinity and left is numeric, convert numeric to TEXT
+/// - If either has no affinity, use storage class ordering (no conversion)
+///
+/// This differs from regular `=` comparison which uses storage class ordering by default.
+fn apply_in_subquery_affinity_coercion(
+    left_val: vibesql_types::SqlValue,
+    right_val: vibesql_types::SqlValue,
+    left_affinity: Option<vibesql_types::TypeAffinity>,
+    right_affinity: Option<vibesql_types::TypeAffinity>,
+) -> (vibesql_types::SqlValue, vibesql_types::SqlValue) {
+    use vibesql_types::{SqlValue, TypeAffinity};
+
+    // If right (subquery) has numeric affinity and left is a TEXT value, convert TEXT to numeric
+    let right_is_numeric_affinity = matches!(
+        right_affinity,
+        Some(TypeAffinity::Integer) | Some(TypeAffinity::Real) | Some(TypeAffinity::Numeric)
+    );
+
+    if right_is_numeric_affinity {
+        if let SqlValue::Varchar(s) | SqlValue::Character(s) = &left_val {
+            // Try to convert left TEXT to numeric
+            if let Some(coerced) = try_coerce_string_to_numeric(s) {
+                return (coerced, right_val);
+            }
+        }
+    }
+
+    // If left has numeric affinity and right is a TEXT value, convert TEXT to numeric
+    let left_is_numeric_affinity = matches!(
+        left_affinity,
+        Some(TypeAffinity::Integer) | Some(TypeAffinity::Real) | Some(TypeAffinity::Numeric)
+    );
+
+    if left_is_numeric_affinity {
+        if let SqlValue::Varchar(s) | SqlValue::Character(s) = &right_val {
+            // Try to convert right TEXT to numeric
+            if let Some(coerced) = try_coerce_string_to_numeric(s) {
+                return (left_val, coerced);
+            }
+        }
+    }
+
+    // If right has TEXT affinity and left is numeric, convert numeric to TEXT
+    if matches!(right_affinity, Some(TypeAffinity::Text)) {
+        if let SqlValue::Integer(n) = &left_val {
+            return (
+                SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                right_val,
+            );
+        }
+        if let SqlValue::Real(n) | SqlValue::Double(n) = &left_val {
+            return (
+                SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*n))),
+                right_val,
+            );
+        }
+    }
+
+    // If left has TEXT affinity and right is numeric, convert numeric to TEXT
+    if matches!(left_affinity, Some(TypeAffinity::Text)) {
+        if let SqlValue::Integer(n) = &right_val {
+            return (
+                left_val,
+                SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+            );
+        }
+        if let SqlValue::Real(n) | SqlValue::Double(n) = &right_val {
+            return (
+                left_val,
+                SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*n))),
+            );
+        }
+    }
+
+    // No coercion needed - use original values
+    (left_val, right_val)
+}
+
+/// Try to coerce a string to a numeric value
+fn try_coerce_string_to_numeric(s: &str) -> Option<vibesql_types::SqlValue> {
+    // Try integer first
+    if let Ok(n) = s.parse::<i64>() {
+        return Some(vibesql_types::SqlValue::Integer(n));
+    }
+
+    // Try float
+    if let Ok(n) = s.parse::<f64>() {
+        // For values like "10.0", use Real to preserve the decimal
+        return Some(vibesql_types::SqlValue::Real(n));
+    }
+
+    None
+}
+
+/// Format a float for TEXT comparison
+fn format_float_for_text(n: f64) -> String {
+    if n.fract() == 0.0 && n.abs() < i64::MAX as f64 {
+        format!("{}.0", n as i64)
+    } else {
+        n.to_string()
     }
 }

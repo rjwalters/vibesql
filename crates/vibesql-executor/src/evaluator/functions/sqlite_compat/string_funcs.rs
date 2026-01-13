@@ -81,10 +81,12 @@ pub(crate) fn char_func(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 /// Concatenates strings with the first argument as separator.
 /// NULL values are skipped (not included in result).
 /// Returns NULL if the separator is NULL.
+/// SQLite requires at least 2 arguments (separator + at least one value).
 pub(crate) fn concat_ws(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
-    if args.is_empty() {
+    // SQLite requires at least 2 arguments: separator and at least one value
+    if args.len() < 2 {
         return Err(ExecutorError::UnsupportedFeature(
-            "CONCAT_WS requires at least 1 argument (separator)".to_string(),
+            "wrong number of arguments to function CONCAT_WS()".to_string(),
         ));
     }
 
@@ -451,6 +453,119 @@ fn format_char(val: &SqlValue) -> String {
     char::from_u32(code).map(|c| c.to_string()).unwrap_or_default()
 }
 
+/// UNISTR(x) - Interpret Unicode escape sequences in a string
+///
+/// Converts Unicode escape sequences like \uXXXX to actual Unicode characters.
+/// SQLite compatibility: Recognizes \uXXXX (4 hex digits) and \UXXXXXXXX (8 hex digits).
+/// A backslash followed by anything else is passed through unchanged.
+/// Returns NULL if the argument is NULL.
+pub(crate) fn unistr(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.len() != 1 {
+        return Err(ExecutorError::UnsupportedFeature(format!(
+            "UNISTR requires exactly 1 argument, got {}",
+            args.len()
+        )));
+    }
+
+    let s = match &args[0] {
+        SqlValue::Null => return Ok(SqlValue::Null),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
+        other => {
+            // Convert non-string to string first
+            let s = other.to_string();
+            return Ok(SqlValue::Varchar(process_unistr(&s).into()));
+        }
+    };
+
+    Ok(SqlValue::Varchar(process_unistr(s).into()))
+}
+
+/// Process Unicode escape sequences in a string
+fn process_unistr(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            result.push(c);
+            continue;
+        }
+
+        // Check for \u or \U escape sequence
+        match chars.peek() {
+            Some('u') => {
+                chars.next(); // consume 'u'
+                // Try to parse 4 hex digits
+                let hex: String = chars.by_ref().take(4).collect();
+                if hex.len() == 4 {
+                    if let Ok(code_point) = u32::from_str_radix(&hex, 16) {
+                        if let Some(ch) = char::from_u32(code_point) {
+                            result.push(ch);
+                            continue;
+                        }
+                    }
+                }
+                // Invalid escape - pass through as-is
+                result.push('\\');
+                result.push('u');
+                result.push_str(&hex);
+            }
+            Some('U') => {
+                chars.next(); // consume 'U'
+                // Try to parse 8 hex digits (for surrogate pairs or extended Unicode)
+                let hex: String = chars.by_ref().take(8).collect();
+                if hex.len() == 8 {
+                    if let Ok(code_point) = u32::from_str_radix(&hex, 16) {
+                        if let Some(ch) = char::from_u32(code_point) {
+                            result.push(ch);
+                            continue;
+                        }
+                    }
+                }
+                // Invalid escape - pass through as-is
+                result.push('\\');
+                result.push('U');
+                result.push_str(&hex);
+            }
+            Some('+') => {
+                chars.next(); // consume '+'
+                // Try to parse up to 6 hex digits (Unicode code point format \+XXXXXX)
+                let mut hex = String::new();
+                while hex.len() < 6 {
+                    if let Some(&c) = chars.peek() {
+                        if c.is_ascii_hexdigit() {
+                            hex.push(c);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                if !hex.is_empty() {
+                    if let Ok(code_point) = u32::from_str_radix(&hex, 16) {
+                        if let Some(ch) = char::from_u32(code_point) {
+                            result.push(ch);
+                            continue;
+                        }
+                    }
+                }
+                // Invalid escape - pass through as-is
+                result.push('\\');
+                result.push('+');
+                result.push_str(&hex);
+            }
+            _ => {
+                // Not a Unicode escape, pass through the backslash
+                result.push('\\');
+            }
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,10 +648,9 @@ mod tests {
             SqlValue::Varchar("only".into())
         );
 
-        // No strings (empty result)
-        assert_eq!(
-            concat_ws(&[SqlValue::Varchar(",".into())]).unwrap(),
-            SqlValue::Varchar("".into())
+        // No strings (just separator) - SQLite requires at least 2 args
+        assert!(
+            concat_ws(&[SqlValue::Varchar(",".into())]).is_err()
         );
 
         // Integers are converted to strings

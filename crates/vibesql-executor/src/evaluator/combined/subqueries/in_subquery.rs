@@ -16,9 +16,11 @@ use super::{
     super::super::core::{CombinedExpressionEvaluator, ExpressionEvaluator},
     schema_utils::{
         build_merged_outer_row, build_merged_outer_schema, compute_select_list_column_count,
+        get_subquery_first_column_affinity,
     },
 };
 use crate::errors::ExecutorError;
+use vibesql_types::TypeAffinity;
 
 /// Cached HashSet entry for IN subquery optimization
 /// Built once from subquery rows, then reused for O(1) membership checks
@@ -114,6 +116,12 @@ impl CombinedExpressionEvaluator<'_> {
         // Evaluate the left-hand expression
         let expr_val = self.eval(expr, row)?;
 
+        // Get affinities for coercion
+        // Left expression affinity (e.g., TEXT column from outer table)
+        let left_affinity = self.get_expression_affinity(expr);
+        // Subquery result affinity (e.g., INTEGER column from inner table)
+        let subquery_affinity = get_subquery_first_column_affinity(subquery, database);
+
         // Phase 3 optimization: Try index-aware execution for simple uncorrelated subqueries
         // Only applies to simple SELECT column FROM table WHERE ... queries
         // This is tried first because it's the fastest when applicable
@@ -124,6 +132,8 @@ impl CombinedExpressionEvaluator<'_> {
                 negated,
                 database,
                 sql_mode.clone(),
+                left_affinity,
+                subquery_affinity,
             )?;
             if let Some(index_result) = index_result_opt {
                 return Ok(index_result);
@@ -173,7 +183,7 @@ impl CombinedExpressionEvaluator<'_> {
 
             if let Some(entry) = hashset_entry {
                 // Fast path: use HashSet for O(1) lookup
-                return eval_in_with_hashset(&expr_val, &entry, negated, sql_mode);
+                return eval_in_with_hashset(&expr_val, &entry, negated, sql_mode, left_affinity, subquery_affinity);
             }
 
             // HashSet not cached yet - need to execute the subquery first
@@ -218,7 +228,7 @@ impl CombinedExpressionEvaluator<'_> {
             });
 
             // Use the HashSet for evaluation
-            return eval_in_with_hashset(&expr_val, &entry, negated, sql_mode);
+            return eval_in_with_hashset(&expr_val, &entry, negated, sql_mode, left_affinity, subquery_affinity);
         }
 
         // Correlated subquery - execute with outer context (can't cache, use linear search)
@@ -272,7 +282,7 @@ impl CombinedExpressionEvaluator<'_> {
         }
 
         // For correlated subqueries, use linear search (they change each time)
-        eval_in_linear(&expr_val, &rows, negated, sql_mode)
+        eval_in_linear(&expr_val, &rows, negated, sql_mode, left_affinity, subquery_affinity)
     }
 }
 
@@ -282,6 +292,8 @@ fn eval_in_with_hashset(
     entry: &InSubqueryHashSetEntry,
     negated: bool,
     sql_mode: vibesql_types::SqlMode,
+    left_affinity: Option<TypeAffinity>,
+    subquery_affinity: Option<TypeAffinity>,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     // Handle NULL expression
     if matches!(expr_val, vibesql_types::SqlValue::Null) {
@@ -299,15 +311,27 @@ fn eval_in_with_hashset(
         return Ok(vibesql_types::SqlValue::Boolean(!negated));
     }
 
-    // Slow path: check for cross-type equality (e.g., Integer vs Float)
-    // Only needed if the direct lookup failed and types might differ
+    // Slow path: check for cross-type equality with affinity coercion
     for value in &entry.value_set {
-        // Only do expensive comparison if types differ
-        if std::mem::discriminant(expr_val) != std::mem::discriminant(value) {
+        // Apply affinity coercion before comparison
+        let (coerced_expr, coerced_value) = apply_in_subquery_affinity_coercion(
+            expr_val.clone(),
+            value.clone(),
+            left_affinity,
+            subquery_affinity,
+        );
+
+        // Check if coerced values match
+        if coerced_expr == coerced_value {
+            return Ok(vibesql_types::SqlValue::Boolean(!negated));
+        }
+
+        // Also check with eval_binary_op_static for numeric type equivalence (e.g., Integer vs Float)
+        if std::mem::discriminant(&coerced_expr) != std::mem::discriminant(&coerced_value) {
             let eq_result = ExpressionEvaluator::eval_binary_op_static(
-                expr_val,
+                &coerced_expr,
                 &vibesql_ast::BinaryOperator::Equal,
-                value,
+                &coerced_value,
                 sql_mode.clone(),
             )?;
 
@@ -331,6 +355,8 @@ fn eval_in_linear(
     rows: &[vibesql_storage::Row],
     negated: bool,
     sql_mode: vibesql_types::SqlMode,
+    left_affinity: Option<TypeAffinity>,
+    subquery_affinity: Option<TypeAffinity>,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     // Handle NULL expression
     if matches!(expr_val, vibesql_types::SqlValue::Null) {
@@ -359,10 +385,24 @@ fn eval_in_linear(
             continue;
         }
 
+        // Apply affinity coercion before comparison
+        let (coerced_expr, coerced_subquery) = apply_in_subquery_affinity_coercion(
+            expr_val.clone(),
+            subquery_val.clone(),
+            left_affinity,
+            subquery_affinity,
+        );
+
+        // Check if coerced values match
+        if coerced_expr == coerced_subquery {
+            return Ok(vibesql_types::SqlValue::Boolean(!negated));
+        }
+
+        // Also check with eval_binary_op_static for numeric type equivalence
         let eq_result = ExpressionEvaluator::eval_binary_op_static(
-            expr_val,
+            &coerced_expr,
             &vibesql_ast::BinaryOperator::Equal,
-            subquery_val,
+            &coerced_subquery,
             sql_mode.clone(),
         )?;
 
@@ -446,6 +486,8 @@ fn try_index_optimized_in_subquery(
     negated: bool,
     database: &vibesql_storage::Database,
     sql_mode: vibesql_types::SqlMode,
+    left_affinity: Option<TypeAffinity>,
+    subquery_affinity: Option<TypeAffinity>,
 ) -> Result<Option<vibesql_types::SqlValue>, ExecutorError> {
     // Extract table and column names (already validated by can_use_index_for_in_subquery)
     let table_name = match &subquery.from {
@@ -596,11 +638,24 @@ fn try_index_optimized_in_subquery(
             continue;
         }
 
-        // Compare using equality
+        // Apply affinity coercion before comparison
+        let (coerced_expr, coerced_value) = apply_in_subquery_affinity_coercion(
+            expr_val.clone(),
+            value.clone(),
+            left_affinity,
+            subquery_affinity,
+        );
+
+        // Check if coerced values match
+        if coerced_expr == coerced_value {
+            return Ok(Some(vibesql_types::SqlValue::Boolean(!negated)));
+        }
+
+        // Also check with eval_binary_op_static for numeric type equivalence
         let eq_result = ExpressionEvaluator::eval_binary_op_static(
-            expr_val,
+            &coerced_expr,
             &vibesql_ast::BinaryOperator::Equal,
-            value,
+            &coerced_value,
             sql_mode.clone(),
         )?;
 
@@ -614,5 +669,110 @@ fn try_index_optimized_in_subquery(
         Ok(Some(vibesql_types::SqlValue::Null))
     } else {
         Ok(Some(vibesql_types::SqlValue::Boolean(negated)))
+    }
+}
+
+/// Apply SQLite affinity coercion rules for IN subquery comparisons
+///
+/// SQLite uses the affinity of the subquery's first column to determine comparison rules:
+/// - If subquery has INTEGER/REAL/NUMERIC affinity and left is TEXT value, convert TEXT to numeric
+/// - If subquery has TEXT affinity and left is numeric, convert numeric to TEXT
+/// - If either has no affinity, use storage class ordering (no conversion)
+fn apply_in_subquery_affinity_coercion(
+    left_val: vibesql_types::SqlValue,
+    right_val: vibesql_types::SqlValue,
+    left_affinity: Option<TypeAffinity>,
+    right_affinity: Option<TypeAffinity>,
+) -> (vibesql_types::SqlValue, vibesql_types::SqlValue) {
+    use vibesql_types::SqlValue;
+
+    // If right (subquery) has numeric affinity and left is a TEXT value, convert TEXT to numeric
+    let right_is_numeric_affinity = matches!(
+        right_affinity,
+        Some(TypeAffinity::Integer) | Some(TypeAffinity::Real) | Some(TypeAffinity::Numeric)
+    );
+
+    if right_is_numeric_affinity {
+        if let SqlValue::Varchar(s) | SqlValue::Character(s) = &left_val {
+            // Try to convert left TEXT to numeric
+            if let Some(coerced) = try_coerce_string_to_numeric(s) {
+                return (coerced, right_val);
+            }
+        }
+    }
+
+    // If left has numeric affinity and right is a TEXT value, convert TEXT to numeric
+    let left_is_numeric_affinity = matches!(
+        left_affinity,
+        Some(TypeAffinity::Integer) | Some(TypeAffinity::Real) | Some(TypeAffinity::Numeric)
+    );
+
+    if left_is_numeric_affinity {
+        if let SqlValue::Varchar(s) | SqlValue::Character(s) = &right_val {
+            // Try to convert right TEXT to numeric
+            if let Some(coerced) = try_coerce_string_to_numeric(s) {
+                return (left_val, coerced);
+            }
+        }
+    }
+
+    // If right has TEXT affinity and left is numeric, convert numeric to TEXT
+    if matches!(right_affinity, Some(TypeAffinity::Text)) {
+        if let SqlValue::Integer(n) = &left_val {
+            return (
+                SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+                right_val,
+            );
+        }
+        if let SqlValue::Real(n) | SqlValue::Double(n) = &left_val {
+            return (
+                SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*n))),
+                right_val,
+            );
+        }
+    }
+
+    // If left has TEXT affinity and right is numeric, convert numeric to TEXT
+    if matches!(left_affinity, Some(TypeAffinity::Text)) {
+        if let SqlValue::Integer(n) = &right_val {
+            return (
+                left_val,
+                SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+            );
+        }
+        if let SqlValue::Real(n) | SqlValue::Double(n) = &right_val {
+            return (
+                left_val,
+                SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*n))),
+            );
+        }
+    }
+
+    // No coercion needed - use original values
+    (left_val, right_val)
+}
+
+/// Try to coerce a string to a numeric value
+fn try_coerce_string_to_numeric(s: &str) -> Option<vibesql_types::SqlValue> {
+    // Try integer first
+    if let Ok(n) = s.parse::<i64>() {
+        return Some(vibesql_types::SqlValue::Integer(n));
+    }
+
+    // Try float
+    if let Ok(n) = s.parse::<f64>() {
+        // For values like "10.0", use Real to preserve the decimal
+        return Some(vibesql_types::SqlValue::Real(n));
+    }
+
+    None
+}
+
+/// Format a float for TEXT comparison
+fn format_float_for_text(n: f64) -> String {
+    if n.fract() == 0.0 && n.abs() < i64::MAX as f64 {
+        format!("{}.0", n as i64)
+    } else {
+        n.to_string()
     }
 }

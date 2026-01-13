@@ -154,8 +154,10 @@ fn execute_insert_internal(
                 select_executor.execute_with_columns(select_stmt)?
             };
 
-            // Validate column count - if rowid is specified, SELECT should return one extra column
-            let expected_select_columns = if rowid_position.is_some() {
+            // Validate column count - if rowid is a pseudo-column (not INTEGER PRIMARY KEY),
+            // SELECT should return one extra column for the rowid value.
+            // For INTEGER PRIMARY KEY columns, the rowid value is already part of target_column_info.
+            let expected_select_columns = if resolved_columns.rowid_is_pseudo_column {
                 target_column_info.len() + 1
             } else {
                 target_column_info.len()
@@ -286,7 +288,7 @@ fn execute_insert_internal(
                             // For pseudo-columns, require positive; for IPK columns, allow any value
                             if resolved_columns.rowid_is_pseudo_column && *i <= 0 {
                                 return Err(ExecutorError::UnsupportedExpression(
-                                    "ROWID must be a positive integer".to_string(),
+                                    "datatype mismatch".to_string(),
                                 ));
                             }
                             let rowid = *i as u64;
@@ -299,7 +301,7 @@ fn execute_insert_internal(
                         vibesql_types::SqlValue::Bigint(i) => {
                             if resolved_columns.rowid_is_pseudo_column && *i <= 0 {
                                 return Err(ExecutorError::UnsupportedExpression(
-                                    "ROWID must be a positive integer".to_string(),
+                                    "datatype mismatch".to_string(),
                                 ));
                             }
                             let rowid = *i as u64;
@@ -313,9 +315,71 @@ fn execute_insert_internal(
                             batch_max_rowid += 1;
                             Some(batch_max_rowid)
                         }
+                        // SQLite type affinity: try to convert numeric strings to integers
+                        vibesql_types::SqlValue::Varchar(s)
+                        | vibesql_types::SqlValue::Character(s) => {
+                            let trimmed = s.trim();
+                            if let Ok(i) = trimmed.parse::<i64>() {
+                                if resolved_columns.rowid_is_pseudo_column && i <= 0 {
+                                    return Err(ExecutorError::UnsupportedExpression(
+                                        "datatype mismatch".to_string(),
+                                    ));
+                                }
+                                let rowid = i as u64;
+                                if i > 0 {
+                                    batch_max_rowid = batch_max_rowid.max(rowid);
+                                }
+                                Some(rowid)
+                            } else {
+                                // Non-numeric string cannot be used as rowid
+                                return Err(ExecutorError::UnsupportedExpression(
+                                    "datatype mismatch".to_string(),
+                                ));
+                            }
+                        }
+                        // SQLite type affinity: convert float literals to integers if whole numbers
+                        vibesql_types::SqlValue::Float(f) => {
+                            let f64_val = *f as f64;
+                            if f64_val.fract() == 0.0 && f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
+                                let i = f64_val as i64;
+                                if resolved_columns.rowid_is_pseudo_column && i <= 0 {
+                                    return Err(ExecutorError::UnsupportedExpression(
+                                        "datatype mismatch".to_string(),
+                                    ));
+                                }
+                                let rowid = i as u64;
+                                if i > 0 {
+                                    batch_max_rowid = batch_max_rowid.max(rowid);
+                                }
+                                Some(rowid)
+                            } else {
+                                return Err(ExecutorError::UnsupportedExpression(
+                                    "datatype mismatch".to_string(),
+                                ));
+                            }
+                        }
+                        vibesql_types::SqlValue::Real(f) | vibesql_types::SqlValue::Double(f) | vibesql_types::SqlValue::Numeric(f) => {
+                            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                                let i = *f as i64;
+                                if resolved_columns.rowid_is_pseudo_column && i <= 0 {
+                                    return Err(ExecutorError::UnsupportedExpression(
+                                        "datatype mismatch".to_string(),
+                                    ));
+                                }
+                                let rowid = i as u64;
+                                if i > 0 {
+                                    batch_max_rowid = batch_max_rowid.max(rowid);
+                                }
+                                Some(rowid)
+                            } else {
+                                return Err(ExecutorError::UnsupportedExpression(
+                                    "datatype mismatch".to_string(),
+                                ));
+                            }
+                        }
                         _ => {
                             return Err(ExecutorError::UnsupportedExpression(
-                                "ROWID must be a positive integer".to_string(),
+                                "datatype mismatch".to_string(),
                             ));
                         }
                     }
@@ -335,7 +399,7 @@ fn execute_insert_internal(
                             let neg_val = -(*i);
                             if resolved_columns.rowid_is_pseudo_column && neg_val <= 0 {
                                 return Err(ExecutorError::UnsupportedExpression(
-                                    "ROWID must be a positive integer".to_string(),
+                                    "datatype mismatch".to_string(),
                                 ));
                             }
                             // Note: negative rowid as u64 wraps, but SQLite allows this for IPK
@@ -345,22 +409,65 @@ fn execute_insert_internal(
                             let neg_val = -(*i);
                             if resolved_columns.rowid_is_pseudo_column && neg_val <= 0 {
                                 return Err(ExecutorError::UnsupportedExpression(
-                                    "ROWID must be a positive integer".to_string(),
+                                    "datatype mismatch".to_string(),
                                 ));
                             }
                             Some(neg_val as u64)
                         }
                         _ => {
                             return Err(ExecutorError::UnsupportedExpression(
-                                "ROWID value must be a literal integer".to_string(),
+                                "datatype mismatch".to_string(),
                             ));
                         }
                     }
                 }
                 _ => {
-                    return Err(ExecutorError::UnsupportedExpression(
-                        "ROWID value must be a literal integer".to_string(),
-                    ));
+                    // For complex expressions (CASE, functions, subqueries, etc.),
+                    // evaluate them to get the resulting value
+                    // Create a dummy schema/row for evaluation since rowid expressions
+                    // don't reference columns from a current row
+                    let dummy_schema =
+                        vibesql_catalog::TableSchema::new("__rowid_expr__".to_string(), vec![]);
+                    let dummy_row = vibesql_storage::Row::new(vec![]);
+                    let evaluator = crate::ExpressionEvaluator::with_database(&dummy_schema, db);
+                    let val = evaluator.eval(rowid_expr, &dummy_row)?;
+
+                    match val {
+                        vibesql_types::SqlValue::Integer(i) => {
+                            if resolved_columns.rowid_is_pseudo_column && i <= 0 {
+                                return Err(ExecutorError::UnsupportedExpression(
+                                    "datatype mismatch".to_string(),
+                                ));
+                            }
+                            let rowid = i as u64;
+                            if i > 0 {
+                                batch_max_rowid = batch_max_rowid.max(rowid);
+                            }
+                            Some(rowid)
+                        }
+                        vibesql_types::SqlValue::Bigint(i) => {
+                            if resolved_columns.rowid_is_pseudo_column && i <= 0 {
+                                return Err(ExecutorError::UnsupportedExpression(
+                                    "datatype mismatch".to_string(),
+                                ));
+                            }
+                            let rowid = i as u64;
+                            if i > 0 {
+                                batch_max_rowid = batch_max_rowid.max(rowid);
+                            }
+                            Some(rowid)
+                        }
+                        vibesql_types::SqlValue::Null => {
+                            // NULL rowid means auto-assign: max_seen + 1
+                            batch_max_rowid += 1;
+                            Some(batch_max_rowid)
+                        }
+                        _ => {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                "datatype mismatch".to_string(),
+                            ));
+                        }
+                    }
                 }
             }
         } else {
@@ -756,9 +863,14 @@ fn execute_insert_internal(
                 if rowid_to_use == reserved_rowid {
                     if !is_explicit_reservation {
                         // Auto-allocated REPLACE rowid: trigger INSERT must fail
+                        // Use actual column name for INTEGER PRIMARY KEY columns
+                        let col_name = ipk_col_idx
+                            .and_then(|idx| schema.columns.get(idx))
+                            .map(|col| col.name.as_str())
+                            .unwrap_or("rowid");
                         return Err(ExecutorError::SqliteCompatError(format!(
-                            "UNIQUE constraint failed: {}.rowid",
-                            table_name
+                            "UNIQUE constraint failed: {}.{}",
+                            table_name, col_name
                         )));
                     } else if explicit_rowid.is_none() {
                         // Explicit REPLACE rowid: auto-allocated trigger INSERT skips to next rowid
@@ -774,9 +886,14 @@ fn execute_insert_internal(
                         }
                     } else {
                         // Explicit REPLACE rowid and explicit trigger INSERT with same rowid: fail
+                        // Use actual column name for INTEGER PRIMARY KEY columns
+                        let col_name = ipk_col_idx
+                            .and_then(|idx| schema.columns.get(idx))
+                            .map(|col| col.name.as_str())
+                            .unwrap_or("rowid");
                         return Err(ExecutorError::SqliteCompatError(format!(
-                            "UNIQUE constraint failed: {}.rowid",
-                            table_name
+                            "UNIQUE constraint failed: {}.{}",
+                            table_name, col_name
                         )));
                     }
                 }

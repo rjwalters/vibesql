@@ -40,5 +40,5 @@ pub(super) use pattern_funcs::glob;
 pub(super) use pattern_funcs::like;
 // Re-export string functions
 pub(super) use string_funcs::char_func;
-pub(super) use string_funcs::{concat_ws, printf, unicode};
+pub(super) use string_funcs::{concat_ws, printf, unicode, unistr};
 pub(super) use type_funcs::{intreal, tointeger, toreal, typeof_func};

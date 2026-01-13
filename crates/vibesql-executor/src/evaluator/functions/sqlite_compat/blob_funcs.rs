@@ -138,6 +138,18 @@ pub(crate) fn zeroblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Real(r) => *r as usize,
         SqlValue::Double(d) => *d as usize,
         SqlValue::Float(f) => *f as usize,
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            // SQLite accepts numeric strings
+            s.trim().parse::<f64>().map(|v| v as usize).unwrap_or(0)
+        }
+        SqlValue::Blob(_) => {
+            // SQLite treats blobs as 0 in numeric context for zeroblob
+            0
+        }
+        SqlValue::Boolean(b) => {
+            // Boolean converts to 0 or 1
+            if *b { 1 } else { 0 }
+        }
         _ => {
             return Err(ExecutorError::UnsupportedFeature(
                 "ZEROBLOB argument must be numeric".to_string(),

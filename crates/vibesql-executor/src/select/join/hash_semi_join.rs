@@ -13,6 +13,109 @@ use crate::{
     schema::CombinedSchema,
     timeout::{TimeoutContext, CHECK_INTERVAL},
 };
+use vibesql_types::{SqlValue, TypeAffinity};
+
+/// Get the TypeAffinity for a column at a given index in a CombinedSchema
+pub(super) fn get_column_affinity(schema: &CombinedSchema, col_idx: usize) -> Option<TypeAffinity> {
+    // Iterate through tables to find the column at this index
+    for (start_idx, table_schema) in schema.table_schemas.values() {
+        let end_idx = start_idx + table_schema.columns.len();
+        if col_idx >= *start_idx && col_idx < end_idx {
+            let local_idx = col_idx - start_idx;
+            return Some(table_schema.columns[local_idx].data_type.sqlite_affinity());
+        }
+    }
+    None
+}
+
+/// Normalize a value for affinity-aware comparison/hashing.
+///
+/// When comparing values with different type affinities (e.g., TEXT '10.0' vs INTEGER 10),
+/// SQLite applies type coercion rules. For IN subqueries, the subquery column's affinity
+/// determines how the left-hand value should be coerced.
+///
+/// This function normalizes values to a canonical form that can be used for hash-based
+/// lookups, ensuring that TEXT '10.0' can match INTEGER 10 when INTEGER affinity applies.
+pub(super) fn normalize_for_affinity_hash(value: &SqlValue, target_affinity: Option<TypeAffinity>) -> SqlValue {
+    match (value, target_affinity) {
+        // When target has INTEGER/REAL/NUMERIC affinity and value is TEXT, try to coerce to number
+        (SqlValue::Varchar(s) | SqlValue::Character(s), Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric)) => {
+            // Try to parse as a number
+            let s_str = s.as_str().trim();
+
+            // Try integer first
+            if let Ok(i) = s_str.parse::<i64>() {
+                return SqlValue::Integer(i);
+            }
+
+            // Try float
+            if let Ok(f) = s_str.parse::<f64>() {
+                // For INTEGER affinity, if the float is a whole number, convert to integer
+                if matches!(target_affinity, Some(TypeAffinity::Integer)) && f.fract() == 0.0 && f.is_finite() {
+                    if f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+                        return SqlValue::Integer(f as i64);
+                    }
+                }
+                return SqlValue::Double(f);
+            }
+
+            // Can't convert to number, keep as-is
+            value.clone()
+        }
+
+        // When target has TEXT affinity and value is numeric, convert to TEXT
+        (SqlValue::Integer(i), Some(TypeAffinity::Text)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(i.to_string()))
+        }
+        (SqlValue::Double(f), Some(TypeAffinity::Text)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*f)))
+        }
+        (SqlValue::Real(f), Some(TypeAffinity::Text)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*f as f64)))
+        }
+        (SqlValue::Float(f), Some(TypeAffinity::Text)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*f as f64)))
+        }
+
+        // Normalize Double/Real/Float to a consistent form for hashing
+        // This ensures 10.0 (Double) matches 10 (Integer) when comparing numerically
+        (SqlValue::Double(f), Some(TypeAffinity::Integer)) if f.fract() == 0.0 && f.is_finite() => {
+            if *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                SqlValue::Integer(*f as i64)
+            } else {
+                value.clone()
+            }
+        }
+        (SqlValue::Real(f), Some(TypeAffinity::Integer)) if (*f as f64).fract() == 0.0 && f.is_finite() => {
+            let f64_val = *f as f64;
+            if f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
+                SqlValue::Integer(f64_val as i64)
+            } else {
+                value.clone()
+            }
+        }
+        (SqlValue::Float(f), Some(TypeAffinity::Integer)) if (*f as f64).fract() == 0.0 && f.is_finite() => {
+            let f64_val = *f as f64;
+            if f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
+                SqlValue::Integer(f64_val as i64)
+            } else {
+                value.clone()
+            }
+        }
+
+        // No normalization needed for other cases
+        _ => value.clone(),
+    }
+}
+
+/// Format a float for TEXT representation (SQLite-compatible)
+fn format_float_for_text(f: f64) -> String {
+    if f.fract() == 0.0 && f.abs() < 1e15 {
+        format!("{:.1}", f) // "10.0" format
+    } else {
+        f.to_string()
+    }
+}
 
 /// Hash semi-join implementation
 ///
@@ -45,42 +148,145 @@ pub(super) fn hash_semi_join(
     // Use default timeout context (proper propagation from SelectExecutor is a future improvement)
     let timeout_ctx = TimeoutContext::new_default();
 
+    // Get column affinities for affinity-aware comparison
+    // The right side (subquery in IN clause) determines how values should be compared
+    let left_affinity = get_column_affinity(&left.schema, left_col_idx);
+    let right_affinity = get_column_affinity(&right.schema, right_col_idx);
+
+    // Determine if we need affinity-aware hashing
+    // This is needed when affinities differ and could affect comparison results
+    let needs_affinity_aware = match (left_affinity, right_affinity) {
+        // TEXT vs numeric needs coercion
+        (Some(TypeAffinity::Text), Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric)) => true,
+        // Numeric vs TEXT needs coercion
+        (Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric), Some(TypeAffinity::Text)) => true,
+        // Different numeric types may need normalization
+        (Some(TypeAffinity::Integer), Some(TypeAffinity::Real)) => true,
+        (Some(TypeAffinity::Real), Some(TypeAffinity::Integer)) => true,
+        _ => false,
+    };
+
     // Use as_slice() for zero-cost access without triggering row materialization
     let left_slice = left.as_slice();
     let right_slice = right.as_slice();
 
-    // Build phase: Create hash table from right side (using parallel algorithm)
-    // Key: join column value
-    // Value: () (we only need to know if the key exists, not store row indices)
-    // Automatically uses parallel build when beneficial (based on row count and hardware)
-    let hash_table = build_existence_hash_table_parallel(right_slice, right_col_idx, &timeout_ctx)?;
+    if needs_affinity_aware {
+        // Use affinity-aware hashing for cross-type comparisons
+        hash_semi_join_with_affinity(
+            left_slice,
+            right_slice,
+            left_col_idx,
+            right_col_idx,
+            left_affinity,
+            right_affinity,
+            &timeout_ctx,
+            &left.schema,
+        )
+    } else {
+        // Use optimized parallel hash table for same-type comparisons
+        let hash_table = build_existence_hash_table_parallel(right_slice, right_col_idx, &timeout_ctx)?;
 
-    // Probe phase: Check each left row for a match
-    // We only emit left rows that have a match in the right table
+        // Probe phase: Check each left row for a match
+        let estimated_capacity = left_slice.len().min(100_000);
+        let mut result_rows = Vec::with_capacity(estimated_capacity);
+
+        for (idx, left_row) in left_slice.iter().enumerate() {
+            // Check timeout periodically during probe phase
+            if idx % CHECK_INTERVAL == 0 {
+                timeout_ctx.check()?;
+            }
+
+            let key = &left_row.values[left_col_idx];
+
+            // Skip NULL values - they never match in equi-joins
+            if key == &SqlValue::Null {
+                continue;
+            }
+
+            // If key exists in hash table, emit this left row (only once)
+            if hash_table.contains_key(key) {
+                result_rows.push(left_row.clone());
+            }
+        }
+
+        // Return result with left schema only (we don't combine with right schema)
+        Ok(FromResult::from_rows(left.schema.clone(), result_rows))
+    }
+}
+
+/// Affinity-aware hash semi-join for cross-type comparisons
+///
+/// This version normalizes values based on their affinities before hashing,
+/// enabling TEXT '10.0' to match INTEGER 10 when the subquery column has INTEGER affinity.
+fn hash_semi_join_with_affinity(
+    left_slice: &[vibesql_storage::Row],
+    right_slice: &[vibesql_storage::Row],
+    left_col_idx: usize,
+    right_col_idx: usize,
+    left_affinity: Option<TypeAffinity>,
+    right_affinity: Option<TypeAffinity>,
+    timeout_ctx: &TimeoutContext,
+    left_schema: &CombinedSchema,
+) -> Result<FromResult, ExecutorError> {
+    use ahash::AHashSet;
+
+    // Determine the target affinity for normalization
+    // For IN subqueries, the right side (subquery) determines the affinity
+    // Following SQLite's rules: if one side has numeric affinity, use numeric comparison
+    let target_affinity = match (left_affinity, right_affinity) {
+        // Right side (subquery) has numeric affinity - coerce left to numeric
+        (_, Some(TypeAffinity::Integer)) => Some(TypeAffinity::Integer),
+        (_, Some(TypeAffinity::Real)) => Some(TypeAffinity::Real),
+        (_, Some(TypeAffinity::Numeric)) => Some(TypeAffinity::Numeric),
+        // Left side has numeric affinity, right is TEXT - coerce right to numeric
+        (Some(TypeAffinity::Integer), Some(TypeAffinity::Text)) => Some(TypeAffinity::Integer),
+        (Some(TypeAffinity::Real), Some(TypeAffinity::Text)) => Some(TypeAffinity::Real),
+        (Some(TypeAffinity::Numeric), Some(TypeAffinity::Text)) => Some(TypeAffinity::Numeric),
+        // Default: use right affinity
+        _ => right_affinity,
+    };
+
+    // Build phase: Create hash set with normalized keys
+    let mut hash_set: AHashSet<SqlValue> = AHashSet::with_capacity(right_slice.len());
+
+    for (idx, row) in right_slice.iter().enumerate() {
+        if idx % CHECK_INTERVAL == 0 {
+            timeout_ctx.check()?;
+        }
+
+        let key = &row.values[right_col_idx];
+        if key == &SqlValue::Null {
+            continue;
+        }
+
+        // Normalize the key for hashing
+        let normalized_key = normalize_for_affinity_hash(key, target_affinity);
+        hash_set.insert(normalized_key);
+    }
+
+    // Probe phase: Check each left row with normalized key
     let estimated_capacity = left_slice.len().min(100_000);
     let mut result_rows = Vec::with_capacity(estimated_capacity);
 
     for (idx, left_row) in left_slice.iter().enumerate() {
-        // Check timeout periodically during probe phase
         if idx % CHECK_INTERVAL == 0 {
             timeout_ctx.check()?;
         }
 
         let key = &left_row.values[left_col_idx];
-
-        // Skip NULL values - they never match in equi-joins
-        if key == &vibesql_types::SqlValue::Null {
+        if key == &SqlValue::Null {
             continue;
         }
 
-        // If key exists in hash table, emit this left row (only once)
-        if hash_table.contains_key(key) {
+        // Normalize the probe key using the same target affinity
+        let normalized_key = normalize_for_affinity_hash(key, target_affinity);
+
+        if hash_set.contains(&normalized_key) {
             result_rows.push(left_row.clone());
         }
     }
 
-    // Return result with left schema only (we don't combine with right schema)
-    Ok(FromResult::from_rows(left.schema.clone(), result_rows))
+    Ok(FromResult::from_rows(left_schema.clone(), result_rows))
 }
 
 /// Hash semi-join with additional filter conditions

@@ -18,6 +18,9 @@ use comparison::ComparisonOps;
 use logical::LogicalOps;
 use string::StringOps;
 use vector::VectorOps;
+
+// Re-export string truthiness helper for use in CASE evaluation
+pub use logical::is_truthy_string;
 use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;
