@@ -193,6 +193,10 @@ pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
     // Disable HeatWave secondary engine to avoid errors on complex queries
     let _ = conn.query_drop("SET SESSION use_secondary_engine=OFF");
 
+    // Disable ONLY_FULL_GROUP_BY to allow TPC-H queries that have non-aggregated
+    // columns in SELECT that are functionally dependent on GROUP BY columns
+    let _ = conn.query_drop("SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))");
+
     let data = TPCHData::new(scale_factor);
 
     // Check if data already exists with correct scale factor
@@ -1702,7 +1706,7 @@ fn load_part_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
 /// Uses a formula that guarantees 4 unique suppliers per part at any scale factor.
 /// The base supplier is determined by (part_key - 1) % supplier_count, then
 /// we add evenly-spaced offsets (0, 1/4, 2/4, 3/4 of supplier_count) for each j.
-#[cfg(feature = "vibesql")]
+#[cfg(any(feature = "vibesql", feature = "sqlite", feature = "duckdb", feature = "mysql"))]
 fn get_valid_supplier_for_part(
     part_key: usize,
     supplier_count: usize,

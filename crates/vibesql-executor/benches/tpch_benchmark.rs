@@ -77,6 +77,8 @@ use tpch::schema::load_duckdb;
 use tpch::schema::load_mysql;
 #[cfg(feature = "sqlite")]
 use tpch::schema::load_sqlite;
+#[cfg(feature = "mysql")]
+use tpch::queries::{TPCH_Q7_MYSQL, TPCH_Q8_MYSQL, TPCH_Q9_MYSQL};
 use tpch::{queries::*, schema::load_vibesql};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
@@ -120,6 +122,33 @@ const ALL_QUERIES_SQLITE: &[(&str, &str)] = &[
     ("Q7", TPCH_Q7_SQLITE),
     ("Q8", TPCH_Q8_SQLITE),
     ("Q9", TPCH_Q9_SQLITE),
+    ("Q10", TPCH_Q10),
+    ("Q11", TPCH_Q11),
+    ("Q12", TPCH_Q12),
+    ("Q13", TPCH_Q13),
+    ("Q14", TPCH_Q14),
+    ("Q15", TPCH_Q15),
+    ("Q16", TPCH_Q16),
+    ("Q17", TPCH_Q17),
+    ("Q18", TPCH_Q18),
+    ("Q19", TPCH_Q19),
+    ("Q20", TPCH_Q20),
+    ("Q21", TPCH_Q21),
+    ("Q22", TPCH_Q22),
+];
+
+/// MySQL-specific TPC-H queries (uses YEAR() instead of EXTRACT)
+#[cfg(feature = "mysql")]
+const ALL_QUERIES_MYSQL: &[(&str, &str)] = &[
+    ("Q1", TPCH_Q1),
+    ("Q2", TPCH_Q2),
+    ("Q3", TPCH_Q3),
+    ("Q4", TPCH_Q4),
+    ("Q5", TPCH_Q5),
+    ("Q6", TPCH_Q6),
+    ("Q7", TPCH_Q7_MYSQL),
+    ("Q8", TPCH_Q8_MYSQL),
+    ("Q9", TPCH_Q9_MYSQL),
     ("Q10", TPCH_Q10),
     ("Q11", TPCH_Q11),
     ("Q12", TPCH_Q12),
@@ -180,6 +209,19 @@ fn get_sqlite_queries_to_run(filter: &Option<Vec<String>>) -> Vec<(&'static str,
             .copied()
             .collect(),
         None => ALL_QUERIES_SQLITE.to_vec(),
+    }
+}
+
+/// Get MySQL-specific queries to run based on filter
+#[cfg(feature = "mysql")]
+fn get_mysql_queries_to_run(filter: &Option<Vec<String>>) -> Vec<(&'static str, &'static str)> {
+    match filter {
+        Some(queries) => ALL_QUERIES_MYSQL
+            .iter()
+            .filter(|(name, _)| queries.iter().any(|q| q == *name))
+            .copied()
+            .collect(),
+        None => ALL_QUERIES_MYSQL.to_vec(),
     }
 }
 
@@ -409,10 +451,12 @@ fn main() {
     #[cfg(feature = "mysql")]
     if engine_filter.mysql {
         if let Some(mut conn) = load_mysql(scale_factor) {
+            // Use MySQL-specific queries (YEAR() instead of EXTRACT)
+            let mysql_queries = get_mysql_queries_to_run(&query_filter);
             let mut mysql_results = Vec::new();
             eprintln!("\n--- MySQL ---");
 
-            for (name, sql) in &queries {
+            for (name, sql) in &mysql_queries {
                 let stats = harness.run(name, || run_mysql_query(&mut conn, sql));
                 stats.print_compact();
                 mysql_results.push(stats);
