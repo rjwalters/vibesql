@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-01-06T11:04:32.651907",
-  "git_commit": "0dd78213e",
+  "generated_at": "2026-01-14T11:50:58.468657",
+  "git_commit": "02f891233",
   "description": "VibeSQL Embedded performance trends over time",
   "benchmarks": {
     "tpch": {
@@ -304,6 +304,50 @@
           "geomean_ms": 19.29,
           "queries_passed": 22,
           "total_queries": 22
+        },
+        {
+          "date": "2026-01-09",
+          "timestamp": "2026-01-09T20:58:01.724517",
+          "commit": "68651dfd",
+          "avg_ms": 52.16,
+          "min_ms": 1.67,
+          "max_ms": 253.62,
+          "geomean_ms": 20.39,
+          "queries_passed": 22,
+          "total_queries": 22
+        },
+        {
+          "date": "2026-01-13",
+          "timestamp": "2026-01-13T13:25:55.342513",
+          "commit": "b5c36cda",
+          "avg_ms": 101.24,
+          "min_ms": 2.51,
+          "max_ms": 341.05,
+          "geomean_ms": 47.78,
+          "queries_passed": 22,
+          "total_queries": 22
+        },
+        {
+          "date": "2026-01-13",
+          "timestamp": "2026-01-13T15:24:58.692087",
+          "commit": "2e01b823",
+          "avg_ms": 105.76,
+          "min_ms": 2.69,
+          "max_ms": 370.2,
+          "geomean_ms": 46.38,
+          "queries_passed": 22,
+          "total_queries": 22
+        },
+        {
+          "date": "2026-01-14",
+          "timestamp": "2026-01-14T11:00:22.690035",
+          "commit": "02f89123",
+          "avg_ms": 62.04,
+          "min_ms": 1.78,
+          "max_ms": 268.81,
+          "geomean_ms": 25.56,
+          "queries_passed": 22,
+          "total_queries": 22
         }
       ]
     },
@@ -443,6 +487,17 @@
           "geomean_ms": 9.55,
           "queries_passed": 408,
           "total_queries": 408
+        },
+        {
+          "date": "2026-01-09",
+          "timestamp": "2026-01-09T21:18:06.285655",
+          "commit": "68651dfd",
+          "avg_ms": 123.64,
+          "min_ms": 0.04,
+          "max_ms": 9960.0,
+          "geomean_ms": 10.2,
+          "queries_passed": 408,
+          "total_queries": 408
         }
       ]
     },
@@ -536,6 +591,34 @@
           "commit": "0dd78213",
           "tps": 10592.43,
           "latency_us": 128.46
+        },
+        {
+          "date": "2026-01-09",
+          "timestamp": "2026-01-09T21:03:57.753710",
+          "commit": "68651dfd",
+          "tps": 10969.67,
+          "latency_us": 125.85
+        },
+        {
+          "date": "2026-01-13",
+          "timestamp": "2026-01-13T13:37:58.763676",
+          "commit": "b5c36cda",
+          "tps": 9399.58,
+          "latency_us": 153.88
+        },
+        {
+          "date": "2026-01-13",
+          "timestamp": "2026-01-13T15:32:00.068103",
+          "commit": "2e01b823",
+          "tps": 8530.83,
+          "latency_us": 173.13
+        },
+        {
+          "date": "2026-01-14",
+          "timestamp": "2026-01-14T11:07:24.092282",
+          "commit": "02f89123",
+          "tps": 9483.45,
+          "latency_us": 165.32
         }
       ]
     },
@@ -686,6 +769,70 @@
             "update_non_index": 0.0022,
             "delete": 0.0038,
             "range_queries": 0.0262
+          }
+        },
+        {
+          "date": "2026-01-09",
+          "timestamp": "2026-01-09T21:27:20.119978",
+          "commit": "68651dfd",
+          "avg_ms": 0.0084,
+          "min_ms": 0.0022,
+          "max_ms": 0.0279,
+          "workloads": {
+            "point_select": 0.0022,
+            "insert": 0.0085,
+            "update_index": 0.0056,
+            "update_non_index": 0.0024,
+            "delete": 0.0039,
+            "range_queries": 0.0279
+          }
+        },
+        {
+          "date": "2026-01-13",
+          "timestamp": "2026-01-13T13:57:23.888867",
+          "commit": "b5c36cda",
+          "avg_ms": 0.0101,
+          "min_ms": 0.0029,
+          "max_ms": 0.0332,
+          "workloads": {
+            "point_select": 0.0029,
+            "insert": 0.0103,
+            "update_index": 0.0067,
+            "update_non_index": 0.0029,
+            "delete": 0.0049,
+            "range_queries": 0.0332
+          }
+        },
+        {
+          "date": "2026-01-13",
+          "timestamp": "2026-01-13T15:46:17.053814",
+          "commit": "2e01b823",
+          "avg_ms": 0.0094,
+          "min_ms": 0.0026,
+          "max_ms": 0.0306,
+          "workloads": {
+            "point_select": 0.0026,
+            "insert": 0.0093,
+            "update_index": 0.0065,
+            "update_non_index": 0.0027,
+            "delete": 0.0048,
+            "range_queries": 0.0306
+          }
+        },
+        {
+          "date": "2026-01-14",
+          "timestamp": "2026-01-14T11:20:39.596280",
+          "commit": "02f89123",
+          "avg_ms": 0.0091,
+          "min_ms": 0.0026,
+          "max_ms": 0.0301,
+          "workloads": {
+            "point_select": 0.0026,
+            "insert": 0.009,
+            "update_index": 0.0062,
+            "update_non_index": 0.0027,
+            "delete": 0.0039,
+            "range_queries": 0.0301
           }
         }
       ]
