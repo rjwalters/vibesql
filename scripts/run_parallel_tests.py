@@ -28,10 +28,17 @@ Per-File Timeout Strategy:
 Usage:
     python3 scripts/run_parallel_tests.py --workers 8 --time-budget 300
 
-Environment Variables:
+Environment Variables (set by runner for each test):
     SQLLOGICTEST_WORKER_ID: Worker number (0-indexed)
     SQLLOGICTEST_FILES: Test file to run (set per-file by worker)
     SQLLOGICTEST_TIME_BUDGET: Time budget in seconds per file
+    RAYON_NUM_THREADS: Number of rayon threads (prevents CPU contention)
+
+CPU Contention Prevention:
+    When running many parallel workers, each spawning rayon threads, CPU contention
+    can significantly degrade performance. Benchmarks show that 4 rayon threads is
+    optimal - 31% faster than using all cores (default). Each worker is limited to
+    4 rayon threads by default (configurable via --rayon-threads).
 
 Example:
     # Run with 8 workers, 5 minutes per worker
@@ -364,7 +371,7 @@ def initialize_work_queue(repo_root: Path, work_queue_dir: Path) -> int:
     return len(test_files)
 
 
-def run_worker(worker_id: int, work_queue: WorkQueue, db_writer: Optional[StreamingDatabaseWriter], time_budget: int, repo_root: Path, release_mode: bool = True, per_file_timeout: int = 500) -> Tuple[int, Optional[Dict]]:
+def run_worker(worker_id: int, work_queue: WorkQueue, db_writer: Optional[StreamingDatabaseWriter], time_budget: int, repo_root: Path, release_mode: bool = True, per_file_timeout: int = 500, rayon_threads: int = 4) -> Tuple[int, Optional[Dict]]:
     """
     Run a single worker process, pulling test files from queue until empty.
 
@@ -376,6 +383,7 @@ def run_worker(worker_id: int, work_queue: WorkQueue, db_writer: Optional[Stream
         repo_root: Repository root directory
         release_mode: Whether to use release binary (default: True for performance)
         per_file_timeout: Timeout in seconds for each test file (default: 500s)
+        rayon_threads: Number of rayon threads per worker (default: 4, optimal for performance)
 
     Returns:
         (worker_id, results_dict) or (worker_id, None) on failure
@@ -448,6 +456,9 @@ def run_worker(worker_id: int, work_queue: WorkQueue, db_writer: Optional[Stream
         env["SQLLOGICTEST_WORKER_ID"] = str(worker_id)
         env["SQLLOGICTEST_FILES"] = test_file  # Single file
         env["SQLLOGICTEST_TIME_BUDGET"] = str(per_file_timeout)
+        # Limit rayon threads to prevent CPU contention when running parallel workers
+        # Each worker gets a limited number of threads instead of all CPUs
+        env["RAYON_NUM_THREADS"] = str(rayon_threads)
 
         # Run the test binary for this single file
         cmd = [test_binary]
@@ -777,7 +788,7 @@ def merge_worker_results(worker_results: List[Tuple[int, Optional[Dict]]]) -> Di
     return cumulative
 
 
-def run_parallel_tests(num_workers: int, time_budget: int, repo_root: Path, release_mode: bool = True, per_file_timeout: int = 500) -> bool:
+def run_parallel_tests(num_workers: int, time_budget: int, repo_root: Path, release_mode: bool = True, per_file_timeout: int = 500, rayon_threads: int = 4) -> bool:
     """
     Run SQLLogicTest suite in parallel across multiple workers.
 
@@ -787,6 +798,7 @@ def run_parallel_tests(num_workers: int, time_budget: int, repo_root: Path, rele
         repo_root: Repository root directory
         release_mode: Whether to build in release mode (default: True for 10-15x speedup)
         per_file_timeout: Timeout in seconds for each test file (default: 500s)
+        rayon_threads: Number of rayon threads per worker (default: 4, optimal for performance)
 
     Returns:
         True if successful, False otherwise
@@ -797,6 +809,7 @@ def run_parallel_tests(num_workers: int, time_budget: int, repo_root: Path, rele
     print(f"Workers: {num_workers}")
     print(f"Time budget: {time_budget}s per worker")
     print(f"Per-file timeout: {per_file_timeout}s")
+    print(f"Rayon threads per worker: {rayon_threads}")
     print(f"Build mode: {build_type}")
     print()
 
@@ -908,7 +921,7 @@ VALUES ({run_id}, TIMESTAMP '{timestamp}', NULL, {len(test_files)}, 0, 0, {len(t
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         # Submit all workers (they all share the same work queue and database writer)
         futures = {
-            executor.submit(run_worker, i, work_queue, db_writer, time_budget, repo_root, release_mode, per_file_timeout): i
+            executor.submit(run_worker, i, work_queue, db_writer, time_budget, repo_root, release_mode, per_file_timeout, rayon_threads): i
             for i in range(num_workers)
         }
 
@@ -989,6 +1002,12 @@ def main():
         default=500,
         help="Timeout in seconds for each test file (default: 500s)",
     )
+    parser.add_argument(
+        "--rayon-threads",
+        type=int,
+        default=4,
+        help="Rayon threads per worker (default: 4, optimal for performance)",
+    )
 
     args = parser.parse_args()
 
@@ -1005,6 +1024,10 @@ def main():
         print("Error: --per-file-timeout must be >= 1", file=sys.stderr)
         return 1
 
+    if args.rayon_threads < 1:
+        print("Error: --rayon-threads must be >= 1", file=sys.stderr)
+        return 1
+
     # Get repository root
     try:
         repo_root = get_repo_root()
@@ -1014,7 +1037,7 @@ def main():
 
     # Run parallel tests (default to release mode for performance)
     release_mode = not args.debug
-    success = run_parallel_tests(args.workers, args.time_budget, repo_root, release_mode, args.per_file_timeout)
+    success = run_parallel_tests(args.workers, args.time_budget, repo_root, release_mode, args.per_file_timeout, args.rayon_threads)
 
     return 0 if success else 1
 
