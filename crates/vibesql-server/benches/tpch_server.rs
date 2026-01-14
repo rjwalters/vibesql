@@ -52,6 +52,8 @@ use tokio::{net::TcpListener, runtime::Runtime, sync::oneshot};
 use tokio_postgres::NoTls;
 #[cfg(feature = "mysql")]
 use tpch::schema::load_mysql;
+#[cfg(feature = "mysql")]
+use tpch::queries::{TPCH_Q7_MYSQL, TPCH_Q8_MYSQL, TPCH_Q9_MYSQL};
 use tpch::{queries::*, schema::load_vibesql};
 
 /// Default port for vibesql-server (different from sysbench_server to avoid conflicts)
@@ -68,6 +70,33 @@ const ALL_QUERIES: &[(&str, &str)] = &[
     ("Q7", TPCH_Q7),
     ("Q8", TPCH_Q8),
     ("Q9", TPCH_Q9),
+    ("Q10", TPCH_Q10),
+    ("Q11", TPCH_Q11),
+    ("Q12", TPCH_Q12),
+    ("Q13", TPCH_Q13),
+    ("Q14", TPCH_Q14),
+    ("Q15", TPCH_Q15),
+    ("Q16", TPCH_Q16),
+    ("Q17", TPCH_Q17),
+    ("Q18", TPCH_Q18),
+    ("Q19", TPCH_Q19),
+    ("Q20", TPCH_Q20),
+    ("Q21", TPCH_Q21),
+    ("Q22", TPCH_Q22),
+];
+
+/// MySQL-specific TPC-H queries (uses YEAR() instead of EXTRACT)
+#[cfg(feature = "mysql")]
+const ALL_QUERIES_MYSQL: &[(&str, &str)] = &[
+    ("Q1", TPCH_Q1),
+    ("Q2", TPCH_Q2),
+    ("Q3", TPCH_Q3),
+    ("Q4", TPCH_Q4),
+    ("Q5", TPCH_Q5),
+    ("Q6", TPCH_Q6),
+    ("Q7", TPCH_Q7_MYSQL),
+    ("Q8", TPCH_Q8_MYSQL),
+    ("Q9", TPCH_Q9_MYSQL),
     ("Q10", TPCH_Q10),
     ("Q11", TPCH_Q11),
     ("Q12", TPCH_Q12),
@@ -238,6 +267,9 @@ impl MysqlExecutor {
 
     fn run_query(&self, sql: &str) -> Result<usize, mysql::Error> {
         let mut conn = self.pool.get_conn()?;
+        // Disable ONLY_FULL_GROUP_BY for TPC-H queries that have non-aggregated
+        // columns in SELECT that are functionally dependent on GROUP BY columns
+        conn.query_drop("SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))")?;
         let result: Vec<mysql::Row> = conn.query(sql)?;
         Ok(result.len())
     }
@@ -290,6 +322,19 @@ fn get_queries_to_run(filter: &Option<Vec<String>>) -> Vec<(&'static str, &'stat
             .copied()
             .collect(),
         None => ALL_QUERIES.to_vec(),
+    }
+}
+
+/// Get MySQL-specific queries to run based on filter
+#[cfg(feature = "mysql")]
+fn get_mysql_queries_to_run(filter: &Option<Vec<String>>) -> Vec<(&'static str, &'static str)> {
+    match filter {
+        Some(queries) => ALL_QUERIES_MYSQL
+            .iter()
+            .filter(|(name, _)| queries.iter().any(|q| q == *name))
+            .copied()
+            .collect(),
+        None => ALL_QUERIES_MYSQL.to_vec(),
     }
 }
 
@@ -607,9 +652,9 @@ fn main() {
                 eprintln!("MySQL data loaded successfully");
 
                 if let Some(executor) = MysqlExecutor::connect(&mysql_url) {
-                    // MySQL uses slightly different SQL syntax for some queries
-                    // We'll use the same queries but some may need adjustment
-                    for (query_name, query_sql) in &queries {
+                    // Get MySQL-specific queries (uses YEAR() instead of EXTRACT)
+                    let mysql_queries = get_mysql_queries_to_run(&query_filter);
+                    for (query_name, query_sql) in &mysql_queries {
                         eprintln!("\nRunning {} on MySQL...", query_name);
 
                         // Warmup
