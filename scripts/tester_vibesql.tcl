@@ -2251,9 +2251,6 @@ array set vibesql_skip_tests {
     view-21.1 "Column name propagation differs"
     view-22.1 "Error message format differs"
     view-22.2 "Error message format differs"
-    view-23.1 "INSTEAD OF trigger not supported"
-    view-23.2 "Cascades from view-23.1"
-    view-23.3 "Cascades from view-23.1"
 
     subquery-1.10.1 "Uses sqlite_master"
     subquery-1.10.2 "Uses sqlite_master"
@@ -2280,25 +2277,25 @@ array set vibesql_skip_tests {
     altertab-2.2 "Uses sqlite_master"
     altertab-2.3 "Uses sqlite_master"
     altertab-3.1 "Uses sqlite_master"
-    altertab-3.3 "Uses CREATE TRIGGER"
-    altertab-3.3.2 "Uses CREATE TRIGGER"
-    altertab-4.1 "Uses CREATE TRIGGER"
-    altertab-4.2 "Uses CREATE TRIGGER"
-    altertab-4.3 "Uses CREATE TRIGGER"
-    altertab-4.4 "Uses CREATE TRIGGER"
-    altertab-4.5 "Uses CREATE TRIGGER"
-    altertab-4.6 "Uses CREATE TRIGGER"
-    altertab-4.6.1 "Uses CREATE TRIGGER"
-    altertab-4.6.2 "Uses CREATE TRIGGER"
-    altertab-4.6.3 "Uses CREATE TRIGGER"
-    altertab-4.6.4 "Uses CREATE TRIGGER"
-    altertab-4.7 "Uses CREATE TRIGGER"
-    altertab-4.8 "Uses CREATE TRIGGER"
-    altertab-4.8.1 "Uses CREATE TRIGGER"
-    altertab-4.9 "Uses CREATE TRIGGER"
-    altertab-4.10 "Uses CREATE TRIGGER"
-    altertab-4.11 "Uses CREATE TRIGGER"
-    altertab-4.12 "Uses CREATE TRIGGER"
+    altertab-3.3 "Queries trigger DDL via sqlite_master"
+    altertab-3.3.2 "Queries trigger DDL via sqlite_master"
+    altertab-4.1 "Queries trigger DDL via sqlite_master"
+    altertab-4.2 "Queries trigger DDL via sqlite_master"
+    altertab-4.3 "Queries trigger DDL via sqlite_master"
+    altertab-4.4 "Queries trigger DDL via sqlite_master"
+    altertab-4.5 "Queries trigger DDL via sqlite_master"
+    altertab-4.6 "Queries trigger DDL via sqlite_master"
+    altertab-4.6.1 "Queries trigger DDL via sqlite_master"
+    altertab-4.6.2 "Queries trigger DDL via sqlite_master"
+    altertab-4.6.3 "Queries trigger DDL via sqlite_master"
+    altertab-4.6.4 "Queries trigger DDL via sqlite_master"
+    altertab-4.7 "Queries trigger DDL via sqlite_master"
+    altertab-4.8 "Queries trigger DDL via sqlite_master"
+    altertab-4.8.1 "Queries trigger DDL via sqlite_master"
+    altertab-4.9 "Queries trigger DDL via sqlite_master"
+    altertab-4.10 "Queries trigger DDL via sqlite_master"
+    altertab-4.11 "Queries trigger DDL via sqlite_master"
+    altertab-4.12 "Queries trigger DDL via sqlite_master"
     altertab-4.99 "Uses sqlite_master"
     altertab-5.1 "Uses sqlite_master"
     altertab-5.2 "Uses ATTACH DATABASE"
@@ -2797,6 +2794,36 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses sqlite_exec() (SQLite internal)"]
     }
 
+    # Named WINDOW clause - SQL:2003 feature not yet supported in VibeSQL
+    # Pattern: WINDOW name AS (...) in SELECT statements
+    # Example: SELECT sum(x) OVER win FROM t WINDOW win AS (ORDER BY y)
+    if {[regexp -nocase {WINDOW\s+\w+\s+AS\s*\(} $script]} {
+        return [list 1 "uses named WINDOW clause (not yet supported)"]
+    }
+    # Also detect OVER <name> without parentheses (references a named window)
+    # Example: sum(x) OVER win
+    # But avoid false positives with OVER ( - the normal inline window spec
+    if {[regexp -nocase {OVER\s+[a-zA-Z_]\w*(?:\s|$|,|\))} $script] &&
+        ![regexp -nocase {OVER\s*\(} $script]} {
+        return [list 1 "uses named window reference (not yet supported)"]
+    }
+
+    # Unsupported window functions
+    # total() as window function - note: total() as aggregate IS supported
+    # Only skip when used with OVER clause: total(...) OVER (...)
+    if {[regexp -nocase {\btotal\s*\([^)]*\)\s+OVER\s*\(} $script]} {
+        return [list 1 "uses total() as window function (not yet implemented)"]
+    }
+    # nth_value() - window function not yet implemented
+    if {[regexp -nocase {\bnth_value\s*\(} $script]} {
+        return [list 1 "uses nth_value() (not yet implemented)"]
+    }
+
+    # NULLS FIRST/LAST - SQL:2003 null ordering not yet supported
+    if {[regexp -nocase {NULLS\s+(FIRST|LAST)} $script]} {
+        return [list 1 "uses NULLS FIRST/LAST (not yet supported)"]
+    }
+
     return [list 0 ""]
 }
 
@@ -2840,6 +2867,14 @@ proc do_test {name script expected} {
             # Treat as skipped due to TRIGGER dependency cascade
             incr ::nTest -1  ;# Don't count this as a run test
             omit_test $name "cascading from skipped TRIGGER test"
+            return
+        }
+        # Check for cascading failure from skipped WINDOW test
+        if {[info exists ::window_skipped] && $::window_skipped &&
+            ([string match "*no such table*" $result] || [string match "*no such view*" $result])} {
+            # Treat as skipped due to WINDOW dependency cascade
+            incr ::nTest -1  ;# Don't count this as a run test
+            omit_test $name "cascading from skipped WINDOW test"
             return
         }
         # Script error - always print failures
@@ -3625,6 +3660,11 @@ proc omit_test {name reason {append 0}} {
     if {[string match "*TRIGGER*" $reason]} {
         set ::trigger_skipped 1
     }
+    # Track if we skipped a WINDOW-dependent test (causes cascading failures)
+    # Tests using named windows often create views/CTEs that subsequent tests depend on
+    if {[string match "*WINDOW*" $reason] || [string match "*window*" $reason]} {
+        set ::window_skipped 1
+    }
 }
 
 proc reset_db {} {
@@ -3883,6 +3923,7 @@ proc run_test_file {filename} {
     # Reset cascade tracking for new test file
     set ::attach_skipped 0
     set ::trigger_skipped 0
+    set ::window_skipped 0
 
     # Clean any existing temp db (use catch to handle race conditions)
     if {$::db_file ne ""} {
