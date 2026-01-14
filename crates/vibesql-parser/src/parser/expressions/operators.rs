@@ -255,9 +255,26 @@ impl Parser {
                     self.expect_token(Token::LParen)?;
 
                     // Check if it's a subquery (SELECT ...) or a value list
-                    if self.peek_keyword(Keyword::Select) {
-                        // It's a subquery: NOT IN (SELECT ...)
+                    // Also check for parenthesized subqueries like NOT IN ((SELECT ...))
+                    let (is_subquery_through_parens, extra_paren_depth) =
+                        self.peek_select_through_parens();
+
+                    if self.peek_keyword(Keyword::Select)
+                        || self.peek_keyword(Keyword::Values)
+                        || is_subquery_through_parens
+                    {
+                        // It's a subquery: NOT IN (SELECT ...) or NOT IN ((SELECT ...))
+                        // Consume any extra opening parentheses
+                        for _ in 0..extra_paren_depth {
+                            self.expect_token(Token::LParen)?;
+                        }
+
                         let subquery = self.parse_select_statement()?;
+
+                        // Consume matching closing parentheses
+                        for _ in 0..extra_paren_depth {
+                            self.expect_token(Token::RParen)?;
+                        }
                         self.expect_token(Token::RParen)?;
 
                         // Don't return - assign to left and continue to check for IS NULL
@@ -453,9 +470,26 @@ impl Parser {
                 self.expect_token(Token::LParen)?;
 
                 // Check if it's a subquery (SELECT ...) or a value list
-                if self.peek_keyword(Keyword::Select) {
-                    // It's a subquery: IN (SELECT ...)
+                // Also check for parenthesized subqueries like IN ((SELECT ...))
+                let (is_subquery_through_parens, extra_paren_depth) =
+                    self.peek_select_through_parens();
+
+                if self.peek_keyword(Keyword::Select)
+                    || self.peek_keyword(Keyword::Values)
+                    || is_subquery_through_parens
+                {
+                    // It's a subquery: IN (SELECT ...) or IN ((SELECT ...))
+                    // Consume any extra opening parentheses
+                    for _ in 0..extra_paren_depth {
+                        self.expect_token(Token::LParen)?;
+                    }
+
                     let subquery = self.parse_select_statement()?;
+
+                    // Consume matching closing parentheses
+                    for _ in 0..extra_paren_depth {
+                        self.expect_token(Token::RParen)?;
+                    }
                     self.expect_token(Token::RParen)?;
 
                     // Don't return - assign to left and continue to check for IS NULL

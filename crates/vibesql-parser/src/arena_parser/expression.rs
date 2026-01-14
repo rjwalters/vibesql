@@ -104,8 +104,25 @@ impl<'arena> ArenaParser<'arena> {
                 self.consume_keyword(Keyword::In)?;
                 self.expect_token(Token::LParen)?;
 
-                if self.peek_keyword(Keyword::Select) {
+                // Check for parenthesized subqueries like NOT IN ((SELECT ...))
+                let (is_subquery_through_parens, extra_paren_depth) =
+                    self.peek_select_through_parens();
+
+                if self.peek_keyword(Keyword::Select)
+                    || self.peek_keyword(Keyword::Values)
+                    || is_subquery_through_parens
+                {
+                    // Consume any extra opening parentheses
+                    for _ in 0..extra_paren_depth {
+                        self.expect_token(Token::LParen)?;
+                    }
+
                     let subquery = self.parse_select_statement()?;
+
+                    // Consume matching closing parentheses
+                    for _ in 0..extra_paren_depth {
+                        self.expect_token(Token::RParen)?;
+                    }
                     self.expect_token(Token::RParen)?;
                     let left_ref = self.arena.alloc(left);
                     return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::In {
@@ -174,8 +191,25 @@ impl<'arena> ArenaParser<'arena> {
             self.consume_keyword(Keyword::In)?;
             self.expect_token(Token::LParen)?;
 
-            if self.peek_keyword(Keyword::Select) {
+            // Check for parenthesized subqueries like IN ((SELECT ...))
+            let (is_subquery_through_parens, extra_paren_depth) =
+                self.peek_select_through_parens();
+
+            if self.peek_keyword(Keyword::Select)
+                || self.peek_keyword(Keyword::Values)
+                || is_subquery_through_parens
+            {
+                // Consume any extra opening parentheses
+                for _ in 0..extra_paren_depth {
+                    self.expect_token(Token::LParen)?;
+                }
+
                 let subquery = self.parse_select_statement()?;
+
+                // Consume matching closing parentheses
+                for _ in 0..extra_paren_depth {
+                    self.expect_token(Token::RParen)?;
+                }
                 self.expect_token(Token::RParen)?;
                 let left_ref = self.arena.alloc(left);
                 return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::In {

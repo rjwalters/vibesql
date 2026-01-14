@@ -45,6 +45,36 @@ impl Parser {
         matches!(self.peek_next(), Token::Keyword { keyword: k, .. } if k == &keyword)
     }
 
+    /// Check if there's a SELECT keyword after any number of opening parentheses.
+    /// This is used to detect subqueries in contexts like `IN ((SELECT ...))` where
+    /// extra parentheses around the SELECT should still be treated as a subquery.
+    ///
+    /// Returns (true, depth) if SELECT is found, where depth is the number of parens traversed.
+    /// Returns (false, 0) otherwise.
+    pub(super) fn peek_select_through_parens(&self) -> (bool, usize) {
+        let mut offset = 0;
+        let mut paren_depth = 0;
+
+        loop {
+            let token = self.peek_at_offset(offset);
+            match token {
+                Token::LParen => {
+                    paren_depth += 1;
+                    offset += 1;
+                }
+                Token::Keyword { keyword: Keyword::Select, .. }
+                | Token::Keyword { keyword: Keyword::Values, .. } => {
+                    // Found SELECT or VALUES after parentheses - this is a subquery
+                    return (true, paren_depth);
+                }
+                _ => {
+                    // Found something else - not a subquery through parens
+                    return (false, 0);
+                }
+            }
+        }
+    }
+
     /// Expect and consume a specific keyword.
     pub(super) fn expect_keyword(&mut self, keyword: Keyword) -> Result<(), ParseError> {
         if self.peek_keyword(keyword) {

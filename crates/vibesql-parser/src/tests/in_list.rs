@@ -259,3 +259,58 @@ fn test_parse_in_table_name_not_confused_with_subquery() {
         }
     }
 }
+
+#[test]
+fn test_parse_in_parenthesized_subquery() {
+    // PostgreSQL-style parenthesized subquery: IN ((SELECT ...))
+    // This should be treated as an IN subquery, not an IN list with a scalar subquery
+    let result = Parser::parse_sql("SELECT * FROM t1 WHERE a IN ((SELECT b FROM t2));");
+    assert!(result.is_ok(), "IN with parenthesized subquery should parse: {:?}", result);
+
+    let stmt = result.unwrap();
+    if let vibesql_ast::Statement::Select(select) = stmt {
+        // Should be In (subquery form), not InList
+        if let vibesql_ast::Expression::In { subquery, negated, .. } = &select.where_clause.unwrap()
+        {
+            assert!(!*negated);
+            // The subquery should have a proper SELECT list
+            assert!(!subquery.select_list.is_empty());
+        } else {
+            panic!("Expected In expression (subquery form), not InList");
+        }
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+#[test]
+fn test_parse_in_triple_parenthesized_subquery() {
+    // Multiple levels of parentheses: IN (((SELECT ...)))
+    let result = Parser::parse_sql("SELECT * FROM t1 WHERE a IN (((SELECT b FROM t2)));");
+    assert!(result.is_ok(), "IN with triple-parenthesized subquery should parse: {:?}", result);
+
+    let stmt = result.unwrap();
+    if let vibesql_ast::Statement::Select(select) = stmt {
+        // Should be In (subquery form), not InList
+        assert!(
+            matches!(&select.where_clause.unwrap(), vibesql_ast::Expression::In { .. }),
+            "Expected In expression (subquery form)"
+        );
+    }
+}
+
+#[test]
+fn test_parse_not_in_parenthesized_subquery() {
+    // NOT IN with parenthesized subquery
+    let result = Parser::parse_sql("SELECT * FROM t1 WHERE a NOT IN ((SELECT b FROM t2));");
+    assert!(result.is_ok(), "NOT IN with parenthesized subquery should parse: {:?}", result);
+
+    let stmt = result.unwrap();
+    if let vibesql_ast::Statement::Select(select) = stmt {
+        if let vibesql_ast::Expression::In { negated, .. } = &select.where_clause.unwrap() {
+            assert!(*negated, "NOT IN should set negated=true");
+        } else {
+            panic!("Expected In expression (subquery form)");
+        }
+    }
+}
