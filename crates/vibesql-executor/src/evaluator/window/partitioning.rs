@@ -12,16 +12,34 @@ pub struct Partition {
     pub rows: Vec<Row>,
     /// Original indices of rows before partitioning/sorting
     pub original_indices: Vec<usize>,
+    /// Column name to index mapping (for resolving named column references)
+    pub column_map: std::collections::HashMap<String, usize>,
 }
 
 impl Partition {
     pub fn new(rows: Vec<Row>) -> Self {
         let original_indices = (0..rows.len()).collect();
-        Self { rows, original_indices }
+        Self {
+            rows,
+            original_indices,
+            column_map: std::collections::HashMap::new(),
+        }
     }
 
     pub fn with_indices(rows: Vec<Row>, original_indices: Vec<usize>) -> Self {
-        Self { rows, original_indices }
+        Self {
+            rows,
+            original_indices,
+            column_map: std::collections::HashMap::new(),
+        }
+    }
+
+    pub fn with_column_map(
+        rows: Vec<Row>,
+        original_indices: Vec<usize>,
+        column_map: std::collections::HashMap<String, usize>,
+    ) -> Self {
+        Self { rows, original_indices, column_map }
     }
 
     pub fn len(&self) -> usize {
@@ -30,6 +48,17 @@ impl Partition {
 
     pub fn is_empty(&self) -> bool {
         self.rows.is_empty()
+    }
+
+    /// Get column index by name (case-insensitive)
+    pub fn get_column_index(&self, name: &str) -> Option<usize> {
+        // First try exact match
+        if let Some(&idx) = self.column_map.get(name) {
+            return Some(idx);
+        }
+        // Try lowercase match
+        let lower = name.to_lowercase();
+        self.column_map.get(&lower).copied()
     }
 }
 

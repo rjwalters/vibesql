@@ -236,11 +236,12 @@ fn extract_collations(order_items: &[vibesql_ast::OrderByItem]) -> Vec<Option<St
 
 /// Validate aggregate function argument count
 /// Returns error with SQLite-compatible message if validation fails
+/// `name` is the FunctionIdentifier which provides both canonical (lowercase) and display forms
 fn validate_aggregate_args(
-    name: &str,
+    name: &vibesql_ast::FunctionIdentifier,
     args: &[vibesql_ast::Expression],
 ) -> Result<(), ExecutorError> {
-    let name_upper = name.to_uppercase();
+    let name_upper = name.canonical().to_uppercase();
     let arg_count = args.len();
 
     // Check for wildcard in non-COUNT aggregates
@@ -262,7 +263,7 @@ fn validate_aggregate_args(
             // min() and max() with * is wrong number of args
             if has_wildcard || arg_count == 0 {
                 return Err(ExecutorError::WrongNumberOfArguments {
-                    function_name: name.to_string(), // Preserve original case
+                    function_name: name.display().to_string(),
                 });
             }
             // min/max with > 1 arg becomes scalar function, handled elsewhere
@@ -272,12 +273,12 @@ fn validate_aggregate_args(
             // These require exactly 1 argument, no wildcard allowed
             if has_wildcard || arg_count == 0 {
                 return Err(ExecutorError::WrongNumberOfArguments {
-                    function_name: name.to_string(), // Preserve original case
+                    function_name: name.display().to_string(),
                 });
             }
             if arg_count > 1 {
                 return Err(ExecutorError::WrongNumberOfArguments {
-                    function_name: name.to_string(), // Preserve original case
+                    function_name: name.display().to_string(),
                 });
             }
             Ok(())
@@ -286,7 +287,7 @@ fn validate_aggregate_args(
             // GROUP_CONCAT/STRING_AGG requires 1 or 2 arguments
             if arg_count == 0 || arg_count > 2 {
                 return Err(ExecutorError::WrongNumberOfArguments {
-                    function_name: name.to_string(), // Preserve original case
+                    function_name: name.display().to_string(),
                 });
             }
             Ok(())
@@ -295,7 +296,7 @@ fn validate_aggregate_args(
             // Unknown aggregate functions require at least 1 argument
             if arg_count == 0 {
                 return Err(ExecutorError::WrongNumberOfArguments {
-                    function_name: name.to_string(), // Preserve original case
+                    function_name: name.display().to_string(),
                 });
             }
             Ok(())
@@ -335,7 +336,7 @@ pub(super) fn evaluate(
     };
 
     // Validate argument count first
-    validate_aggregate_args(name.canonical(), args)?;
+    validate_aggregate_args(name, args)?;
 
     // Generate cache key for this aggregate expression
     // Format: "{name}:{distinct}:{arg_debug}:{order_by_debug}:{filter_debug}"
@@ -390,8 +391,8 @@ pub(super) fn evaluate(
     // This counts distinct combinations of values
     if name.to_uppercase() == "COUNT" && args.len() > 1 {
         if !distinct {
-            // SQLite-compatible error message
-            return Err(ExecutorError::WrongNumberOfArguments { function_name: name.to_string() });
+            // SQLite-compatible error message - preserve original case
+            return Err(ExecutorError::WrongNumberOfArguments { function_name: name.display().to_string() });
         }
 
         // Evaluate all arguments for each row and accumulate as tuples
@@ -572,7 +573,7 @@ pub(super) fn evaluate(
     // Handle JSON_GROUP_ARRAY with optional ORDER BY
     if name_upper == "JSON_GROUP_ARRAY" {
         if args.len() != 1 {
-            return Err(ExecutorError::WrongNumberOfArguments { function_name: name.to_string() });
+            return Err(ExecutorError::WrongNumberOfArguments { function_name: name.display().to_string() });
         }
 
         // Handle ORDER BY clause within the aggregate
@@ -684,7 +685,7 @@ pub(super) fn evaluate(
     // This should be caught by validate_aggregate_args above, but keep as safety net
     if args.len() != 1 {
         return Err(ExecutorError::WrongNumberOfArguments {
-            function_name: name.to_string(), // Preserve original case
+            function_name: name.display().to_string(),
         });
     }
 

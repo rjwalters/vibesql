@@ -37,6 +37,7 @@ pub enum Keyword {
     Natural,
     On,
     Group,
+    Groups,
     By,
     // OLAP extensions for GROUP BY
     Rollup,
@@ -432,6 +433,7 @@ impl fmt::Display for Keyword {
             Keyword::Natural => "NATURAL",
             Keyword::On => "ON",
             Keyword::Group => "GROUP",
+            Keyword::Groups => "GROUPS",
             Keyword::By => "BY",
             Keyword::Rollup => "ROLLUP",
             Keyword::Cube => "CUBE",

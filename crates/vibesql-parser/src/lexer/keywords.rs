@@ -40,6 +40,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "NATURAL" => Keyword::Natural,
     "ON" => Keyword::On,
     "GROUP" => Keyword::Group,
+    "GROUPS" => Keyword::Groups,
     "BY" => Keyword::By,
     // OLAP extensions for GROUP BY
     "ROLLUP" => Keyword::Rollup,

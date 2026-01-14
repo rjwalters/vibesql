@@ -50,6 +50,7 @@ pub fn evaluate_expression_with_map(
 ///
 /// This version uses index-based column resolution (columns named "0", "1", etc.)
 /// without requiring a column name mapping.
+#[cfg(test)]
 pub fn evaluate_expression(expr: &Expression, row: &Row) -> Result<SqlValue, String> {
     evaluate_expression_with_map(expr, row, &std::collections::HashMap::new())
 }

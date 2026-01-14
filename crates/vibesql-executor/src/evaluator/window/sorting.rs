@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 use vibesql_ast::{OrderByItem, OrderDirection};
 use vibesql_types::SqlValue;
 
-use super::{partitioning::Partition, utils::evaluate_expression};
+use super::{partitioning::Partition, utils::evaluate_expression_with_map};
 
 /// Sort a partition by ORDER BY clauses
 ///
@@ -28,10 +28,11 @@ pub fn sort_partition(partition: &mut Partition, order_by: &Option<Vec<OrderByIt
 
     // Sort indices by evaluating order expressions on the rows
     let rows = &partition.rows; // Borrow for comparison only
+    let column_map = &partition.column_map;
     indices.sort_by(|&a, &b| {
         for order_item in order_items {
-            let val_a = evaluate_expression(&order_item.expr, &rows[a]).unwrap_or(SqlValue::Null);
-            let val_b = evaluate_expression(&order_item.expr, &rows[b]).unwrap_or(SqlValue::Null);
+            let val_a = evaluate_expression_with_map(&order_item.expr, &rows[a], column_map).unwrap_or(SqlValue::Null);
+            let val_b = evaluate_expression_with_map(&order_item.expr, &rows[b], column_map).unwrap_or(SqlValue::Null);
 
             let cmp = compare_values(&val_a, &val_b);
 
@@ -85,6 +86,33 @@ pub fn compare_values(a: &SqlValue, b: &SqlValue) -> Ordering {
         }
         (SqlValue::Real(a), SqlValue::Integer(b)) => {
             a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
+        }
+
+        // Numeric type handling (f64)
+        (SqlValue::Numeric(a), SqlValue::Numeric(b)) => {
+            if a.is_nan() && b.is_nan() {
+                Ordering::Equal
+            } else if a.is_nan() {
+                Ordering::Greater
+            } else if b.is_nan() {
+                Ordering::Less
+            } else {
+                a.partial_cmp(b).unwrap_or(Ordering::Equal)
+            }
+        }
+        // Numeric coercion with Integer
+        (SqlValue::Numeric(a), SqlValue::Integer(b)) => {
+            a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Integer(a), SqlValue::Numeric(b)) => {
+            (*a as f64).partial_cmp(b).unwrap_or(Ordering::Equal)
+        }
+        // Numeric coercion with Real
+        (SqlValue::Numeric(a), SqlValue::Real(b)) => {
+            a.partial_cmp(b).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Real(a), SqlValue::Numeric(b)) => {
+            a.partial_cmp(b).unwrap_or(Ordering::Equal)
         }
 
         // Other type combinations: compare as strings

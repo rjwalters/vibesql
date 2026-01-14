@@ -788,6 +788,7 @@ impl ToSql for WindowFrame {
         let unit = match self.unit {
             FrameUnit::Rows => "ROWS",
             FrameUnit::Range => "RANGE",
+            FrameUnit::Groups => "GROUPS",
         };
 
         let frame_bounds = match &self.end {

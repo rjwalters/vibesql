@@ -88,7 +88,7 @@ impl ExpressionEvaluator<'_> {
         // SQLite requires coalesce to have at least 2 arguments
         if args.len() < 2 {
             return Err(ExecutorError::WrongNumberOfArguments {
-                function_name: "COALESCE".to_string(),
+                function_name: "coalesce".to_string(),
             });
         }
 
@@ -251,7 +251,7 @@ impl ExpressionEvaluator<'_> {
         for arg in args {
             if matches!(arg, vibesql_ast::Expression::Wildcard) {
                 return Err(ExecutorError::WrongNumberOfArguments {
-                    function_name: name.to_uppercase(),
+                    function_name: name.to_string(),
                 });
             }
         }

@@ -85,9 +85,9 @@ pub(crate) fn char_func(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 pub(crate) fn concat_ws(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     // SQLite requires at least 2 arguments: separator and at least one value
     if args.len() < 2 {
-        return Err(ExecutorError::UnsupportedFeature(
-            "wrong number of arguments to function CONCAT_WS()".to_string(),
-        ));
+        return Err(ExecutorError::WrongNumberOfArguments {
+            function_name: "concat_ws".to_string(),
+        });
     }
 
     // First argument is the separator

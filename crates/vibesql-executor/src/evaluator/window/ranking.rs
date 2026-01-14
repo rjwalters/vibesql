@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 use vibesql_ast::OrderByItem;
 use vibesql_types::SqlValue;
 
-use super::{partitioning::Partition, sorting::compare_values, utils::evaluate_expression};
+use super::{partitioning::Partition, sorting::compare_values, utils::evaluate_expression_with_map};
 
 /// Evaluate ROW_NUMBER() window function
 ///
@@ -48,9 +48,9 @@ pub fn evaluate_rank(partition: &Partition, order_by: &Option<Vec<OrderByItem>>)
             // Check if ORDER BY values differ
             let mut values_differ = false;
             for order_item in order_items {
-                let val_curr = evaluate_expression(&order_item.expr, row).unwrap_or(SqlValue::Null);
+                let val_curr = evaluate_expression_with_map(&order_item.expr, row, &partition.column_map).unwrap_or(SqlValue::Null);
                 let val_prev =
-                    evaluate_expression(&order_item.expr, prev_row).unwrap_or(SqlValue::Null);
+                    evaluate_expression_with_map(&order_item.expr, prev_row, &partition.column_map).unwrap_or(SqlValue::Null);
 
                 if compare_values(&val_curr, &val_prev) != Ordering::Equal {
                     values_differ = true;
@@ -102,9 +102,9 @@ pub fn evaluate_dense_rank(
             // Check if ORDER BY values differ
             let mut values_differ = false;
             for order_item in order_items {
-                let val_curr = evaluate_expression(&order_item.expr, row).unwrap_or(SqlValue::Null);
+                let val_curr = evaluate_expression_with_map(&order_item.expr, row, &partition.column_map).unwrap_or(SqlValue::Null);
                 let val_prev =
-                    evaluate_expression(&order_item.expr, prev_row).unwrap_or(SqlValue::Null);
+                    evaluate_expression_with_map(&order_item.expr, prev_row, &partition.column_map).unwrap_or(SqlValue::Null);
 
                 if compare_values(&val_curr, &val_prev) != Ordering::Equal {
                     values_differ = true;
@@ -217,9 +217,9 @@ pub fn evaluate_cume_dist(
             let mut differs = false;
             for order_item in order_items {
                 let val_curr =
-                    evaluate_expression(&order_item.expr, curr_row).unwrap_or(SqlValue::Null);
+                    evaluate_expression_with_map(&order_item.expr, curr_row, &partition.column_map).unwrap_or(SqlValue::Null);
                 let val_next =
-                    evaluate_expression(&order_item.expr, next_row).unwrap_or(SqlValue::Null);
+                    evaluate_expression_with_map(&order_item.expr, next_row, &partition.column_map).unwrap_or(SqlValue::Null);
 
                 if compare_values(&val_curr, &val_next) != Ordering::Equal {
                     differs = true;

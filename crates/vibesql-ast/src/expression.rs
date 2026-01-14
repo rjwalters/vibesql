@@ -488,6 +488,8 @@ pub enum FrameUnit {
     Rows,
     /// RANGE - logical range based on ORDER BY values
     Range,
+    /// GROUPS - peer groups (rows with same ORDER BY values)
+    Groups,
 }
 
 /// Frame boundary specification

@@ -171,6 +171,7 @@ fn write_window_frame<W: Write>(writer: &mut W, frame: &WindowFrame) -> Result<(
     let unit_tag = match frame.unit {
         FrameUnit::Rows => 0u8,
         FrameUnit::Range => 1,
+        FrameUnit::Groups => 2,
     };
     writer
         .write_all(&[unit_tag])
@@ -208,6 +209,7 @@ fn read_window_frame<R: Read>(reader: &mut R) -> Result<WindowFrame, StorageErro
     let unit = match unit_tag {
         0 => FrameUnit::Rows,
         1 => FrameUnit::Range,
+        2 => FrameUnit::Groups,
         _ => {
             return Err(StorageError::NotImplemented(format!(
                 "Unknown frame unit tag: {}",

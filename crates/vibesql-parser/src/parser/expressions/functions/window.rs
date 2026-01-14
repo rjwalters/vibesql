@@ -100,11 +100,12 @@ impl Parser {
             order_by = Some(order_items);
         }
 
-        // Parse frame clause (ROWS/RANGE)
+        // Parse frame clause (ROWS/RANGE/GROUPS)
         if matches!(
             self.peek(),
             Token::Keyword { keyword: Keyword::Rows, .. }
                 | Token::Keyword { keyword: Keyword::Range, .. }
+                | Token::Keyword { keyword: Keyword::Groups, .. }
         ) {
             frame = Some(self.parse_frame_clause()?);
         }
@@ -114,9 +115,9 @@ impl Parser {
         Ok(vibesql_ast::WindowSpec { partition_by, order_by, frame })
     }
 
-    /// Parse frame clause (ROWS/RANGE BETWEEN ... AND ... [EXCLUDE ...])
+    /// Parse frame clause (ROWS/RANGE/GROUPS BETWEEN ... AND ... [EXCLUDE ...])
     pub(super) fn parse_frame_clause(&mut self) -> Result<vibesql_ast::WindowFrame, ParseError> {
-        // Parse frame unit (ROWS or RANGE)
+        // Parse frame unit (ROWS, RANGE, or GROUPS)
         let unit = match self.peek() {
             Token::Keyword { keyword: Keyword::Rows, .. } => {
                 self.advance();
@@ -126,10 +127,14 @@ impl Parser {
                 self.advance();
                 vibesql_ast::FrameUnit::Range
             }
+            Token::Keyword { keyword: Keyword::Groups, .. } => {
+                self.advance();
+                vibesql_ast::FrameUnit::Groups
+            }
             _ => {
                 return Err(ParseError {
                     message: format!(
-                        "Expected ROWS or RANGE in frame clause, found {:?}",
+                        "Expected ROWS, RANGE, or GROUPS in frame clause, found {:?}",
                         self.peek()
                     ),
                 })
@@ -266,9 +271,9 @@ impl Parser {
                 }
             }
 
-            // N PRECEDING or N FOLLOWING
+            // N PRECEDING or N FOLLOWING (including negative numbers like -1 PRECEDING)
             _ => {
-                let offset = self.parse_primary_expression()?;
+                let offset = self.parse_unary_expression()?;
 
                 match self.peek() {
                     Token::Keyword { keyword: Keyword::Preceding, .. } => {

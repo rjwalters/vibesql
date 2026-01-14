@@ -949,6 +949,45 @@ impl CombinedSchema {
         }
         None
     }
+
+    /// Build a map from column names to their indices.
+    ///
+    /// This is used by window function frame calculations to resolve named column
+    /// references in ORDER BY expressions. The map contains both the original case
+    /// and lowercase versions of column names for case-insensitive matching.
+    ///
+    /// For columns that appear in multiple tables, the mapping prefers the leftmost
+    /// table (lowest start_index) to match the behavior of unqualified column lookups.
+    pub fn build_column_name_map(&self) -> std::collections::HashMap<String, usize> {
+        let mut map = std::collections::HashMap::new();
+
+        // Collect entries sorted by start_index to ensure deterministic ordering
+        let mut entries: Vec<_> = self.table_schemas.iter()
+            .filter(|(table_id, _)| !self.alias_tables.contains(*table_id))
+            .map(|(_, (start_index, schema))| (*start_index, schema))
+            .collect();
+        entries.sort_by_key(|(start_index, _)| *start_index);
+
+        for (start_index, schema) in entries {
+            for (idx, col) in schema.columns.iter().enumerate() {
+                let absolute_idx = start_index + idx;
+                let name = &col.name;
+
+                // Insert original case if not already present
+                if !map.contains_key(name) {
+                    map.insert(name.clone(), absolute_idx);
+                }
+
+                // Insert lowercase for case-insensitive matching
+                let lower = name.to_lowercase();
+                if !map.contains_key(&lower) {
+                    map.insert(lower, absolute_idx);
+                }
+            }
+        }
+
+        map
+    }
 }
 
 /// Builder for incrementally constructing a CombinedSchema

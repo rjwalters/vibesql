@@ -40,28 +40,28 @@ pub fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
                     // Multi-arg COUNT without DISTINCT is an error
                     // SQLite: "wrong number of arguments to function count()"
                     if arg_count > 1 && !*distinct {
-                        Some(name.to_string())
+                        Some(name.display().to_string())
                     } else {
                         None
                     }
                 }
                 "MIN" | "MAX" => {
                     if has_wildcard || arg_count == 0 {
-                        Some(name.to_string()) // Preserve original case for SQLite-compatible error
+                        Some(name.display().to_string())
                     } else {
                         None
                     }
                 }
                 "SUM" | "AVG" | "TOTAL" => {
                     if has_wildcard || arg_count == 0 || arg_count > 1 {
-                        Some(name.to_string()) // Preserve original case for SQLite-compatible error
+                        Some(name.display().to_string())
                     } else {
                         None
                     }
                 }
                 "GROUP_CONCAT" => {
                     if arg_count == 0 || arg_count > 2 {
-                        Some(name.to_string()) // Preserve original case for SQLite-compatible error
+                        Some(name.display().to_string())
                     } else {
                         None
                     }
@@ -89,7 +89,7 @@ pub fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
                         // count(a, b) without DISTINCT is wrong
                         // Regular count without DISTINCT can only have 0-1 args
                         if arg_count > 1 {
-                            Some(name.to_string()) // Preserve original case
+                            Some(name.display().to_string())
                         } else {
                             None
                         }
@@ -97,21 +97,21 @@ pub fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
                     "MIN" | "MAX" => {
                         // Multi-arg min/max are scalar, so only check single arg case
                         if arg_count <= 1 && (has_wildcard || arg_count == 0) {
-                            Some(name.to_string()) // Preserve original case
+                            Some(name.display().to_string())
                         } else {
                             None
                         }
                     }
                     "SUM" | "AVG" | "TOTAL" => {
                         if has_wildcard || arg_count == 0 || arg_count > 1 {
-                            Some(name.to_string()) // Preserve original case
+                            Some(name.display().to_string())
                         } else {
                             None
                         }
                     }
                     "GROUP_CONCAT" => {
                         if arg_count == 0 || arg_count > 2 {
-                            Some(name.to_string()) // Preserve original case
+                            Some(name.display().to_string())
                         } else {
                             None
                         }

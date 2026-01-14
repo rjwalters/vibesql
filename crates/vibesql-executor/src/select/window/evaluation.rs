@@ -17,7 +17,7 @@ use crate::{
         window::{
             calculate_frame_with_exclusion, evaluate_avg_window, evaluate_count_window,
             evaluate_group_concat_window, evaluate_max_window, evaluate_min_window,
-            evaluate_sum_window, partition_rows, sort_partition, Partition,
+            evaluate_sum_window, partition_rows, sort_partition, validate_frame, Partition,
         },
         CombinedExpressionEvaluator,
     },
@@ -35,6 +35,10 @@ pub(super) fn evaluate_single_window_function(
     win_func: &WindowFunctionInfo,
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<Vec<SqlValue>, ExecutorError> {
+    // Validate frame specification (checks for non-negative offsets, etc.)
+    validate_frame(&win_func.window_spec.frame)
+        .map_err(ExecutorError::SqliteCompatError)?;
+
     // Extract function details including optional FILTER clause
     let (func_name, args, filter) = match &win_func.function_spec {
         WindowFunctionSpec::Aggregate { name, args, filter } => {
@@ -52,6 +56,12 @@ pub(super) fn evaluate_single_window_function(
         evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
     };
     let mut partitions = partition_rows(rows.to_vec(), &win_func.window_spec.partition_by, eval_fn);
+
+    // Build column name map for frame calculations (RANGE/GROUPS need to resolve named columns)
+    let column_map = evaluator.get_schema().build_column_name_map();
+    for partition in &mut partitions {
+        partition.column_map = column_map.clone();
+    }
 
     // Sort each partition - parallelize when beneficial
     #[cfg(feature = "parallel")]
@@ -229,6 +239,10 @@ fn evaluate_window_function_for_partition(
                     "NTILE requires an argument".to_string(),
                 ));
             }
+            // Handle empty partition
+            if partition.is_empty() {
+                return Ok(vec![]);
+            }
             // Evaluate the NTILE argument (should be a constant)
             let n_value = evaluator.eval(&args[0], &partition.rows[0])?;
             let n = match n_value {
@@ -248,6 +262,10 @@ fn evaluate_window_function_for_partition(
                 return Err(ExecutorError::UnsupportedExpression(
                     "LAG requires at least one argument (value expression)".to_string(),
                 ));
+            }
+            // Handle empty partition
+            if partition.is_empty() {
+                return Ok(vec![]);
             }
 
             let value_expr = &args[0];
@@ -296,6 +314,10 @@ fn evaluate_window_function_for_partition(
                 return Err(ExecutorError::UnsupportedExpression(
                     "LEAD requires at least one argument (value expression)".to_string(),
                 ));
+            }
+            // Handle empty partition
+            if partition.is_empty() {
+                return Ok(vec![]);
             }
 
             let value_expr = &args[0];
@@ -394,6 +416,10 @@ fn evaluate_window_function_for_partition(
                 return Err(ExecutorError::UnsupportedExpression(
                     "NTH_VALUE requires two arguments (expression and n)".to_string(),
                 ));
+            }
+            // Handle empty partition
+            if partition.is_empty() {
+                return Ok(vec![]);
             }
 
             let value_expr = &args[0];

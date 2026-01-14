@@ -30,7 +30,7 @@ pub use aggregates::{
     evaluate_avg_window, evaluate_count_window, evaluate_group_concat_window, evaluate_max_window,
     evaluate_min_window, evaluate_sum_window,
 };
-pub use frames::{calculate_frame, calculate_frame_with_exclusion, FrameResult};
+pub use frames::{calculate_frame, calculate_frame_with_exclusion, validate_frame, FrameResult};
 pub use partitioning::{partition_rows, Partition};
 pub use ranking::{
     evaluate_cume_dist, evaluate_dense_rank, evaluate_ntile, evaluate_percent_rank, evaluate_rank,

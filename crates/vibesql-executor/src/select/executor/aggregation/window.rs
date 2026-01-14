@@ -15,7 +15,7 @@ use crate::{
         window::{
             calculate_frame_with_exclusion, evaluate_avg_window, evaluate_count_window,
             evaluate_max_window, evaluate_min_window, evaluate_sum_window, partition_rows,
-            sort_partition,
+            sort_partition, validate_frame,
         },
         CombinedExpressionEvaluator,
     },
@@ -99,6 +99,10 @@ pub(super) fn apply_window_functions_to_aggregates(
 
     // Process each window function
     for win_func in &window_funcs {
+        // Validate frame specification (checks for non-negative offsets, etc.)
+        validate_frame(&win_func.window_spec.frame)
+            .map_err(ExecutorError::SqliteCompatError)?;
+
         // The window function's argument (e.g., SUM(x)) has already been evaluated
         // and is stored at the same column index. We need to read this value from
         // each row and apply the outer window function.
