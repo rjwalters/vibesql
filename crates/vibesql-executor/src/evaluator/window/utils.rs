@@ -1,44 +1,21 @@
 //! Utility functions for window function evaluation
 //!
-//! This module provides simplified expression evaluation for LAG/LEAD window functions.
-//!
-//! # Limitations
-//!
-//! The current implementation uses a simplified expression evaluator that:
-//! - Only supports literals and column references
-//! - Resolves column references by parsing column names as numeric indices (e.g., "0", "1")
-//! - Falls back to the first column for non-numeric column names
-//!
-//! # Future Enhancement
-//!
-//! For full LAG/LEAD integration into the main window function execution path,
-//! this module should be refactored to:
-//! 1. Accept a schema parameter for proper column name resolution
-//! 2. Use the full ExpressionEvaluator instead of this simplified version
-//! 3. Support all expression types (functions, operators, subqueries, etc.)
-//! 4. Thread the evaluator through all window function implementations
-//!
-//! See `crates/executor/src/select/window/evaluation.rs` for how the main
-//! window function evaluation (SUM, AVG, COUNT, etc.) uses CombinedExpressionEvaluator.
+//! This module provides expression evaluation for window function frame calculations.
+//! The `evaluate_expression_with_map` function supports column name resolution via
+//! a pre-built column name to index mapping.
 
 use vibesql_ast::Expression;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-/// Simple expression evaluation for window functions
+/// Evaluate expression with column name mapping support
 ///
-/// This is a simplified version that handles basic cases (literals and column references).
-/// It does NOT use schema context and has limited expression support.
-///
-/// # Limitations
-/// - Column references are resolved by numeric index only
-/// - Does not support complex expressions (functions, operators, subqueries)
-/// - No type checking or validation
-///
-/// # Note
-/// This function is currently only used by LAG/LEAD window functions in tests.
-/// The main window function evaluation path uses proper ExpressionEvaluator.
-pub fn evaluate_expression(expr: &Expression, row: &Row) -> Result<SqlValue, String> {
+/// This version accepts a column name to index mapping for resolving named columns.
+pub fn evaluate_expression_with_map(
+    expr: &Expression,
+    row: &Row,
+    column_map: &std::collections::HashMap<String, usize>,
+) -> Result<SqlValue, String> {
     match expr {
         Expression::Literal(val) => Ok(val.clone()),
         Expression::ColumnRef(col_id) => {
@@ -49,13 +26,32 @@ pub fn evaluate_expression(expr: &Expression, row: &Row) -> Result<SqlValue, Str
                     .cloned()
                     .ok_or_else(|| format!("Column index {} out of bounds", index))
             } else {
-                // Fallback: assume first column
-                // This is a limitation - proper implementation should use schema
-                row.get(0).cloned().ok_or_else(|| "Row has no columns".to_string())
+                // Try to find column name in the mapping
+                if let Some(&index) = column_map.get(column) {
+                    row.get(index)
+                        .cloned()
+                        .ok_or_else(|| format!("Column index {} out of bounds", index))
+                } else if let Some(&index) = column_map.get(&column.to_lowercase()) {
+                    row.get(index)
+                        .cloned()
+                        .ok_or_else(|| format!("Column index {} out of bounds", index))
+                } else {
+                    // Fallback: assume first column
+                    // This is a limitation - proper implementation should use schema
+                    row.get(0).cloned().ok_or_else(|| "Row has no columns".to_string())
+                }
             }
         }
         _ => Err("Unsupported expression in window function".to_string()),
     }
+}
+
+/// Simple expression evaluator for tests
+///
+/// This version uses index-based column resolution (columns named "0", "1", etc.)
+/// without requiring a column name mapping.
+pub fn evaluate_expression(expr: &Expression, row: &Row) -> Result<SqlValue, String> {
+    evaluate_expression_with_map(expr, row, &std::collections::HashMap::new())
 }
 
 /// Evaluate default value expression

@@ -481,10 +481,10 @@ fn test_window_first_value() {
         assert_eq!(result[0].values[3], SqlValue::Integer(120000));
         assert_eq!(result[1].values[3], SqlValue::Integer(120000));
 
-        // Sales rows should have top_salary = 85000 (Carol is first in DESC order)
-        // Note: Carol (85000) comes before Dave (90000) when sorted by string comparison
-        assert_eq!(result[2].values[3], SqlValue::Integer(85000));
-        assert_eq!(result[3].values[3], SqlValue::Integer(85000));
+        // Sales rows should have top_salary = 90000 (Dave is first in DESC order)
+        // When sorted by salary DESC: Dave (90000) comes before Carol (85000)
+        assert_eq!(result[2].values[3], SqlValue::Integer(90000));
+        assert_eq!(result[3].values[3], SqlValue::Integer(90000));
 
         println!("✅ FIRST_VALUE test works!");
     } else {
@@ -568,10 +568,10 @@ fn test_window_last_value() {
         assert_eq!(result[0].values[3], SqlValue::Integer(95000));
         assert_eq!(result[1].values[3], SqlValue::Integer(95000));
 
-        // Sales rows should have lowest_salary = 90000 (Dave is last in DESC order)
-        // Note: Dave (90000) comes after Carol (85000) when sorted by string comparison
-        assert_eq!(result[2].values[3], SqlValue::Integer(90000));
-        assert_eq!(result[3].values[3], SqlValue::Integer(90000));
+        // Sales rows should have lowest_salary = 85000 (Carol is last in DESC order)
+        // When sorted by salary DESC: Dave (90000) comes before Carol (85000)
+        assert_eq!(result[2].values[3], SqlValue::Integer(85000));
+        assert_eq!(result[3].values[3], SqlValue::Integer(85000));
 
         println!("✅ LAST_VALUE test works!");
     } else {
