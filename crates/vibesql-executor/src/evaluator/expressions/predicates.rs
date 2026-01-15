@@ -34,6 +34,20 @@ impl ExpressionEvaluator<'_> {
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
         use vibesql_types::SqlValue;
 
+        // Handle row value constructor BETWEEN
+        // (a, b) BETWEEN (low_a, low_b) AND (high_a, high_b)
+        // is equivalent to: (a, b) >= (low_a, low_b) AND (a, b) <= (high_a, high_b)
+        if let (
+            vibesql_ast::Expression::RowValueConstructor(expr_exprs),
+            vibesql_ast::Expression::RowValueConstructor(low_exprs),
+            vibesql_ast::Expression::RowValueConstructor(high_exprs),
+        ) = (expr, low, high)
+        {
+            return self.eval_row_value_between(
+                expr_exprs, low_exprs, high_exprs, negated, symmetric, row,
+            );
+        }
+
         let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
 
         // Get effective collation: explicit COLLATE or column-level collation
@@ -725,6 +739,93 @@ impl ExpressionEvaluator<'_> {
                 Ok(vibesql_types::SqlValue::Null)
             } else {
                 Ok(vibesql_types::SqlValue::Boolean(negated))
+            }
+        }
+    }
+
+    /// Evaluate row value BETWEEN predicate
+    ///
+    /// `(a, b) BETWEEN (low_a, low_b) AND (high_a, high_b)`
+    /// is equivalent to: `(a, b) >= (low_a, low_b) AND (a, b) <= (high_a, high_b)`
+    ///
+    /// NULL handling follows the standard row value comparison semantics.
+    fn eval_row_value_between(
+        &self,
+        expr_exprs: &[vibesql_ast::Expression],
+        low_exprs: &[vibesql_ast::Expression],
+        high_exprs: &[vibesql_ast::Expression],
+        negated: bool,
+        symmetric: bool,
+        row: &vibesql_storage::Row,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        use vibesql_types::SqlValue;
+
+        // Row values must have the same number of elements
+        if expr_exprs.len() != low_exprs.len() || expr_exprs.len() != high_exprs.len() {
+            return Err(ExecutorError::UnsupportedExpression(format!(
+                "Row value constructor size mismatch in BETWEEN: expr has {} elements, low has {}, high has {}",
+                expr_exprs.len(),
+                low_exprs.len(),
+                high_exprs.len()
+            )));
+        }
+
+        if expr_exprs.is_empty() {
+            return Err(ExecutorError::UnsupportedExpression(
+                "Empty row value constructors are not allowed".to_string(),
+            ));
+        }
+
+        // Determine effective bounds (swap if symmetric and low > high)
+        let (effective_low, effective_high) = if symmetric {
+            let gt_op = vibesql_ast::BinaryOperator::GreaterThan;
+            let low_gt_high =
+                self.eval_row_value_comparison(low_exprs, &gt_op, high_exprs, row)?;
+
+            if matches!(low_gt_high, SqlValue::Boolean(true)) {
+                (high_exprs, low_exprs) // Swap
+            } else {
+                (low_exprs, high_exprs)
+            }
+        } else {
+            (low_exprs, high_exprs)
+        };
+
+        if negated {
+            // NOT BETWEEN: expr < low OR expr > high
+            let lt_op = vibesql_ast::BinaryOperator::LessThan;
+            let gt_op = vibesql_ast::BinaryOperator::GreaterThan;
+
+            let lt_low =
+                self.eval_row_value_comparison(expr_exprs, &lt_op, effective_low, row)?;
+            let gt_high =
+                self.eval_row_value_comparison(expr_exprs, &gt_op, effective_high, row)?;
+
+            // OR logic with three-valued semantics
+            match (&lt_low, &gt_high) {
+                (SqlValue::Boolean(true), _) | (_, SqlValue::Boolean(true)) => {
+                    Ok(SqlValue::Boolean(true))
+                }
+                (SqlValue::Boolean(false), SqlValue::Boolean(false)) => Ok(SqlValue::Boolean(false)),
+                _ => Ok(SqlValue::Null),
+            }
+        } else {
+            // BETWEEN: expr >= low AND expr <= high
+            let ge_op = vibesql_ast::BinaryOperator::GreaterThanOrEqual;
+            let le_op = vibesql_ast::BinaryOperator::LessThanOrEqual;
+
+            let ge_low =
+                self.eval_row_value_comparison(expr_exprs, &ge_op, effective_low, row)?;
+            let le_high =
+                self.eval_row_value_comparison(expr_exprs, &le_op, effective_high, row)?;
+
+            // AND logic with three-valued semantics
+            match (&ge_low, &le_high) {
+                (SqlValue::Boolean(true), SqlValue::Boolean(true)) => Ok(SqlValue::Boolean(true)),
+                (SqlValue::Boolean(false), _) | (_, SqlValue::Boolean(false)) => {
+                    Ok(SqlValue::Boolean(false))
+                }
+                _ => Ok(SqlValue::Null),
             }
         }
     }

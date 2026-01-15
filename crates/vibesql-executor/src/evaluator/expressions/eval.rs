@@ -692,6 +692,17 @@ impl ExpressionEvaluator<'_> {
             }
 
             vibesql_ast::Expression::IsDistinctFrom { left, right, negated } => {
+                // Handle row value constructor IS [NOT] DISTINCT FROM
+                // (a, b) IS (c, d) is equivalent to (a, b) IS NOT DISTINCT FROM (c, d)
+                // SQLite: a IS b returns TRUE if both are NULL or both are equal (not NULL-propagating)
+                if let (
+                    vibesql_ast::Expression::RowValueConstructor(left_exprs),
+                    vibesql_ast::Expression::RowValueConstructor(right_exprs),
+                ) = (left.as_ref(), right.as_ref())
+                {
+                    return self.eval_row_value_is_distinct(left_exprs, right_exprs, *negated, row);
+                }
+
                 let left_val = self.eval(left, row)?;
                 let right_val = self.eval(right, row)?;
                 let is_distinct = super::super::core::values_are_distinct(&left_val, &right_val);
@@ -1160,7 +1171,7 @@ impl ExpressionEvaluator<'_> {
     ///
     /// NULL handling: If any element comparison involves NULL, the result follows
     /// SQL three-valued logic (NULL propagates unless short-circuited by a definite result).
-    fn eval_row_value_comparison(
+    pub(super) fn eval_row_value_comparison(
         &self,
         left_exprs: &[vibesql_ast::Expression],
         op: &vibesql_ast::BinaryOperator,
@@ -1356,5 +1367,68 @@ impl ExpressionEvaluator<'_> {
             // For < or >, all equal means FALSE
             Ok(SqlValue::Boolean(false))
         }
+    }
+
+    /// Evaluate row value IS [NOT] DISTINCT FROM comparison
+    ///
+    /// In SQLite:
+    /// - `(a, b) IS (c, d)` means `(a, b) IS NOT DISTINCT FROM (c, d)`
+    ///   Returns TRUE if a IS c AND b IS d (NULL-safe equality, NULL IS NULL = TRUE)
+    /// - `(a, b) IS NOT (c, d)` means `(a, b) IS DISTINCT FROM (c, d)`
+    ///   Returns TRUE if any element is distinct (NULL IS NOT NULL = TRUE)
+    ///
+    /// Note: This differs from `=` comparison where NULL = NULL returns NULL
+    fn eval_row_value_is_distinct(
+        &self,
+        left_exprs: &[vibesql_ast::Expression],
+        right_exprs: &[vibesql_ast::Expression],
+        negated: bool,
+        row: &vibesql_storage::Row,
+    ) -> Result<SqlValue, ExecutorError> {
+        // Row values must have the same number of elements
+        if left_exprs.len() != right_exprs.len() {
+            return Err(ExecutorError::UnsupportedExpression(format!(
+                "Row value constructor size mismatch: left has {} elements, right has {}",
+                left_exprs.len(),
+                right_exprs.len()
+            )));
+        }
+
+        // Empty row values are not allowed
+        if left_exprs.is_empty() {
+            return Err(ExecutorError::UnsupportedExpression(
+                "Empty row value constructors are not allowed".to_string(),
+            ));
+        }
+
+        // Evaluate all elements and check distinctness
+        // IS NOT DISTINCT FROM (negated=true in SQLite's IS syntax):
+        //   All elements must be "not distinct" (NULL-safe equal)
+        // IS DISTINCT FROM (negated=false in SQLite's IS NOT syntax):
+        //   At least one element must be "distinct"
+        for (left_expr, right_expr) in left_exprs.iter().zip(right_exprs.iter()) {
+            let left_val = self.eval(left_expr, row)?;
+            let right_val = self.eval(right_expr, row)?;
+
+            let is_distinct = super::super::core::values_are_distinct(&left_val, &right_val);
+
+            if negated {
+                // IS NOT DISTINCT FROM: all must be not distinct
+                // If any is distinct, return FALSE
+                if is_distinct {
+                    return Ok(SqlValue::Boolean(false));
+                }
+            } else {
+                // IS DISTINCT FROM: if any is distinct, return TRUE
+                if is_distinct {
+                    return Ok(SqlValue::Boolean(true));
+                }
+            }
+        }
+
+        // If we get here:
+        // - For IS NOT DISTINCT FROM (negated=true): all were not distinct → TRUE
+        // - For IS DISTINCT FROM (negated=false): none were distinct → FALSE
+        Ok(SqlValue::Boolean(negated))
     }
 }
