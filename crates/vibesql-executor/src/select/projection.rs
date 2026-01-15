@@ -11,9 +11,6 @@ pub(crate) fn project_row_combined(
     window_mapping: &Option<HashMap<WindowFunctionKey, usize>>,
     buffer_pool: &vibesql_storage::QueryBufferPool,
 ) -> Result<vibesql_storage::Row, crate::errors::ExecutorError> {
-    if std::env::var("ROWID_DEBUG").is_ok() {
-        eprintln!("[ROWID_DEBUG] project_row_combined: row.row_id={:?}, row.row_ids={:?}", row.row_id, row.row_ids);
-    }
     // Use pooled buffer to reduce allocation overhead
     let mut values = buffer_pool.get_value_buffer(columns.len());
 
