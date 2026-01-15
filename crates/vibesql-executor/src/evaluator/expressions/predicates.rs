@@ -43,7 +43,9 @@ impl ExpressionEvaluator<'_> {
         let low_val = self.eval(low, row)?;
         let high_val = self.eval(high, row)?;
 
-        // Apply collation transformation if needed (for NOCASE, uppercase all strings)
+        // Apply collation transformation if needed
+        // NOCASE: uppercase all strings for case-insensitive comparison
+        // RTRIM: trim trailing whitespace from all strings
         let transform_for_collation = |val: SqlValue, collation_name: &str| -> SqlValue {
             if collation_name.eq_ignore_ascii_case("nocase") {
                 match val {
@@ -52,6 +54,16 @@ impl ExpressionEvaluator<'_> {
                     }
                     SqlValue::Character(s) => {
                         SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase()))
+                    }
+                    other => other,
+                }
+            } else if collation_name.eq_ignore_ascii_case("rtrim") {
+                match val {
+                    SqlValue::Varchar(s) => {
+                        SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end()))
+                    }
+                    SqlValue::Character(s) => {
+                        SqlValue::Character(arcstr::ArcStr::from(s.trim_end()))
                     }
                     other => other,
                 }
