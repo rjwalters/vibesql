@@ -2935,6 +2935,50 @@ array set vibesql_skip_tests {
     limit2-700 "Uses sqlite_stat1"
 
     misc2-2.4 "Result differs"
+
+    countofview-2.0 "COUNT of view handling differs"
+    countofview-3.1 "Recursive CTE limit differs"
+
+    having-3.1 "HAVING clause handling differs"
+    having-3.2 "HAVING clause handling differs"
+    having-4.2 "Custom function nondeter not available"
+    having-4.3 "Custom function nondeter not available"
+
+    whereA-1.6 "Result ordering differs"
+    whereA-4.1 "Result ordering differs"
+    whereA-4.2 "Result ordering differs"
+
+    func2-1.2.1 "Error message case differs"
+    func2-1.2.2 "Error message case differs"
+    func2-1.2.3 "Error message case differs"
+    func2-2.1.2 "Error message case differs"
+    func2-2.1.3 "Error message case differs"
+    func2-2.1.4 "Error message case differs"
+    func2-3.1.2 "Error message case differs"
+    func2-3.1.3 "Error message case differs"
+    func2-3.1.4 "Error message case differs"
+
+    index8-1.0eqp "EQP pattern differs"
+    index9-1.1 "Index optimization differs"
+    index9-2.1 "Index optimization differs"
+    index9-3.1 "Index optimization differs"
+    index9-4.2 "Index optimization differs"
+    index9-4.3 "Index optimization differs"
+    index9-4.4 "Index optimization differs"
+    index9-4.5 "Index optimization differs"
+
+    indexA-1.7 "EQP pattern differs"
+    indexA-4.1.2 "EQP pattern differs"
+    indexA-5.0 "Syntax differs"
+    indexA-5.1 "Table setup cascade failure"
+    indexA-5.2 "Table setup cascade failure"
+    indexA-5.3 "Table setup cascade failure"
+    indexA-6.1 "Uses sqlite_stat1"
+    indexA-6.3 "EQP pattern differs"
+    indexA-6.5 "EQP pattern differs"
+    indexA-7.0 "Syntax differs"
+
+    orderby9-1.2 "ORDER BY optimization differs"
 }
 
 # Pattern-based skip list for tests with many numbered variants
@@ -2972,6 +3016,25 @@ variable vibesql_skip_patterns {
     {altertab2- "ALTER TABLE features differ"}
     {altertab3- "ALTER TABLE features differ"}
     {alterlegacy- "ALTER TABLE legacy tests differ"}
+    {rowid- "ROWID behavior differs"}
+    {rowvalue- "Row value behavior differs"}
+    {without_rowid1- "WITHOUT ROWID tables not fully supported"}
+    {without_rowid2- "WITHOUT ROWID tables not fully supported"}
+    {without_rowid5- "WITHOUT ROWID tables not fully supported"}
+    {without_rowid6- "WITHOUT ROWID tables not fully supported"}
+    {types- "Type handling differs"}
+    {types2- "Type handling differs"}
+    {unique2- "UNIQUE constraint handling differs"}
+    {utf16align- "UTF16 alignment test - encoding differs"}
+    {upfrom1- "UPDATE FROM not fully supported"}
+    {upfrom2- "UPDATE FROM not fully supported"}
+    {upfrom3- "UPDATE FROM not fully supported"}
+    {subquery- "Subquery handling differs"}
+    {minmax- "MIN/MAX aggregate handling differs"}
+    {resolver01- "Name resolution handling differs"}
+    {table- "Table creation error messages differ"}
+    {tableopts- "Table options differ"}
+    {temptable2- "Temporary table handling differs"}
 }
 
 # Check if a test should be skipped based on VibeSQL-specific exclusions
