@@ -1,4 +1,4 @@
-name: CI and Deploy
+name: CI (main)
 
 on:
   push:
@@ -7,8 +7,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # Simpler concurrency: just prevent multiple CI runs on main
 concurrency:
@@ -17,7 +15,7 @@ concurrency:
 
 jobs:
   # ============================================================================
-  # JOB 1: Build and Test
+  # Build and Test
   # ============================================================================
   test:
     runs-on: ubuntu-latest
@@ -50,16 +48,6 @@ jobs:
         continue-on-error: true
 
   # ============================================================================
-  # JOB 2: Deploy Web Demo
-  # Benchmark data is committed directly to web-demo/public/benchmarks/
-  # and gets deployed with the web demo build.
+  # Web Demo is deployed manually via: cd web-demo && wrangler deploy
+  # See CLAUDE.md for instructions.
   # ============================================================================
-  deploy:
-    needs: [test]
-    uses: ./.github/workflows/deploy-pages.yml
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    with:
-      rebuild-web-demo: true
