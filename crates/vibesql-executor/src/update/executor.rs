@@ -227,8 +227,13 @@ pub(super) fn execute_internal(
         evaluator.clear_cse_cache();
 
         // Apply assignments to build updated row
-        let (new_row, changed_columns) =
+        let (mut new_row, mut changed_columns) =
             value_updater.apply_assignments(&row, &stmt.assignments)?;
+
+        // Recompute generated columns if any source columns changed
+        // Generated columns are defined with AS(expression) syntax and must be updated
+        // whenever their dependent columns are modified
+        apply_generated_columns_for_update(schema, &mut new_row, &mut changed_columns)?;
 
         // Check if primary key is being updated
         let updates_pk = if let Some(ref pk_idx) = pk_indices {
@@ -966,4 +971,50 @@ fn validate_function_exists(name: &str, database: &Database) -> Result<(), Execu
 
     // Function not found
     Err(ExecutorError::NoSuchFunction { function_name: name.to_string() })
+}
+
+/// Recompute generated columns after UPDATE assignments are applied.
+///
+/// Generated columns (defined with AS(expression) syntax) must be recomputed whenever
+/// their dependent columns are modified. This function:
+/// 1. Evaluates each generated column's expression against the updated row
+/// 2. Updates the row with the new computed values
+/// 3. Tracks generated columns in changed_columns for index maintenance
+fn apply_generated_columns_for_update(
+    schema: &vibesql_catalog::TableSchema,
+    row: &mut Row,
+    changed_columns: &mut HashSet<usize>,
+) -> Result<(), ExecutorError> {
+    // Check if there are any generated columns
+    let has_generated = schema.columns.iter().any(|col| col.generated_expr.is_some());
+    if !has_generated {
+        return Ok(());
+    }
+
+    // Create evaluator with the current row values
+    let evaluator = ExpressionEvaluator::new(schema);
+
+    for (col_idx, col) in schema.columns.iter().enumerate() {
+        if let Some(generated_expr) = &col.generated_expr {
+            // Evaluate the generated expression against the current row
+            let generated_value = evaluator.eval(generated_expr, row)?;
+            let coerced_value =
+                crate::insert::validation::coerce_value(generated_value, &col.data_type)?;
+
+            // Check if the value actually changed
+            let old_value = row.get(col_idx);
+            let value_changed = old_value != Some(&coerced_value);
+
+            // Update the row with the new generated value
+            row.set(col_idx, coerced_value)
+                .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+
+            // Track the generated column as changed for index maintenance
+            if value_changed {
+                changed_columns.insert(col_idx);
+            }
+        }
+    }
+
+    Ok(())
 }
