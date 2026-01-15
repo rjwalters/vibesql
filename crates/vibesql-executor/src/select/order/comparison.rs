@@ -13,6 +13,7 @@ use super::SortKey;
 /// Apply collation transformation to a SQL value for comparison.
 ///
 /// For NOCASE collation, string values are uppercased for case-insensitive comparison.
+/// For RTRIM collation, trailing whitespace is removed from string values.
 /// Other values are returned unchanged.
 fn apply_collation<'a>(
     val: &'a vibesql_types::SqlValue,
@@ -29,6 +30,20 @@ fn apply_collation<'a>(
                 vibesql_types::SqlValue::Character(s) => {
                     Cow::Owned(vibesql_types::SqlValue::Character(arcstr::ArcStr::from(
                         s.to_uppercase(),
+                    )))
+                }
+                other => Cow::Borrowed(other),
+            }
+        } else if coll.eq_ignore_ascii_case("rtrim") {
+            match val {
+                vibesql_types::SqlValue::Varchar(s) => {
+                    Cow::Owned(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                        s.trim_end(),
+                    )))
+                }
+                vibesql_types::SqlValue::Character(s) => {
+                    Cow::Owned(vibesql_types::SqlValue::Character(arcstr::ArcStr::from(
+                        s.trim_end(),
                     )))
                 }
                 other => Cow::Borrowed(other),

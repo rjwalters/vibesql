@@ -818,6 +818,27 @@ impl CombinedExpressionEvaluator<'_> {
                                     other => other.clone(),
                                 };
                                 (left_transformed, right_transformed)
+                            } else if collation_lower == "rtrim" {
+                                // For RTRIM collation, trim trailing whitespace from both string values
+                                let left_transformed = match &left_val {
+                                    SqlValue::Varchar(s) => {
+                                        SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end()))
+                                    }
+                                    SqlValue::Character(s) => {
+                                        SqlValue::Character(arcstr::ArcStr::from(s.trim_end()))
+                                    }
+                                    other => other.clone(),
+                                };
+                                let right_transformed = match &right_val {
+                                    SqlValue::Varchar(s) => {
+                                        SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end()))
+                                    }
+                                    SqlValue::Character(s) => {
+                                        SqlValue::Character(arcstr::ArcStr::from(s.trim_end()))
+                                    }
+                                    other => other.clone(),
+                                };
+                                (left_transformed, right_transformed)
                             } else {
                                 // For BINARY or other collations, use values as-is
                                 (left_val, right_val)
