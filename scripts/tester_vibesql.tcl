@@ -1876,8 +1876,6 @@ array set vibesql_skip_tests {
     where9-10.1 "Uses INDEXED BY hint - SQLite-specific"
     where9-10.2 "Uses INDEXED BY hint - SQLite-specific"
 
-    func-9.14 "printf %.*c (repeat character) format not implemented"
-
     func-10.1 "Uses testfunc - SQLite test extension"
     func-10.2 "Uses testfunc - SQLite test extension"
     func-10.3 "Uses testfunc - SQLite test extension"

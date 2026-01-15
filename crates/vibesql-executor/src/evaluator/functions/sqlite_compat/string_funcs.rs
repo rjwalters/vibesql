@@ -127,6 +127,8 @@ struct FormatSpec {
     width: Option<usize>,
     /// Precision (for floats: decimal places; for strings: max length)
     precision: Option<usize>,
+    /// Whether precision should be read from the next argument (for %.*s, %.*c, etc.)
+    precision_from_arg: bool,
     /// The conversion specifier character
     specifier: char,
 }
@@ -173,7 +175,27 @@ pub(crate) fn printf(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         }
 
         // Parse format specifier: %[flags][width][.precision]specifier
-        let spec = parse_format_spec(&mut chars);
+        let mut spec = parse_format_spec(&mut chars);
+
+        // If precision comes from argument, consume it first
+        if spec.precision_from_arg {
+            if arg_index < format_args.len() {
+                let prec_val = &format_args[arg_index];
+                arg_index += 1;
+                // Convert the precision argument to usize
+                spec.precision = match prec_val {
+                    SqlValue::Integer(i) => Some((*i).max(0) as usize),
+                    SqlValue::Bigint(i) => Some((*i).max(0) as usize),
+                    SqlValue::Smallint(i) => Some((*i).max(0) as usize),
+                    SqlValue::Numeric(n) => Some((*n).max(0.0) as usize),
+                    SqlValue::Real(r) => Some((*r).max(0.0) as usize),
+                    SqlValue::Double(d) => Some((*d).max(0.0) as usize),
+                    _ => Some(0),
+                };
+            } else {
+                spec.precision = Some(0);
+            }
+        }
 
         // Format the value according to the specifier
         let formatted = if arg_index >= format_args.len() {
@@ -238,16 +260,22 @@ fn parse_format_spec(chars: &mut std::iter::Peekable<std::str::Chars>) -> Format
     // Parse precision
     if chars.peek() == Some(&'.') {
         chars.next();
-        let mut prec_str = String::new();
-        while let Some(&c) = chars.peek() {
-            if c.is_ascii_digit() {
-                prec_str.push(c);
-                chars.next();
-            } else {
-                break;
+        // Check for * (precision from argument)
+        if chars.peek() == Some(&'*') {
+            chars.next();
+            spec.precision_from_arg = true;
+        } else {
+            let mut prec_str = String::new();
+            while let Some(&c) = chars.peek() {
+                if c.is_ascii_digit() {
+                    prec_str.push(c);
+                    chars.next();
+                } else {
+                    break;
+                }
             }
+            spec.precision = Some(prec_str.parse().unwrap_or(0));
         }
-        spec.precision = Some(prec_str.parse().unwrap_or(0));
     }
 
     // Parse specifier
@@ -267,7 +295,7 @@ fn format_value(val: &SqlValue, spec: &FormatSpec) -> String {
         'x' => format_hex_with_spec(val, false, spec),
         'X' => format_hex_with_spec(val, true, spec),
         'o' => format_octal_with_spec(val, spec),
-        'c' => format_char(val),
+        'c' => format_char(val, spec.precision),
         other => format!("%{}", other),
     };
 
@@ -440,17 +468,32 @@ fn format_octal_with_spec(val: &SqlValue, spec: &FormatSpec) -> String {
     }
 }
 
-fn format_char(val: &SqlValue) -> String {
+fn format_char(val: &SqlValue, precision: Option<usize>) -> String {
     let code = match val {
         SqlValue::Null => return "(null)".to_string(),
         SqlValue::Integer(i) => *i as u32,
         SqlValue::Bigint(i) => *i as u32,
         SqlValue::Smallint(i) => *i as u32,
         SqlValue::Numeric(n) => *n as u32,
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            // For string input, use the first character's code point (SQLite behavior)
+            match s.chars().next() {
+                Some(c) => c as u32,
+                None => return String::new(),
+            }
+        }
         _ => return "".to_string(),
     };
 
-    char::from_u32(code).map(|c| c.to_string()).unwrap_or_default()
+    match char::from_u32(code) {
+        Some(c) => {
+            // If precision is specified, repeat the character that many times
+            // This implements %.*c behavior (e.g., printf('%.*c', 5, 65) -> "AAAAA")
+            let repeat_count = precision.unwrap_or(1);
+            c.to_string().repeat(repeat_count)
+        }
+        None => String::new(),
+    }
 }
 
 /// UNISTR(x) - Interpret Unicode escape sequences in a string
@@ -701,6 +744,146 @@ mod tests {
         assert_eq!(
             printf(&[SqlValue::Varchar("100%%".into())]).unwrap(),
             SqlValue::Varchar("100%".into())
+        );
+    }
+
+    #[test]
+    fn test_printf_char() {
+        // Basic %c - single character from code point
+        assert_eq!(
+            printf(&[SqlValue::Varchar("%c".into()), SqlValue::Integer(65)]).unwrap(),
+            SqlValue::Varchar("A".into())
+        );
+
+        // %c with asterisk - no precision specified should output single char
+        assert_eq!(
+            printf(&[SqlValue::Varchar("%c".into()), SqlValue::Integer(42)]).unwrap(),
+            SqlValue::Varchar("*".into())
+        );
+    }
+
+    #[test]
+    fn test_printf_precision_from_arg() {
+        // %.*c - repeat character N times
+        assert_eq!(
+            printf(&[
+                SqlValue::Varchar("%.*c".into()),
+                SqlValue::Integer(5),  // precision: repeat 5 times
+                SqlValue::Integer(65)  // 'A'
+            ])
+            .unwrap(),
+            SqlValue::Varchar("AAAAA".into())
+        );
+
+        // %.*c with zero precision - empty string
+        assert_eq!(
+            printf(&[
+                SqlValue::Varchar("%.*c".into()),
+                SqlValue::Integer(0),
+                SqlValue::Integer(65)
+            ])
+            .unwrap(),
+            SqlValue::Varchar("".into())
+        );
+
+        // %.*c with precision 1 - single character
+        assert_eq!(
+            printf(&[
+                SqlValue::Varchar("%.*c".into()),
+                SqlValue::Integer(1),
+                SqlValue::Integer(66)  // 'B'
+            ])
+            .unwrap(),
+            SqlValue::Varchar("B".into())
+        );
+
+        // %.*c with asterisk character
+        assert_eq!(
+            printf(&[
+                SqlValue::Varchar("%.*c".into()),
+                SqlValue::Integer(3),
+                SqlValue::Integer(42)  // '*'
+            ])
+            .unwrap(),
+            SqlValue::Varchar("***".into())
+        );
+
+        // %.*s - precision for string truncation
+        assert_eq!(
+            printf(&[
+                SqlValue::Varchar("%.*s".into()),
+                SqlValue::Integer(5),
+                SqlValue::Varchar("Hello, World!".into())
+            ])
+            .unwrap(),
+            SqlValue::Varchar("Hello".into())
+        );
+    }
+
+    #[test]
+    fn test_printf_char_with_width() {
+        // %10.*c with width and precision - right-padded with spaces
+        assert_eq!(
+            printf(&[
+                SqlValue::Varchar("%10.*c".into()),
+                SqlValue::Integer(3),
+                SqlValue::Integer(42)  // '*'
+            ])
+            .unwrap(),
+            SqlValue::Varchar("       ***".into())
+        );
+
+        // %-10.*c with left justification
+        assert_eq!(
+            printf(&[
+                SqlValue::Varchar("%-10.*c".into()),
+                SqlValue::Integer(3),
+                SqlValue::Integer(42)  // '*'
+            ])
+            .unwrap(),
+            SqlValue::Varchar("***       ".into())
+        );
+    }
+
+    #[test]
+    fn test_printf_char_with_string_arg() {
+        // %c with string argument - uses first character's code point (SQLite behavior)
+        assert_eq!(
+            printf(&[SqlValue::Varchar("%c".into()), SqlValue::Varchar("A".into())]).unwrap(),
+            SqlValue::Varchar("A".into())
+        );
+
+        // %.*c with string argument - repeat first character N times
+        assert_eq!(
+            printf(&[
+                SqlValue::Varchar("%.*c".into()),
+                SqlValue::Integer(5),
+                SqlValue::Varchar("m".into())  // 'm' as string
+            ])
+            .unwrap(),
+            SqlValue::Varchar("mmmmm".into())
+        );
+
+        // %.*c with longer string - should only use first character
+        assert_eq!(
+            printf(&[
+                SqlValue::Varchar("%.*c".into()),
+                SqlValue::Integer(3),
+                SqlValue::Varchar("hello".into())  // only 'h' is used
+            ])
+            .unwrap(),
+            SqlValue::Varchar("hhh".into())
+        );
+
+        // Mixed usage matching TCL test func-9.14 pattern
+        assert_eq!(
+            printf(&[
+                SqlValue::Varchar("abc%.*cxyz".into()),
+                SqlValue::Integer(5),
+                SqlValue::Varchar("m".into())
+            ])
+            .unwrap(),
+            SqlValue::Varchar("abcmmmmmxyz".into())
         );
     }
 }
