@@ -182,8 +182,17 @@ impl SelectExecutor<'_> {
 
             // Fetch the rows
             // Issue #3790: Use get_row() which returns None for deleted rows
-            let rows: Vec<Row> =
-                row_indices.iter().filter_map(|&idx| table.get_row(idx).cloned()).collect();
+            // Issue #4954: Set row_id when cloning for rowid support
+            let rows: Vec<Row> = row_indices
+                .iter()
+                .filter_map(|&idx| {
+                    table.get_row(idx).map(|row| {
+                        let mut cloned = row.clone();
+                        cloned.set_row_id((idx + 1) as u64);
+                        cloned
+                    })
+                })
+                .collect();
 
             // Build schema for projection and filtering
             let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
@@ -319,25 +328,35 @@ impl SelectExecutor<'_> {
             }
 
             // Perform index lookup
-            let rows = if key_values.len() == index_columns.len() {
+            // Issue #4954: Use index data directly to get row indices, then set row_id when cloning
+            let index_data = match self.database.get_index_data(index_name) {
+                Some(idx) => idx,
+                None => continue,
+            };
+
+            let row_indices = if key_values.len() == index_columns.len() {
                 // Full key match - use exact lookup
-                let rows_result = self
-                    .database
-                    .lookup_by_index(index_name, &key_values)
-                    .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
-                match rows_result {
-                    Some(refs) => refs.into_iter().cloned().collect::<Vec<_>>(),
+                match index_data.get(&key_values) {
+                    Some(indices) => indices,
                     None => vec![],
                 }
             } else {
-                // Prefix match - use prefix lookup
-                self.database
-                    .lookup_by_index_prefix(index_name, &key_values)
-                    .map_err(|e| ExecutorError::StorageError(e.to_string()))?
-                    .into_iter()
-                    .cloned()
-                    .collect::<Vec<_>>()
+                // Prefix match - use prefix scan
+                index_data.prefix_scan(&key_values)
             };
+
+            // Fetch rows with row_id set
+            // Issue #3790: Use get_row() which returns None for deleted rows
+            let rows: Vec<Row> = row_indices
+                .iter()
+                .filter_map(|&idx| {
+                    table.get_row(idx).map(|row| {
+                        let mut cloned = row.clone();
+                        cloned.set_row_id((idx + 1) as u64);
+                        cloned
+                    })
+                })
+                .collect();
 
             // Check if WHERE clause has predicates not covered by the index lookup.
             // If so, we need to apply the full WHERE clause as a filter.

@@ -274,7 +274,17 @@ pub(crate) fn project_row_combined(
     // This allows buffer capacity reuse while avoiding clone overhead
     let result_values = std::mem::take(&mut values);
     buffer_pool.return_value_buffer(values);
-    Ok(vibesql_storage::Row::new(result_values))
+
+    // Issue #4954: Preserve row_id and row_ids from source row when projecting
+    // This is needed for queries like `SELECT rowid, a FROM t WHERE b=1` to work
+    // correctly when an index scan is used
+    let mut result = vibesql_storage::Row::new(result_values);
+    if let Some(ref row_ids) = row.row_ids {
+        result.row_ids = Some(row_ids.clone());
+    } else if let Some(row_id) = row.row_id {
+        result.row_id = Some(row_id);
+    }
+    Ok(result)
 }
 
 /// Evaluate an expression, checking for window functions first
