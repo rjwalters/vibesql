@@ -2122,7 +2122,6 @@ array set vibesql_skip_tests {
     orderby1-1.103 "Uses eqp proc - EXPLAIN QUERY PLAN wrapper"
 
     expr-1.135 "printf %c on large integer differs from SQLite"
-    expr-2.2 "Precedence of - with || differs from SQLite"
     expr-6.4 "NOT NULL literal optimization differs"
     expr-6.21 "COALESCE with NOT IN differs"
     expr-6.22 "COALESCE with NOT IN differs"
