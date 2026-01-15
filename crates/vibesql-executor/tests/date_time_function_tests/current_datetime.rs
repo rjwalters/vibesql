@@ -252,7 +252,7 @@ fn test_datetime_no_arguments_error() {
 }
 
 #[test]
-fn test_datetime_invalid_string_error() {
+fn test_datetime_invalid_string_returns_null() {
     let (evaluator, row) = setup_test();
 
     let expr = create_datetime_function(
@@ -261,25 +261,486 @@ fn test_datetime_invalid_string_error() {
             "invalid-date",
         )))],
     );
-    let result = evaluator.eval(&expr, &row);
+    let result = evaluator.eval(&expr, &row).unwrap();
 
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Unable to parse datetime string"));
+    // Invalid datetime strings return NULL (SQLite behavior)
+    assert!(matches!(result, vibesql_types::SqlValue::Null));
 }
 
+// ==================== DATETIME MODIFIERS ====================
+
 #[test]
-fn test_datetime_modifiers_not_supported() {
+fn test_datetime_plus_one_day() {
     let (evaluator, row) = setup_test();
 
     let expr = create_datetime_function(
         "DATETIME",
         vec![
-            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("now"))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
             create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("+1 day"))),
         ],
     );
-    let result = evaluator.eval(&expr, &row);
+    let result = evaluator.eval(&expr, &row).unwrap();
 
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("modifiers not yet supported"));
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2003-10-23 12:34:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_minus_one_day() {
+    let (evaluator, row) = setup_test();
+
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("-1 day"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2003-10-21 12:34:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_fractional_day() {
+    let (evaluator, row) = setup_test();
+
+    // +1.25 days = 1 day + 6 hours
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("+1.25 day"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2003-10-23 18:34:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_plus_months() {
+    let (evaluator, row) = setup_test();
+
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("11 month"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2004-09-22 12:34:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_minus_years() {
+    let (evaluator, row) = setup_test();
+
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("-5 years"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "1998-10-22 12:34:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_plus_minutes() {
+    let (evaluator, row) = setup_test();
+
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("+10.5 minutes"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2003-10-22 12:44:30");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_minus_hours() {
+    let (evaluator, row) = setup_test();
+
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("-1.25 hours"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2003-10-22 11:19:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_plus_seconds() {
+    let (evaluator, row) = setup_test();
+
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("11 seconds"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2003-10-22 12:34:11");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_start_of_month() {
+    let (evaluator, row) = setup_test();
+
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("start of month"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2003-10-01 00:00:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_start_of_year() {
+    let (evaluator, row) = setup_test();
+
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("start of year"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2003-01-01 00:00:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_start_of_day() {
+    let (evaluator, row) = setup_test();
+
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("start of day"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2003-10-22 00:00:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_weekday_modifier() {
+    let (evaluator, row) = setup_test();
+
+    // 2003-10-22 is a Wednesday (weekday 3)
+    // weekday 0 (Sunday) should advance to 2003-10-26
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("weekday 0"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2003-10-26 12:34:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_weekday_same_day() {
+    let (evaluator, row) = setup_test();
+
+    // 2003-10-22 is a Wednesday (weekday 3)
+    // weekday 3 should stay on the same day
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("weekday 3"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2003-10-22 12:34:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_multiple_modifiers() {
+    let (evaluator, row) = setup_test();
+
+    // Test chaining multiple modifiers: start of month, then +1 day
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("start of month"))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("+1 day"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2003-10-02 00:00:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_multiple_modifiers_complex() {
+    let (evaluator, row) = setup_test();
+
+    // Test: start of month, +1 month, -1 day = last day of current month at 00:00:00
+    // From 2003-10-22: start of month -> 2003-10-01, +1 month -> 2003-11-01, -1 day -> 2003-10-31
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("start of month"))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("+1 month"))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("-1 day"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2003-10-31 00:00:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_unixepoch_modifier() {
+    let (evaluator, row) = setup_test();
+
+    // Unix epoch 946684800 = 2000-01-01 00:00:00 UTC
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Integer(946684800)),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("unixepoch"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "2000-01-01 00:00:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_unixepoch_zero() {
+    let (evaluator, row) = setup_test();
+
+    // Unix epoch 0 = 1970-01-01 00:00:00 UTC
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Integer(0)),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("unixepoch"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    match result {
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            assert_eq!(ts.to_string(), "1970-01-01 00:00:00");
+        }
+        _ => panic!("Expected Timestamp, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_datetime_invalid_modifier_returns_null() {
+    let (evaluator, row) = setup_test();
+
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("+5 bogus"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    // Invalid modifiers return NULL (SQLite behavior)
+    assert!(matches!(result, vibesql_types::SqlValue::Null));
+}
+
+#[test]
+fn test_datetime_invalid_weekday_returns_null() {
+    let (evaluator, row) = setup_test();
+
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("weekday 7"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    // weekday 7 is invalid (should be 0-6)
+    assert!(matches!(result, vibesql_types::SqlValue::Null));
+}
+
+#[test]
+fn test_datetime_incomplete_start_of_returns_null() {
+    let (evaluator, row) = setup_test();
+
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("start of"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    // Incomplete "start of" returns NULL
+    assert!(matches!(result, vibesql_types::SqlValue::Null));
+}
+
+#[test]
+fn test_datetime_invalid_start_of_unit_returns_null() {
+    let (evaluator, row) = setup_test();
+
+    let expr = create_datetime_function(
+        "DATETIME",
+        vec![
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "2003-10-22 12:34:00",
+            ))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("start of bogus"))),
+        ],
+    );
+    let result = evaluator.eval(&expr, &row).unwrap();
+
+    // Invalid "start of" unit returns NULL
+    assert!(matches!(result, vibesql_types::SqlValue::Null));
 }
