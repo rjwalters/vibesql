@@ -7,7 +7,7 @@ use bumpalo::collections::Vec as BumpVec;
 use super::{
     expression::Expression,
     interner::Symbol,
-    select::{CommonTableExpr, SelectStmt},
+    select::{CommonTableExpr, FromClause, SelectStmt},
 };
 
 // ============================================================================
@@ -146,6 +146,10 @@ pub struct UpdateStmt<'arena> {
     /// Optional table alias (SQLite extension: UPDATE t1 AS xyz SET ...)
     pub alias: Option<Symbol>,
     pub assignments: BumpVec<'arena, Assignment<'arena>>,
+    /// Optional FROM clause for multi-table UPDATE (SQLite 3.33.0+ / SQL:1999)
+    /// Syntax: UPDATE t1 SET col = t2.val FROM t2 WHERE t1.id = t2.id
+    /// See: <https://www.sqlite.org/lang_update.html#update_from>
+    pub from_clause: Option<BumpVec<'arena, FromClause<'arena>>>,
     pub where_clause: Option<WhereClause<'arena>>,
     /// Optional conflict resolution clause (SQLite extension)
     /// Syntax: UPDATE OR REPLACE|IGNORE|ABORT|ROLLBACK|FAIL table SET ...

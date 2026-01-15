@@ -84,6 +84,21 @@ impl<'arena> ArenaParser<'arena> {
         // Parse assignments
         let assignments = self.parse_assignments()?;
 
+        // Parse optional FROM clause (SQLite 3.33.0+ UPDATE FROM syntax)
+        // Syntax: UPDATE t1 SET col = t2.val FROM t2 [, t3 ...] WHERE ...
+        let from_clause = if self.try_consume_keyword(Keyword::From) {
+            let mut froms = BumpVec::new_in(self.arena);
+            loop {
+                froms.push(self.parse_from_clause()?);
+                if !self.try_consume(&Token::Comma) {
+                    break;
+                }
+            }
+            Some(froms)
+        } else {
+            None
+        };
+
         // Parse optional WHERE clause
         let where_clause = if self.try_consume_keyword(Keyword::Where) {
             // Check for WHERE CURRENT OF cursor_name
@@ -110,7 +125,7 @@ impl<'arena> ArenaParser<'arena> {
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
 
-        let stmt = UpdateStmt { with_clause: None, table_name, quoted, alias, assignments, where_clause, conflict_clause };
+        let stmt = UpdateStmt { with_clause: None, table_name, quoted, alias, assignments, from_clause, where_clause, conflict_clause };
 
         Ok(self.arena.alloc(stmt))
     }

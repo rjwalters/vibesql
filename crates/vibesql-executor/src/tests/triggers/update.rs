@@ -60,6 +60,7 @@ fn test_after_update_trigger_fires() {
                 arcstr::ArcStr::from("alice_updated"),
             )),
         }],
+        from_clause: None,
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Equal,
@@ -131,6 +132,7 @@ fn test_before_update_trigger_fires() {
                 arcstr::ArcStr::from("alice_updated"),
             )),
         }],
+        from_clause: None,
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Equal,

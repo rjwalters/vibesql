@@ -1062,6 +1062,12 @@ fn walk_update<V: ExpressionVisitor>(visitor: &mut V, stmt: &UpdateStmt) {
             return;
         }
     }
+    // Walk FROM clause (UPDATE FROM syntax)
+    if let Some(froms) = &stmt.from_clause {
+        for from in froms {
+            walk_from_clause(visitor, from);
+        }
+    }
     if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
         walk_expression(visitor, expr);
     }
@@ -1329,6 +1335,9 @@ pub fn transform_update<V: ExpressionMutVisitor>(visitor: &mut V, stmt: UpdateSt
             .into_iter()
             .map(|a| Assignment { column: a.column, value: transform_expression(visitor, a.value) })
             .collect(),
+        from_clause: stmt.from_clause.map(|froms| {
+            froms.into_iter().map(|f| transform_from_clause(visitor, f)).collect()
+        }),
         where_clause: stmt.where_clause.map(|w| match w {
             WhereClause::Condition(expr) => {
                 WhereClause::Condition(transform_expression(visitor, expr))
