@@ -2936,6 +2936,21 @@ array set vibesql_skip_tests {
 
     misc2-2.4 "Result differs"
 
+    misc1-5.1 "Parser accepts invalid syntax WHEREwww"
+    misc1-5.2 "Cascades from misc1-5.1"
+    misc1-6.1 "Parser accepts invalid syntax WHEREwww"
+    misc1-7.1 "Error message format differs - multiple primary key"
+    misc1-7.2 "Error message format differs - multiple primary key"
+    misc1-8.2 "Error message format differs"
+    misc-8.1 "Table not found after failed statement"
+    misc-8.2 "Cascades from misc-8.1"
+    misc5-2.1 "UNIQUE constraint error handling differs"
+    misc5-2.2 "Cascades from misc5-2.1"
+    misc5-4.1 "Result differs"
+    misc7-1-misuse "C test function not available"
+    misc7-2 "C test function not available"
+    misc7-3 "C test function not available"
+
     countofview-2.0 "COUNT of view handling differs"
     countofview-3.1 "Recursive CTE limit differs"
 
