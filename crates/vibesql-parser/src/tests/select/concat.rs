@@ -42,24 +42,25 @@ fn test_parse_concat_with_literals() {
 
 #[test]
 fn test_parse_concat_precedence() {
-    // || should have same precedence as + and -
+    // Per SQLite, || has HIGHER precedence than + and -
+    // So "a + b || c" should parse as "a + (b || c)"
     let sql = "SELECT a + b || c FROM t";
     let stmt = Parser::parse_sql(sql).unwrap();
 
     match stmt {
         vibesql_ast::Statement::Select(select) => {
-            // Should parse as (a + b) || c
+            // Should parse as a + (b || c)
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => {
                     match expr {
-                        vibesql_ast::Expression::BinaryOp { left, op, .. } => {
-                            assert_eq!(*op, vibesql_ast::BinaryOperator::Concat);
-                            // Left should be (a + b)
-                            match &**left {
+                        vibesql_ast::Expression::BinaryOp { right, op, .. } => {
+                            assert_eq!(*op, vibesql_ast::BinaryOperator::Plus);
+                            // Right should be (b || c)
+                            match &**right {
                                 vibesql_ast::Expression::BinaryOp { op: inner_op, .. } => {
-                                    assert_eq!(*inner_op, vibesql_ast::BinaryOperator::Plus);
+                                    assert_eq!(*inner_op, vibesql_ast::BinaryOperator::Concat);
                                 }
-                                _ => panic!("Expected BinaryOp for left side"),
+                                _ => panic!("Expected BinaryOp for right side"),
                             }
                         }
                         _ => panic!("Expected BinaryOp expression"),

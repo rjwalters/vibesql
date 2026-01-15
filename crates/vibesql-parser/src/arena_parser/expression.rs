@@ -420,23 +420,39 @@ impl<'arena> ArenaParser<'arena> {
         Ok(left)
     }
 
-    /// Parse additive expression.
+    /// Parse additive expression (handles +, -).
+    /// Per SQLite, || has higher precedence than + and -, so it's handled in parse_concat_expression.
     fn parse_additive_expression(&mut self) -> Result<Expression<'arena>, ParseError> {
-        let mut left = self.parse_multiplicative_expression()?;
+        let mut left = self.parse_concat_expression()?;
 
         loop {
             let op = match self.peek() {
                 Token::Symbol('+') => BinaryOperator::Plus,
                 Token::Symbol('-') => BinaryOperator::Minus,
-                Token::Operator(MultiCharOperator::Concat) => BinaryOperator::Concat,
                 _ => break,
             };
             self.advance();
 
-            let right = self.parse_multiplicative_expression()?;
+            let right = self.parse_concat_expression()?;
             let left_ref = self.arena.alloc(left);
             let right_ref = self.arena.alloc(right);
             left = Expression::BinaryOp { op, left: left_ref, right: right_ref };
+        }
+
+        Ok(left)
+    }
+
+    /// Parse string concatenation expression (handles ||).
+    /// Per SQLite, || has higher precedence than + and -, but lower than * / %.
+    fn parse_concat_expression(&mut self) -> Result<Expression<'arena>, ParseError> {
+        let mut left = self.parse_multiplicative_expression()?;
+
+        while self.peek() == &Token::Operator(MultiCharOperator::Concat) {
+            self.advance();
+            let right = self.parse_multiplicative_expression()?;
+            let left_ref = self.arena.alloc(left);
+            let right_ref = self.arena.alloc(right);
+            left = Expression::BinaryOp { op: BinaryOperator::Concat, left: left_ref, right: right_ref };
         }
 
         Ok(left)

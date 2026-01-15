@@ -139,26 +139,44 @@ impl Parser {
         Ok(left)
     }
 
-    /// Parse additive expression (handles +, -, and ||)
+    /// Parse additive expression (handles +, -)
+    /// Per SQLite, || has higher precedence than + and -, so it's handled in parse_concat_expression
     pub(super) fn parse_additive_expression(
         &mut self,
     ) -> Result<vibesql_ast::Expression, ParseError> {
-        let mut left = self.parse_multiplicative_expression()?;
+        let mut left = self.parse_concat_expression()?;
 
         loop {
             let op = match self.peek() {
                 Token::Symbol('+') => vibesql_ast::BinaryOperator::Plus,
                 Token::Symbol('-') => vibesql_ast::BinaryOperator::Minus,
-                Token::Operator(crate::token::MultiCharOperator::Concat) => {
-                    vibesql_ast::BinaryOperator::Concat
-                }
                 _ => break,
             };
             self.advance();
 
-            let right = self.parse_multiplicative_expression()?;
+            let right = self.parse_concat_expression()?;
             left = vibesql_ast::Expression::BinaryOp {
                 op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parse string concatenation expression (handles ||)
+    /// Per SQLite, || has higher precedence than + and -, but lower than * / %
+    pub(super) fn parse_concat_expression(
+        &mut self,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
+        let mut left = self.parse_multiplicative_expression()?;
+
+        while self.peek() == &Token::Operator(crate::token::MultiCharOperator::Concat) {
+            self.advance();
+            let right = self.parse_multiplicative_expression()?;
+            left = vibesql_ast::Expression::BinaryOp {
+                op: vibesql_ast::BinaryOperator::Concat,
                 left: Box::new(left),
                 right: Box::new(right),
             };
