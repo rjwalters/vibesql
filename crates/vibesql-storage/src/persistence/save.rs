@@ -218,6 +218,28 @@ impl Database {
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
                 }
 
+                // Add CHECK constraints
+                // We always output CONSTRAINT <name> CHECK (<expr>) to preserve user-provided names.
+                // For unnamed constraints, the name equals the expression text, which will be
+                // re-derived when the table is reloaded.
+                for (constraint_name, check_expr) in &schema.check_constraints {
+                    use vibesql_ast::pretty_print::ToSql;
+                    let expr_text = check_expr.to_sql();
+                    // Only output CONSTRAINT keyword if the name is different from expression
+                    // (i.e., it's a user-provided name)
+                    if constraint_name != &expr_text {
+                        write!(writer, ", CONSTRAINT {} CHECK ({})", constraint_name, expr_text)
+                            .map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                    } else {
+                        write!(writer, ", CHECK ({})", expr_text)
+                            .map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                    }
+                }
+
                 // Close the column definitions
                 write!(writer, ")")
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;

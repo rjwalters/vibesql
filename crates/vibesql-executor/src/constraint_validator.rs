@@ -6,7 +6,8 @@
 #![allow(clippy::new_without_default)]
 
 use vibesql_ast::{
-    ColumnConstraintKind, ColumnDef, Expression, TableConstraint, TableConstraintKind,
+    pretty_print::ToSql, ColumnConstraintKind, ColumnDef, Expression, TableConstraint,
+    TableConstraintKind,
 };
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_types::DataType;
@@ -60,7 +61,6 @@ impl ConstraintValidator {
         table_constraints: &[TableConstraint],
     ) -> Result<ConstraintResult, ExecutorError> {
         let mut result = ConstraintResult::new();
-        let mut constraint_counter = 0;
 
         // Track if we've seen a primary key at column level
         let mut has_column_level_pk = false;
@@ -88,8 +88,12 @@ impl ConstraintValidator {
                         result.unique_constraints.push(vec![col_def.name.clone()]);
                     }
                     ColumnConstraintKind::Check(expr) => {
-                        let constraint_name = format!("check_{}", constraint_counter);
-                        constraint_counter += 1;
+                        // Use explicit name if provided, otherwise use expression text
+                        // This matches SQLite's behavior for error messages
+                        let constraint_name = constraint
+                            .name
+                            .clone()
+                            .unwrap_or_else(|| expr.to_sql());
                         result.check_constraints.push((constraint_name, (**expr).clone()));
                     }
                     ColumnConstraintKind::NotNull
@@ -150,8 +154,12 @@ impl ConstraintValidator {
                     result.unique_constraints.push(column_names);
                 }
                 TableConstraintKind::Check { expr } => {
-                    let constraint_name = format!("check_{}", constraint_counter);
-                    constraint_counter += 1;
+                    // Use explicit name if provided, otherwise use expression text
+                    // This matches SQLite's behavior for error messages
+                    let constraint_name = table_constraint
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| expr.to_sql());
                     result.check_constraints.push((constraint_name, (**expr).clone()));
                 }
                 TableConstraintKind::ForeignKey { .. } => {

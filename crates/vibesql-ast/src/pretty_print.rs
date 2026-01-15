@@ -306,7 +306,13 @@ impl ToSql for Expression {
                     right_sql
                 };
 
-                format!("{} {} {}", left_str, op_sql, right_str)
+                // Use compact format (no spaces) for symbolic operators, spaces for word operators
+                // This matches SQLite's behavior in CHECK constraint error messages
+                if op.is_word_operator() {
+                    format!("{} {} {}", left_str, op_sql, right_str)
+                } else {
+                    format!("{}{}{}", left_str, op_sql, right_str)
+                }
             }
 
             Expression::Conjunction(exprs) => {
@@ -1215,7 +1221,8 @@ mod tests {
             left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("id", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         };
-        assert_eq!(expr.to_sql(), "id = 1");
+        // Compact format: no spaces around symbolic operators
+        assert_eq!(expr.to_sql(), "id=1");
     }
 
     #[test]
@@ -1286,7 +1293,8 @@ mod tests {
             set_operation: None,
             values: None,
         };
-        assert_eq!(stmt.to_sql(), "SELECT id, name FROM users WHERE active = 1");
+        // Compact format: no spaces around symbolic operators
+        assert_eq!(stmt.to_sql(), "SELECT id, name FROM users WHERE active=1");
     }
 
     #[test]
@@ -1356,7 +1364,8 @@ mod tests {
             alias: None,
         };
 
-        assert_eq!(from.to_sql(), "orders AS o INNER JOIN customers AS c ON o.customer_id = c.id");
+        // Compact format: no spaces around symbolic operators
+        assert_eq!(from.to_sql(), "orders AS o INNER JOIN customers AS c ON o.customer_id=c.id");
     }
 
     #[test]
@@ -1387,7 +1396,8 @@ mod tests {
                 "non-positive".into(),
             )))),
         };
-        assert_eq!(expr.to_sql(), "CASE WHEN x > 0 THEN 'positive' ELSE 'non-positive' END");
+        // Compact format: no spaces around symbolic operators
+        assert_eq!(expr.to_sql(), "CASE WHEN x>0 THEN 'positive' ELSE 'non-positive' END");
     }
 
     #[test]

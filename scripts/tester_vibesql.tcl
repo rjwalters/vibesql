@@ -350,8 +350,10 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {FOREIGN KEY constraint} $error_msg]} {
         return "FOREIGN KEY constraint failed"
     }
-    if {[regexp -nocase {CHECK constraint} $error_msg]} {
-        return "CHECK constraint failed"
+    # CHECK constraint errors - now output in SQLite-compatible format directly
+    # Just return the error message as-is if it's already in the right format
+    if {[regexp -nocase {^CHECK constraint failed:} $error_msg]} {
+        return $error_msg
     }
 
     # Syntax/parse errors - parser now produces SQLite-compatible format directly
@@ -1000,8 +1002,9 @@ proc exec_preserve_newlines {sql db_file} {
     }
 
     # Check for errors in output (regardless of exit code)
-    # vibesql outputs errors starting with "Error"
-    if {[regexp {^Error} $result]} {
+    # vibesql outputs errors on lines starting with "Error executing statement"
+    # or "Error:" - look for these patterns anywhere in output
+    if {[regexp {(?m)^Error executing statement|^Error:} $result]} {
         error [translate_error_to_sqlite $result]
     }
 
@@ -3015,7 +3018,6 @@ variable vibesql_skip_patterns {
     {collateA- "Collation behavior differs"}
     {e_totalchanges- "total_changes() not implemented"}
     {e_wal- "WAL mode not implemented"}
-    {check- "CHECK constraint enforcement not fully implemented"}
     {aggnested- "Nested aggregate functions not fully supported"}
     {printf2- "format() function behavior differs"}
     {randexpr- "Random expression stress test"}
