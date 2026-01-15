@@ -48,6 +48,17 @@ pub enum BinaryOperator {
                            * - IN: Subquery or value list support */
 }
 
+impl BinaryOperator {
+    /// Returns true if this operator is represented as a word (AND, OR, DIV)
+    /// rather than a symbol (+, -, <, etc.)
+    ///
+    /// Word operators require spaces around them in SQL, while symbolic
+    /// operators do not (though spaces are optional).
+    pub fn is_word_operator(&self) -> bool {
+        matches!(self, BinaryOperator::And | BinaryOperator::Or | BinaryOperator::IntegerDivide)
+    }
+}
+
 /// Unary operators for SQL expressions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOperator {

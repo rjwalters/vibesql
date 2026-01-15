@@ -57,11 +57,12 @@ fn test_update_check_constraint_violation() {
     let result = UpdateExecutor::execute(&stmt, &mut db);
     assert!(result.is_err());
     match result.unwrap_err() {
-        ExecutorError::ConstraintViolation(msg) => {
-            assert!(msg.contains("CHECK"));
+        ExecutorError::SqliteCompatError(msg) => {
+            // SQLite-compatible error format: "CHECK constraint failed: <name_or_expr>"
+            assert!(msg.contains("CHECK constraint failed"));
             assert!(msg.contains("price_positive"));
         }
-        other => panic!("Expected ConstraintViolation, got {:?}", other),
+        other => panic!("Expected SqliteCompatError, got {:?}", other),
     }
 }
 
@@ -133,10 +134,11 @@ fn test_update_check_constraint_with_expression() {
     let result = UpdateExecutor::execute(&stmt2, &mut db);
     assert!(result.is_err());
     match result.unwrap_err() {
-        ExecutorError::ConstraintViolation(msg) => {
-            assert!(msg.contains("CHECK"));
+        ExecutorError::SqliteCompatError(msg) => {
+            // SQLite-compatible error format: "CHECK constraint failed: <name_or_expr>"
+            assert!(msg.contains("CHECK constraint failed"));
             assert!(msg.contains("bonus_less_than_salary"));
         }
-        other => panic!("Expected ConstraintViolation, got {:?}", other),
+        other => panic!("Expected SqliteCompatError, got {:?}", other),
     }
 }

@@ -567,8 +567,9 @@ fn validate_non_uniqueness_constraints(
             // CHECK constraint passes if result is TRUE or NULL (UNKNOWN)
             // CHECK constraint fails if result is FALSE
             if result == SqlValue::Boolean(false) {
-                return Err(ExecutorError::ConstraintViolation(format!(
-                    "CHECK constraint '{}' violated",
+                // SQLite-compatible error format: "CHECK constraint failed: <name_or_expr>"
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "CHECK constraint failed: {}",
                     constraint_name
                 )));
             }
