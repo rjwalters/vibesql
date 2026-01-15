@@ -1,6 +1,7 @@
 //! Row selection logic for UPDATE operations
 
 use vibesql_ast::{BinaryOperator, Expression};
+use vibesql_types::SqlValue;
 
 use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator};
 
@@ -203,8 +204,9 @@ impl<'a> RowSelector<'a> {
                 match where_clause {
                     vibesql_ast::WhereClause::Condition(where_expr) => {
                         let result = evaluator.eval(where_expr, row)?;
-                        // SQL semantics: only TRUE (not NULL) causes update
-                        matches!(result, vibesql_types::SqlValue::Boolean(true))
+                        // SQL semantics: only truthy values cause update
+                        // SQLite treats non-zero numeric values as TRUE
+                        is_truthy(&result)
                     }
                     vibesql_ast::WhereClause::CurrentOf(cursor_name) => {
                         // TODO: Implement cursor support for positioned UPDATE/DELETE
@@ -244,5 +246,36 @@ impl<'a> RowSelector<'a> {
         }
 
         Ok(candidate_rows)
+    }
+}
+
+/// Check if a SqlValue is truthy using SQLite truthiness rules.
+///
+/// SQLite rules:
+/// - `Boolean(true)` → true
+/// - `Boolean(false)` → false
+/// - `Null` → false (NULL is not truthy for WHERE clause purposes)
+/// - `0` and `0.0` → false
+/// - Any other numeric value → true
+/// - Strings → parse leading numeric, non-zero is true, 0 or non-numeric is false
+fn is_truthy(value: &SqlValue) -> bool {
+    use SqlValue::*;
+    match value {
+        Boolean(b) => *b,
+        Null => false, // NULL is not truthy for row selection
+        // Integer types: 0 is false, non-zero is true
+        Integer(n) => *n != 0,
+        Smallint(n) => *n != 0,
+        Bigint(n) => *n != 0,
+        Unsigned(n) => *n != 0,
+        // Floating point types: 0.0 is false, non-zero is true
+        Float(f) => *f != 0.0,
+        Real(f) => *f != 0.0,
+        Double(f) => *f != 0.0,
+        Numeric(f) => *f != 0.0,
+        // String types: SQLite parses leading numeric portion
+        Varchar(s) | Character(s) => crate::evaluator::operators::is_truthy_string(s),
+        // Other types are not truthy (conservative default)
+        _ => false,
     }
 }

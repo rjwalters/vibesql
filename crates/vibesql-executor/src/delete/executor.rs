@@ -3,6 +3,7 @@
 use vibesql_ast::DeleteStmt;
 use vibesql_catalog::TableIdentifier;
 use vibesql_storage::Database;
+use vibesql_types::SqlValue;
 
 use super::integrity::check_no_child_references;
 use crate::{
@@ -605,7 +606,8 @@ impl DeleteExecutor {
                     vibesql_ast::WhereClause::Condition(where_expr) => {
                         // Propagate errors from eval() - don't silently swallow them
                         let result = evaluator.eval(where_expr, row)?;
-                        matches!(result, vibesql_types::SqlValue::Boolean(true))
+                        // SQLite treats non-zero numeric values as TRUE
+                        is_truthy(&result)
                     }
                     vibesql_ast::WhereClause::CurrentOf(_cursor_name) => {
                         return Err(ExecutorError::UnsupportedFeature(
@@ -722,11 +724,9 @@ fn execute_delete_on_view(
         for row in &all_rows.rows {
             let matches = match &stmt.where_clause {
                 Some(vibesql_ast::WhereClause::Condition(expr)) => {
-                    match evaluator.eval(expr, row)? {
-                        vibesql_types::SqlValue::Boolean(b) => b,
-                        vibesql_types::SqlValue::Null => false,
-                        _ => false,
-                    }
+                    let result = evaluator.eval(expr, row)?;
+                    // SQLite treats non-zero numeric values as TRUE
+                    is_truthy(&result)
                 }
                 None => true, // No WHERE clause - delete all rows
                 Some(vibesql_ast::WhereClause::CurrentOf(_)) => {
@@ -780,4 +780,35 @@ fn build_view_schema(
         .collect();
 
     Ok(vibesql_catalog::TableSchema::new(view_def.name.clone(), columns))
+}
+
+/// Check if a SqlValue is truthy using SQLite truthiness rules.
+///
+/// SQLite rules:
+/// - `Boolean(true)` → true
+/// - `Boolean(false)` → false
+/// - `Null` → false (NULL is not truthy for WHERE clause purposes)
+/// - `0` and `0.0` → false
+/// - Any other numeric value → true
+/// - Strings → parse leading numeric, non-zero is true, 0 or non-numeric is false
+fn is_truthy(value: &SqlValue) -> bool {
+    use SqlValue::*;
+    match value {
+        Boolean(b) => *b,
+        Null => false, // NULL is not truthy for row selection
+        // Integer types: 0 is false, non-zero is true
+        Integer(n) => *n != 0,
+        Smallint(n) => *n != 0,
+        Bigint(n) => *n != 0,
+        Unsigned(n) => *n != 0,
+        // Floating point types: 0.0 is false, non-zero is true
+        Float(f) => *f != 0.0,
+        Real(f) => *f != 0.0,
+        Double(f) => *f != 0.0,
+        Numeric(f) => *f != 0.0,
+        // String types: SQLite parses leading numeric portion
+        Varchar(s) | Character(s) => crate::evaluator::operators::is_truthy_string(s),
+        // Other types are not truthy (conservative default)
+        _ => false,
+    }
 }

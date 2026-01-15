@@ -1691,7 +1691,6 @@ array set vibesql_skip_tests {
     where7-3.2 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     update-13.3 "sqlite3_limit API not implemented"
     update-15.1 "CAST syntax difference from SQLite"
-    update-17.10 "Expression indexes are not yet supported"
     update-20.20 "Uses TEMP TABLE from ifcapable tempdb block"
     update-20.30 "Cascades from update-20.20 TEMP TABLE failure"
     update-21.3 "min/max UPDATE optimization differs from SQLite"
