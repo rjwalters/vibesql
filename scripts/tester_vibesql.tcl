@@ -1694,8 +1694,8 @@ array set vibesql_skip_tests {
     update-17.10 "Expression indexes are not yet supported"
     update-20.20 "Uses TEMP TABLE from ifcapable tempdb block"
     update-20.30 "Cascades from update-20.20 TEMP TABLE failure"
-    update-21.3 "min/max UPDATE optimization differs from SQLite"
-    update-21.4 "min/max UPDATE optimization differs from SQLite"
+    update-21.3 "min/max UPDATE optimization - requires multi-pass mode for subqueries"
+    update-21.4 "min/max UPDATE optimization - requires multi-pass mode for subqueries"
     update-21.12 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     func-29.1 "Uses sqlite3_db_status internal SQLite API"
     func-29.2 "Uses sqlite3_db_status internal SQLite API"
@@ -1791,6 +1791,15 @@ array set vibesql_skip_tests {
     where4-6.1 "Cascades from where4-1.1b placeholder failure"
     where4-6.2 "Cascades from where4-1.1b placeholder failure"
     where4-8.2 "Uses INDEXED BY hint - SQLite-specific"
+    minmax-1.2 "Returns sqlite_search_count - SQLite internal counter"
+    minmax-1.4 "Returns sqlite_search_count - SQLite internal counter"
+    minmax-1.6 "Returns sqlite_search_count - SQLite internal counter"
+    minmax-1.8 "Returns sqlite_search_count - SQLite internal counter"
+    minmax-1.10 "Returns sqlite_search_count - SQLite internal counter"
+    minmax-2.1 "Returns sqlite_search_count - SQLite internal counter"
+    minmax-2.3 "Returns sqlite_search_count - SQLite internal counter"
+    minmax-3.1 "Returns sqlite_search_count - SQLite internal counter"
+    minmax-3.3 "Returns sqlite_search_count - SQLite internal counter"
     where7-1.1.1 "Uses sqlite_search_count - SQLite internal counter"
     where7-1.2 "Uses sqlite_search_count - SQLite internal counter"
     where7-1.3 "Uses sqlite_search_count - SQLite internal counter"
@@ -3043,7 +3052,6 @@ variable vibesql_skip_patterns {
     {upfrom2- "UPDATE FROM not fully supported"}
     {upfrom3- "UPDATE FROM not fully supported"}
     {subquery- "Subquery handling differs"}
-    {minmax- "MIN/MAX aggregate handling differs"}
     {resolver01- "Name resolution handling differs"}
     {table- "Table creation error messages differ"}
     {tableopts- "Table options differ"}
@@ -3092,9 +3100,14 @@ proc vibesql_should_skip {name} {
 proc uses_sqlite_internals {script} {
     # SQLite internal performance counters
     # These track VDBE operations that don't exist in VibeSQL's execution model
-    if {[regexp {sqlite_search_count} $script]} {
-        return [list 1 "uses sqlite_search_count (B-tree search counter)"]
-    }
+    #
+    # Note: We DON'T skip tests that merely SET sqlite_search_count before SQL.
+    # Many tests do "set sqlite_search_count 0; execsql {...}" where the result
+    # depends on the SQL, not the search count. We only need to handle tests
+    # where the expected result IS the search count value (handled via explicit skips).
+    #
+    # Counters like sqlite_fullscan_count still cause skips because they're
+    # typically used differently (result depends directly on counter value).
     if {[regexp {sqlite_fullscan_count} $script]} {
         return [list 1 "uses sqlite_fullscan_count (full scan counter)"]
     }
@@ -3167,8 +3180,21 @@ proc uses_sqlite_internals {script} {
     }
 
     # db function - TCL interface to register custom SQL functions
+    # Exception: if db function appears only in an "else" branch of an ifcapable
+    # block for a capability we support (like subquery), don't skip. The else
+    # branch won't execute since we have the capability.
     if {[regexp {db\s+function\s} $script]} {
-        return [list 1 "uses db function (TCL custom function registration)"]
+        # Check if db function is only in an ifcapable else block
+        # Pattern: ifcapable <cap> { ... } else { ... db function ... }
+        # Use string match instead of complex regex to avoid brace balance issues
+        set has_ifcapable_subquery [string match "*ifcapable subquery*" $script]
+        set has_else_db_func [string match "*else*db function*" $script]
+        if {$has_ifcapable_subquery && $has_else_db_func} {
+            # db function is in else block of ifcapable subquery - we support
+            # subquery so the else branch won't execute. Don't skip.
+        } else {
+            return [list 1 "uses db function (TCL custom function registration)"]
+        }
     }
 
     # SQLite sort tracking helper functions
@@ -3196,11 +3222,7 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses db cache (statement cache metrics)"]
     }
 
-    # db function command - registers TCL functions as SQL functions
-    # This is SQLite/TCL integration, not standard SQL functionality
-    if {[regexp {db\s+function\s+} $script]} {
-        return [list 1 "uses db function (TCL function registration)"]
-    }
+    # Note: db function check is done earlier with ifcapable exception handling
 
     # sqlite3_test_control - test harness control function
     if {[regexp {sqlite3_test_control} $script]} {

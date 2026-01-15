@@ -634,7 +634,14 @@ impl SelectExecutor<'_> {
             .map(|row| {
                 let projected_values: Vec<SqlValue> =
                     col_indices.iter().map(|&idx| row.values[idx].clone()).collect();
-                Row::from_vec(projected_values)
+                // Issue #4954: Preserve row_id when projecting for rowid support
+                let mut result = Row::from_vec(projected_values);
+                if let Some(ref row_ids) = row.row_ids {
+                    result.row_ids = Some(row_ids.clone());
+                } else if let Some(row_id) = row.row_id {
+                    result.row_id = Some(row_id);
+                }
+                result
             })
             .collect()
     }

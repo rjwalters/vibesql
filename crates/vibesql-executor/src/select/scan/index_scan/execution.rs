@@ -304,7 +304,10 @@ pub(crate) fn execute_index_scan(
                             }
 
                             let t2 = Instant::now();
-                            rows.push(row_ref.clone());
+                            // Issue #4954: Set row_id when cloning for rowid support
+                            let mut cloned = row_ref.clone();
+                            cloned.set_row_id((idx + 1) as u64);
+                            rows.push(cloned);
                             clone_time += t2.elapsed();
 
                             row_count += 1;
@@ -326,9 +329,10 @@ pub(crate) fn execute_index_scan(
 
                     rows
                 } else {
+                    // Issue #4954: Set row_id when cloning for rowid support
                     streaming_iter
-                        .filter_map(|idx| table.get_row(idx))
-                        .filter(|row| {
+                        .filter_map(|idx| table.get_row(idx).map(|row| (idx, row)))
+                        .filter(|(_, row)| {
                             // Skip rows with NULL in indexed column (SQL semantics)
                             if let Some(col_idx) = null_filter_col_idx {
                                 !matches!(
@@ -339,7 +343,11 @@ pub(crate) fn execute_index_scan(
                                 true
                             }
                         })
-                        .cloned()
+                        .map(|(idx, row)| {
+                            let mut cloned = row.clone();
+                            cloned.set_row_id((idx + 1) as u64);
+                            cloned
+                        })
                         .collect()
                 };
                 // sqlite_search_count: Track rows examined during streaming index scan
@@ -551,10 +559,14 @@ pub(crate) fn execute_index_scan(
     // Zero-copy optimization: Work with row references until the final step
     // This avoids cloning rows that will be filtered out by the WHERE clause
     // Issue #3790: Use get_row() which returns None for deleted rows
-    let row_refs: Vec<&Row> = matching_row_indices
+    //
+    // Issue #4954: Track row indices alongside row references so we can set row_id
+    // when cloning. Row indices (0-based) become rowids (1-based) for SQLite compatibility.
+    // We create a mapping from row pointer to index, then look up when cloning.
+    let indexed_row_refs: Vec<(usize, &Row)> = matching_row_indices
         .iter()
-        .filter_map(|idx| table.get_row(*idx))
-        .filter(|row| {
+        .filter_map(|idx| table.get_row(*idx).map(|row| (*idx, row)))
+        .filter(|(_, row)| {
             // Skip rows with NULL in indexed column (SQL semantics for range predicates)
             if let Some(col_idx) = null_filter_col_idx {
                 !matches!(row.values.get(col_idx), Some(vibesql_types::SqlValue::Null))
@@ -563,6 +575,16 @@ pub(crate) fn execute_index_scan(
             }
         })
         .collect();
+
+    // Create mapping from row pointer address to row index for rowid preservation
+    // This allows us to recover the row index after WHERE filtering
+    let row_ptr_to_idx: std::collections::HashMap<usize, usize> = indexed_row_refs
+        .iter()
+        .map(|(idx, row)| (*row as *const Row as usize, *idx))
+        .collect();
+
+    // Extract just the row references for filtering (preserving indices via the mapping)
+    let row_refs: Vec<&Row> = indexed_row_refs.into_iter().map(|(_, row)| row).collect();
     // sqlite_search_count: Track rows examined during index scan
     database.increment_search_count(row_refs.len() as u64);
 
@@ -615,9 +637,20 @@ pub(crate) fn execute_index_scan(
         }
     }
 
-    // Final step: Clone only the filtered rows
+    // Final step: Clone only the filtered rows, preserving row indices as rowids
     // This is the only place where cloning happens, and only for rows that survived filtering
-    let rows: Vec<Row> = filtered_row_refs.into_iter().cloned().collect();
+    // Issue #4954: Set row_id when cloning so MIN/MAX(rowid) queries work with indexes
+    let rows: Vec<Row> = filtered_row_refs
+        .into_iter()
+        .map(|row| {
+            let mut cloned = row.clone();
+            // Look up the original row index from our mapping and convert to 1-based rowid
+            if let Some(&idx) = row_ptr_to_idx.get(&(row as *const Row as usize)) {
+                cloned.set_row_id((idx + 1) as u64);
+            }
+            cloned
+        })
+        .collect();
 
     // Return results with sorting metadata if available
     // If WHERE clause was fully handled by index (!need_where_filter), indicate this
