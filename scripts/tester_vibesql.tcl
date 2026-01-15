@@ -3038,7 +3038,6 @@ variable vibesql_skip_patterns {
     {altertab3- "ALTER TABLE features differ"}
     {alterlegacy- "ALTER TABLE legacy tests differ"}
     {rowid- "ROWID behavior differs"}
-    {rowvalue- "Row value behavior differs"}
     {without_rowid1- "WITHOUT ROWID tables not fully supported"}
     {without_rowid2- "WITHOUT ROWID tables not fully supported"}
     {without_rowid5- "WITHOUT ROWID tables not fully supported"}
