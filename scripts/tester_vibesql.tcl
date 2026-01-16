@@ -1729,8 +1729,8 @@ array set vibesql_skip_tests {
     index-18.3 "Uses sqlite_master internal table"
     index-21.1 "Expression in ORDER BY differs from SQLite"
     index-21.2 "Expression in ORDER BY differs from SQLite"
-    index-22.0 "Uses == operator which is not supported"
-    index-23.0 "Uses GLOB operator which is not supported"
+    index-22.0 "Parser does not support == operator in expression index definitions"
+    index-23.0 "REINDEX panics on expression indexes (GLOB operator is supported)"
     index-16.5 "Cascades from index-16.1 sqlite_stat1 failure"
     index-17.1 "Cascades from earlier sqlite_master failure"
     index-18.5 "Cascades from earlier sqlite_master failure"
@@ -2073,7 +2073,7 @@ array set vibesql_skip_tests {
     func-33.11 "Uses testdirectonly - SQLite test extension"
     func-33.20 "ALTER TABLE RENAME COLUMN not fully supported"
 
-    func-34.10 "DATETIME with multiple modifiers not yet supported"
+    func-34.10 "DATETIME modifiers must be strings, test uses integer arguments"
 
     func-36.100 "Uses -> operator registered via TCL proc"
     func-36.110 "Uses ->> operator registered via TCL proc"
@@ -2104,10 +2104,8 @@ array set vibesql_skip_tests {
     intpkey-16.1 "PRAGMA table_info format differs from SQLite"
     intpkey-17.2 "TCL arithmetic on non-numeric - test infrastructure"
 
-    insert-6.1 "Generated columns (AS ... STORED) not yet supported"
-    insert-6.2 "Cascades from insert-6.1 generated columns"
-    insert-6.3 "Cascades from insert-6.1 generated columns"
-    insert-6.4 "Cascades from insert-6.1 generated columns"
+    insert-6.3 "UPDATE OR REPLACE causes column index out of bounds error"
+    insert-6.4 "Cascades from insert-6.3 UPDATE OR REPLACE failure"
     insert-7.1 "Uses sqlite3_db_config API - SQLite-specific"
     insert-7.2 "Cascades from insert-7.1 db_config"
     insert-7.3 "Cascades from insert-7.1 db_config"
@@ -2466,7 +2464,7 @@ array set vibesql_skip_tests {
     where-21.1 "Result ordering differs"
     join-11.7 "NATURAL JOIN collation handling differs"
     join5-9.2 "NULL handling difference in join"
-    join5-10.1 "Expression indexes not supported"
+    join5-10.1 "Uses ANALYZE and sqlite_stat1 for statistics"
 
     index3-1.2 "Unique constraint error message format differs"
     index3-1.3 "Cascades from index3-1.2"
@@ -3007,9 +3005,9 @@ array set vibesql_skip_tests {
 # Pattern-based skip list for tests with many numbered variants
 variable vibesql_skip_patterns {
     {orderby8-1. "ORDER BY with many columns - stress test"}
-    {indexexpr1- "Expression indexes not fully supported"}
-    {indexexpr2- "Expression indexes not fully supported"}
-    {indexexpr3- "Expression indexes not fully supported"}
+    {indexexpr1- "Many tests check EXPLAIN QUERY PLAN output format"}
+    {indexexpr2- "Many tests check EXPLAIN QUERY PLAN output format"}
+    {indexexpr3- "Many tests check EXPLAIN QUERY PLAN output format"}
     {orderbyA- "ORDER BY optimization differs"}
     {boundary1- "Boundary condition tests - stress test"}
     {boundary2- "Boundary condition tests - stress test"}
