@@ -160,6 +160,7 @@ fn test_update_unique_constraint_composite() {
 
     // Try to update Bob to have the same first_name and last_name as Alice (should fail)
     let stmt = UpdateStmt { with_clause: None,
+        from_clause: None,
         quoted: false,
         alias: None,
         table_name: "users".to_string(),

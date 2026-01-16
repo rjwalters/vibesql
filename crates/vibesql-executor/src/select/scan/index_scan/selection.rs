@@ -5,7 +5,7 @@
 //! Also includes skip-scan optimization for queries filtering on non-prefix columns.
 //! Supports expression indexes (functional indexes) like CREATE INDEX idx ON t(lower(name)).
 
-use vibesql_ast::{Expression, IndexColumn};
+use vibesql_ast::{pretty_print::ToSql, Expression, IndexColumn};
 use vibesql_catalog::TableSchema;
 use vibesql_storage::{
     statistics::{AccessMethod, CostEstimator},
@@ -140,13 +140,15 @@ pub(crate) fn should_use_index_scan(
                     order_items
                         .iter()
                         .map(|item| {
+                            // For expression indexes, ORDER BY may use expressions (e.g., length(a))
+                            // We use to_sql() to convert the expression to a string representation
+                            // The actual string is only used for metadata; the important part
+                            // is the direction for determining scan order
                             let col_name = match &item.expr {
                                 Expression::ColumnRef(col_id) => {
                                     col_id.column_canonical().to_string()
                                 }
-                                _ => unreachable!(
-                                    "can_use_index_for_order_by ensures simple column refs"
-                                ),
+                                expr => expr.to_sql(),
                             };
                             (col_name, item.direction.clone())
                         })
@@ -944,13 +946,15 @@ pub(crate) fn cost_based_index_selection(
                     order_items
                         .iter()
                         .map(|item| {
+                            // For expression indexes, ORDER BY may use expressions (e.g., length(a))
+                            // We use to_sql() to convert the expression to a string representation
+                            // The actual string is only used for metadata; the important part
+                            // is the direction for determining scan order
                             let col_name = match &item.expr {
                                 Expression::ColumnRef(col_id) => {
                                     col_id.column_canonical().to_string()
                                 }
-                                _ => unreachable!(
-                                    "can_use_index_for_order_by ensures simple column refs"
-                                ),
+                                expr => expr.to_sql(),
                             };
                             (col_name, item.direction.clone())
                         })
