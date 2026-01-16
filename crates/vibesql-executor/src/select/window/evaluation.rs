@@ -548,8 +548,8 @@ fn evaluate_window_function_for_partition(
                     }
                     _ => {
                         return Err(ExecutorError::UnsupportedExpression(format!(
-                            "Unsupported window function: {}",
-                            func_name
+                            "{}() may not be used as a window function",
+                            func_name.to_lowercase()
                         )))
                     }
                 };

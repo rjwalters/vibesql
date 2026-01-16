@@ -262,7 +262,7 @@ pub fn evaluate_cume_dist(
 /// Example: NTILE(4) on 10 rows → [1, 1, 1, 2, 2, 2, 3, 3, 4, 4]
 pub fn evaluate_ntile(partition: &Partition, n: i64) -> Result<Vec<SqlValue>, String> {
     if n <= 0 {
-        return Err(format!("NTILE argument must be positive, got {}", n));
+        return Err("argument of ntile must be a positive integer".to_string());
     }
 
     let total_rows = partition.len();
