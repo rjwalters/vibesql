@@ -206,10 +206,29 @@ pub fn validate_column_ref(
 
     // SQLite compatibility: Allow ROWID pseudo-column references
     // Only if there's no actual column with that name (real columns take precedence)
+    // WITHOUT ROWID tables do NOT have the rowid pseudo-column (Issue #4953)
     if is_rowid_pseudo_column(&col_ref.column) {
         // Verify the qualifier matches a table in the schema (if qualified)
         if let Some(ref qualifier) = col_ref.table {
             let qualifier_lower = qualifier.to_lowercase();
+
+            // Check if the qualified table is a WITHOUT ROWID table
+            for (table_id, (_, table_schema)) in &schema.table_schemas {
+                if table_id.canonical() == qualifier_lower && table_schema.without_rowid {
+                    // WITHOUT ROWID tables do not have rowid pseudo-column
+                    return Err(ExecutorError::ColumnNotFound {
+                        column_name: col_ref.column.clone(),
+                        table_name: qualifier.clone(),
+                        searched_tables: vec![qualifier.clone()],
+                        available_columns: table_schema
+                            .columns
+                            .iter()
+                            .map(|c| c.name.clone())
+                            .collect(),
+                    });
+                }
+            }
+
             let table_exists =
                 schema.table_schemas.keys().any(|k| k.canonical() == qualifier_lower);
             let table_in_outer = outer_schema.is_some_and(|outer| {
@@ -220,7 +239,28 @@ pub fn validate_column_ref(
             }
         } else {
             // Unqualified ROWID is valid if there's at least one table in scope
+            // AND none of the tables are WITHOUT ROWID
             if !schema.table_schemas.is_empty() {
+                // Check if any table in scope is WITHOUT ROWID
+                let has_without_rowid_table =
+                    schema.table_schemas.values().any(|(_, ts)| ts.without_rowid);
+                if has_without_rowid_table {
+                    // Get the first WITHOUT ROWID table for error message
+                    if let Some((table_id, (_, table_schema))) =
+                        schema.table_schemas.iter().find(|(_, (_, ts))| ts.without_rowid)
+                    {
+                        return Err(ExecutorError::ColumnNotFound {
+                            column_name: col_ref.column.clone(),
+                            table_name: table_id.display().to_string(),
+                            searched_tables: schema.table_names(),
+                            available_columns: table_schema
+                                .columns
+                                .iter()
+                                .map(|c| c.name.clone())
+                                .collect(),
+                        });
+                    }
+                }
                 return Ok(());
             }
         }

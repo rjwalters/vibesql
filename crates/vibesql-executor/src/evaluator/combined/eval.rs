@@ -512,15 +512,52 @@ impl CombinedExpressionEvaluator<'_> {
 
                 // SQLite compatibility: Handle ROWID pseudo-column
                 // ROWID, _rowid_, and oid are aliases that return the row's unique identifier
+                // WITHOUT ROWID tables do NOT have the rowid pseudo-column (Issue #4953)
                 let column_lower = column.to_lowercase();
                 if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
                     // First check if schema has a real column with this name
                     if self.get_column_index_cached(table, column).is_none() {
+                        // Check if the table is WITHOUT ROWID - if so, error
+                        let table_id = table.map(vibesql_catalog::TableIdentifier::from);
+                        if let Some(ref table_id) = table_id {
+                            if let Some((_, table_schema)) =
+                                self.schema.table_schemas.get(table_id)
+                            {
+                                if table_schema.without_rowid {
+                                    return Err(ExecutorError::ColumnNotFound {
+                                        column_name: column.to_string(),
+                                        table_name: table_id.display().to_string(),
+                                        searched_tables: vec![table_id.display().to_string()],
+                                        available_columns: table_schema
+                                            .columns
+                                            .iter()
+                                            .map(|c| c.name.clone())
+                                            .collect(),
+                                    });
+                                }
+                            }
+                        } else {
+                            // Unqualified rowid - check if any table in scope is WITHOUT ROWID
+                            for (tid, (_, table_schema)) in &self.schema.table_schemas {
+                                if table_schema.without_rowid {
+                                    return Err(ExecutorError::ColumnNotFound {
+                                        column_name: column.to_string(),
+                                        table_name: tid.display().to_string(),
+                                        searched_tables: self.schema.table_names(),
+                                        available_columns: table_schema
+                                            .columns
+                                            .iter()
+                                            .map(|c| c.name.clone())
+                                            .collect(),
+                                    });
+                                }
+                            }
+                        }
+
                         // Issue #4536: Check for INTEGER PRIMARY KEY alias column
                         // If the table has an INTEGER PRIMARY KEY, it acts as an alias for rowid.
                         // The column's value IS the rowid, so return that column's value.
                         // Look up the table's schema to find rowid_alias_column
-                        let table_id = table.map(vibesql_catalog::TableIdentifier::from);
                         if let Some(table_id) = table_id {
                             if let Some((start_idx, table_schema)) =
                                 self.schema.table_schemas.get(&table_id)
