@@ -1635,12 +1635,11 @@ array set vibesql_skip_tests {
     selectH-3.7 "Checks TCL counter variable set by counter() function"
     selectH-4.1 "Uses sqlite_schema internal table"
     selectH-4.2 "Uses sqlite_schema internal table"
-    insert-5.1 "Uses TEMP TABLE which requires session isolation"
-    insert-5.2 "Cascades from insert-5.1 TEMP TABLE failure"
-    insert-5.3 "Cascades from insert-5.1 TEMP TABLE failure"
-    insert-5.4 "Cascades from insert-5.1 TEMP TABLE failure"
-    insert-5.5 "Uses TEMP TABLE which requires session isolation"
-    insert-5.6 "Cascades from TEMP TABLE failure"
+    insert-5.2 "Requires temp table t4 from insert-5.1 (cross-test session state)"
+    insert-5.3 "Requires temp table t4 from insert-5.1 (cross-test session state)"
+    insert-5.4 "Uses sqlite_master internal table"
+    insert-5.5 "Uses sqlite_temp_master internal table"
+    insert-5.6 "Requires temp table t4 from insert-5.1 (cross-test session state)"
     join2-1.7-rj "EXPLAIN QUERY PLAN output format is SQLite-specific"
     join5-7.2 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     join5-7.3 "Uses sqlite_stat1 internal statistics table"
@@ -1655,7 +1654,7 @@ array set vibesql_skip_tests {
     join5-11.4 "Cascades from join5-11.1 sqlite_stat1 failure"
     where-1.1.8 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     where-1.4.4 "EXPLAIN QUERY PLAN output format is SQLite-specific"
-    where-16.4 "Uses TEMP TABLE created in ifcapable tempdb block"
+    where-16.4 "Requires temp table from earlier ifcapable tempdb block (cross-test session state)"
     where-19.0 "Column reference in correlated subquery differs from SQLite"
     where-24.2.1 "reset_db clears tables needed by this test"
     where-24.2.2 "reset_db clears tables needed by this test"
@@ -1673,7 +1672,7 @@ array set vibesql_skip_tests {
     where2-2.5 "EXPLAIN bytecode output is SQLite-specific"
     where2-2.5b "EXPLAIN bytecode output is SQLite-specific"
     where2-12.1 "EXPLAIN QUERY PLAN output format is SQLite-specific"
-    where2-14.1 "Cascades from earlier TEMP TABLE failure"
+    where2-14.1 "Requires temp table from earlier ifcapable tempdb block (cross-test session state)"
     where3-3.0a "EXPLAIN QUERY PLAN output format is SQLite-specific"
     where3-3.1 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     where3-5.0a "EXPLAIN QUERY PLAN output format is SQLite-specific"
@@ -1684,8 +1683,9 @@ array set vibesql_skip_tests {
     where7-3.2 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     update-13.3 "sqlite3_limit API not implemented"
     update-15.1 "CAST syntax difference from SQLite"
-    update-20.20 "Uses TEMP TABLE from ifcapable tempdb block"
-    update-20.30 "Cascades from update-20.20 TEMP TABLE failure"
+    update-17.10 "Expression indexes are not yet supported"
+    update-20.20 "Requires temp table from earlier ifcapable tempdb block (cross-test session state)"
+    update-20.30 "Requires temp table from earlier ifcapable tempdb block (cross-test session state)"
     update-21.3 "min/max UPDATE optimization - requires multi-pass mode for subqueries"
     update-21.4 "min/max UPDATE optimization - requires multi-pass mode for subqueries"
     update-21.12 "EXPLAIN QUERY PLAN output format is SQLite-specific"
@@ -1694,7 +1694,7 @@ array set vibesql_skip_tests {
     func-29.3 "Uses sqlite3_db_status internal SQLite API"
     func-29.5 "Uses sqlite3_db_status internal SQLite API"
     func-29.6 "Uses sqlite3_db_status internal SQLite API"
-    index-9.2 "Uses TEMP TABLE from ifcapable tempdb block"
+    index-9.2 "Requires temp table from earlier ifcapable tempdb block (cross-test session state)"
     index-12.4 "Uses integrity_check and sqlite_stat1"
     index-12.7 "Uses INDEXED BY hint which is SQLite-specific"
     index-13.3.0 "DROP INDEX on autoindex error message differs"
@@ -3039,7 +3039,8 @@ variable vibesql_skip_patterns {
     {resolver01- "Name resolution handling differs"}
     {table- "Table creation error messages differ"}
     {tableopts- "Table options differ"}
-    {temptable2- "Temporary table handling differs"}
+    {temptable- "Temp table tests require cross-test session state"}
+    {temptable2- "Temp table tests require cross-test session state"}
 }
 
 # Check if a test should be skipped based on VibeSQL-specific exclusions
@@ -3769,7 +3770,7 @@ proc match_regex_pattern {result expected} {
 # Returns 1 if supported, 0 if not
 proc check_single_capability {cap} {
     # Capabilities we don't support (unsupported_caps means NOT supported)
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab fts3 fts4 fts5 datetime datetime_time datetime_funcs trigger conflict tempdb}
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab fts3 fts4 fts5 datetime datetime_time datetime_funcs trigger conflict}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0

@@ -68,7 +68,13 @@ pub(super) fn execute_internal(
     // Step 1: Get table schema - clone it to avoid borrow issues
     // We need owned schema because we take mutable references to database later
     // Use TableIdentifier for SQL:1999 case-sensitive lookups when quoted
-    let table_id = TableIdentifier::new(&stmt.table_name, stmt.quoted);
+    // Handle schema-qualified table names (e.g., "temp.t1")
+    let table_id = if let Some((schema_part, table_part)) = stmt.table_name.split_once('.') {
+        // Schema-qualified name: schema.table
+        TableIdentifier::qualified(schema_part, false, table_part, stmt.quoted)
+    } else {
+        TableIdentifier::new(&stmt.table_name, stmt.quoted)
+    };
     let schema_owned: vibesql_catalog::TableSchema = if let Some(s) = schema {
         s.clone()
     } else {

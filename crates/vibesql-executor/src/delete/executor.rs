@@ -147,7 +147,13 @@ impl DeleteExecutor {
         }
 
         // Use TableIdentifier for SQL:1999 case-sensitive lookups when quoted
-        let table_id = TableIdentifier::new(&stmt.table_name, stmt.quoted);
+        // Handle schema-qualified table names (e.g., "temp.t1")
+        let table_id = if let Some((schema_part, table_part)) = stmt.table_name.split_once('.') {
+            // Schema-qualified name: schema.table
+            TableIdentifier::qualified(schema_part, false, table_part, stmt.quoted)
+        } else {
+            TableIdentifier::new(&stmt.table_name, stmt.quoted)
+        };
 
         // Check table exists
         if !database.catalog.table_exists_by_identifier(&table_id) {

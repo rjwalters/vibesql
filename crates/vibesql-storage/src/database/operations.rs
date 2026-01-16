@@ -81,16 +81,30 @@ impl Operations {
     /// Find a table by name with fallback lookups for quoted identifiers.
     ///
     /// This tries multiple lookup strategies to handle both quoted and unquoted identifiers:
-    /// 1. Direct lookup as-is (for quoted identifiers that preserve case)
-    /// 2. Normalized (lowercase) lookup
-    /// 3. Temp schema lookup (SQLite semantics - temp tables shadow main tables)
-    /// 4. Schema-qualified with original case
-    /// 5. Schema-qualified with normalized case
+    /// 1. Resolve "temp" schema to session's temp schema (SQLite compatibility)
+    /// 2. Direct lookup as-is (for quoted identifiers that preserve case)
+    /// 3. Normalized (lowercase) lookup
+    /// 4. Temp schema lookup (SQLite semantics - temp tables shadow main tables)
+    /// 5. Schema-qualified with original case
+    /// 6. Schema-qualified with normalized case
     fn find_table_mut<'a>(
         catalog: &vibesql_catalog::Catalog,
         tables: &'a mut HashMap<String, Table>,
         table_name: &str,
     ) -> Result<&'a mut Table, StorageError> {
+        // For qualified names with "temp" schema, resolve to session's temp schema
+        // This enables `INSERT INTO temp.t1 VALUES(...)` syntax
+        let resolved_name = if let Some((schema_part, table_part)) = table_name.split_once('.') {
+            if schema_part.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA) {
+                Some(format!("{}.{}", catalog.temp_schema_name(), table_part))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let table_name = resolved_name.as_deref().unwrap_or(table_name);
+
         // Try 1: Direct lookup as-is (handles quoted identifiers correctly)
         if tables.contains_key(table_name) {
             return Ok(tables.get_mut(table_name).unwrap());
@@ -136,6 +150,9 @@ impl Operations {
     }
 
     /// Drop a table from the catalog
+    ///
+    /// SQLite Compatibility: The "temp" schema name is mapped to the session's
+    /// temp schema, allowing `DROP TABLE temp.tablename` syntax.
     pub fn drop_table(
         &mut self,
         catalog: &mut vibesql_catalog::Catalog,
@@ -149,12 +166,23 @@ impl Operations {
             name.to_lowercase()
         };
 
-        // Get qualified table name for index cleanup
-        let qualified_name = if normalized_name.contains('.') {
+        // Resolve "temp" schema to session's temp schema for storage lookup
+        let resolved_name = if let Some((schema_part, table_part)) = normalized_name.split_once('.') {
+            if schema_part.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA) {
+                format!("{}.{}", catalog.temp_schema_name(), table_part)
+            } else {
+                normalized_name.clone()
+            }
+        } else {
             normalized_name.clone()
+        };
+
+        // Get qualified table name for index cleanup
+        let qualified_name = if resolved_name.contains('.') {
+            resolved_name.clone()
         } else {
             let current_schema = catalog.get_current_schema();
-            format!("{}.{}", current_schema, normalized_name)
+            format!("{}.{}", current_schema, resolved_name)
         };
 
         // Drop associated indexes BEFORE dropping table (CASCADE behavior)
@@ -166,8 +194,8 @@ impl Operations {
         // Remove from catalog
         catalog.drop_table(name).map_err(|e| StorageError::CatalogError(e.to_string()))?;
 
-        // Remove table data - try normalized name first, then try with schema prefix
-        if tables.remove(&normalized_name).is_none() {
+        // Remove table data - try resolved name first, then try qualified name
+        if tables.remove(&resolved_name).is_none() {
             tables.remove(&qualified_name);
         }
 

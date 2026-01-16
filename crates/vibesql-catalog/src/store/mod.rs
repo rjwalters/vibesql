@@ -187,14 +187,40 @@ impl Catalog {
         }
     }
 
-    /// Get a schema by name with case-insensitive lookup (if configured)
+    /// Resolve a schema name to the actual internal schema name.
+    ///
+    /// SQLite Compatibility: The "temp" schema name is mapped to this session's
+    /// temp schema (e.g., "temp_123"). This allows users to write `temp.tablename`
+    /// syntax while internally temp tables are stored in session-isolated schemas.
+    pub(crate) fn resolve_schema_name<'a>(&'a self, schema_name: &'a str) -> &'a str {
+        if schema_name.eq_ignore_ascii_case(crate::TEMP_SCHEMA) {
+            &self.temp_schema_name
+        } else {
+            schema_name
+        }
+    }
+
+    /// Get a schema by name with case-insensitive lookup (if configured).
+    ///
+    /// SQLite Compatibility: References to the "temp" schema are automatically
+    /// redirected to this session's temp schema (e.g., "temp_123"). This allows
+    /// users to write `SELECT * FROM temp.t1` while internally temp tables are
+    /// stored in session-isolated schemas.
     pub(crate) fn get_schema_case_insensitive(&self, schema_name: &str) -> Option<&crate::Schema> {
+        // SQLite compatibility: "temp" schema references map to session's temp schema
+        // This enables `temp.tablename` syntax while maintaining session isolation
+        let effective_schema_name = if schema_name.eq_ignore_ascii_case(crate::TEMP_SCHEMA) {
+            &self.temp_schema_name
+        } else {
+            schema_name
+        };
+
         if self.case_sensitive_identifiers {
             // Case-sensitive: direct lookup
-            self.schemas.get(schema_name)
+            self.schemas.get(effective_schema_name)
         } else {
             // Case-insensitive: find schema by comparing normalized names
-            let normalized_name = schema_name.to_uppercase();
+            let normalized_name = effective_schema_name.to_uppercase();
             self.schemas
                 .iter()
                 .find(|(key, _)| key.to_uppercase() == normalized_name)

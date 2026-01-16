@@ -147,7 +147,26 @@ impl Database {
     /// Legacy method with fallback lookups for backward compatibility
     ///
     /// For unqualified names, checks temp schema first (SQLite semantics).
+    /// SQLite Compatibility: The "temp" schema name is mapped to the session's
+    /// temp schema, allowing `temp.tablename` syntax.
     pub fn get_table(&self, name: &str) -> Option<&Table> {
+        // For qualified names with "temp" schema, resolve to session's temp schema
+        // This enables `SELECT * FROM temp.t1` syntax
+        let resolved_name = if let Some((schema_part, table_part)) = name.split_once('.') {
+            if schema_part.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA) {
+                std::borrow::Cow::Owned(format!(
+                    "{}.{}",
+                    self.catalog.temp_schema_name(),
+                    table_part
+                ))
+            } else {
+                std::borrow::Cow::Borrowed(name)
+            }
+        } else {
+            std::borrow::Cow::Borrowed(name)
+        };
+        let name = resolved_name.as_ref();
+
         // Try the name as-is first (for delimited identifiers)
         if let Some(table) = self.tables.get(name) {
             return Some(table);
@@ -222,7 +241,22 @@ impl Database {
     /// Get a table for writing
     ///
     /// For unqualified names, checks temp schema first (SQLite semantics).
+    /// SQLite Compatibility: The "temp" schema name is mapped to the session's
+    /// temp schema, allowing `temp.tablename` syntax.
     pub fn get_table_mut(&mut self, name: &str) -> Option<&mut Table> {
+        // For qualified names with "temp" schema, resolve to session's temp schema
+        // This enables `UPDATE temp.t1 SET ...` syntax
+        let resolved_name = if let Some((schema_part, table_part)) = name.split_once('.') {
+            if schema_part.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA) {
+                Some(format!("{}.{}", self.catalog.temp_schema_name(), table_part))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let name = resolved_name.as_deref().unwrap_or(name);
+
         // Try the name as-is first (for delimited identifiers)
         if self.tables.contains_key(name) {
             return self.tables.get_mut(name);
