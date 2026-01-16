@@ -675,6 +675,9 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             quoted: stmt.quoted,
             alias: stmt.alias.map(|a| self.resolve(a)),
             assignments: stmt.assignments.iter().map(|a| self.convert_assignment(a)).collect(),
+            from_clause: stmt.from_clause.as_ref().map(|froms| {
+                froms.iter().map(|f| self.convert_from_clause(f)).collect()
+            }),
             where_clause: stmt.where_clause.as_ref().map(|wc| self.convert_where_clause(wc)),
             conflict_clause: stmt.conflict_clause.map(ConflictClause::from),
         }

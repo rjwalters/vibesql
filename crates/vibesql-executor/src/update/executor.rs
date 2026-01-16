@@ -24,6 +24,7 @@ use super::{
     constraints::ConstraintValidator,
     fast_path,
     foreign_keys::ForeignKeyValidator,
+    from_clause::{apply_update_from_matches, execute_update_from_join},
     index_sync::{
         find_conflicting_rows_for_update, resolve_cross_update_conflicts_for_replace,
         validate_cross_update_uniqueness,
@@ -162,7 +163,26 @@ pub(super) fn execute_internal(
     // SQLite validates expressions at preparation time, not execution time.
     // This ensures errors like "no such column: x" are raised even when
     // no rows match the WHERE clause.
-    validate_set_expressions(schema, &stmt.assignments, database)?;
+    // Note: Skip validation for UPDATE FROM since the SET expressions can reference
+    // columns from the FROM tables, which will be validated during synthetic SELECT.
+    if stmt.from_clause.is_none() {
+        validate_set_expressions(schema, &stmt.assignments, database)?;
+    }
+
+    // Step 3.6: Handle UPDATE FROM (multi-table UPDATE) if FROM clause is present
+    // This uses a completely different code path that builds a synthetic SELECT
+    // to join tables and compute SET values in the joined context.
+    if let Some(ref from_clauses) = stmt.from_clause {
+        return execute_update_from(
+            stmt,
+            from_clauses,
+            database,
+            schema,
+            table_name,
+            has_triggers,
+            &pk_indices,
+        );
+    }
 
     // Step 4: Select rows to update using RowSelector
     let row_selector = RowSelector::new(schema);
@@ -1018,4 +1038,167 @@ fn apply_generated_columns_for_update(
     }
 
     Ok(())
+}
+
+/// Execute UPDATE FROM (multi-table UPDATE) - SQLite 3.33.0+ syntax
+///
+/// This handles UPDATE statements with FROM clause that join other tables:
+/// ```sql
+/// UPDATE t1 SET col = t2.val FROM t2 WHERE t1.id = t2.id;
+/// ```
+///
+/// The implementation:
+/// 1. Builds a synthetic SELECT joining target table with FROM tables
+/// 2. Computes SET expression values in the joined context
+/// 3. Applies the pre-computed values to target rows
+fn execute_update_from(
+    stmt: &UpdateStmt,
+    from_clauses: &[vibesql_ast::FromClause],
+    database: &mut Database,
+    schema: &vibesql_catalog::TableSchema,
+    table_name: &str,
+    has_triggers: bool,
+    pk_indices: &Option<Vec<usize>>,
+) -> Result<usize, ExecutorError> {
+    // Execute the join and get matched rows with computed SET values
+    let join_result = execute_update_from_join(stmt, from_clauses, database, schema)?;
+
+    // Fire BEFORE STATEMENT triggers if needed
+    if has_triggers {
+        crate::TriggerFirer::execute_before_statement_triggers(
+            database,
+            table_name,
+            vibesql_ast::TriggerEvent::Update(None),
+        )?;
+    }
+
+    // Convert join results to update operations
+    let updates = apply_update_from_matches(&join_result.matched_rows, &stmt.assignments, schema)?;
+
+    if updates.is_empty() {
+        // Fire AFTER STATEMENT triggers even when no rows matched
+        if has_triggers {
+            crate::TriggerFirer::execute_after_statement_triggers(
+                database,
+                table_name,
+                vibesql_ast::TriggerEvent::Update(None),
+            )?;
+        }
+        return Ok(0);
+    }
+
+    // Validate constraints for each update
+    let table = database
+        .get_table(table_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+    let constraint_validator = ConstraintValidator::new(schema);
+
+    for (row_index, old_row, new_row, _changed_columns, _updates_pk) in &updates {
+        // Validate all constraints
+        constraint_validator.validate_row(table, table_name, *row_index, new_row, old_row)?;
+        constraint_validator.validate_unique_indexes(database, table_name, new_row, old_row)?;
+
+        // Validate foreign key constraints
+        if !schema.foreign_keys.is_empty() {
+            ForeignKeyValidator::validate_constraints(database, table_name, &new_row.values)?;
+        }
+    }
+
+    // Cross-update uniqueness validation
+    if updates.len() > 1 {
+        validate_cross_update_uniqueness(&updates, schema)?;
+    }
+
+    // Handle CASCADE updates for primary key changes
+    for (_row_index, old_row, new_row, _changed_columns, updates_pk) in &updates {
+        if *updates_pk {
+            ForeignKeyValidator::check_no_child_references(database, table_name, old_row, new_row)?;
+        }
+    }
+
+    // Fire BEFORE UPDATE triggers
+    if has_triggers {
+        for (_row_index, old_row, new_row, _changed_columns, _updates_pk) in &updates {
+            crate::TriggerFirer::execute_before_triggers(
+                database,
+                table_name,
+                vibesql_ast::TriggerEvent::Update(None),
+                Some(old_row),
+                Some(new_row),
+            )?;
+        }
+    }
+
+    // Apply all updates
+    let update_count = updates.len();
+    let table_mut = database
+        .get_table_mut(table_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+    let mut index_updates = Vec::new();
+    for (index, old_row, new_row, changed_columns, _updates_pk) in &updates {
+        table_mut
+            .update_row_selective(*index, new_row.clone(), changed_columns)
+            .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+
+        index_updates.push((*index, old_row.clone(), new_row.clone(), changed_columns.clone()));
+    }
+
+    // Fire AFTER UPDATE triggers
+    if has_triggers {
+        for (_index, old_row, new_row, _changed_columns) in &index_updates {
+            crate::TriggerFirer::execute_after_triggers(
+                database,
+                table_name,
+                vibesql_ast::TriggerEvent::Update(None),
+                Some(old_row),
+                Some(new_row),
+            )?;
+        }
+    }
+
+    // Update indexes
+    for (index, old_row, new_row, changed_columns) in index_updates {
+        database.update_indexes_for_update(
+            table_name,
+            &old_row,
+            &new_row,
+            index,
+            Some(&changed_columns),
+        );
+
+        expression_index_maintenance::maintain_expression_indexes_for_update(
+            database,
+            table_name,
+            &old_row,
+            &new_row,
+            index,
+        );
+    }
+
+    // Invalidate columnar cache
+    if update_count > 0 {
+        database.invalidate_columnar_cache(table_name);
+    }
+
+    // Fire AFTER STATEMENT triggers
+    if has_triggers {
+        crate::TriggerFirer::execute_after_statement_triggers(
+            database,
+            table_name,
+            vibesql_ast::TriggerEvent::Update(None),
+        )?;
+    }
+
+    // Check assertions
+    if let Err(assertion_error) =
+        crate::advanced_objects::AssertionChecker::check_all_assertions(database)
+    {
+        return Err(assertion_error);
+    }
+
+    // Mark pk_indices as used (it's available for future enhancements)
+    let _ = pk_indices;
+
+    Ok(update_count)
 }

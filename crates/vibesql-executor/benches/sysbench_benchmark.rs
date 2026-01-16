@@ -195,6 +195,7 @@ fn bind_update(stmt: &UpdateStmt, params: &[SqlValue]) -> UpdateStmt {
                 value: bind_expression(&a.value, params),
             })
             .collect(),
+        from_clause: stmt.from_clause.clone(), // UPDATE FROM not used in sysbench
         where_clause: bind_where_clause(&stmt.where_clause, params),
         conflict_clause: stmt.conflict_clause.clone(),
     }

@@ -490,7 +490,7 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse FROM clause.
-    fn parse_from_clause(&mut self) -> Result<FromClause<'arena>, ParseError> {
+    pub(crate) fn parse_from_clause(&mut self) -> Result<FromClause<'arena>, ParseError> {
         let mut from = self.parse_table_reference()?;
 
         // Parse JOINs

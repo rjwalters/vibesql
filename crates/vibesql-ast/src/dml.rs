@@ -2,7 +2,7 @@
 //!
 //! This module contains INSERT, UPDATE, and DELETE statement types.
 
-use crate::{CommonTableExpr, Expression, SelectStmt};
+use crate::{CommonTableExpr, Expression, FromClause, SelectStmt};
 
 // ============================================================================
 // INSERT Statement
@@ -151,6 +151,10 @@ pub struct UpdateStmt {
     /// Optional table alias (SQLite extension: UPDATE t1 AS xyz SET ...)
     pub alias: Option<String>,
     pub assignments: Vec<Assignment>,
+    /// Optional FROM clause for multi-table UPDATE (SQLite 3.33.0+ / SQL:1999)
+    /// Syntax: UPDATE t1 SET col = t2.val FROM t2 WHERE t1.id = t2.id
+    /// See: <https://www.sqlite.org/lang_update.html#update_from>
+    pub from_clause: Option<Vec<FromClause>>,
     pub where_clause: Option<WhereClause>,
     /// Optional conflict resolution clause (SQLite extension)
     /// Syntax: UPDATE OR REPLACE|IGNORE|ABORT|ROLLBACK|FAIL table SET ...

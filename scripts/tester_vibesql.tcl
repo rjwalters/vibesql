@@ -3047,9 +3047,6 @@ variable vibesql_skip_patterns {
     {types2- "Type handling differs"}
     {unique2- "UNIQUE constraint handling differs"}
     {utf16align- "UTF16 alignment test - encoding differs"}
-    {upfrom1- "UPDATE FROM not fully supported"}
-    {upfrom2- "UPDATE FROM not fully supported"}
-    {upfrom3- "UPDATE FROM not fully supported"}
     {subquery- "Subquery handling differs"}
     {resolver01- "Name resolution handling differs"}
     {table- "Table creation error messages differ"}

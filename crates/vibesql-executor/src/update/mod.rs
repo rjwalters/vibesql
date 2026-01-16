@@ -27,6 +27,7 @@ mod constraints;
 mod executor;
 mod fast_path;
 mod foreign_keys;
+mod from_clause;
 mod index_sync;
 mod row_selector;
 mod triggers;
@@ -93,6 +94,7 @@ impl UpdateExecutor {
     ///         column: "salary".to_string(),
     ///         value: Expression::Literal(SqlValue::Integer(60000)),
     ///     }],
+    ///     from_clause: None,
     ///     where_clause: None,
     ///     conflict_clause: None,
     /// };

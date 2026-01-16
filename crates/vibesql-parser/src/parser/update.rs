@@ -100,6 +100,24 @@ impl Parser {
             }
         }
 
+        // Parse optional FROM clause (SQLite 3.33.0+ UPDATE FROM syntax)
+        // Syntax: UPDATE t1 SET col = t2.val FROM t2 [, t3 ...] WHERE ...
+        let from_clause = if self.peek_keyword(Keyword::From) {
+            self.consume_keyword(Keyword::From)?;
+            let mut froms = Vec::new();
+            loop {
+                froms.push(self.parse_from_clause()?);
+                if matches!(self.peek(), Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            Some(froms)
+        } else {
+            None
+        };
+
         // Parse optional WHERE clause
         let where_clause = if self.peek_keyword(Keyword::Where) {
             self.consume_keyword(Keyword::Where)?;
@@ -126,6 +144,7 @@ impl Parser {
             quoted,
             alias,
             assignments,
+            from_clause,
             where_clause,
             conflict_clause,
         })
@@ -222,6 +241,24 @@ impl Parser {
             }
         }
 
+        // Parse optional FROM clause (SQLite 3.33.0+ UPDATE FROM syntax)
+        // Syntax: UPDATE t1 SET col = t2.val FROM t2 [, t3 ...] WHERE ...
+        let from_clause = if self.peek_keyword(Keyword::From) {
+            self.consume_keyword(Keyword::From)?;
+            let mut froms = Vec::new();
+            loop {
+                froms.push(self.parse_from_clause()?);
+                if matches!(self.peek(), Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            Some(froms)
+        } else {
+            None
+        };
+
         // Parse optional WHERE clause
         let where_clause = if self.peek_keyword(Keyword::Where) {
             self.consume_keyword(Keyword::Where)?;
@@ -247,6 +284,7 @@ impl Parser {
             quoted,
             alias,
             assignments,
+            from_clause,
             where_clause,
             conflict_clause,
         })
