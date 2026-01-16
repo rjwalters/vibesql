@@ -83,6 +83,9 @@ fn test_create_delete_statement() {
         table_name: "users".to_string(),
         quoted: false,
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
     });
 
     match stmt {

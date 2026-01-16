@@ -61,6 +61,7 @@ fn test_update_with_pk_index_performance() {
                     right: Box::new(Expression::Literal(SqlValue::Integer(1))),
                 },
             }],
+            from_clause: None,
             where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("id", false))),
                 op: BinaryOperator::Equal,
