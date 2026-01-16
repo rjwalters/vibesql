@@ -1594,6 +1594,15 @@ array set vibesql_skip_files {
     indexedby "Uses INDEXED BY hint syntax which is SQLite-specific"
     wherelimit "Tests UPDATE/DELETE ... LIMIT syntax which is SQLite-specific"
     where8 "Tests OR optimization via execsql_status2 internal statistics - query results correct"
+    update2 "Uses repeat() function which is a SQLite test extension"
+    func5 "Uses counter1/counter2 custom TCL functions - SQLite test extension"
+    delete_db "Uses sqlite3_delete_database - SQLite internal function"
+    incrblobfault "Uses incrblob - SQLite incremental blob I/O API"
+    incrblob "Uses incrblob - SQLite incremental blob I/O API"
+    incrblob2 "Uses incrblob - SQLite incremental blob I/O API"
+    incrblob3 "Uses incrblob - SQLite incremental blob I/O API"
+    incrblob4 "Uses incrblob - SQLite incremental blob I/O API"
+    incrblob_err "Uses incrblob - SQLite incremental blob I/O API"
 }
 
 # Tests to skip because they test SQLite-specific behavior that VibeSQL
@@ -1613,6 +1622,9 @@ array set vibesql_skip_tests {
     selectC-1.13.2 "Uses custom TCL function uppercaseconversionfunctionwithaverylongname"
     selectC-1.14.2 "Uses custom TCL function uppercaseconversionfunctionwithaverylongname"
     selectC-4.3 "Uses custom TCL function udf"
+    select2-3.2d "Returns sqlite_search_count - SQLite internal counter"
+    select2-3.2e "Returns sqlite_search_count - SQLite internal counter"
+    select2-3.3 "Returns sqlite_search_count - SQLite internal counter"
     select2-4.2 "CROSS JOIN row order differs without ORDER BY - result set is correct"
     select2-4.3 "CROSS JOIN row order differs without ORDER BY - result set is correct"
     select2-4.5 "CROSS JOIN row order differs without ORDER BY - result set is correct"
@@ -2990,6 +3002,58 @@ array set vibesql_skip_tests {
     indexA-7.0 "Syntax differs"
 
     orderby9-1.2 "ORDER BY optimization differs"
+
+    index-11.1 "Returns sqlite_search_count - SQLite internal counter"
+
+    func-8.4 "Requires temp table t3 from func-8.3 ifcapable tempdb block (cross-test session state)"
+
+    join4-1.1 "Requires temp table from ifcapable tempdb block (cross-test session state)"
+    join4-1.2 "Requires temp table from join4-1.1 ifcapable tempdb block (cross-test session state)"
+    join4-1.3 "Requires temp table from join4-1.1 ifcapable tempdb block (cross-test session state)"
+    join4-1.4 "Requires temp table from join4-1.1 ifcapable tempdb block (cross-test session state)"
+    join4-1.5 "Requires temp table from join4-1.1 ifcapable tempdb block (cross-test session state)"
+    join4-1.6 "Requires temp table from join4-1.1 ifcapable tempdb block (cross-test session state)"
+    join4-1.7 "Requires temp table from join4-1.1 ifcapable tempdb block (cross-test session state)"
+
+    whereA-4.3 "Requires temp table t2 from ifcapable tempdb block (cross-test session state)"
+    whereA-4.4 "Requires temp table t2 from ifcapable tempdb block (cross-test session state)"
+    whereA-4.5 "Requires temp index t2x from ifcapable tempdb block (cross-test session state)"
+    whereA-4.6 "Requires temp table t2 from ifcapable tempdb block (cross-test session state)"
+
+    whereD-3.1 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-3.2 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-3.4.1 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-3.4.2 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-3.4.3 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-3.4.4 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-3.5.1 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-3.5.2 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.2.1 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.2.2 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.3.1 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.3.2 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.3.3 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.4.1 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.4.2 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.4.3 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.5.1 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.5.2 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.5.3 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.5.4 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.6.1 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.6.2 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.6.3 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+    whereD-6.6.4 "Uses do_searchcount_test (sqlite_search_count - SQLite internal counter)"
+
+    insert2-3.3 "Cascades from insert2-3.2 (skipped due to total_changes usage)"
+    insert2-4.1 "Uses temp table from ifcapable tempdb block + BOOL type coercion with integer 0"
+
+    update2-1.1.1 "Uses REPEAT TCL command - SQLite test extension"
+
+    func5-2.2 "Uses counter1 - custom TCL function not available"
+
+    in6-1.1 "Uses sqlite_stat1 internal statistics table"
+    in6-1.5 "Cascades from in6-1.1 sqlite_stat1 failure"
 }
 
 # Pattern-based skip list for tests with many numbered variants
