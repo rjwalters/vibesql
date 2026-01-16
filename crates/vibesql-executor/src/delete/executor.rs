@@ -81,6 +81,9 @@ impl DeleteExecutor {
     ///         op: BinaryOperator::Equal,
     ///         right: Box::new(Expression::Literal(SqlValue::Integer(1))),
     ///     })),
+    ///     order_by: None,
+    ///     limit: None,
+    ///     offset: None,
     /// };
     ///
     /// let count = DeleteExecutor::execute(&stmt, &mut db).unwrap();
