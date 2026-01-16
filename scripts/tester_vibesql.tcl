@@ -3005,9 +3005,9 @@ array set vibesql_skip_tests {
 # Pattern-based skip list for tests with many numbered variants
 variable vibesql_skip_patterns {
     {orderby8-1. "ORDER BY with many columns - stress test"}
-    {indexexpr1- "Many tests check EXPLAIN QUERY PLAN output format"}
-    {indexexpr2- "Many tests check EXPLAIN QUERY PLAN output format"}
-    {indexexpr3- "Many tests check EXPLAIN QUERY PLAN output format"}
+    {indexexpr1- "EXPLAIN output format differs (tests check COVERING INDEX output)"}
+    {indexexpr2- "EXPLAIN output format differs (tests check COVERING INDEX output)"}
+    {indexexpr3- "EXPLAIN output format differs (tests check COVERING INDEX output)"}
     {orderbyA- "ORDER BY optimization differs"}
     {boundary1- "Boundary condition tests - stress test"}
     {boundary2- "Boundary condition tests - stress test"}

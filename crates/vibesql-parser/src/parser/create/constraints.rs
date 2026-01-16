@@ -2,6 +2,21 @@
 
 use super::super::*;
 
+/// Validate that constraint columns do not contain expressions.
+/// SQLite prohibits expressions in PRIMARY KEY and UNIQUE constraints.
+fn validate_no_expressions_in_constraint(
+    columns: &[vibesql_ast::IndexColumn],
+) -> Result<(), ParseError> {
+    for col in columns {
+        if matches!(col, vibesql_ast::IndexColumn::Expression { .. }) {
+            return Err(ParseError {
+                message: "expressions prohibited in PRIMARY KEY and UNIQUE constraints".to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
 impl Parser {
     /// Parse an optional ON CONFLICT clause for constraints
     /// Returns None if no ON CONFLICT clause is present
@@ -457,6 +472,8 @@ impl Parser {
                 }
 
                 self.expect_token(Token::RParen)?;
+                // Validate no expressions in PRIMARY KEY constraint
+                validate_no_expressions_in_constraint(&columns)?;
                 // Parse optional ON CONFLICT clause
                 let on_conflict = self.parse_constraint_conflict_clause()?;
                 vibesql_ast::TableConstraintKind::PrimaryKey { columns, on_conflict }
@@ -554,6 +571,8 @@ impl Parser {
                 }
 
                 self.expect_token(Token::RParen)?;
+                // Validate no expressions in UNIQUE constraint
+                validate_no_expressions_in_constraint(&columns)?;
                 // Parse optional ON CONFLICT clause
                 let on_conflict = self.parse_constraint_conflict_clause()?;
                 vibesql_ast::TableConstraintKind::Unique { columns, on_conflict }

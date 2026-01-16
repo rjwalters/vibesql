@@ -183,6 +183,7 @@ pub fn create_update_with_id_clause(
             column: column.to_string(),
             value: Expression::Literal(value),
         }],
+        from_clause: None,
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
                 "id", false,

@@ -64,6 +64,7 @@ fn test_create_update_statement() {
             column: "name".to_string(),
             value: Expression::Literal(SqlValue::Varchar(StringValue::from("Bob"))),
         }],
+        from_clause: None,
         where_clause: None,
         conflict_clause: None,
     });
