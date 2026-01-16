@@ -966,10 +966,26 @@ impl ExpressionEvaluator<'_> {
         // SQLite compatibility: Handle ROWID pseudo-column
         // ROWID, _rowid_, and oid are aliases that return the row's unique identifier
         // Note: We check real columns first - real columns take precedence over ROWID
+        // WITHOUT ROWID tables do NOT have the rowid pseudo-column (Issue #4953)
         let column_lower = column.to_lowercase();
         if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
             // First check if schema has a real column with this name
             if self.schema.get_column_index(column).is_none() {
+                // WITHOUT ROWID tables do not have the rowid pseudo-column
+                if self.schema.without_rowid {
+                    return Err(ExecutorError::ColumnNotFound {
+                        column_name: column.to_string(),
+                        table_name: self.schema.name.clone(),
+                        searched_tables: vec![self.schema.name.clone()],
+                        available_columns: self
+                            .schema
+                            .columns
+                            .iter()
+                            .map(|c| c.name.clone())
+                            .collect(),
+                    });
+                }
+
                 // Issue #4536: Check for INTEGER PRIMARY KEY alias column
                 // If the table has an INTEGER PRIMARY KEY, it acts as an alias for rowid.
                 // The column's value IS the rowid, so return that column's value.

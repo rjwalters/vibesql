@@ -207,6 +207,13 @@ impl CreateTableExecutor {
         // Apply constraint results to schema (sets PK, unique, and check constraints)
         ConstraintValidator::apply_to_schema(&mut table_schema, &constraint_result);
 
+        // WITHOUT ROWID tables must have a PRIMARY KEY (SQLite requirement, Issue #4953)
+        if stmt.without_rowid && table_schema.primary_key.is_none() {
+            return Err(ExecutorError::ConstraintViolation(
+                "WITHOUT ROWID tables must have a PRIMARY KEY".to_string(),
+            ));
+        }
+
         // Detect INTEGER PRIMARY KEY for SQLite rowid aliasing (Issue #4536)
         // In SQLite, a single-column PRIMARY KEY with exactly "INTEGER" type is an alias for rowid.
         // The column's value IS the rowid, and SELECT rowid returns this column's value.
