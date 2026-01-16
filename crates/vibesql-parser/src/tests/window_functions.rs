@@ -436,3 +436,70 @@ fn test_window_function_without_over_clause_errors() {
     let result = Parser::parse_sql(sql);
     assert!(result.is_err(), "last_value() without OVER should error");
 }
+
+#[test]
+fn test_window_function_argument_count_validation() {
+    // Zero-argument functions should reject any arguments
+    let sql = "SELECT row_number(x) OVER () FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "row_number(x) should error");
+    assert!(result.unwrap_err().message.contains("wrong number of arguments"));
+
+    let sql = "SELECT rank(x) OVER () FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "rank(x) should error");
+
+    let sql = "SELECT dense_rank(x) OVER () FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "dense_rank(x) should error");
+
+    // Single-argument functions should require exactly one argument
+    let sql = "SELECT ntile() OVER () FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "ntile() with no args should error");
+
+    let sql = "SELECT ntile(1, 2) OVER () FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "ntile(1, 2) should error");
+
+    let sql = "SELECT first_value() OVER () FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "first_value() with no args should error");
+
+    // NTH_VALUE requires exactly 2 arguments
+    let sql = "SELECT nth_value(x) OVER () FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "nth_value(x) with 1 arg should error");
+
+    let sql = "SELECT nth_value(x, 1, 2) OVER () FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "nth_value(x, 1, 2) with 3 args should error");
+
+    // LAG/LEAD accept 1-3 arguments
+    let sql = "SELECT lag() OVER () FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "lag() with no args should error");
+
+    let sql = "SELECT lag(x, 1, 0, extra) OVER () FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "lag() with 4 args should error");
+
+    // Valid calls should succeed
+    let sql = "SELECT row_number() OVER () FROM t";
+    assert!(Parser::parse_sql(sql).is_ok(), "row_number() should work");
+
+    let sql = "SELECT ntile(4) OVER () FROM t";
+    assert!(Parser::parse_sql(sql).is_ok(), "ntile(4) should work");
+
+    let sql = "SELECT nth_value(x, 1) OVER () FROM t";
+    assert!(Parser::parse_sql(sql).is_ok(), "nth_value(x, 1) should work");
+
+    let sql = "SELECT lag(x) OVER () FROM t";
+    assert!(Parser::parse_sql(sql).is_ok(), "lag(x) should work");
+
+    let sql = "SELECT lag(x, 1) OVER () FROM t";
+    assert!(Parser::parse_sql(sql).is_ok(), "lag(x, 1) should work");
+
+    let sql = "SELECT lag(x, 1, 0) OVER () FROM t";
+    assert!(Parser::parse_sql(sql).is_ok(), "lag(x, 1, 0) should work");
+}

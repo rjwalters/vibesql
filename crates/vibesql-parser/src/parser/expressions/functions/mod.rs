@@ -346,6 +346,9 @@ impl Parser {
         if matches!(self.peek(), Token::Keyword { keyword: Keyword::Over, .. }) {
             self.advance(); // consume OVER
 
+            // Validate argument count for window functions
+            self.validate_window_function_args(&function_name_upper, args.len(), &first)?;
+
             // Parse window specification
             let window_spec = self.parse_window_spec()?;
 

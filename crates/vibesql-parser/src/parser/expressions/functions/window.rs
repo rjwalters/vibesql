@@ -25,6 +25,44 @@ impl Parser {
         )
     }
 
+    /// Validate argument count for window functions.
+    ///
+    /// Window function signatures:
+    /// - 0 args: ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST
+    /// - 1 arg: NTILE, FIRST_VALUE, LAST_VALUE
+    /// - 1-3 args: LAG, LEAD
+    /// - 2 args: NTH_VALUE
+    pub(super) fn validate_window_function_args(
+        &self,
+        name: &str,
+        arg_count: usize,
+        original_name: &str,
+    ) -> Result<(), ParseError> {
+        let (min_args, max_args) = match name {
+            // Zero-argument ranking functions
+            "ROW_NUMBER" | "RANK" | "DENSE_RANK" | "PERCENT_RANK" | "CUME_DIST" => (0, 0),
+            // Single-argument functions
+            "NTILE" | "FIRST_VALUE" | "LAST_VALUE" => (1, 1),
+            // Variable-argument value functions
+            "LAG" | "LEAD" => (1, 3),
+            // Two-argument function
+            "NTH_VALUE" => (2, 2),
+            // Not a window-only function, no validation needed
+            _ => return Ok(()),
+        };
+
+        if arg_count < min_args || arg_count > max_args {
+            return Err(ParseError {
+                message: format!(
+                    "wrong number of arguments to function {}()",
+                    original_name.to_lowercase()
+                ),
+            });
+        }
+
+        Ok(())
+    }
+
     /// Classify a function as aggregate, ranking, or value window function
     pub(super) fn classify_window_function(
         &self,

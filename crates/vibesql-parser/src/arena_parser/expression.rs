@@ -1057,6 +1057,8 @@ impl<'arena> ArenaParser<'arena> {
 
             // Check for OVER clause (window function)
             if self.peek_keyword(Keyword::Over) {
+                // Validate argument count for window functions
+                Self::validate_window_function_args(&name_upper, args.len(), name)?;
                 return self.parse_window_function(name_sym, args);
             }
 
@@ -1105,6 +1107,8 @@ impl<'arena> ArenaParser<'arena> {
 
         // Check for OVER clause
         if self.peek_keyword(Keyword::Over) {
+            // Validate argument count for window functions
+            Self::validate_window_function_args(&name_upper, args.len(), name)?;
             return self.parse_window_function(name_sym, args);
         }
 
@@ -1133,6 +1137,37 @@ impl<'arena> ArenaParser<'arena> {
             // Value functions
             "LAG" | "LEAD" | "FIRST_VALUE" | "LAST_VALUE" | "NTH_VALUE"
         )
+    }
+
+    /// Validate argument count for window functions.
+    fn validate_window_function_args(
+        name: &str,
+        arg_count: usize,
+        original_name: &str,
+    ) -> Result<(), ParseError> {
+        let (min_args, max_args) = match name {
+            // Zero-argument ranking functions
+            "ROW_NUMBER" | "RANK" | "DENSE_RANK" | "PERCENT_RANK" | "CUME_DIST" => (0, 0),
+            // Single-argument functions
+            "NTILE" | "FIRST_VALUE" | "LAST_VALUE" => (1, 1),
+            // Variable-argument value functions
+            "LAG" | "LEAD" => (1, 3),
+            // Two-argument function
+            "NTH_VALUE" => (2, 2),
+            // Not a window-only function, no validation needed
+            _ => return Ok(()),
+        };
+
+        if arg_count < min_args || arg_count > max_args {
+            return Err(ParseError {
+                message: format!(
+                    "wrong number of arguments to function {}()",
+                    original_name.to_lowercase()
+                ),
+            });
+        }
+
+        Ok(())
     }
 
     /// Parse window function (OVER clause).
