@@ -704,6 +704,12 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             table_name: self.resolve(stmt.table_name),
             quoted: stmt.quoted,
             where_clause: stmt.where_clause.as_ref().map(|wc| self.convert_where_clause(wc)),
+            order_by: stmt
+                .order_by
+                .as_ref()
+                .map(|v| v.iter().map(|item| self.convert_order_by_item(item)).collect()),
+            limit: stmt.limit.as_ref().map(|e| self.convert_expression(e)),
+            offset: stmt.offset.as_ref().map(|e| self.convert_expression(e)),
         }
     }
 }

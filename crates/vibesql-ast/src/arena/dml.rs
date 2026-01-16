@@ -5,7 +5,7 @@
 use bumpalo::collections::Vec as BumpVec;
 
 use super::{
-    expression::Expression,
+    expression::{Expression, OrderByItem},
     interner::Symbol,
     select::{CommonTableExpr, FromClause, SelectStmt},
 };
@@ -180,4 +180,13 @@ pub struct DeleteStmt<'arena> {
     /// Per SQL:1999, quoted identifiers are case-sensitive.
     pub quoted: bool,
     pub where_clause: Option<WhereClause<'arena>>,
+    /// Optional ORDER BY clause (SQLite extension for DELETE)
+    /// When present with LIMIT, deletes rows in the specified order
+    pub order_by: Option<BumpVec<'arena, OrderByItem<'arena>>>,
+    /// Optional LIMIT clause (SQLite extension for DELETE)
+    /// When used with ORDER BY, limits the number of rows deleted
+    pub limit: Option<Expression<'arena>>,
+    /// Optional OFFSET clause (SQLite extension for DELETE)
+    /// When used with ORDER BY and LIMIT, skips rows before deleting
+    pub offset: Option<Expression<'arena>>,
 }

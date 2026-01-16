@@ -18,6 +18,9 @@ fn test_delete_all_rows() {
         table_name: "users".to_string(),
         quoted: false,
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -44,6 +47,9 @@ fn test_delete_with_simple_where() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -81,6 +87,9 @@ fn test_delete_with_boolean_where() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Boolean(true))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -116,6 +125,9 @@ fn test_delete_multiple_rows() {
             op: BinaryOperator::GreaterThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();

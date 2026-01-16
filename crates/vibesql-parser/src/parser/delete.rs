@@ -45,12 +45,93 @@ impl Parser {
             None
         };
 
+        // Parse optional ORDER BY clause (SQLite extension)
+        let order_by = if self.peek_keyword(Keyword::Order) {
+            self.consume_keyword(Keyword::Order)?;
+            self.expect_keyword(Keyword::By)?;
+
+            let order_items = self.parse_comma_separated_list(|p| {
+                let expr = p.parse_expression()?;
+                let direction = if p.peek_keyword(Keyword::Asc) {
+                    p.consume_keyword(Keyword::Asc)?;
+                    vibesql_ast::OrderDirection::Asc
+                } else if p.peek_keyword(Keyword::Desc) {
+                    p.consume_keyword(Keyword::Desc)?;
+                    vibesql_ast::OrderDirection::Desc
+                } else {
+                    vibesql_ast::OrderDirection::Asc
+                };
+
+                let nulls_order = if p.peek_keyword(Keyword::Nulls) {
+                    p.consume_keyword(Keyword::Nulls)?;
+                    if p.peek_keyword(Keyword::First) {
+                        p.consume_keyword(Keyword::First)?;
+                        Some(vibesql_ast::NullsOrder::First)
+                    } else if p.peek_keyword(Keyword::Last) {
+                        p.consume_keyword(Keyword::Last)?;
+                        Some(vibesql_ast::NullsOrder::Last)
+                    } else {
+                        return Err(ParseError {
+                            message: format!(
+                                "Expected FIRST or LAST after NULLS, found {}",
+                                p.peek().syntax_error()
+                            ),
+                        });
+                    }
+                } else {
+                    None
+                };
+
+                Ok(vibesql_ast::OrderByItem { expr, direction, nulls_order })
+            })?;
+
+            Some(order_items)
+        } else {
+            None
+        };
+
+        // Parse optional LIMIT clause (SQLite extension, supports comma syntax)
+        let (limit, offset_from_limit) = if self.peek_keyword(Keyword::Limit) {
+            self.consume_keyword(Keyword::Limit)?;
+            let first_expr = self.parse_expression()?;
+
+            if matches!(self.peek(), Token::Comma) {
+                self.advance();
+                let second_expr = self.parse_expression()?;
+                // LIMIT offset,count syntax
+                (Some(second_expr), Some(first_expr))
+            } else {
+                (Some(first_expr), None)
+            }
+        } else {
+            (None, None)
+        };
+
+        // Parse optional OFFSET clause (only if not already set via comma syntax)
+        let offset = if offset_from_limit.is_some() {
+            offset_from_limit
+        } else if self.peek_keyword(Keyword::Offset) {
+            self.consume_keyword(Keyword::Offset)?;
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
         // Expect semicolon or EOF
         if matches!(self.peek(), Token::Semicolon) {
             self.advance();
         }
 
-        Ok(vibesql_ast::DeleteStmt { with_clause: None, only, table_name, quoted, where_clause })
+        Ok(vibesql_ast::DeleteStmt {
+            with_clause: None,
+            only,
+            table_name,
+            quoted,
+            where_clause,
+            order_by,
+            limit,
+            offset,
+        })
     }
 
     /// Parse DELETE statement with a pre-parsed WITH clause (CTEs)
@@ -97,6 +178,78 @@ impl Parser {
             None
         };
 
+        // Parse optional ORDER BY clause (SQLite extension)
+        let order_by = if self.peek_keyword(Keyword::Order) {
+            self.consume_keyword(Keyword::Order)?;
+            self.expect_keyword(Keyword::By)?;
+
+            let order_items = self.parse_comma_separated_list(|p| {
+                let expr = p.parse_expression()?;
+                let direction = if p.peek_keyword(Keyword::Asc) {
+                    p.consume_keyword(Keyword::Asc)?;
+                    vibesql_ast::OrderDirection::Asc
+                } else if p.peek_keyword(Keyword::Desc) {
+                    p.consume_keyword(Keyword::Desc)?;
+                    vibesql_ast::OrderDirection::Desc
+                } else {
+                    vibesql_ast::OrderDirection::Asc
+                };
+
+                let nulls_order = if p.peek_keyword(Keyword::Nulls) {
+                    p.consume_keyword(Keyword::Nulls)?;
+                    if p.peek_keyword(Keyword::First) {
+                        p.consume_keyword(Keyword::First)?;
+                        Some(vibesql_ast::NullsOrder::First)
+                    } else if p.peek_keyword(Keyword::Last) {
+                        p.consume_keyword(Keyword::Last)?;
+                        Some(vibesql_ast::NullsOrder::Last)
+                    } else {
+                        return Err(ParseError {
+                            message: format!(
+                                "Expected FIRST or LAST after NULLS, found {}",
+                                p.peek().syntax_error()
+                            ),
+                        });
+                    }
+                } else {
+                    None
+                };
+
+                Ok(vibesql_ast::OrderByItem { expr, direction, nulls_order })
+            })?;
+
+            Some(order_items)
+        } else {
+            None
+        };
+
+        // Parse optional LIMIT clause (SQLite extension, supports comma syntax)
+        let (limit, offset_from_limit) = if self.peek_keyword(Keyword::Limit) {
+            self.consume_keyword(Keyword::Limit)?;
+            let first_expr = self.parse_expression()?;
+
+            if matches!(self.peek(), Token::Comma) {
+                self.advance();
+                let second_expr = self.parse_expression()?;
+                // LIMIT offset,count syntax
+                (Some(second_expr), Some(first_expr))
+            } else {
+                (Some(first_expr), None)
+            }
+        } else {
+            (None, None)
+        };
+
+        // Parse optional OFFSET clause (only if not already set via comma syntax)
+        let offset = if offset_from_limit.is_some() {
+            offset_from_limit
+        } else if self.peek_keyword(Keyword::Offset) {
+            self.consume_keyword(Keyword::Offset)?;
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
         // Expect semicolon or EOF
         if matches!(self.peek(), Token::Semicolon) {
             self.advance();
@@ -108,6 +261,9 @@ impl Parser {
             table_name,
             quoted,
             where_clause,
+            order_by,
+            limit,
+            offset,
         })
     }
 }

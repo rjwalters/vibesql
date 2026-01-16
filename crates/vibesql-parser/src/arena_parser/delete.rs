@@ -1,6 +1,7 @@
 //! Arena-allocated DELETE statement parsing.
 
-use vibesql_ast::arena::{DeleteStmt, WhereClause};
+use bumpalo::collections::Vec as BumpVec;
+use vibesql_ast::arena::{DeleteStmt, NullsOrder, OrderByItem, OrderDirection, WhereClause};
 
 use super::ArenaParser;
 use crate::{keywords::Keyword, token::Token, ParseError};
@@ -66,11 +67,95 @@ impl<'arena> ArenaParser<'arena> {
             None
         };
 
+        // Parse optional ORDER BY clause (SQLite extension)
+        let order_by = if self.try_consume_keyword(Keyword::Order) {
+            self.consume_keyword(Keyword::By)?;
+            Some(self.parse_delete_order_by_clause()?)
+        } else {
+            None
+        };
+
+        // Parse optional LIMIT clause (SQLite extension, supports comma syntax)
+        let (limit, offset_from_limit) = if self.try_consume_keyword(Keyword::Limit) {
+            let first_expr = self.parse_expression()?;
+
+            if self.try_consume(&Token::Comma) {
+                let second_expr = self.parse_expression()?;
+                // LIMIT offset,count syntax
+                (Some(second_expr), Some(first_expr))
+            } else {
+                (Some(first_expr), None)
+            }
+        } else {
+            (None, None)
+        };
+
+        // Parse optional OFFSET clause (only if not already set via comma syntax)
+        let offset = if offset_from_limit.is_some() {
+            offset_from_limit
+        } else if self.try_consume_keyword(Keyword::Offset) {
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
 
-        let stmt = DeleteStmt { with_clause: None, only, table_name, quoted, where_clause };
+        let stmt = DeleteStmt {
+            with_clause: None,
+            only,
+            table_name,
+            quoted,
+            where_clause,
+            order_by,
+            limit,
+            offset,
+        };
 
         Ok(self.arena.alloc(stmt))
+    }
+
+    /// Parse ORDER BY clause for DELETE statement
+    fn parse_delete_order_by_clause(
+        &mut self,
+    ) -> Result<BumpVec<'arena, OrderByItem<'arena>>, ParseError> {
+        let mut items = BumpVec::new_in(self.arena);
+
+        loop {
+            let expr = self.parse_expression()?;
+            let direction = if self.try_consume_keyword(Keyword::Desc) {
+                OrderDirection::Desc
+            } else {
+                self.try_consume_keyword(Keyword::Asc);
+                OrderDirection::Asc
+            };
+
+            // Parse optional NULLS FIRST/LAST
+            let nulls_order = if self.try_consume_keyword(Keyword::Nulls) {
+                if self.try_consume_keyword(Keyword::First) {
+                    Some(NullsOrder::First)
+                } else if self.try_consume_keyword(Keyword::Last) {
+                    Some(NullsOrder::Last)
+                } else {
+                    return Err(ParseError {
+                        message: format!(
+                            "Expected FIRST or LAST after NULLS, found {}",
+                            self.peek().syntax_error()
+                        ),
+                    });
+                }
+            } else {
+                None
+            };
+
+            items.push(OrderByItem { expr, direction, nulls_order });
+
+            if !self.try_consume(&Token::Comma) {
+                break;
+            }
+        }
+
+        Ok(items)
     }
 }

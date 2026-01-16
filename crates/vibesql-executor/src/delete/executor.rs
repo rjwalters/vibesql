@@ -153,7 +153,12 @@ impl DeleteExecutor {
 
         // Fast path: DELETE FROM table (no WHERE clause)
         // Use TRUNCATE-style optimization for 100-1000x performance improvement
-        if stmt.where_clause.is_none() && can_use_truncate(database, &stmt.table_name)? {
+        // Only use truncate if there's no ORDER BY or LIMIT (which would restrict which rows to delete)
+        if stmt.where_clause.is_none()
+            && stmt.order_by.is_none()
+            && stmt.limit.is_none()
+            && can_use_truncate(database, &stmt.table_name)?
+        {
             return execute_truncate(database, &stmt.table_name);
         }
 
@@ -265,18 +270,32 @@ impl DeleteExecutor {
         // Try to use primary key index for fast lookup
         let mut rows_and_indices_to_delete: Vec<(usize, vibesql_storage::Row)> = Vec::new();
 
-        if let Some(vibesql_ast::WhereClause::Condition(where_expr)) = &stmt.where_clause {
-            // Try primary key optimization
-            if let Some(pk_values) = Self::extract_primary_key_lookup(where_expr, &schema) {
-                if let Some(pk_index) = table.primary_key_index() {
-                    if let Some(&row_index) = pk_index.get(&pk_values) {
-                        // Found the row via index - single row to delete
-                        rows_and_indices_to_delete
-                            .push((row_index, table.scan()[row_index].clone()));
+        // For ORDER BY in DELETE, we need to skip PK optimization and do a full scan
+        // because we need all matching rows to sort them properly
+        let has_order_by = stmt.order_by.is_some();
+
+        if !has_order_by {
+            if let Some(vibesql_ast::WhereClause::Condition(where_expr)) = &stmt.where_clause {
+                // Try primary key optimization
+                if let Some(pk_values) = Self::extract_primary_key_lookup(where_expr, &schema) {
+                    if let Some(pk_index) = table.primary_key_index() {
+                        if let Some(&row_index) = pk_index.get(&pk_values) {
+                            // Found the row via index - single row to delete
+                            rows_and_indices_to_delete
+                                .push((row_index, table.scan()[row_index].clone()));
+                        }
+                        // If not found, rows_and_indices_to_delete stays empty (no rows to delete)
+                    } else {
+                        // No PK index, fall through to table scan below
+                        Self::collect_rows_with_scan(
+                            table,
+                            &stmt.where_clause,
+                            &mut evaluator,
+                            &mut rows_and_indices_to_delete,
+                        )?;
                     }
-                    // If not found, rows_and_indices_to_delete stays empty (no rows to delete)
                 } else {
-                    // No PK index, fall through to table scan below
+                    // Can't extract PK lookup, fall through to table scan
                     Self::collect_rows_with_scan(
                         table,
                         &stmt.where_clause,
@@ -285,7 +304,7 @@ impl DeleteExecutor {
                     )?;
                 }
             } else {
-                // Can't extract PK lookup, fall through to table scan
+                // No WHERE clause - collect all rows
                 Self::collect_rows_with_scan(
                     table,
                     &stmt.where_clause,
@@ -294,12 +313,24 @@ impl DeleteExecutor {
                 )?;
             }
         } else {
-            // No WHERE clause - collect all rows
+            // ORDER BY present - must do full scan to get all rows for sorting
             Self::collect_rows_with_scan(
                 table,
                 &stmt.where_clause,
                 &mut evaluator,
                 &mut rows_and_indices_to_delete,
+            )?;
+        }
+
+        // Apply ORDER BY sorting and LIMIT/OFFSET (SQLite extension)
+        if let Some(ref order_by) = stmt.order_by {
+            Self::apply_order_by_and_limit(
+                &mut rows_and_indices_to_delete,
+                order_by,
+                &stmt.limit,
+                &stmt.offset,
+                &schema,
+                &evaluator,
             )?;
         }
 
@@ -622,6 +653,121 @@ impl DeleteExecutor {
             if should_delete {
                 rows_and_indices.push((index, row.clone()));
             }
+        }
+
+        Ok(())
+    }
+
+    /// Apply ORDER BY sorting and LIMIT/OFFSET to the collected rows
+    /// This implements the SQLite extension for DELETE with ORDER BY LIMIT
+    fn apply_order_by_and_limit(
+        rows_and_indices: &mut Vec<(usize, vibesql_storage::Row)>,
+        order_by: &[vibesql_ast::OrderByItem],
+        limit: &Option<vibesql_ast::Expression>,
+        offset: &Option<vibesql_ast::Expression>,
+        _schema: &vibesql_catalog::TableSchema,
+        evaluator: &ExpressionEvaluator,
+    ) -> Result<(), ExecutorError> {
+        use vibesql_ast::OrderDirection;
+        use vibesql_types::SqlValue;
+
+        // Sort rows by ORDER BY columns
+        rows_and_indices.sort_by(|a, b| {
+            for item in order_by {
+                // Evaluate the ORDER BY expression for both rows
+                let val_a = evaluator.eval(&item.expr, &a.1).unwrap_or(SqlValue::Null);
+                let val_b = evaluator.eval(&item.expr, &b.1).unwrap_or(SqlValue::Null);
+
+                // Compare values with proper NULL handling
+                // NULLS FIRST: nulls come first (default for DESC)
+                // NULLS LAST: nulls come last (default for ASC)
+                let nulls_first = match item.nulls_order {
+                    Some(vibesql_ast::NullsOrder::First) => true,
+                    Some(vibesql_ast::NullsOrder::Last) => false,
+                    None => matches!(item.direction, OrderDirection::Desc),
+                };
+
+                let cmp = match (&val_a, &val_b) {
+                    (SqlValue::Null, SqlValue::Null) => std::cmp::Ordering::Equal,
+                    (SqlValue::Null, _) => {
+                        if nulls_first {
+                            std::cmp::Ordering::Less
+                        } else {
+                            std::cmp::Ordering::Greater
+                        }
+                    }
+                    (_, SqlValue::Null) => {
+                        if nulls_first {
+                            std::cmp::Ordering::Greater
+                        } else {
+                            std::cmp::Ordering::Less
+                        }
+                    }
+                    _ => val_a.partial_cmp(&val_b).unwrap_or(std::cmp::Ordering::Equal),
+                };
+
+                // Apply direction
+                let cmp = match item.direction {
+                    OrderDirection::Desc => cmp.reverse(),
+                    OrderDirection::Asc => cmp,
+                };
+
+                if cmp != std::cmp::Ordering::Equal {
+                    return cmp;
+                }
+            }
+            std::cmp::Ordering::Equal
+        });
+
+        // Evaluate OFFSET expression if present
+        let offset_val = if let Some(ref offset_expr) = offset {
+            // Evaluate the offset expression without a row context
+            // (it should be a constant or simple expression)
+            let empty_row = vibesql_storage::Row::new(vec![]);
+            match evaluator.eval(offset_expr, &empty_row)? {
+                SqlValue::Integer(n) if n >= 0 => n as usize,
+                SqlValue::Bigint(n) if n >= 0 => n as usize,
+                SqlValue::Null => 0, // NULL offset treated as 0
+                _ => {
+                    return Err(ExecutorError::TypeError(
+                        "OFFSET value must be a non-negative integer".to_string(),
+                    ))
+                }
+            }
+        } else {
+            0
+        };
+
+        // Evaluate LIMIT expression if present
+        let limit_val = if let Some(ref limit_expr) = limit {
+            let empty_row = vibesql_storage::Row::new(vec![]);
+            match evaluator.eval(limit_expr, &empty_row)? {
+                SqlValue::Integer(n) if n >= 0 => Some(n as usize),
+                SqlValue::Bigint(n) if n >= 0 => Some(n as usize),
+                SqlValue::Integer(-1) | SqlValue::Bigint(-1) => None, // -1 means no limit (SQLite extension)
+                SqlValue::Null => None, // NULL limit treated as no limit
+                _ => {
+                    return Err(ExecutorError::TypeError(
+                        "LIMIT value must be a non-negative integer".to_string(),
+                    ))
+                }
+            }
+        } else {
+            None
+        };
+
+        // Apply OFFSET: skip first N rows
+        if offset_val > 0 {
+            if offset_val >= rows_and_indices.len() {
+                rows_and_indices.clear();
+            } else {
+                rows_and_indices.drain(..offset_val);
+            }
+        }
+
+        // Apply LIMIT: keep only first N rows
+        if let Some(limit) = limit_val {
+            rows_and_indices.truncate(limit);
         }
 
         Ok(())
