@@ -268,20 +268,22 @@ where
             )))
         }
 
-        // Mixed Float/Integer comparisons - promote Integer to Float
-        (
-            left_val @ (Float(_) | Real(_) | Double(_)),
-            right_val @ (Integer(_) | Smallint(_) | Bigint(_)),
-        )
-        | (
-            left_val @ (Integer(_) | Smallint(_) | Bigint(_)),
-            right_val @ (Float(_) | Real(_) | Double(_)),
-        ) => {
+        // Mixed Float/Integer comparisons - use precise comparison for large values
+        // SQLite handles edge cases near i64::MAX/i64::MIN specially to avoid
+        // precision loss when converting large integers to f64.
+        (left_val @ (Float(_) | Real(_) | Double(_)), right_val)
+            if is_exact_numeric(right_val) =>
+        {
             let left_f64 = to_f64(left_val)?;
+            let right_i64 = to_i64(right_val)?;
+            Ok(Boolean(predicate(compare_float_int(left_f64, right_i64))))
+        }
+        (left_val, right_val @ (Float(_) | Real(_) | Double(_)))
+            if is_exact_numeric(left_val) =>
+        {
+            let left_i64 = to_i64(left_val)?;
             let right_f64 = to_f64(right_val)?;
-            Ok(Boolean(predicate(
-                left_f64.partial_cmp(&right_f64).unwrap_or(std::cmp::Ordering::Equal),
-            )))
+            Ok(Boolean(predicate(compare_int_float(left_i64, right_f64))))
         }
 
         // NUMERIC comparisons with any numeric type
@@ -332,4 +334,109 @@ where
             right: right.clone(),
         }),
     }
+}
+
+/// Compare an integer (i64) with a float (f64) precisely, handling edge cases
+/// near i64::MAX and i64::MIN where f64 loses precision.
+///
+/// SQLite uses special handling for these cases because f64 cannot exactly
+/// represent integers larger than 2^53. This function ensures correct comparison
+/// results even when the float value is beyond the range of i64.
+///
+/// Key insight: When i64::MAX (9223372036854775807) is converted to f64, it
+/// rounds UP to 9223372036854775808.0. So `float(i64::MAX)` and `float(i64::MAX+1)`
+/// produce the same f64 value. We must handle this edge case carefully.
+#[inline]
+fn compare_int_float(int_val: i64, float_val: f64) -> std::cmp::Ordering {
+    // Handle NaN: NaN comparisons return Equal (will be false for all predicates)
+    if float_val.is_nan() {
+        return std::cmp::Ordering::Equal;
+    }
+
+    // Handle infinity
+    if float_val.is_infinite() {
+        return if float_val.is_sign_positive() {
+            std::cmp::Ordering::Less // int < +inf
+        } else {
+            std::cmp::Ordering::Greater // int > -inf
+        };
+    }
+
+    // Threshold for exact representation: 2^53 = 9007199254740992
+    const EXACT_INT_MAX: f64 = 9007199254740992.0;
+    const EXACT_INT_MIN: f64 = -9007199254740992.0;
+
+    // If float is within the exact representation range, convert to i64 and compare
+    if float_val >= EXACT_INT_MIN && float_val <= EXACT_INT_MAX && float_val.fract() == 0.0 {
+        let float_as_int = float_val as i64;
+        return int_val.cmp(&float_as_int);
+    }
+
+    // For floats with fractional parts, convert int to float and compare
+    if float_val.fract() != 0.0 {
+        let int_as_float = int_val as f64;
+        return int_as_float
+            .partial_cmp(&float_val)
+            .unwrap_or(std::cmp::Ordering::Equal);
+    }
+
+    // Handle the imprecise range: floats between 2^53 and i64 bounds
+    // Key edge case: float(i64::MAX) = 9223372036854775808.0 (rounds UP!)
+    // This is actually i64::MAX + 1 as an exact integer value.
+
+    // The float value 9223372036854775808.0 represents the integer 2^63 = i64::MAX + 1
+    // Since this is beyond i64::MAX, any i64 value is strictly less than it.
+    // Note: This constant MUST be written as the exact bit pattern, not derived from i64::MAX
+    const I64_MAX_PLUS_ONE_AS_F64: f64 = 9223372036854775808.0_f64; // 2^63 exactly
+
+    if float_val >= I64_MAX_PLUS_ONE_AS_F64 {
+        return std::cmp::Ordering::Less; // Any i64 is less than 2^63 or greater
+    }
+
+    // Similarly for the minimum: float(i64::MIN) represents -2^63 exactly (no rounding)
+    // Any float less than i64::MIN as f64 means int > float
+    const I64_MIN_AS_F64: f64 = -9223372036854775808.0_f64; // -2^63 exactly
+
+    if float_val < I64_MIN_AS_F64 {
+        return std::cmp::Ordering::Greater; // Any i64 is greater than value < i64::MIN
+    }
+
+    // If float equals i64::MIN exactly, compare with int
+    if float_val == I64_MIN_AS_F64 {
+        return int_val.cmp(&i64::MIN);
+    }
+
+    // For values in the imprecise zone (2^53 < |value| < 2^63), we need to be careful.
+    // Convert int to float and compare, but account for potential rounding.
+    let int_as_float = int_val as f64;
+
+    if int_as_float == float_val {
+        // They compare equal as floats. In the imprecise range, this could mean
+        // the integer was rounded during conversion. Check if the round-trip
+        // preserves the original value.
+        let round_trip = int_as_float as i64;
+        if round_trip == int_val {
+            // The integer survives round-trip, so they're truly equal
+            return std::cmp::Ordering::Equal;
+        }
+        // The integer was rounded. Determine direction of rounding.
+        if round_trip > int_val {
+            // int_as_float rounded UP, so int < float
+            return std::cmp::Ordering::Less;
+        } else {
+            // int_as_float rounded DOWN, so int > float
+            return std::cmp::Ordering::Greater;
+        }
+    }
+
+    // Standard float comparison
+    int_as_float
+        .partial_cmp(&float_val)
+        .unwrap_or(std::cmp::Ordering::Equal)
+}
+
+/// Compare a float (f64) with an integer (i64) - returns float.cmp(int)
+#[inline]
+fn compare_float_int(float_val: f64, int_val: i64) -> std::cmp::Ordering {
+    compare_int_float(int_val, float_val).reverse()
 }
