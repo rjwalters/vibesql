@@ -17,6 +17,9 @@ fn test_delete_table_not_found() {
         table_name: "nonexistent".to_string(),
         quoted: false,
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     let result = DeleteExecutor::execute(&stmt, &mut db);
@@ -41,6 +44,9 @@ fn test_delete_no_matching_rows() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(999))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -68,6 +74,9 @@ fn test_delete_from_empty_table() {
         table_name: "empty_users".to_string(),
         quoted: false,
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -92,6 +101,9 @@ fn test_delete_column_not_found() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     // Column validation happens upfront - should return NoSuchColumn error

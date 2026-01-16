@@ -47,6 +47,9 @@ fn test_truncate_optimization_basic() {
         table_name: "large_table".to_string(),
         quoted: false,
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -119,6 +122,9 @@ fn test_truncate_blocked_by_fk_reference() {
         table_name: "parent".to_string(),
         quoted: false,
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     let result = DeleteExecutor::execute(&stmt, &mut db);
@@ -188,6 +194,9 @@ fn test_truncate_allowed_when_no_fk_references() {
         table_name: "parent".to_string(),
         quoted: false,
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -248,6 +257,9 @@ fn test_truncate_blocked_by_delete_trigger() {
         table_name: "test_table".to_string(),
         quoted: false,
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -306,6 +318,9 @@ fn test_truncate_allowed_with_insert_trigger() {
         table_name: "test_table".to_string(),
         quoted: false,
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -350,6 +365,9 @@ fn test_truncate_performance() {
         table_name: "large_table".to_string(),
         quoted: false,
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
     };
 
     // Time the deletion

@@ -1078,6 +1078,20 @@ fn walk_delete<V: ExpressionVisitor>(visitor: &mut V, stmt: &DeleteStmt) {
     if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
         walk_expression(visitor, expr);
     }
+    // Walk ORDER BY expressions
+    if let Some(order_by) = &stmt.order_by {
+        for item in order_by {
+            walk_expression(visitor, &item.expr);
+        }
+    }
+    // Walk LIMIT expression
+    if let Some(limit) = &stmt.limit {
+        walk_expression(visitor, limit);
+    }
+    // Walk OFFSET expression
+    if let Some(offset) = &stmt.offset {
+        walk_expression(visitor, offset);
+    }
 }
 
 // ============================================================================
@@ -1371,6 +1385,18 @@ pub fn transform_delete<V: ExpressionMutVisitor>(visitor: &mut V, stmt: DeleteSt
             }
             other => other,
         }),
+        order_by: stmt.order_by.map(|items| {
+            items
+                .into_iter()
+                .map(|item| crate::OrderByItem {
+                    expr: transform_expression(visitor, item.expr),
+                    direction: item.direction,
+                    nulls_order: item.nulls_order,
+                })
+                .collect()
+        }),
+        limit: stmt.limit.map(|e| transform_expression(visitor, e)),
+        offset: stmt.offset.map(|e| transform_expression(visitor, e)),
     }
 }
 

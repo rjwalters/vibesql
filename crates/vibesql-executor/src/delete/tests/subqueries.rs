@@ -224,6 +224,9 @@ mod in_subquery {
                 subquery,
                 negated: false,
             })),
+            order_by: None,
+            limit: None,
+            offset: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -289,6 +292,9 @@ mod in_subquery {
                 subquery,
                 negated: true,
             })),
+            order_by: None,
+            limit: None,
+            offset: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -365,6 +371,9 @@ mod scalar_subquery {
                 op: vibesql_ast::BinaryOperator::LessThan,
                 right: Box::new(Expression::ScalarSubquery(subquery)),
             })),
+            order_by: None,
+            limit: None,
+            offset: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -443,6 +452,9 @@ mod scalar_subquery {
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(Expression::ScalarSubquery(subquery)),
             })),
+            order_by: None,
+            limit: None,
+            offset: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -512,6 +524,9 @@ mod scalar_subquery {
                 op: vibesql_ast::BinaryOperator::GreaterThan,
                 right: Box::new(Expression::ScalarSubquery(subquery)),
             })),
+            order_by: None,
+            limit: None,
+            offset: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -580,6 +595,9 @@ mod empty_subquery {
                 subquery,
                 negated: false,
             })),
+            order_by: None,
+            limit: None,
+            offset: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -665,6 +683,9 @@ mod complex_subquery {
                 subquery,
                 negated: false,
             })),
+            order_by: None,
+            limit: None,
+            offset: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();

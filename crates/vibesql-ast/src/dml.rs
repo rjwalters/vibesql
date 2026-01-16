@@ -2,7 +2,7 @@
 //!
 //! This module contains INSERT, UPDATE, and DELETE statement types.
 
-use crate::{CommonTableExpr, Expression, FromClause, SelectStmt};
+use crate::{CommonTableExpr, Expression, FromClause, OrderByItem, SelectStmt};
 
 // ============================================================================
 // INSERT Statement
@@ -185,4 +185,13 @@ pub struct DeleteStmt {
     /// Per SQL:1999, quoted identifiers are case-sensitive.
     pub quoted: bool,
     pub where_clause: Option<WhereClause>,
+    /// Optional ORDER BY clause (SQLite extension for DELETE)
+    /// When present with LIMIT, deletes rows in the specified order
+    pub order_by: Option<Vec<OrderByItem>>,
+    /// Optional LIMIT clause (SQLite extension for DELETE)
+    /// When used with ORDER BY, limits the number of rows deleted
+    pub limit: Option<Expression>,
+    /// Optional OFFSET clause (SQLite extension for DELETE)
+    /// When used with ORDER BY and LIMIT, skips rows before deleting
+    pub offset: Option<Expression>,
 }
