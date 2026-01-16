@@ -391,3 +391,48 @@ fn test_n_following() {
         _ => panic!("Expected SELECT"),
     }
 }
+
+#[test]
+fn test_window_function_without_over_clause_errors() {
+    // Window-only functions MUST have an OVER clause
+    // They cannot be used as regular scalar functions
+
+    // Ranking functions
+    let sql = "SELECT row_number() FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "row_number() without OVER should error");
+    assert!(result.unwrap_err().message.contains("misuse of window function"));
+
+    let sql = "SELECT rank() FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "rank() without OVER should error");
+
+    let sql = "SELECT dense_rank() FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "dense_rank() without OVER should error");
+
+    let sql = "SELECT ntile(4) FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "ntile() without OVER should error");
+
+    // Value functions
+    let sql = "SELECT nth_value(x, 1) FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "nth_value() without OVER should error");
+
+    let sql = "SELECT lag(x, 1) FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "lag() without OVER should error");
+
+    let sql = "SELECT lead(x, 1) FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "lead() without OVER should error");
+
+    let sql = "SELECT first_value(x) FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "first_value() without OVER should error");
+
+    let sql = "SELECT last_value(x) FROM t";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_err(), "last_value() without OVER should error");
+}

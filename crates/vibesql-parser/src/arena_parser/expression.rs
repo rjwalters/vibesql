@@ -1108,11 +1108,31 @@ impl<'arena> ArenaParser<'arena> {
             return self.parse_window_function(name_sym, args);
         }
 
+        // Check if this is a window-only function used without OVER clause
+        // These functions REQUIRE an OVER clause - they cannot be used as scalar functions
+        if Self::is_window_only_function(&name_upper) {
+            return Err(ParseError {
+                message: format!("misuse of window function {}()", name.to_lowercase()),
+            });
+        }
+
         Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::Function {
             name: name_sym,
             args,
             character_unit: None,
         })))
+    }
+
+    /// Check if a function is a window-only function that requires an OVER clause.
+    /// These functions cannot be used as scalar functions - they MUST have an OVER clause.
+    fn is_window_only_function(name: &str) -> bool {
+        matches!(
+            name,
+            // Ranking functions
+            "ROW_NUMBER" | "RANK" | "DENSE_RANK" | "NTILE" | "PERCENT_RANK" | "CUME_DIST" |
+            // Value functions
+            "LAG" | "LEAD" | "FIRST_VALUE" | "LAST_VALUE" | "NTH_VALUE"
+        )
     }
 
     /// Parse window function (OVER clause).

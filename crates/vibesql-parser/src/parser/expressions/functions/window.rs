@@ -9,6 +9,22 @@
 use super::super::*;
 
 impl Parser {
+    /// Check if a function is a window-only function that requires an OVER clause.
+    /// These functions cannot be used as scalar functions - they MUST have an OVER clause.
+    ///
+    /// Returns true for:
+    /// - Ranking functions: ROW_NUMBER, RANK, DENSE_RANK, NTILE, PERCENT_RANK, CUME_DIST
+    /// - Value functions: LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE
+    pub(super) fn is_window_only_function(&self, name: &str) -> bool {
+        matches!(
+            name,
+            // Ranking functions
+            "ROW_NUMBER" | "RANK" | "DENSE_RANK" | "NTILE" | "PERCENT_RANK" | "CUME_DIST" |
+            // Value functions
+            "LAG" | "LEAD" | "FIRST_VALUE" | "LAST_VALUE" | "NTH_VALUE"
+        )
+    }
+
     /// Classify a function as aggregate, ranking, or value window function
     pub(super) fn classify_window_function(
         &self,

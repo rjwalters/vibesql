@@ -307,6 +307,12 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "misuse of aggregate"
     }
 
+    # Window function misuse: "Parse error: misuse of window function X()" -> "misuse of window function X()"
+    # This occurs when window-only functions (row_number, rank, nth_value, etc.) are used without OVER clause
+    if {[regexp -nocase {misuse of window function\s+([A-Za-z_]+)\(\)} $error_msg -> func_name]} {
+        return "misuse of window function [string tolower $func_name]()"
+    }
+
     # Table already exists: "Table 'public.X' already exists" -> {table "x" already exists}
     # Strip schema prefix (e.g., "public.t1" -> "t1")
     if {[regexp -nocase {^Table '([^']+)' already exists} $error_msg -> full_name]} {

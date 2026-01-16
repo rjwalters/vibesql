@@ -358,6 +358,14 @@ impl Parser {
             }));
         }
 
+        // Check if this is a window-only function used without OVER clause
+        // These functions REQUIRE an OVER clause - they cannot be used as scalar functions
+        if self.is_window_only_function(&function_name_upper) {
+            return Err(ParseError {
+                message: format!("misuse of window function {}()", first.to_lowercase()),
+            });
+        }
+
         // Determine if this is truly an aggregate function
         // MIN/MAX with >1 argument are scalar functions (SQLite compatibility)
         // GROUP_CONCAT accepts 1 or 2 arguments (expr, separator)
