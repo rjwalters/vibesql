@@ -195,11 +195,16 @@ impl super::Catalog {
     /// For unqualified identifiers, follows SQLite semantics:
     /// 1. First check the temp schema (temporary tables shadow main tables)
     /// 2. Then check the current schema (main)
+    ///
+    /// SQLite Compatibility: The "temp" schema name is mapped to the session's
+    /// temp schema, allowing `temp.tablename` syntax.
     pub fn get_table_by_identifier(&self, identifier: &TableIdentifier) -> Option<&TableSchema> {
         if identifier.is_qualified() {
             // For qualified identifiers, look up in the specified schema
+            // Resolve "temp" to session's temp schema for SQLite compatibility
             let schema_canonical = identifier.schema_canonical().unwrap_or(&self.current_schema);
-            self.schemas.get(schema_canonical).and_then(|schema| {
+            let resolved_schema = self.resolve_schema_name(schema_canonical);
+            self.schemas.get(resolved_schema).and_then(|schema| {
                 // Create a simple identifier with just the table part for lookup
                 let table_id = TableIdentifier::new(
                     identifier.table_canonical(),
@@ -261,6 +266,9 @@ impl super::Catalog {
     /// Drop a table schema (supports qualified names like "schema.table").
     /// Respects the `case_sensitive_identifiers` setting.
     ///
+    /// SQLite Compatibility: The "temp" schema name is mapped to the session's
+    /// temp schema, allowing `DROP TABLE temp.tablename` syntax.
+    ///
     /// Note: Triggers are automatically dropped when the associated table is dropped.
     pub fn drop_table(&mut self, name: &str) -> Result<(), CatalogError> {
         // Parse qualified name: schema.table or just table
@@ -273,17 +281,20 @@ impl super::Catalog {
 
         let normalized_table = self.normalize_identifier(table_name);
 
+        // Resolve "temp" to session's temp schema for SQLite compatibility
+        let resolved_schema_name = self.resolve_schema_name(schema_name_for_lookup);
+
         // Find schema with case-insensitive lookup, then get mutable reference
         let schema_key = if self.case_sensitive_identifiers {
             // Case-sensitive: direct lookup
-            if self.schemas.contains_key(schema_name_for_lookup) {
-                schema_name_for_lookup.to_string()
+            if self.schemas.contains_key(resolved_schema_name) {
+                resolved_schema_name.to_string()
             } else {
                 return Err(CatalogError::SchemaNotFound(schema_name_for_lookup.to_string()));
             }
         } else {
             // Case-insensitive: find schema key by comparing normalized names
-            let normalized_name = schema_name_for_lookup.to_lowercase();
+            let normalized_name = resolved_schema_name.to_lowercase();
             self.schemas
                 .keys()
                 .find(|key| key.to_lowercase() == normalized_name)
@@ -358,19 +369,39 @@ impl super::Catalog {
     /// - Quoted identifiers are case-sensitive (match exact canonical form)
     /// - Unquoted identifiers are case-insensitive (lowercase canonical form)
     ///
+    /// For qualified identifiers, looks up in the specified schema.
     /// For unqualified identifiers, checks session-specific temp schema first (SQLite semantics).
+    ///
+    /// SQLite Compatibility: The "temp" schema name is mapped to the session's
+    /// temp schema, allowing `temp.tablename` syntax.
     pub fn table_exists_by_identifier(&self, identifier: &TableIdentifier) -> bool {
-        // Check session's temp schema first
-        if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
-            if temp_schema.table_exists_by_identifier(identifier) {
-                return true;
+        if identifier.is_qualified() {
+            // For qualified identifiers, look up in the specified schema
+            // Resolve "temp" to session's temp schema for SQLite compatibility
+            let schema_canonical = identifier.schema_canonical().unwrap_or(&self.current_schema);
+            let resolved_schema = self.resolve_schema_name(schema_canonical);
+            if let Some(schema) = self.schemas.get(resolved_schema) {
+                // Create a simple identifier with just the table part for lookup
+                let table_id = TableIdentifier::new(
+                    identifier.table_canonical(),
+                    identifier.is_table_quoted(),
+                );
+                return schema.table_exists_by_identifier(&table_id);
             }
-        }
+            false
+        } else {
+            // For unqualified identifiers, check session's temp schema first (SQLite semantics)
+            if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
+                if temp_schema.table_exists_by_identifier(identifier) {
+                    return true;
+                }
+            }
 
-        // Then check current schema
-        self.schemas
-            .get(&self.current_schema)
-            .is_some_and(|schema| schema.table_exists_by_identifier(identifier))
+            // Then check current schema
+            self.schemas
+                .get(&self.current_schema)
+                .is_some_and(|schema| schema.table_exists_by_identifier(identifier))
+        }
     }
 
     /// Get the TableIdentifier for a table by its canonical name.
