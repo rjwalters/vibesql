@@ -157,7 +157,11 @@ pub fn execute_update_from_join(
 
     for row in rows {
         // Extract identifier values (first num_id_columns values)
-        let id_values: Vec<SqlValue> = row.values[..num_id_columns].to_vec();
+        // Normalize integer types to ensure consistent comparison
+        let id_values: Vec<SqlValue> = row.values[..num_id_columns]
+            .iter()
+            .map(normalize_integer_type)
+            .collect();
 
         // Skip NULL identifiers
         if id_values.iter().any(|v| matches!(v, SqlValue::Null)) {
@@ -201,18 +205,19 @@ pub fn execute_update_from_join(
 
     for (row_index, target_row) in target_table.scan().iter().enumerate() {
         // Build identifier for this row
+        // Normalize integer types to match the keys in id_to_set_values
         let id_values: Vec<SqlValue> = if use_rowid {
             // Use the row's rowid
             let rowid = target_row
                 .row_id
                 .map(|id| SqlValue::Integer(id as i64))
                 .unwrap_or_else(|| SqlValue::Integer((row_index + 1) as i64));
-            vec![rowid]
+            vec![normalize_integer_type(&rowid)]
         } else {
             // Use PK column values
             pk_indices
                 .iter()
-                .map(|&idx| target_row.get(idx).cloned().unwrap_or(SqlValue::Null))
+                .map(|&idx| normalize_integer_type(target_row.get(idx).unwrap_or(&SqlValue::Null)))
                 .collect()
         };
 
@@ -358,4 +363,19 @@ pub fn apply_update_from_matches(
     }
 
     Ok(updates)
+}
+
+/// Normalize integer types to ensure consistent comparison in HashMaps
+///
+/// SQLite's rowid can be returned as different integer types (Integer, Bigint)
+/// depending on how it's accessed. This function normalizes all integer types
+/// to a consistent representation (Bigint) for reliable HashMap lookups.
+fn normalize_integer_type(value: &SqlValue) -> SqlValue {
+    match value {
+        SqlValue::Integer(i) => SqlValue::Bigint(*i),
+        SqlValue::Bigint(i) => SqlValue::Bigint(*i),
+        SqlValue::Smallint(i) => SqlValue::Bigint(*i as i64),
+        SqlValue::Unsigned(i) => SqlValue::Bigint(*i as i64),
+        other => other.clone(),
+    }
 }

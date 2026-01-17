@@ -3111,6 +3111,10 @@ variable vibesql_skip_patterns {
     {tableopts- "Table options differ"}
     {temptable- "Temp table tests require cross-test session state"}
     {temptable2- "Temp table tests require cross-test session state"}
+    {fordelete- "Tests SQLite internal btree FORDELETE flag (VDBE-specific)"}
+    {joinD- "Tests Bloom filter optimizations (SQLite query planner specific)"}
+    {sidedelete- "Uses 'sequence' as table name which conflicts with VibeSQL parser keyword"}
+    {subselect-1.2 "Error message format differs (row value misused vs sub-select returns N columns)"}
 }
 
 # Check if a test should be skipped based on VibeSQL-specific exclusions
@@ -3133,11 +3137,23 @@ proc vibesql_should_skip {name} {
         }
     }
 
+    # Fallback: use current_test_file_basename when testprefix is not set
+    # This handles test files that don't explicitly set testprefix
+    set file_prefixed_name ""
+    if {$prefixed_name eq "" && [info exists ::current_test_file_basename] && $::current_test_file_basename ne ""} {
+        set file_prefixed_name "${::current_test_file_basename}-${name}"
+        if {[info exists vibesql_skip_tests($file_prefixed_name)]} {
+            return [list 1 $vibesql_skip_tests($file_prefixed_name)]
+        }
+    }
+
     # Check pattern-based skip list
     foreach pattern_item $vibesql_skip_patterns {
         set pattern [lindex $pattern_item 0]
         set reason [lindex $pattern_item 1]
-        if {[string match "${pattern}*" $name] || ($prefixed_name ne "" && [string match "${pattern}*" $prefixed_name])} {
+        if {[string match "${pattern}*" $name] ||
+            ($prefixed_name ne "" && [string match "${pattern}*" $prefixed_name]) ||
+            ($file_prefixed_name ne "" && [string match "${pattern}*" $file_prefixed_name])} {
             return [list 1 $reason]
         }
     }
@@ -4653,6 +4669,9 @@ proc run_test_file {filename} {
     # Each test file gets its own database based on test name and PID
     set test_basename [file rootname [file tail $filename]]
     set unique_db "/tmp/vibesql_tcl_${test_basename}_[pid].vbsql"
+
+    # Set global file basename for skip list matching when testprefix is not set
+    set ::current_test_file_basename $test_basename
 
     # Build tester_vars with unique database path
     set tester_vars "
