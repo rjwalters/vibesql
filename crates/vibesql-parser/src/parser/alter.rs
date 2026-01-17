@@ -141,6 +141,7 @@ fn parse_add_column(
                         column: ref_column,
                         on_delete: None,
                         on_update: None,
+                        deferral: None,
                     },
                 });
             }
@@ -334,6 +335,7 @@ fn parse_modify_column(
                         column: ref_column,
                         on_delete: None,
                         on_update: None,
+                        deferral: None,
                     },
                 });
             }
@@ -422,6 +424,7 @@ fn parse_change_column(
                         column: ref_column,
                         on_delete: None,
                         on_update: None,
+                        deferral: None,
                     },
                 });
             }

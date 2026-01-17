@@ -197,6 +197,11 @@ pub enum Keyword {
     Next,
     // Referential action keywords
     Action,
+    // Constraint deferral keywords (SQL:1999)
+    Deferrable,
+    Deferred,
+    Immediate,
+    Initially,
     // Session configuration keywords (SQL:1999)
     Catalog,
     Names,
@@ -568,6 +573,10 @@ impl fmt::Display for Keyword {
             Keyword::Restart => "RESTART",
             Keyword::Next => "NEXT",
             Keyword::Action => "ACTION",
+            Keyword::Deferrable => "DEFERRABLE",
+            Keyword::Deferred => "DEFERRED",
+            Keyword::Immediate => "IMMEDIATE",
+            Keyword::Initially => "INITIALLY",
             Keyword::Catalog => "CATALOG",
             Keyword::Names => "NAMES",
             Keyword::Zone => "ZONE",
