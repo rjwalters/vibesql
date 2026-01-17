@@ -26,15 +26,27 @@ use crate::{
 #[cfg(feature = "parallel")]
 use crate::select::parallel::ParallelConfig;
 
+/// Result from evaluating a window function, including optional row reordering
+pub(super) struct WindowEvaluationResult {
+    /// Window function values in partition order
+    pub values: Vec<SqlValue>,
+    /// Row indices in partition order (if PARTITION BY is present)
+    /// This maps: partition_order_index -> original_row_index
+    pub partition_order: Option<Vec<usize>>,
+}
+
 /// Evaluate a single window function over all rows
 ///
 /// When the `parallel` feature is enabled and there are multiple partitions,
 /// partition sorting is parallelized for better performance on multi-core systems.
+///
+/// Returns values in partition order (grouped by partition, then by ORDER BY within partition)
+/// along with the mapping from partition order to original row indices.
 pub(super) fn evaluate_single_window_function(
     rows: &[Row],
     win_func: &WindowFunctionInfo,
     evaluator: &CombinedExpressionEvaluator,
-) -> Result<Vec<SqlValue>, ExecutorError> {
+) -> Result<WindowEvaluationResult, ExecutorError> {
     // Validate frame specification (checks for non-negative offsets, etc.)
     validate_frame(&win_func.window_spec.frame)
         .map_err(ExecutorError::SqliteCompatError)?;
@@ -173,14 +185,32 @@ pub(super) fn evaluate_single_window_function(
         evaluator,
     )?;
 
-    // Sort by original index to restore original row order
+    // Determine if we have PARTITION BY or ORDER BY - if so, capture the window order
+    let has_partition_by = win_func
+        .window_spec
+        .partition_by
+        .as_ref()
+        .is_some_and(|p| !p.is_empty());
+    let has_order_by = win_func
+        .window_spec
+        .order_by
+        .as_ref()
+        .is_some_and(|o| !o.is_empty());
+
+    // Capture window function order before sorting back to original
+    // This captures the order after partitioning and sorting (the "window order")
+    let partition_order: Option<Vec<usize>> = if has_partition_by || has_order_by {
+        Some(results_with_indices.iter().map(|(idx, _)| *idx).collect())
+    } else {
+        None
+    };
+
+    // Always sort values back to original order for consistent indexing
     let mut results_with_indices = results_with_indices;
     results_with_indices.sort_by_key(|(idx, _)| *idx);
+    let values = results_with_indices.into_iter().map(|(_, result)| result).collect();
 
-    // Extract just the results
-    let all_results = results_with_indices.into_iter().map(|(_, result)| result).collect();
-
-    Ok(all_results)
+    Ok(WindowEvaluationResult { values, partition_order })
 }
 
 /// Sequential evaluation of window function partitions

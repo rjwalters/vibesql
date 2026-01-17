@@ -66,6 +66,9 @@ impl Partition {
 ///
 /// Groups rows into partitions based on partition expressions.
 /// If no PARTITION BY clause, all rows go into a single partition.
+///
+/// Partitions are ordered by their key values (using BTreeMap with SqlValue keys
+/// for proper numeric/string ordering), matching SQLite's behavior.
 pub fn partition_rows<F>(
     rows: Vec<Row>,
     partition_by: &Option<Vec<Expression>>,
@@ -83,9 +86,10 @@ where
         return vec![Partition::new(rows)];
     }
 
-    // Group rows by partition key values (use BTreeMap for deterministic ordering)
-    // Track original indices through partitioning
-    let mut partitions_map: std::collections::BTreeMap<Vec<String>, Vec<(usize, Row)>> =
+    // Group rows by partition key values
+    // Use BTreeMap with SqlValue keys for proper value ordering (not string ordering)
+    // This ensures Integer(3) < Integer(7) < Integer(11) as expected
+    let mut partitions_map: std::collections::BTreeMap<Vec<SqlValue>, Vec<(usize, Row)>> =
         std::collections::BTreeMap::new();
 
     for (original_idx, row) in rows.into_iter().enumerate() {
@@ -94,14 +98,13 @@ where
 
         for expr in partition_exprs {
             let value = eval_fn(expr, &row).unwrap_or(SqlValue::Null);
-            // Convert to string for grouping (handles NULL consistently)
-            partition_key.push(format!("{:?}", value));
+            partition_key.push(value);
         }
 
         partitions_map.entry(partition_key).or_default().push((original_idx, row));
     }
 
-    // Convert HashMap to Vec<Partition>, preserving original indices
+    // Convert BTreeMap to Vec<Partition>, preserving sorted partition key order
     partitions_map
         .into_values()
         .map(|rows_with_indices| {
