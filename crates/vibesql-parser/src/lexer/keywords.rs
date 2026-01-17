@@ -133,6 +133,11 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "CHECK" => Keyword::Check,
     "REFERENCES" => Keyword::References,
     "ACTION" => Keyword::Action,
+    // Constraint deferral keywords (SQL:1999)
+    "DEFERRABLE" => Keyword::Deferrable,
+    "DEFERRED" => Keyword::Deferred,
+    "IMMEDIATE" => Keyword::Immediate,
+    "INITIALLY" => Keyword::Initially,
     // TRIM function keywords
     "BOTH" => Keyword::Both,
     "LEADING" => Keyword::Leading,

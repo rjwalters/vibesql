@@ -209,6 +209,7 @@ fn test_alter_table_add_foreign_key_no_keyword() {
                         references_columns,
                         on_delete,
                         on_update,
+                        ..
                     } => {
                         assert_eq!(columns.len(), 1);
                         assert_eq!(columns[0], "col");

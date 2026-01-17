@@ -60,6 +60,7 @@ fn test_parse_create_table_with_foreign_key() {
                             references_columns,
                             on_delete,
                             on_update,
+                            ..
                         },
                     ..
                 } => {
@@ -102,6 +103,7 @@ fn test_parse_create_table_with_foreign_key_on_delete_update() {
                             column: col,
                             on_delete,
                             on_update,
+                            ..
                         },
                     ..
                 } => {
@@ -141,6 +143,7 @@ fn test_parse_create_table_with_table_foreign_key_on_delete_update() {
                             references_columns,
                             on_delete,
                             on_update,
+                            ..
                         },
                     ..
                 } => {
