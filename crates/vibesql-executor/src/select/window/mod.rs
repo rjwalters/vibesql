@@ -57,22 +57,45 @@ pub(super) fn evaluate_window_functions(
 
     // For each window function, compute values for all rows
     // We'll build a Vec<Vec<SqlValue>> where outer vec is window functions,
-    // inner vec is values for each row
+    // inner vec is values for each row (in partition order if PARTITION BY present)
     let mut window_results: Vec<Vec<::vibesql_types::SqlValue>> = Vec::new();
     let mut window_mapping = HashMap::new();
 
     // Track the column index where window function results start
     let base_column_count = if rows.is_empty() { 0 } else { rows[0].values.len() };
 
+    // Track row reordering from the first window function with PARTITION BY
+    let mut row_reordering: Option<Vec<usize>> = None;
+
     for (idx, win_func) in window_functions.iter().enumerate() {
-        let values = evaluation::evaluate_single_window_function(&rows, win_func, evaluator)?;
-        window_results.push(values);
+        let result = evaluation::evaluate_single_window_function(&rows, win_func, evaluator)?;
+        window_results.push(result.values);
+
+        // Capture row reordering from the first window function that has PARTITION BY
+        if row_reordering.is_none() {
+            row_reordering = result.partition_order;
+        }
 
         // Build mapping: WindowFunctionKey -> column index
         let key =
             WindowFunctionKey::from_expression(&win_func.function_spec, &win_func.window_spec);
         let col_idx = base_column_count + idx;
         window_mapping.insert(key, col_idx);
+    }
+
+    // If we have row reordering (from PARTITION BY), reorder rows and values together
+    if let Some(ref order) = row_reordering {
+        // Reorder rows according to partition order
+        let reordered_rows: Vec<Row> = order.iter().map(|&orig_idx| rows[orig_idx].clone()).collect();
+        rows = reordered_rows;
+
+        // Reorder window results to match the new row order
+        // partition_order[i] = original_idx means position i in partition order came from original_idx
+        // window_results are in original order, so we need: new[i] = old[partition_order[i]]
+        for results in &mut window_results {
+            let reordered: Vec<_> = order.iter().map(|&orig_idx| results[orig_idx].clone()).collect();
+            *results = reordered;
+        }
     }
 
     // Extend each row with window function results

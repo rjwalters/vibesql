@@ -185,8 +185,10 @@ pub(in crate::select) fn evaluate_order_by_window_functions(
             function_spec: function_spec.clone(),
             window_spec: window_spec.clone(),
         };
-        let values = evaluate_single_window_function(&rows, &win_func_info, evaluator)?;
-        window_results.push(values);
+        let result = evaluate_single_window_function(&rows, &win_func_info, evaluator)?;
+        // Values are in original row order, which matches the input rows
+        // For ORDER BY, we don't need partition ordering since ORDER BY sorts explicitly
+        window_results.push(result.values);
 
         // Build mapping: WindowFunctionKey -> column index
         let col_idx = base_column_count + idx;
