@@ -90,6 +90,7 @@ fn test_parse_create_table_with_references() {
                             column,
                             on_delete,
                             on_update,
+                            ..
                         },
                     ..
                 } => {

@@ -94,6 +94,7 @@ pub(super) fn execute_add_constraint(
             references_columns,
             on_delete,
             on_update,
+            ..
         } => {
             // Convert AST ReferentialAction to catalog ReferentialAction
             let convert_action = |action: &Option<vibesql_ast::ReferentialAction>| match action {

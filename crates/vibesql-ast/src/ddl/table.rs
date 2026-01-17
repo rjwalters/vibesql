@@ -19,6 +19,24 @@ pub enum ReferentialAction {
     SetDefault,
 }
 
+/// Constraint deferral mode for foreign key constraints (SQL:1999)
+///
+/// Syntax: `[NOT] DEFERRABLE [INITIALLY {DEFERRED | IMMEDIATE}]`
+///
+/// When a constraint is DEFERRABLE, its enforcement can be deferred until
+/// the end of a transaction (with SET CONSTRAINTS DEFERRED). Non-deferrable
+/// constraints are always checked immediately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ConstraintDeferral {
+    /// Whether the constraint can be deferred.
+    /// Default is NOT DEFERRABLE (false).
+    pub is_deferrable: bool,
+    /// When deferrable, whether it starts in deferred mode.
+    /// Only meaningful when `is_deferrable` is true.
+    /// INITIALLY DEFERRED (true) or INITIALLY IMMEDIATE (false, default).
+    pub initially_deferred: bool,
+}
+
 /// Storage format for tables
 ///
 /// Tables can be stored in row-oriented (default) or columnar format.
@@ -208,6 +226,8 @@ pub enum ColumnConstraintKind {
         column: Option<String>,
         on_delete: Option<ReferentialAction>,
         on_update: Option<ReferentialAction>,
+        /// Constraint deferral mode (DEFERRABLE INITIALLY DEFERRED, etc.)
+        deferral: Option<ConstraintDeferral>,
     },
     /// AUTO_INCREMENT (MySQL) or AUTOINCREMENT (SQLite)
     /// Automatically generates sequential integer values for new rows
@@ -242,6 +262,8 @@ pub enum TableConstraintKind {
         references_columns: Vec<String>,
         on_delete: Option<ReferentialAction>,
         on_update: Option<ReferentialAction>,
+        /// Constraint deferral mode (DEFERRABLE INITIALLY DEFERRED, etc.)
+        deferral: Option<ConstraintDeferral>,
     },
     Unique {
         columns: Vec<crate::IndexColumn>,

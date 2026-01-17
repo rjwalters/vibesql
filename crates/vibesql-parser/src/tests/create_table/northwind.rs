@@ -79,6 +79,7 @@ fn test_parse_northwind_products_table() {
                             references_columns,
                             on_delete,
                             on_update,
+                            ..
                         },
                     ..
                 } => {

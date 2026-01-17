@@ -224,6 +224,55 @@ impl Parser {
         Ok((on_delete, on_update))
     }
 
+    /// Parse constraint deferral mode: [NOT] DEFERRABLE [INITIALLY {DEFERRED | IMMEDIATE}]
+    ///
+    /// Returns None if no deferral clause is present.
+    fn parse_constraint_deferral(
+        &mut self,
+    ) -> Result<Option<vibesql_ast::ConstraintDeferral>, ParseError> {
+        let is_deferrable = if self.peek_keyword(Keyword::Not) {
+            // Check if followed by DEFERRABLE
+            if self.position + 1 < self.tokens.len() {
+                if let Token::Keyword { keyword: Keyword::Deferrable, .. } =
+                    &self.tokens[self.position + 1]
+                {
+                    self.advance(); // consume NOT
+                    self.advance(); // consume DEFERRABLE
+                    false
+                } else {
+                    return Ok(None);
+                }
+            } else {
+                return Ok(None);
+            }
+        } else if self.peek_keyword(Keyword::Deferrable) {
+            self.advance(); // consume DEFERRABLE
+            true
+        } else {
+            return Ok(None);
+        };
+
+        // Parse optional INITIALLY clause
+        let initially_deferred = if self.peek_keyword(Keyword::Initially) {
+            self.advance(); // consume INITIALLY
+            if self.peek_keyword(Keyword::Deferred) {
+                self.advance(); // consume DEFERRED
+                true
+            } else if self.peek_keyword(Keyword::Immediate) {
+                self.advance(); // consume IMMEDIATE
+                false
+            } else {
+                return Err(ParseError {
+                    message: "Expected DEFERRED or IMMEDIATE after INITIALLY".to_string(),
+                });
+            }
+        } else {
+            false // Default is INITIALLY IMMEDIATE
+        };
+
+        Ok(Some(vibesql_ast::ConstraintDeferral { is_deferrable, initially_deferred }))
+    }
+
     /// Parse a single referential action (NO ACTION, CASCADE, SET NULL, SET DEFAULT)
     fn parse_referential_action(&mut self) -> Result<vibesql_ast::ReferentialAction, ParseError> {
         if self.peek_keyword(Keyword::No) {
@@ -366,6 +415,7 @@ impl Parser {
                     };
 
                     let (on_delete, on_update) = self.parse_referential_actions()?;
+                    let deferral = self.parse_constraint_deferral()?;
 
                     constraints.push(vibesql_ast::ColumnConstraint {
                         name,
@@ -374,6 +424,7 @@ impl Parser {
                             column,
                             on_delete,
                             on_update,
+                            deferral,
                         },
                     });
                 }
@@ -546,6 +597,7 @@ impl Parser {
                 self.expect_token(Token::RParen)?;
 
                 let (on_delete, on_update) = self.parse_referential_actions()?;
+                let deferral = self.parse_constraint_deferral()?;
 
                 vibesql_ast::TableConstraintKind::ForeignKey {
                     columns,
@@ -553,6 +605,7 @@ impl Parser {
                     references_columns,
                     on_delete,
                     on_update,
+                    deferral,
                 }
             }
             Token::Keyword { keyword: Keyword::Unique, .. } => {

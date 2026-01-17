@@ -245,6 +245,7 @@ impl CreateTableExecutor {
                 references_columns,
                 on_delete,
                 on_update,
+                ..
             } = &constraint.kind
             {
                 // Resolve column indices for FK columns
