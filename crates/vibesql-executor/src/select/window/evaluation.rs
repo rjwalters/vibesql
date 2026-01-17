@@ -228,16 +228,51 @@ fn evaluate_window_function_for_partition(
 ) -> Result<Vec<SqlValue>, ExecutorError> {
     // Handle ranking functions (they don't use frames)
     let results = match func_name.to_uppercase().as_str() {
-        "ROW_NUMBER" => crate::evaluator::window::evaluate_row_number(partition),
-        "RANK" => crate::evaluator::window::evaluate_rank(partition, order_by),
-        "DENSE_RANK" => crate::evaluator::window::evaluate_dense_rank(partition, order_by),
-        "PERCENT_RANK" => crate::evaluator::window::evaluate_percent_rank(partition, order_by),
-        "CUME_DIST" => crate::evaluator::window::evaluate_cume_dist(partition, order_by),
+        "ROW_NUMBER" => {
+            if !args.is_empty() {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: "row_number".to_string(),
+                });
+            }
+            crate::evaluator::window::evaluate_row_number(partition)
+        }
+        "RANK" => {
+            if !args.is_empty() {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: "rank".to_string(),
+                });
+            }
+            crate::evaluator::window::evaluate_rank(partition, order_by)
+        }
+        "DENSE_RANK" => {
+            if !args.is_empty() {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: "dense_rank".to_string(),
+                });
+            }
+            crate::evaluator::window::evaluate_dense_rank(partition, order_by)
+        }
+        "PERCENT_RANK" => {
+            if !args.is_empty() {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: "percent_rank".to_string(),
+                });
+            }
+            crate::evaluator::window::evaluate_percent_rank(partition, order_by)
+        }
+        "CUME_DIST" => {
+            if !args.is_empty() {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: "cume_dist".to_string(),
+                });
+            }
+            crate::evaluator::window::evaluate_cume_dist(partition, order_by)
+        }
         "NTILE" => {
-            if args.is_empty() {
-                return Err(ExecutorError::UnsupportedExpression(
-                    "NTILE requires an argument".to_string(),
-                ));
+            if args.len() != 1 {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: "ntile".to_string(),
+                });
             }
             // Handle empty partition
             if partition.is_empty() {
@@ -412,10 +447,10 @@ fn evaluate_window_function_for_partition(
         }
         "NTH_VALUE" => {
             // NTH_VALUE(expr, n)
-            if args.len() < 2 {
-                return Err(ExecutorError::UnsupportedExpression(
-                    "NTH_VALUE requires two arguments (expression and n)".to_string(),
-                ));
+            if args.len() != 2 {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: "nth_value".to_string(),
+                });
             }
             // Handle empty partition
             if partition.is_empty() {
