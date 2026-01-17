@@ -2090,16 +2090,6 @@ array set vibesql_skip_tests {
     func-37.110 "Integer overflow in SUM returns float instead of error"
     func-37.120 "Integer overflow in SUM returns float instead of error"
 
-    func-38.100 "Inf/inf case difference - VibeSQL uses lowercase"
-    func-39.120 "Inf/inf case difference - VibeSQL uses lowercase"
-    func-39.130 "Inf/inf case difference - VibeSQL uses lowercase"
-    func-39.140 "Inf/inf case difference - VibeSQL uses lowercase"
-    func-39.150 "Inf/inf case difference - VibeSQL uses lowercase"
-    func-39.160 "Inf/inf case difference - VibeSQL uses lowercase"
-    func-39.170 "Inf/inf case difference - VibeSQL uses lowercase"
-    func-39.180 "Inf/inf case difference - VibeSQL uses lowercase"
-    func-39.190 "Inf/inf case difference - VibeSQL uses lowercase"
-
     intpkey-1.12.2 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     intpkey-2.4.2 "Row order without ORDER BY is undefined"
     intpkey-2.4.3 "Row order without ORDER BY is undefined"
