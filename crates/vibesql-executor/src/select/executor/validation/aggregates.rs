@@ -503,6 +503,133 @@ pub fn expression_contains_aggregate(expr: &Expression) -> bool {
     }
 }
 
+/// Find the first window function in an expression
+///
+/// Window functions can only appear in SELECT list and ORDER BY clauses.
+/// This function finds window functions in expressions where they are not allowed
+/// (e.g., WHERE, HAVING, GROUP BY, aggregate function arguments).
+///
+/// Returns the function name if found, None otherwise.
+pub fn find_window_function_in_expression(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::WindowFunction { function, .. } => {
+            // Return the function name
+            Some(function.name())
+        }
+        Expression::AggregateFunction { args, order_by, filter, .. } => {
+            // Check aggregate function arguments for window functions
+            for arg in args {
+                if let Some(found) = find_window_function_in_expression(arg) {
+                    return Some(found);
+                }
+            }
+            // Check ORDER BY expressions
+            if let Some(order_items) = order_by {
+                for item in order_items {
+                    if let Some(found) = find_window_function_in_expression(&item.expr) {
+                        return Some(found);
+                    }
+                }
+            }
+            // Check FILTER clause
+            if let Some(filter_expr) = filter {
+                if let Some(found) = find_window_function_in_expression(filter_expr) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Expression::Function { args, .. } => {
+            for arg in args {
+                if let Some(found) = find_window_function_in_expression(arg) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            find_window_function_in_expression(left)
+                .or_else(|| find_window_function_in_expression(right))
+        }
+        Expression::UnaryOp { expr, .. } => find_window_function_in_expression(expr),
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                if let Some(found) = find_window_function_in_expression(op) {
+                    return Some(found);
+                }
+            }
+            for case_when in when_clauses {
+                for cond in &case_when.conditions {
+                    if let Some(found) = find_window_function_in_expression(cond) {
+                        return Some(found);
+                    }
+                }
+                if let Some(found) = find_window_function_in_expression(&case_when.result) {
+                    return Some(found);
+                }
+            }
+            if let Some(else_expr) = else_result {
+                find_window_function_in_expression(else_expr)
+            } else {
+                None
+            }
+        }
+        Expression::IsNull { expr, .. } => find_window_function_in_expression(expr),
+        Expression::IsDistinctFrom { left, right, .. } => {
+            find_window_function_in_expression(left)
+                .or_else(|| find_window_function_in_expression(right))
+        }
+        Expression::IsTruthValue { expr, .. } => find_window_function_in_expression(expr),
+        Expression::Between { expr, low, high, .. } => find_window_function_in_expression(expr)
+            .or_else(|| find_window_function_in_expression(low))
+            .or_else(|| find_window_function_in_expression(high)),
+        Expression::InList { expr, values, .. } => {
+            if let Some(found) = find_window_function_in_expression(expr) {
+                return Some(found);
+            }
+            for val in values {
+                if let Some(found) = find_window_function_in_expression(val) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Expression::In { expr, .. } => find_window_function_in_expression(expr),
+        Expression::Exists { .. } => None, // EXISTS subqueries have their own scope
+        Expression::Cast { expr, .. } => find_window_function_in_expression(expr),
+        Expression::Like { expr, pattern, .. } => find_window_function_in_expression(expr)
+            .or_else(|| find_window_function_in_expression(pattern)),
+        Expression::Position { substring, string, .. } => {
+            find_window_function_in_expression(substring)
+                .or_else(|| find_window_function_in_expression(string))
+        }
+        Expression::Trim { removal_char, string, .. } => {
+            if let Some(char_expr) = removal_char {
+                if let Some(found) = find_window_function_in_expression(char_expr) {
+                    return Some(found);
+                }
+            }
+            find_window_function_in_expression(string)
+        }
+        Expression::Extract { expr, .. } => find_window_function_in_expression(expr),
+        Expression::ScalarSubquery(_) => None, // Subqueries have their own scope
+        Expression::QuantifiedComparison { expr, .. } => find_window_function_in_expression(expr),
+        Expression::Interval { value, .. } => find_window_function_in_expression(value),
+        Expression::MatchAgainst { search_modifier, .. } => {
+            find_window_function_in_expression(search_modifier)
+        }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children {
+                if let Some(found) = find_window_function_in_expression(child) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 /// Check for misuse of aliased aggregates in HAVING clause
 ///
 /// SQLite error: When an aggregate alias (e.g., `m` from `min(f1) AS m`) is used

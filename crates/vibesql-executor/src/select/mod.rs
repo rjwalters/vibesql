@@ -22,6 +22,7 @@ mod vectorized;
 pub(crate) mod window;
 
 pub use cte::CteResult;
+pub use executor::validation::find_window_function_in_expression;
 pub use iterator::{RowIterator, TableScanIterator};
 pub use late_materialization::{
     gather_columns, gather_single_column, LazyMaterializedBatch, RowReference, SelectionVector,

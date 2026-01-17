@@ -76,6 +76,10 @@ pub fn validate_create_index(
         .ok_or_else(|| ExecutorError::TableNotFound(qualified_table_name.clone()))?
         .clone();
 
+    // Validate no window functions in index expressions or WHERE clause (#4985)
+    // Window functions cannot be used in CREATE INDEX statements
+    validate_no_window_functions_in_index(stmt)?;
+
     // Validate expression determinism
     validate_expression_determinism(&stmt.columns)?;
 
@@ -92,6 +96,29 @@ pub fn validate_create_index(
     check_namespace_collision(&stmt.index_name, database)?;
 
     Ok(ValidationResult { table_name, qualified_table_name, table_schema })
+}
+
+/// Validate that no window functions are used in index expressions or WHERE clause.
+///
+/// Window functions are not allowed in CREATE INDEX statements because indexes
+/// need deterministic expressions that can be computed from row data alone.
+fn validate_no_window_functions_in_index(stmt: &CreateIndexStmt) -> Result<(), ExecutorError> {
+    // Check index column expressions for window functions
+    for index_col in &stmt.columns {
+        if let Some(expr) = index_col.get_expression() {
+            if let Some(window_name) =
+                crate::select::find_window_function_in_expression(expr)
+            {
+                return Err(ExecutorError::MisuseOfWindowFunction { function_name: window_name });
+            }
+        }
+    }
+
+    // Note: Partial indexes (WHERE clause in CREATE INDEX) are not yet supported in the parser,
+    // so we don't need to validate window functions in the WHERE clause.
+    // When partial index support is added, validation should be added here.
+
+    Ok(())
 }
 
 /// Validate that expression indexes use deterministic expressions.

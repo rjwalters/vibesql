@@ -449,6 +449,17 @@ pub enum WindowFunctionSpec {
     Value { name: FunctionIdentifier, args: Vec<Expression> },
 }
 
+impl WindowFunctionSpec {
+    /// Get the function name from any window function variant
+    pub fn name(&self) -> String {
+        match self {
+            WindowFunctionSpec::Aggregate { name, .. } => name.display().to_string(),
+            WindowFunctionSpec::Ranking { name, .. } => name.display().to_string(),
+            WindowFunctionSpec::Value { name, .. } => name.display().to_string(),
+        }
+    }
+}
+
 /// Window specification (OVER clause)
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowSpec {

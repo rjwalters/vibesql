@@ -21,8 +21,8 @@ use std::collections::HashSet;
 
 // Re-export public validation functions
 pub use aggregates::{
-    check_aggregate_arg_count, find_aggregate_in_expression, validate_aggregate_arguments,
-    validate_having_aliased_aggregates, validate_no_nested_aggregates,
+    check_aggregate_arg_count, find_aggregate_in_expression, find_window_function_in_expression,
+    validate_aggregate_arguments, validate_having_aliased_aggregates, validate_no_nested_aggregates,
 };
 pub use column_refs::{extract_column_refs, validate_column_ref};
 pub use join_limits::validate_join_table_limit;
@@ -121,6 +121,11 @@ pub fn validate_select_columns_with_context(
         // Check for aggregate functions in WHERE clause (misuse of aggregate)
         if let Some(agg_name) = find_aggregate_in_expression(where_expr) {
             return Err(ExecutorError::MisuseOfAggregate { function_name: agg_name });
+        }
+
+        // Check for window functions in WHERE clause (misuse of window function)
+        if let Some(window_name) = find_window_function_in_expression(where_expr) {
+            return Err(ExecutorError::MisuseOfWindowFunction { function_name: window_name });
         }
     }
 
