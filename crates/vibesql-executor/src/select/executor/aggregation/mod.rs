@@ -140,6 +140,34 @@ impl SelectExecutor<'_> {
             &from_result.schema,
         )?;
 
+        // Validate HAVING clause for misuse of window functions (#4985)
+        // Window functions are only valid in SELECT list and ORDER BY clause
+        if let Some(having_expr) = stmt.having.as_ref() {
+            if let Some(window_name) =
+                crate::select::executor::validation::find_window_function_in_expression(having_expr)
+            {
+                return Err(crate::errors::ExecutorError::MisuseOfWindowFunction {
+                    function_name: window_name,
+                });
+            }
+        }
+
+        // Validate GROUP BY clause for misuse of window functions (#4985)
+        // Window functions are not allowed in GROUP BY expressions
+        if let Some(ref group_by_clause) = stmt.group_by {
+            for group_expr in group_by_clause.all_expressions() {
+                if let Some(window_name) =
+                    crate::select::executor::validation::find_window_function_in_expression(
+                        group_expr,
+                    )
+                {
+                    return Err(crate::errors::ExecutorError::MisuseOfWindowFunction {
+                        function_name: window_name,
+                    });
+                }
+            }
+        }
+
         // Extract schema for evaluator before moving from_result
         let original_schema = from_result.schema.clone();
 
