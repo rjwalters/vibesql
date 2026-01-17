@@ -280,6 +280,164 @@ fn test_parse_create_table_references_without_column() {
     }
 }
 
+// ========================================================================
+// DEFERRABLE Constraint Tests (Issue #4990) - Column-level
+// ========================================================================
+
+/// Test DEFERRABLE constraint on column-level REFERENCES
+#[test]
+fn test_parse_references_deferrable() {
+    let result =
+        Parser::parse_sql("CREATE TABLE t(a INTEGER REFERENCES p(x) DEFERRABLE)");
+    assert!(result.is_ok(), "Should parse REFERENCES with DEFERRABLE: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert_eq!(create.columns[0].constraints.len(), 1);
+            match &create.columns[0].constraints[0].kind {
+                vibesql_ast::ColumnConstraintKind::References { table, column, deferral, .. } => {
+                    assert_eq!(table, "p");
+                    assert_eq!(column, &Some("x".to_string()));
+                    let deferral = deferral.expect("Should have deferral");
+                    assert!(deferral.is_deferrable, "Should be deferrable");
+                    assert!(!deferral.initially_deferred, "Should default to INITIALLY IMMEDIATE");
+                }
+                _ => panic!("Expected REFERENCES constraint"),
+            }
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+/// Test NOT DEFERRABLE constraint on column-level REFERENCES
+#[test]
+fn test_parse_references_not_deferrable() {
+    let result =
+        Parser::parse_sql("CREATE TABLE t(a INTEGER REFERENCES p(x) NOT DEFERRABLE)");
+    assert!(result.is_ok(), "Should parse REFERENCES with NOT DEFERRABLE: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            match &create.columns[0].constraints[0].kind {
+                vibesql_ast::ColumnConstraintKind::References { deferral, .. } => {
+                    let deferral = deferral.expect("Should have deferral");
+                    assert!(!deferral.is_deferrable, "Should NOT be deferrable");
+                    assert!(!deferral.initially_deferred, "initially_deferred should be false");
+                }
+                _ => panic!("Expected REFERENCES constraint"),
+            }
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+/// Test DEFERRABLE INITIALLY DEFERRED on column-level REFERENCES
+#[test]
+fn test_parse_references_deferrable_initially_deferred() {
+    let result = Parser::parse_sql(
+        "CREATE TABLE t(a INTEGER REFERENCES p(x) DEFERRABLE INITIALLY DEFERRED)"
+    );
+    assert!(result.is_ok(), "Should parse DEFERRABLE INITIALLY DEFERRED: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            match &create.columns[0].constraints[0].kind {
+                vibesql_ast::ColumnConstraintKind::References { deferral, .. } => {
+                    let deferral = deferral.expect("Should have deferral");
+                    assert!(deferral.is_deferrable, "Should be deferrable");
+                    assert!(deferral.initially_deferred, "Should be INITIALLY DEFERRED");
+                }
+                _ => panic!("Expected REFERENCES constraint"),
+            }
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+/// Test DEFERRABLE INITIALLY IMMEDIATE on column-level REFERENCES
+#[test]
+fn test_parse_references_deferrable_initially_immediate() {
+    let result = Parser::parse_sql(
+        "CREATE TABLE t(a INTEGER REFERENCES p(x) DEFERRABLE INITIALLY IMMEDIATE)"
+    );
+    assert!(result.is_ok(), "Should parse DEFERRABLE INITIALLY IMMEDIATE: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            match &create.columns[0].constraints[0].kind {
+                vibesql_ast::ColumnConstraintKind::References { deferral, .. } => {
+                    let deferral = deferral.expect("Should have deferral");
+                    assert!(deferral.is_deferrable, "Should be deferrable");
+                    assert!(!deferral.initially_deferred, "Should be INITIALLY IMMEDIATE");
+                }
+                _ => panic!("Expected REFERENCES constraint"),
+            }
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+/// Test DEFERRABLE with ON DELETE/UPDATE actions
+#[test]
+fn test_parse_references_deferrable_with_actions() {
+    let result = Parser::parse_sql(
+        "CREATE TABLE t(a INTEGER REFERENCES p(x) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED)"
+    );
+    assert!(result.is_ok(), "Should parse with ON DELETE and DEFERRABLE: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            match &create.columns[0].constraints[0].kind {
+                vibesql_ast::ColumnConstraintKind::References {
+                    on_delete, deferral, ..
+                } => {
+                    assert_eq!(on_delete, &Some(vibesql_ast::ReferentialAction::Cascade));
+                    let deferral = deferral.expect("Should have deferral");
+                    assert!(deferral.is_deferrable);
+                    assert!(deferral.initially_deferred);
+                }
+                _ => panic!("Expected REFERENCES constraint"),
+            }
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+/// Test error: INITIALLY without DEFERRABLE should fail
+/// The INITIALLY keyword is only valid after DEFERRABLE/NOT DEFERRABLE
+#[test]
+fn test_parse_references_initially_without_deferrable_fails() {
+    let result = Parser::parse_sql(
+        "CREATE TABLE t(a INTEGER REFERENCES p(x) INITIALLY DEFERRED)"
+    );
+    assert!(result.is_err(), "Should reject INITIALLY without DEFERRABLE");
+}
+
+/// Test that REFERENCES without deferral clause has None deferral
+#[test]
+fn test_parse_references_no_deferral_clause() {
+    let result = Parser::parse_sql("CREATE TABLE t(a INTEGER REFERENCES p(x))");
+    assert!(result.is_ok(), "Should parse REFERENCES without deferral: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            match &create.columns[0].constraints[0].kind {
+                vibesql_ast::ColumnConstraintKind::References { deferral, .. } => {
+                    assert!(deferral.is_none(), "Should have no deferral when not specified");
+                }
+                _ => panic!("Expected REFERENCES constraint"),
+            }
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
 /// Test ON CONFLICT clause for column-level constraints (SQLite extension)
 #[test]
 fn test_parse_on_conflict_column_constraints() {
