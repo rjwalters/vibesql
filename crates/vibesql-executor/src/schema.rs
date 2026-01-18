@@ -580,6 +580,38 @@ impl CombinedSchema {
         None
     }
 
+    /// Get the type affinity for a column by name
+    ///
+    /// Returns the SQLite type affinity for the column, which determines how
+    /// type coercion is performed in comparisons.
+    pub fn get_column_affinity(
+        &self,
+        table: Option<&str>,
+        column: &str,
+    ) -> Option<vibesql_types::TypeAffinity> {
+        if let Some(table_name) = table {
+            // Qualified column reference (table.column)
+            let table_id = TableIdentifier::unquoted(table_name);
+            if let Some((_start_index, schema)) = self.table_schemas.get(&table_id) {
+                if let Some(col_idx) = schema.get_column_index(column) {
+                    return Some(schema.columns[col_idx].data_type.sqlite_affinity());
+                }
+            }
+        } else {
+            // Unqualified column reference - search all tables
+            for (table_id, (_start_index, schema)) in &self.table_schemas {
+                // Skip alias tables for unqualified column resolution
+                if self.alias_tables.contains(table_id) {
+                    continue;
+                }
+                if let Some(col_idx) = schema.get_column_index(column) {
+                    return Some(schema.columns[col_idx].data_type.sqlite_affinity());
+                }
+            }
+        }
+        None
+    }
+
     /// Check if an unqualified column reference is ambiguous
     /// (i.e., exists in multiple tables in the schema)
     ///

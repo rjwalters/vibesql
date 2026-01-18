@@ -437,14 +437,19 @@ fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
                 matches
             }
         }
-        ColumnPredicate::InList { column_idx, values, negated } => {
+        ColumnPredicate::InList { column_idx, values, negated, use_strict_type_ordering } => {
             // Check if column value matches any value in the list
             let matches = row
                 .get(*column_idx)
                 .map(|v| {
-                    values
-                        .iter()
-                        .any(|list_val| compare_values(v, list_val) == std::cmp::Ordering::Equal)
+                    values.iter().any(|list_val| {
+                        if *use_strict_type_ordering {
+                            // Use strict type ordering - no coercion
+                            strict_type_equal(v, list_val)
+                        } else {
+                            compare_values(v, list_val) == std::cmp::Ordering::Equal
+                        }
+                    })
                 })
                 .unwrap_or(false);
             if *negated {
@@ -511,6 +516,102 @@ fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
         (SqlValue::Null, _) | (_, SqlValue::Null) => Ordering::Equal, /* NULL comparisons are */
         // undefined
         _ => Ordering::Equal, // Incompatible types
+    }
+}
+
+/// Strict equality comparison without string-to-number coercion
+///
+/// Returns true if both values can be considered equal WITHOUT coercing
+/// string values to numbers. This is used for columns with NONE or INTEGER
+/// affinity in IN expressions, where string values should NOT be coerced.
+///
+/// Numeric types (Integer, Float, Real, Double, etc.) can still be compared
+/// with each other since they're all in the same storage class.
+fn strict_type_equal(a: &SqlValue, b: &SqlValue) -> bool {
+    // NULL never equals anything
+    if matches!(a, SqlValue::Null) || matches!(b, SqlValue::Null) {
+        return false;
+    }
+
+    // Helper to check if a value is a string type
+    let is_string = |v: &SqlValue| matches!(v, SqlValue::Varchar(_) | SqlValue::Character(_));
+
+    // Helper to check if a value is a numeric type
+    let is_numeric = |v: &SqlValue| {
+        matches!(
+            v,
+            SqlValue::Integer(_)
+                | SqlValue::Bigint(_)
+                | SqlValue::Smallint(_)
+                | SqlValue::Float(_)
+                | SqlValue::Real(_)
+                | SqlValue::Double(_)
+                | SqlValue::Numeric(_)
+        )
+    };
+
+    // Different storage classes (string vs numeric) - NOT equal without coercion
+    if (is_string(a) && is_numeric(b)) || (is_numeric(a) && is_string(b)) {
+        return false;
+    }
+
+    // Same storage class - use normal comparison
+    match (a, b) {
+        // Same integer types
+        (SqlValue::Integer(x), SqlValue::Integer(y)) => x == y,
+        (SqlValue::Bigint(x), SqlValue::Bigint(y)) => x == y,
+        (SqlValue::Smallint(x), SqlValue::Smallint(y)) => x == y,
+
+        // Same string types (VARCHAR and CHAR are compatible)
+        (SqlValue::Varchar(x), SqlValue::Varchar(y))
+        | (SqlValue::Character(x), SqlValue::Character(y)) => x == y,
+        (SqlValue::Varchar(x), SqlValue::Character(y))
+        | (SqlValue::Character(x), SqlValue::Varchar(y)) => x == y,
+
+        // Same float types
+        (SqlValue::Float(x), SqlValue::Float(y)) => (x - y).abs() < f32::EPSILON,
+        (SqlValue::Double(x), SqlValue::Double(y)) => (x - y).abs() < f64::EPSILON,
+        (SqlValue::Real(x), SqlValue::Real(y)) => (x - y).abs() < f64::EPSILON,
+
+        // Cross-type numeric comparisons (all numeric types are comparable)
+        (SqlValue::Integer(x), SqlValue::Bigint(y))
+        | (SqlValue::Bigint(y), SqlValue::Integer(x)) => *x as i64 == *y,
+
+        // Float types with integer
+        (SqlValue::Float(x), SqlValue::Integer(y))
+        | (SqlValue::Integer(y), SqlValue::Float(x)) => (*x as f64 - *y as f64).abs() < f64::EPSILON,
+        (SqlValue::Double(x), SqlValue::Integer(y))
+        | (SqlValue::Integer(y), SqlValue::Double(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+        (SqlValue::Real(x), SqlValue::Integer(y))
+        | (SqlValue::Integer(y), SqlValue::Real(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+
+        // Mixed float types
+        (SqlValue::Float(x), SqlValue::Double(y))
+        | (SqlValue::Double(y), SqlValue::Float(x)) => (*x as f64 - *y).abs() < f64::EPSILON,
+        (SqlValue::Float(x), SqlValue::Real(y))
+        | (SqlValue::Real(y), SqlValue::Float(x)) => (*x as f64 - *y).abs() < f64::EPSILON,
+        (SqlValue::Double(x), SqlValue::Real(y))
+        | (SqlValue::Real(y), SqlValue::Double(x)) => (*x - *y).abs() < f64::EPSILON,
+
+        // Numeric type (f64) with integer types
+        (SqlValue::Numeric(x), SqlValue::Integer(y))
+        | (SqlValue::Integer(y), SqlValue::Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+        (SqlValue::Numeric(x), SqlValue::Bigint(y))
+        | (SqlValue::Bigint(y), SqlValue::Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+        (SqlValue::Numeric(x), SqlValue::Smallint(y))
+        | (SqlValue::Smallint(y), SqlValue::Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+
+        // Numeric with float types
+        (SqlValue::Numeric(x), SqlValue::Float(y))
+        | (SqlValue::Float(y), SqlValue::Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+        (SqlValue::Numeric(x), SqlValue::Double(y))
+        | (SqlValue::Double(y), SqlValue::Numeric(x)) => (*x - *y).abs() < f64::EPSILON,
+        (SqlValue::Numeric(x), SqlValue::Real(y))
+        | (SqlValue::Real(y), SqlValue::Numeric(x)) => (*x - *y).abs() < f64::EPSILON,
+        (SqlValue::Numeric(x), SqlValue::Numeric(y)) => (*x - *y).abs() < f64::EPSILON,
+
+        // Different storage classes not handled above - NOT equal
+        _ => false,
     }
 }
 

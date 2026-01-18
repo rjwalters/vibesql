@@ -97,6 +97,10 @@ pub struct PredicateDecomposition {
     pub equijoin_conditions: Vec<(String, String, String, String, vibesql_ast::Expression)>,
     /// Complex predicates that cannot be pushed down
     pub complex_predicates: Vec<vibesql_ast::Expression>,
+    /// Flag indicating the WHERE clause contains a constant FALSE predicate.
+    /// When true, the entire query should return zero rows because we have
+    /// something like `(1 = 2) AND ...` where `(1 = 2)` is always FALSE.
+    pub always_false: bool,
 }
 
 impl PredicateDecomposition {
@@ -106,6 +110,7 @@ impl PredicateDecomposition {
             table_local_predicates: HashMap::new(),
             equijoin_conditions: Vec::new(),
             complex_predicates: Vec::new(),
+            always_false: false,
         }
     }
 

@@ -1,5 +1,5 @@
 use vibesql_ast::{BinaryOperator, Expression, UnaryOperator};
-use vibesql_types::{SqlMode, SqlValue};
+use vibesql_types::{SqlMode, SqlValue, TypeAffinity};
 
 use crate::{evaluator::ExpressionEvaluator, schema::CombinedSchema};
 
@@ -69,7 +69,10 @@ pub enum ColumnPredicate {
     Like { column_idx: usize, pattern: String, negated: bool },
 
     /// column IN (value1, value2, ...)
-    InList { column_idx: usize, values: Vec<SqlValue>, negated: bool },
+    /// The `use_strict_type_ordering` flag indicates whether to use SQLite's strict
+    /// type ordering (no coercion) for comparisons. This is true for columns with
+    /// NONE or INTEGER affinity, where string values should NOT be coerced to numbers.
+    InList { column_idx: usize, values: Vec<SqlValue>, negated: bool, use_strict_type_ordering: bool },
 
     /// column1 op column2 (column-to-column comparison)
     /// Used for predicates like `l_commitdate < l_receiptdate` in TPC-H Q4
@@ -187,10 +190,11 @@ fn remap_predicate(predicate: &ColumnPredicate, column_mapping: &[usize]) -> Col
             pattern: pattern.clone(),
             negated: *negated,
         },
-        ColumnPredicate::InList { column_idx, values, negated } => ColumnPredicate::InList {
+        ColumnPredicate::InList { column_idx, values, negated, use_strict_type_ordering } => ColumnPredicate::InList {
             column_idx: find_new_idx(*column_idx),
             values: values.clone(),
             negated: *negated,
+            use_strict_type_ordering: *use_strict_type_ordering,
         },
         ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } => {
             ColumnPredicate::ColumnCompare {
@@ -515,10 +519,22 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
                 }
 
                 let column_idx = schema.get_column_index(table, column)?;
+
+                // Determine if we should use strict type ordering (no coercion).
+                // SQLite IN expressions don't coerce strings for NONE or INTEGER affinity.
+                // Only REAL affinity coerces strings to numbers in IN expressions.
+                let use_strict_type_ordering = schema
+                    .get_column_affinity(table, column)
+                    .map(|affinity| {
+                        matches!(affinity, TypeAffinity::None | TypeAffinity::Integer)
+                    })
+                    .unwrap_or(true); // Default to strict ordering if affinity unknown
+
                 return Some(PredicateTree::Leaf(ColumnPredicate::InList {
                     column_idx,
                     values: folded_values,
                     negated: *negated,
+                    use_strict_type_ordering,
                 }));
             }
             None
@@ -725,10 +741,20 @@ fn extract_predicates_recursive(
 
                 // Skip if column not in schema (cross-table predicate)
                 if let Some(column_idx) = schema.get_column_index(table, column) {
+                    // Determine if we should use strict type ordering (no coercion).
+                    // SQLite IN expressions don't coerce strings for NONE or INTEGER affinity.
+                    let use_strict_type_ordering = schema
+                        .get_column_affinity(table, column)
+                        .map(|affinity| {
+                            matches!(affinity, TypeAffinity::None | TypeAffinity::Integer)
+                        })
+                        .unwrap_or(true);
+
                     predicates.push(ColumnPredicate::InList {
                         column_idx,
                         values: folded_values,
                         negated: *negated,
+                        use_strict_type_ordering,
                     });
                 }
                 return Some(());
@@ -929,7 +955,7 @@ mod tests {
         assert!(tree.is_some());
 
         match tree.unwrap() {
-            PredicateTree::Leaf(ColumnPredicate::InList { column_idx, values, negated }) => {
+            PredicateTree::Leaf(ColumnPredicate::InList { column_idx, values, negated, .. }) => {
                 assert_eq!(column_idx, 0);
                 assert!(!negated);
                 assert_eq!(values.len(), 3);

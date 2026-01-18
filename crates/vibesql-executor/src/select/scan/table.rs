@@ -495,6 +495,15 @@ pub(crate) fn execute_table_scan(
         let predicate_plan = PredicatePlan::from_where_clause(Some(where_expr), &schema)
             .map_err(ExecutorError::InvalidWhereClause)?;
 
+        // Check if WHERE clause contains a constant FALSE predicate (e.g., `1 = 2`)
+        // If so, return empty result immediately - no need to scan the table
+        if predicate_plan.is_always_false() {
+            if crate::profiling::is_scan_debug_enabled() {
+                eprintln!("[SCAN_PATH] {} table: WHERE clause is always false, returning empty", table_name);
+            }
+            return Ok(super::FromResult::from_rows_where_filtered(schema, Vec::new(), None));
+        }
+
         // Check if there are actually table-local predicates for this table
         // Note: has_table_filters does case-sensitive lookup
         // Must check BOTH effective_name (alias) AND table_name because:

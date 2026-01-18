@@ -5,6 +5,90 @@ use super::{
     predicates::{ColumnPredicate, CompareOp, PredicateTree},
 };
 
+/// Strict equality comparison without string-to-number coercion
+///
+/// Returns true if both values can be considered equal WITHOUT coercing
+/// string values to numbers. This is used for columns with NONE or INTEGER
+/// affinity in IN expressions, where string values should NOT be coerced.
+///
+/// Numeric types (Integer, Float, Real, Double, etc.) can still be compared
+/// with each other since they're all in the same storage class.
+fn strict_type_equal(a: &SqlValue, b: &SqlValue) -> bool {
+    use SqlValue::*;
+
+    // NULL never equals anything
+    if matches!(a, Null) || matches!(b, Null) {
+        return false;
+    }
+
+    // Helper to check if a value is a string type
+    let is_string = |v: &SqlValue| matches!(v, Varchar(_) | Character(_));
+
+    // Helper to check if a value is a numeric type
+    let is_numeric = |v: &SqlValue| {
+        matches!(
+            v,
+            Integer(_) | Bigint(_) | Smallint(_) | Float(_) | Real(_) | Double(_) | Numeric(_)
+        )
+    };
+
+    // Different storage classes (string vs numeric) - NOT equal without coercion
+    if (is_string(a) && is_numeric(b)) || (is_numeric(a) && is_string(b)) {
+        return false;
+    }
+
+    // Same storage class - use normal comparison
+    match (a, b) {
+        // Same integer types
+        (Integer(x), Integer(y)) => x == y,
+        (Bigint(x), Bigint(y)) => x == y,
+        (Smallint(x), Smallint(y)) => x == y,
+
+        // Same string types (VARCHAR and CHAR are compatible)
+        (Varchar(x), Varchar(y)) | (Character(x), Character(y)) => x == y,
+        (Varchar(x), Character(y)) | (Character(x), Varchar(y)) => x == y,
+
+        // Same float types
+        (Float(x), Float(y)) => (x - y).abs() < f32::EPSILON,
+        (Double(x), Double(y)) => (x - y).abs() < f64::EPSILON,
+        (Real(x), Real(y)) => (x - y).abs() < f64::EPSILON,
+
+        // Cross-type numeric comparisons (all numeric types are comparable)
+        (Integer(x), Bigint(y)) | (Bigint(y), Integer(x)) => *x as i64 == *y,
+        (Integer(x), Smallint(y)) | (Smallint(y), Integer(x)) => *x == *y as i64,
+        (Bigint(x), Smallint(y)) | (Smallint(y), Bigint(x)) => *x == *y as i64,
+
+        // Float types with integer
+        (Float(x), Integer(y)) | (Integer(y), Float(x)) => (*x as f64 - *y as f64).abs() < f64::EPSILON,
+        (Double(x), Integer(y)) | (Integer(y), Double(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+        (Real(x), Integer(y)) | (Integer(y), Real(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+
+        // Float with Bigint
+        (Float(x), Bigint(y)) | (Bigint(y), Float(x)) => (*x as f64 - *y as f64).abs() < f64::EPSILON,
+        (Double(x), Bigint(y)) | (Bigint(y), Double(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+        (Real(x), Bigint(y)) | (Bigint(y), Real(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+
+        // Mixed float types
+        (Float(x), Double(y)) | (Double(y), Float(x)) => (*x as f64 - *y).abs() < f64::EPSILON,
+        (Float(x), Real(y)) | (Real(y), Float(x)) => (*x as f64 - *y).abs() < f64::EPSILON,
+        (Double(x), Real(y)) | (Real(y), Double(x)) => (*x - *y).abs() < f64::EPSILON,
+
+        // Numeric type (f64) with integer types
+        (Numeric(x), Integer(y)) | (Integer(y), Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+        (Numeric(x), Bigint(y)) | (Bigint(y), Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+        (Numeric(x), Smallint(y)) | (Smallint(y), Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+
+        // Numeric with float types
+        (Numeric(x), Float(y)) | (Float(y), Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+        (Numeric(x), Double(y)) | (Double(y), Numeric(x)) => (*x - *y).abs() < f64::EPSILON,
+        (Numeric(x), Real(y)) | (Real(y), Numeric(x)) => (*x - *y).abs() < f64::EPSILON,
+        (Numeric(x), Numeric(y)) => (*x - *y).abs() < f64::EPSILON,
+
+        // Different storage classes not handled above - NOT equal
+        _ => false,
+    }
+}
+
 /// Evaluate a predicate tree on a row
 ///
 /// Returns true if the row satisfies the entire predicate tree.
@@ -195,14 +279,37 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
                 matches
             }
         }
-        ColumnPredicate::InList { values: list_values, negated, .. } => {
+        ColumnPredicate::InList { values: list_values, negated, use_strict_type_ordering, .. } => {
             use std::cmp::Ordering;
+            use vibesql_types::SqlValue;
+
             // Check if value matches any in the list
-            let matches = list_values
-                .iter()
-                .any(|list_val| compare_values(value, list_val).equals(Ordering::Equal));
+            let matches = list_values.iter().any(|list_val| {
+                // Handle NULL in list
+                if matches!(list_val, SqlValue::Null) {
+                    return false;
+                }
+
+                if *use_strict_type_ordering {
+                    // Use strict type ordering (no coercion) for NONE/INTEGER affinity
+                    // Integer != Varchar even if they have the same numeric value
+                    strict_type_equal(value, list_val)
+                } else {
+                    // Use normal comparison with type coercion
+                    compare_values(value, list_val).equals(Ordering::Equal)
+                }
+            });
+
             if *negated {
-                !matches
+                // For NOT IN, also check for NULL in the list
+                // If any value in the list is NULL and no exact match was found,
+                // the result is UNKNOWN (false in WHERE context)
+                let has_null_in_list = list_values.iter().any(|v| matches!(v, SqlValue::Null));
+                if has_null_in_list && !matches {
+                    false // UNKNOWN in WHERE context
+                } else {
+                    !matches
+                }
             } else {
                 matches
             }

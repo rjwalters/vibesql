@@ -129,6 +129,14 @@ impl PredicatePlan {
         self.decomposition.is_empty()
     }
 
+    /// Check if the WHERE clause is always false (contains a constant FALSE predicate)
+    ///
+    /// When this returns true, the query should return zero rows because the
+    /// WHERE clause contains something like `(1 = 2) AND ...` which is always false.
+    pub fn is_always_false(&self) -> bool {
+        self.decomposition.always_false
+    }
+
     /// Get the underlying decomposition (for compatibility)
     pub fn decomposition(&self) -> &PredicateDecomposition {
         &self.decomposition
