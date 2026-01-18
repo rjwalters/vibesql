@@ -30,6 +30,8 @@ validation_run.log
 tf_*.tcl
 test.db
 test*.db
+testdb
+out.db
 *.db.tmp*
 .*.tmp*
 

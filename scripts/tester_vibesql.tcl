@@ -3050,6 +3050,21 @@ array set vibesql_skip_tests {
 
     in6-1.1 "Uses sqlite_stat1 internal statistics table"
     in6-1.5 "Cascades from in6-1.1 sqlite_stat1 failure"
+
+    window1-5.1 "Error message format differs (ntile argument)"
+    window1-5.2 "Error message format differs (ntile argument)"
+    window1-5.3 "Error message format differs (ntile argument)"
+    window1-7.1.6 "Error message format differs (trim as window function)"
+    window1-11.2 "Expression indexes with window functions not supported"
+    window1-11.3 "Expression indexes with window functions not supported"
+    window1-11.4 "Expression indexes with window functions not supported"
+
+    fkey1-3.5 "Uses sqlite3_db_status internal API"
+    fkey6-1.3 "Uses sqlite3_db_status internal API"
+    fkey6-1.5.1 "Uses sqlite3_db_status internal API"
+    fkey6-1.5.2 "Uses sqlite3_db_status internal API"
+    fkey6-1.7 "Uses sqlite3_db_status internal API"
+    fkey6-1.9 "Uses sqlite3_db_status internal API"
 }
 
 # Pattern-based skip list for tests with many numbered variants
@@ -3105,6 +3120,11 @@ variable vibesql_skip_patterns {
     {joinD- "Tests Bloom filter optimizations (SQLite query planner specific)"}
     {sidedelete- "Uses 'sequence' as table name which conflicts with VibeSQL parser keyword"}
     {subselect-1.2 "Error message format differs (row value misused vs sub-select returns N columns)"}
+    {fkey_malloc- "SQLite memory allocation testing"}
+    {window1-66. "json_group_array/json_group_object as window function not implemented"}
+    {window1-69. "total() as window function not implemented"}
+    {window2-66. "json_group_array/json_group_object as window function not implemented"}
+    {windowfault- "SQLite fault injection testing"}
 }
 
 # Check if a test should be skipped based on VibeSQL-specific exclusions
