@@ -105,6 +105,7 @@ fn create_table_with_fk(
                     references_columns: vec![parent_column.to_string()],
                     on_delete: None,
                     on_update: None,
+                    deferral: None,
                 },
             },
         ],
