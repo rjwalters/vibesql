@@ -551,7 +551,8 @@ pub(crate) fn execute_table_scan(
                                 sort_rows_by_integer_primary_key(&mut filtered_rows, ipk_col_idx);
                             }
                         }
-                        return Ok(super::FromResult::from_rows(schema, filtered_rows));
+                        // Mark WHERE as already filtered to avoid double-evaluation
+                        return Ok(super::FromResult::from_rows_where_filtered(schema, filtered_rows, None));
                     }
                     // Fall through to row-based path if SIMD fails
                 }
@@ -572,7 +573,8 @@ pub(crate) fn execute_table_scan(
                                 sort_rows_by_integer_primary_key(&mut filtered_rows, ipk_col_idx);
                             }
                         }
-                        return Ok(super::FromResult::from_rows(schema, filtered_rows));
+                        // Mark WHERE as already filtered to avoid double-evaluation
+                        return Ok(super::FromResult::from_rows_where_filtered(schema, filtered_rows, None));
                     }
                     // Fall through to row-based path if cached columnar fails
                 }
@@ -605,7 +607,8 @@ pub(crate) fn execute_table_scan(
                         sort_rows_by_integer_primary_key(&mut filtered_rows, ipk_col_idx);
                     }
                 }
-                return Ok(super::FromResult::from_rows(schema, filtered_rows));
+                // Mark WHERE as already filtered to avoid double-evaluation
+                return Ok(super::FromResult::from_rows_where_filtered(schema, filtered_rows, None));
             }
 
             // extract_column_predicates returned None - fall back
@@ -639,7 +642,8 @@ pub(crate) fn execute_table_scan(
                     sort_rows_by_integer_primary_key(&mut filtered_rows, ipk_col_idx);
                 }
             }
-            return Ok(super::FromResult::from_rows(schema, filtered_rows));
+            // Mark WHERE as already filtered to avoid double-evaluation
+            return Ok(super::FromResult::from_rows_where_filtered(schema, filtered_rows, None));
         }
     }
 

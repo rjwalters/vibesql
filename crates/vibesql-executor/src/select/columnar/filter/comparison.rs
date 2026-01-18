@@ -151,6 +151,9 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
                         return CompareResult::Ordering(Ordering::Greater);
                     }
                 }
+                // String can't be parsed as number - use SQLite type ordering:
+                // INTEGER/REAL < TEXT (numeric is less than text)
+                return CompareResult::Ordering(Ordering::Less);
             } else if is_string(a) && is_numeric(b) {
                 if let (Some(a_f64), Some(b_f64)) = (string_to_f64(a), to_f64(b)) {
                     const EPSILON: f64 = 1e-9;
@@ -162,6 +165,9 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
                         return CompareResult::Ordering(Ordering::Greater);
                     }
                 }
+                // String can't be parsed as number - use SQLite type ordering:
+                // TEXT > INTEGER/REAL (text is greater than numeric)
+                return CompareResult::Ordering(Ordering::Greater);
             }
 
             // Non-comparable types: use SQLite type ordering (INTEGER < REAL < TEXT < BLOB)
@@ -290,5 +296,63 @@ mod tests {
         // Test apply_columnar_filter (the actual function used in execution)
         let indices = apply_columnar_filter(&rows, &predicates).unwrap();
         assert_eq!(indices.len(), 3, "All 3 rows should pass filter");
+    }
+
+    /// Test for index-14.x: SQLite type ordering for TEXT vs INTEGER comparison
+    /// When comparing TEXT that can't be parsed as a number with INTEGER,
+    /// SQLite uses type ordering: INTEGER < TEXT
+    #[test]
+    fn test_text_vs_integer_type_ordering() {
+        // Empty string can't be parsed as number - should use type ordering
+        let text_empty = SqlValue::Varchar(arcstr::ArcStr::from(""));
+        let integer = SqlValue::Integer(123);
+
+        // TEXT > INTEGER in SQLite type ordering
+        let result = compare_values(&text_empty, &integer);
+        assert_eq!(
+            result,
+            CompareResult::Ordering(std::cmp::Ordering::Greater),
+            "Empty string (TEXT) should be > Integer in SQLite type ordering"
+        );
+
+        // INTEGER < TEXT in SQLite type ordering
+        let result_rev = compare_values(&integer, &text_empty);
+        assert_eq!(
+            result_rev,
+            CompareResult::Ordering(std::cmp::Ordering::Less),
+            "Integer should be < empty string (TEXT) in SQLite type ordering"
+        );
+
+        // Non-numeric string should also use type ordering
+        let text_abc = SqlValue::Varchar(arcstr::ArcStr::from("abc"));
+        let result_abc = compare_values(&text_abc, &integer);
+        assert_eq!(
+            result_abc,
+            CompareResult::Ordering(std::cmp::Ordering::Greater),
+            "'abc' (TEXT) should be > Integer in SQLite type ordering"
+        );
+    }
+
+    /// Test evaluate_predicate with text vs integer
+    #[test]
+    fn test_evaluate_predicate_text_vs_integer() {
+        use super::super::evaluation::evaluate_predicate;
+        use super::super::predicates::ColumnPredicate;
+
+        // GreaterThan predicate: column > 123
+        let predicate = ColumnPredicate::GreaterThan {
+            column_idx: 0,
+            value: SqlValue::Integer(123),
+        };
+
+        // Column value is 'abc' (text)
+        let value = SqlValue::Varchar(arcstr::ArcStr::from("abc"));
+        let result = evaluate_predicate(&predicate, &value);
+        assert!(result, "Varchar('abc') should be > Integer(123)");
+
+        // Column value is empty string
+        let empty = SqlValue::Varchar(arcstr::ArcStr::from(""));
+        let result_empty = evaluate_predicate(&predicate, &empty);
+        assert!(result_empty, "Varchar('') should be > Integer(123)");
     }
 }

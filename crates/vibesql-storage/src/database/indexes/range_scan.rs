@@ -128,6 +128,10 @@ impl IndexData {
                         // Use smart_increment_value which chooses the right increment strategy:
                         // - Integer values (40.0): add 1.0 → 41.0
                         // - Float values (3952.75): add epsilon → 3952.750...001
+                        //
+                        // For non-incrementable types (strings), we must filter results manually
+                        // because Excluded([""]) includes ["", x] for any x.
+                        let mut needs_start_filter = false;
                         let start_key = normalized_start.as_ref().map(|v| {
                             if inclusive_start {
                                 // For >= predicates, use value as-is with Included
@@ -137,8 +141,12 @@ impl IndexData {
                                 // This ensures we exclude ALL keys starting with the original value
                                 match smart_increment_value(v) {
                                     Some(incremented) => (vec![incremented], true),
-                                    // If increment fails (overflow), fall back to Excluded
-                                    None => (vec![v.clone()], false),
+                                    // If increment fails (overflow/non-numeric), fall back to Excluded
+                                    // but mark that we need to filter results manually
+                                    None => {
+                                        needs_start_filter = true;
+                                        (vec![v.clone()], false)
+                                    }
                                 }
                             }
                         });
@@ -152,14 +160,25 @@ impl IndexData {
                         // checking For multi-column indexes, we need an
                         // upper bound that stops after all keys
                         // starting with end_val (if inclusive) or before them (if exclusive)
+                        //
+                        // For non-incrementable types (strings), we must filter results manually.
+                        let mut needs_end_filter = false;
                         let end_key = normalized_end.as_ref().and_then(|v| {
                             if inclusive_end {
                                 // For inclusive: try to increment the value to get next prefix
                                 // If successful, use as Excluded bound; otherwise use Unbounded
-                                try_increment_sqlvalue(v)
-                                    .map(|incremented| (vec![incremented], false))
+                                match try_increment_sqlvalue(v) {
+                                    Some(incremented) => Some((vec![incremented], false)),
+                                    None => {
+                                        // Can't increment - use Unbounded and filter manually
+                                        needs_end_filter = true;
+                                        None
+                                    }
+                                }
                             } else {
                                 // For exclusive: use end_val itself as Excluded bound
+                                // But this doesn't correctly exclude [v, x] keys, so we need filtering
+                                needs_end_filter = true;
                                 Some((vec![v.clone()], false))
                             }
                         });
@@ -183,10 +202,41 @@ impl IndexData {
                             }
                         }
 
-                        // Iterate through BTreeMap with proper bounds - no manual checking needed!
-                        for (_key_values, row_indices) in
+                        // Iterate through BTreeMap with proper bounds
+                        // When we couldn't increment a bound value (e.g., strings), we need
+                        // to manually filter the first column to ensure correct semantics.
+                        for (key_values, row_indices) in
                             data.range::<[SqlValue], _>((start_bound, end_bound))
                         {
+                            // Get first column value for filtering
+                            let first_col = key_values.first();
+
+                            // Check start bound filter: for `col > value`, exclude keys where
+                            // first column equals value (since Excluded([v]) includes [v, x])
+                            if needs_start_filter {
+                                if let (Some(first), Some(start_val)) =
+                                    (first_col, normalized_start.as_ref())
+                                {
+                                    // Skip if first column equals start value (we want strictly greater)
+                                    if first == start_val {
+                                        continue;
+                                    }
+                                }
+                            }
+
+                            // Check end bound filter: for `col < value`, exclude keys where
+                            // first column equals value (since Excluded([v]) includes [v, x])
+                            if needs_end_filter && !inclusive_end {
+                                if let (Some(first), Some(end_val)) =
+                                    (first_col, normalized_end.as_ref())
+                                {
+                                    // Skip if first column equals end value (we want strictly less)
+                                    if first == end_val {
+                                        continue;
+                                    }
+                                }
+                            }
+
                             matching_row_indices.extend(row_indices);
                         }
                         // Apply lazy adjustment for pending deletions
