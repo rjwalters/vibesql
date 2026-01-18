@@ -93,6 +93,9 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
         (SqlValue::Real(a), SqlValue::Real(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
         (SqlValue::Varchar(a), SqlValue::Varchar(b)) => a.cmp(b),
         (SqlValue::Character(a), SqlValue::Character(b)) => a.cmp(b),
+        // Mixed string types: Character vs Varchar (same underlying Arc<str>)
+        (SqlValue::Varchar(a), SqlValue::Character(b))
+        | (SqlValue::Character(a), SqlValue::Varchar(b)) => a.cmp(b),
         (SqlValue::Date(a), SqlValue::Date(b)) => a.cmp(b),
 
         // Date-String comparisons: parse string to Date for native comparison
