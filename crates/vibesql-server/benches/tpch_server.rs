@@ -53,7 +53,10 @@ use tokio_postgres::NoTls;
 #[cfg(feature = "mysql")]
 use tpch::schema::load_mysql;
 #[cfg(feature = "mysql")]
-use tpch::queries::{TPCH_Q7_MYSQL, TPCH_Q8_MYSQL, TPCH_Q9_MYSQL};
+use tpch::queries::{
+    TPCH_Q3_MYSQL, TPCH_Q4_MYSQL, TPCH_Q5_MYSQL, TPCH_Q7_MYSQL, TPCH_Q8_MYSQL, TPCH_Q9_MYSQL,
+    TPCH_Q10_MYSQL, TPCH_Q12_MYSQL, TPCH_Q13_MYSQL, TPCH_Q18_MYSQL,
+};
 use tpch::{queries::*, schema::load_vibesql};
 
 /// Default port for vibesql-server (different from sysbench_server to avoid conflicts)
@@ -85,27 +88,27 @@ const ALL_QUERIES: &[(&str, &str)] = &[
     ("Q22", TPCH_Q22),
 ];
 
-/// MySQL-specific TPC-H queries (uses YEAR() instead of EXTRACT)
+/// MySQL-specific TPC-H queries (uses YEAR() instead of EXTRACT, explicit table aliases)
 #[cfg(feature = "mysql")]
 const ALL_QUERIES_MYSQL: &[(&str, &str)] = &[
     ("Q1", TPCH_Q1),
     ("Q2", TPCH_Q2),
-    ("Q3", TPCH_Q3),
-    ("Q4", TPCH_Q4),
-    ("Q5", TPCH_Q5),
+    ("Q3", TPCH_Q3_MYSQL),
+    ("Q4", TPCH_Q4_MYSQL),
+    ("Q5", TPCH_Q5_MYSQL),
     ("Q6", TPCH_Q6),
     ("Q7", TPCH_Q7_MYSQL),
     ("Q8", TPCH_Q8_MYSQL),
     ("Q9", TPCH_Q9_MYSQL),
-    ("Q10", TPCH_Q10),
+    ("Q10", TPCH_Q10_MYSQL),
     ("Q11", TPCH_Q11),
-    ("Q12", TPCH_Q12),
-    ("Q13", TPCH_Q13),
+    ("Q12", TPCH_Q12_MYSQL),
+    ("Q13", TPCH_Q13_MYSQL),
     ("Q14", TPCH_Q14),
     ("Q15", TPCH_Q15),
     ("Q16", TPCH_Q16),
     ("Q17", TPCH_Q17),
-    ("Q18", TPCH_Q18),
+    ("Q18", TPCH_Q18_MYSQL),
     ("Q19", TPCH_Q19),
     ("Q20", TPCH_Q20),
     ("Q21", TPCH_Q21),

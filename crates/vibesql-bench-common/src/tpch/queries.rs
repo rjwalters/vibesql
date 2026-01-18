@@ -625,3 +625,148 @@ WHERE s_suppkey = l_suppkey
 GROUP BY n_name, YEAR(o_orderdate)
 ORDER BY nation, o_year DESC
 "#;
+
+/// MySQL-specific Q3: Shipping Priority
+/// Uses explicit table aliases for MySQL compatibility
+pub const TPCH_Q3_MYSQL: &str = r#"
+SELECT
+    l.l_orderkey,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) as revenue,
+    o.o_orderdate,
+    o.o_shippriority
+FROM customer c, orders o, lineitem l
+WHERE c.c_mktsegment = 'BUILDING'
+    AND c.c_custkey = o.o_custkey
+    AND l.l_orderkey = o.o_orderkey
+    AND o.o_orderdate < '1995-03-15'
+    AND l.l_shipdate > '1995-03-15'
+GROUP BY l.l_orderkey, o.o_orderdate, o.o_shippriority
+ORDER BY revenue DESC, o.o_orderdate
+LIMIT 10
+"#;
+
+/// MySQL-specific Q4: Order Priority Checking
+/// Uses explicit table aliases for MySQL compatibility
+pub const TPCH_Q4_MYSQL: &str = r#"
+SELECT
+    o.o_orderpriority,
+    COUNT(*) as order_count
+FROM orders o
+WHERE o.o_orderdate >= '1993-07-01'
+    AND o.o_orderdate < '1993-10-01'
+    AND EXISTS (
+        SELECT *
+        FROM lineitem l
+        WHERE l.l_orderkey = o.o_orderkey
+            AND l.l_commitdate < l.l_receiptdate
+    )
+GROUP BY o.o_orderpriority
+ORDER BY o.o_orderpriority
+"#;
+
+/// MySQL-specific Q5: Local Supplier Volume
+/// Uses explicit table aliases for MySQL compatibility
+pub const TPCH_Q5_MYSQL: &str = r#"
+SELECT
+    n.n_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) as revenue
+FROM customer c, orders o, lineitem l, supplier s, nation n, region r
+WHERE c.c_custkey = o.o_custkey
+    AND l.l_orderkey = o.o_orderkey
+    AND l.l_suppkey = s.s_suppkey
+    AND c.c_nationkey = s.s_nationkey
+    AND s.s_nationkey = n.n_nationkey
+    AND n.n_regionkey = r.r_regionkey
+    AND r.r_name = 'ASIA'
+    AND o.o_orderdate >= '1994-01-01'
+    AND o.o_orderdate < '1995-01-01'
+GROUP BY n.n_name
+ORDER BY revenue DESC
+"#;
+
+/// MySQL-specific Q10: Returned Item Reporting
+/// Uses explicit table aliases for MySQL compatibility
+pub const TPCH_Q10_MYSQL: &str = r#"
+SELECT
+    c.c_custkey,
+    c.c_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) as revenue,
+    c.c_acctbal,
+    n.n_name,
+    c.c_address,
+    c.c_phone,
+    c.c_comment
+FROM customer c, orders o, lineitem l, nation n
+WHERE c.c_custkey = o.o_custkey
+    AND l.l_orderkey = o.o_orderkey
+    AND o.o_orderdate >= '1993-10-01'
+    AND o.o_orderdate < '1994-01-01'
+    AND l.l_returnflag = 'R'
+    AND c.c_nationkey = n.n_nationkey
+GROUP BY c.c_custkey, c.c_name, c.c_acctbal, c.c_phone, n.n_name, c.c_address, c.c_comment
+ORDER BY revenue DESC
+LIMIT 20
+"#;
+
+/// MySQL-specific Q12: Shipping Modes and Order Priority
+/// Uses explicit table aliases for MySQL compatibility
+pub const TPCH_Q12_MYSQL: &str = r#"
+SELECT
+    l.l_shipmode,
+    SUM(CASE WHEN o.o_orderpriority = '1-URGENT' OR o.o_orderpriority = '2-HIGH'
+        THEN 1 ELSE 0 END) as high_line_count,
+    SUM(CASE WHEN o.o_orderpriority <> '1-URGENT' AND o.o_orderpriority <> '2-HIGH'
+        THEN 1 ELSE 0 END) as low_line_count
+FROM orders o, lineitem l
+WHERE o.o_orderkey = l.l_orderkey
+    AND l.l_shipmode IN ('MAIL', 'SHIP')
+    AND l.l_commitdate < l.l_receiptdate
+    AND l.l_shipdate < l.l_commitdate
+    AND l.l_receiptdate >= '1994-01-01'
+    AND l.l_receiptdate < '1995-01-01'
+GROUP BY l.l_shipmode
+ORDER BY l.l_shipmode
+"#;
+
+/// MySQL-specific Q13: Customer Distribution
+/// Uses explicit table aliases for MySQL compatibility
+pub const TPCH_Q13_MYSQL: &str = r#"
+SELECT
+    c_count,
+    COUNT(*) as custdist
+FROM (
+    SELECT
+        c.c_custkey,
+        COUNT(o.o_orderkey) as c_count
+    FROM customer c
+    LEFT OUTER JOIN orders o ON c.c_custkey = o.o_custkey
+        AND o.o_comment NOT LIKE '%special%requests%'
+    GROUP BY c.c_custkey
+) c_orders
+GROUP BY c_count
+ORDER BY custdist DESC, c_count DESC
+"#;
+
+/// MySQL-specific Q18: Large Volume Customer
+/// Uses explicit table aliases for MySQL compatibility
+pub const TPCH_Q18_MYSQL: &str = r#"
+SELECT
+    c.c_name,
+    c.c_custkey,
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    SUM(l.l_quantity) as total_qty
+FROM customer c, orders o, lineitem l
+WHERE o.o_orderkey IN (
+        SELECT l2.l_orderkey
+        FROM lineitem l2
+        GROUP BY l2.l_orderkey
+        HAVING SUM(l2.l_quantity) > 300
+    )
+    AND c.c_custkey = o.o_custkey
+    AND o.o_orderkey = l.l_orderkey
+GROUP BY c.c_name, c.c_custkey, o.o_orderkey, o.o_orderdate, o.o_totalprice
+ORDER BY o.o_totalprice DESC, o.o_orderdate
+LIMIT 100
+"#;
