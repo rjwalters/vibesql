@@ -8,7 +8,6 @@ repository.workspace = true
 description = "Shared benchmark infrastructure for vibesql benchmarks"
 keywords = ["sql", "database", "benchmark", "tpch", "tpcc"]
 categories = ["database"]
-publish = false
 
 [features]
 default = []
