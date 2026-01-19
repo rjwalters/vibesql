@@ -1,0 +1,132 @@
+name: Release to crates.io
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (build but do not publish)'
+        required: false
+        default: 'true'
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-publish-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Verify versions match tag
+        if: github.event_name == 'push'
+        run: |
+          TAG=${GITHUB_REF#refs/tags/v}
+          VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "Tag v$TAG does not match Cargo.toml version $VERSION"
+            exit 1
+          fi
+          echo "Version $VERSION matches tag"
+
+      - name: Dry run check
+        if: github.event.inputs.dry_run == 'true'
+        run: |
+          echo "Dry run mode - will verify packages but not publish"
+          cargo publish -p vibesql-types --dry-run
+          cargo publish -p vibesql-l10n --dry-run
+          cargo publish -p vibesql-ast --dry-run
+          cargo publish -p vibesql-parser --dry-run
+          cargo publish -p vibesql-catalog --dry-run
+          cargo publish -p vibesql-storage --dry-run
+          cargo publish -p vibesql-executor --dry-run
+          cargo publish -p vibesql --dry-run
+
+      - name: Publish vibesql-types
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: cargo publish -p vibesql-types --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for index update
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: sleep 30
+
+      - name: Publish vibesql-l10n
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: cargo publish -p vibesql-l10n --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for index update
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: sleep 30
+
+      - name: Publish vibesql-ast
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: cargo publish -p vibesql-ast --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for index update
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: sleep 30
+
+      - name: Publish vibesql-parser
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: cargo publish -p vibesql-parser --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for index update
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: sleep 30
+
+      - name: Publish vibesql-catalog
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: cargo publish -p vibesql-catalog --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for index update
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: sleep 30
+
+      - name: Publish vibesql-storage
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: cargo publish -p vibesql-storage --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for index update
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: sleep 30
+
+      - name: Publish vibesql-executor
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: cargo publish -p vibesql-executor --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for index update
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: sleep 30
+
+      - name: Publish vibesql
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: cargo publish -p vibesql --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## crates.io Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Published packages:" >> $GITHUB_STEP_SUMMARY
+          echo "- vibesql-types" >> $GITHUB_STEP_SUMMARY
+          echo "- vibesql-l10n" >> $GITHUB_STEP_SUMMARY
+          echo "- vibesql-ast" >> $GITHUB_STEP_SUMMARY
+          echo "- vibesql-parser" >> $GITHUB_STEP_SUMMARY
+          echo "- vibesql-catalog" >> $GITHUB_STEP_SUMMARY
+          echo "- vibesql-storage" >> $GITHUB_STEP_SUMMARY
+          echo "- vibesql-executor" >> $GITHUB_STEP_SUMMARY
+          echo "- vibesql" >> $GITHUB_STEP_SUMMARY
