@@ -111,7 +111,8 @@ jobs:
 
       - name: Publish vibesql-executor
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-executor --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
+        # --no-verify: dev-dependency vibesql-bench-common has publish=false
+        run: cargo publish -p vibesql-executor --no-verify --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -119,7 +120,8 @@ jobs:
 
       - name: Publish vibesql
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
+        # --no-verify: transitive dev-dependency vibesql-bench-common has publish=false
+        run: cargo publish -p vibesql --no-verify --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
 
       - name: Summary
         run: |
