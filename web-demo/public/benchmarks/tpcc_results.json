@@ -3,47 +3,47 @@
     {
       "name": "tpcc_mixed_vibesql",
       "stats": {
-        "mean": 9.8e-05,
+        "mean": 0.000106,
         "stddev": 0,
-        "min": 8.8e-05,
-        "max": 0.000107,
-        "rounds": 614737,
-        "tps": 10245.62,
-        "transactions": 614737,
+        "min": 9.6e-05,
+        "max": 0.000117,
+        "rounds": 564034,
+        "tps": 9400.57,
+        "transactions": 564034,
         "duration_ms": 60000
       }
     },
     {
       "name": "tpcc_mixed_sqlite",
       "stats": {
-        "mean": 0.000444,
+        "mean": 0.000445,
         "stddev": 0,
-        "min": 0.0004,
-        "max": 0.000488,
-        "rounds": 135127,
-        "tps": 2251.85,
-        "transactions": 135127,
-        "duration_ms": 60007
+        "min": 0.000401,
+        "max": 0.00049,
+        "rounds": 134708,
+        "tps": 2244.95,
+        "transactions": 134708,
+        "duration_ms": 60005
       }
     },
     {
       "name": "tpcc_mixed_duckdb",
       "stats": {
-        "mean": 0.002825,
+        "mean": 0.003031,
         "stddev": 0,
-        "min": 0.002542,
-        "max": 0.003107,
-        "rounds": 21241,
-        "tps": 353.99,
-        "transactions": 21241,
-        "duration_ms": 60004
+        "min": 0.002728,
+        "max": 0.003335,
+        "rounds": 19793,
+        "tps": 329.88,
+        "transactions": 19793,
+        "duration_ms": 60000
       }
     }
   ],
-  "datetime": "2026-01-15T19:52:01.464563",
+  "datetime": "2026-01-18T12:39:07.308779",
   "machine_info": {
     "suite": "tpcc",
-    "git_commit": "446ca300",
+    "git_commit": "11fcc052",
     "scale_factor": "1.0"
   }
 }

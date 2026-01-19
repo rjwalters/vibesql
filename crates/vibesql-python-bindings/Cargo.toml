@@ -21,9 +21,9 @@ lru = "0.16"
 parking_lot = "0.12"
 
 # Internal crates
-vibesql-types = { version = "0.1.3", path = "../vibesql-types" }
-vibesql-ast = { version = "0.1.3", path = "../vibesql-ast" }
-vibesql-parser = { version = "0.1.3", path = "../vibesql-parser" }
-vibesql-executor = { version = "0.1.3", path = "../vibesql-executor" }
-vibesql-storage = { version = "0.1.3", path = "../vibesql-storage" }
-vibesql-catalog = { version = "0.1.3", path = "../vibesql-catalog" }
+vibesql-types = { version = "0.1.4", path = "../vibesql-types" }
+vibesql-ast = { version = "0.1.4", path = "../vibesql-ast" }
+vibesql-parser = { version = "0.1.4", path = "../vibesql-parser" }
+vibesql-executor = { version = "0.1.4", path = "../vibesql-executor" }
+vibesql-storage = { version = "0.1.4", path = "../vibesql-storage" }
+vibesql-catalog = { version = "0.1.4", path = "../vibesql-catalog" }

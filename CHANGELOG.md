@@ -5,6 +5,142 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-01-18
+
+This release focuses on **SQLite compatibility** and **morsel-driven parallel execution**. With 878 commits since v0.1.3, highlights include 100% TCL test pass rate on Priority 1 tests, memory-bounded operators with spill-to-disk, UPDATE FROM syntax, and CHECK constraint enforcement.
+
+### Performance
+
+#### Phase 10: Morsel-Driven Parallel Execution
+
+- **Morsel-driven dispatcher** - Work-stealing parallel dispatcher with adaptive morsel sizing (#4160)
+- **Parallel GROUP BY** - Morsel-driven work-stealing for GROUP BY operations (#4166)
+- **Parallel hash join** - Morsel-driven build and probe phases (#4169, #4146)
+- **Parallel sort** - Morsel-driven parallel sort with work-stealing (#4172)
+- **Parallel nested loop joins** - Morsel-driven parallelism for nested loop joins (#4276, #4280)
+- **Adaptive morsel sizing** - Query-characteristic-based morsel size adaptation (#4170)
+- **Per-operation morsel sizes** - Tuned morsel sizes per operation type (#4291)
+- **Tree-based parallel merge** - Efficient parallel merge for hash table build (#4279)
+
+#### Memory-Bounded Operators
+
+- **External sort** - Spill-to-disk sorting for datasets larger than memory (#4190)
+- **Memory-bounded aggregation** - Graceful degradation under memory pressure (#4190)
+- **Memory-bounded join** - Hash join with configurable memory limits (#4190)
+
+#### Query Execution
+
+- **Native columnar by default** - Enable native-columnar execution by default (#4204)
+- **Columnar HAVING** - HAVING clause support for columnar GROUP BY execution (#4183, #4185)
+- **Parallel columnar filter** - Parallel filter mask creation for columnar execution (#4210, #4248)
+- **CTE filter-while-copy** - Filter optimization for CTE scans (#4207)
+- **Bloom filter pre-filtering** - Scan-time pre-filtering for multi-way joins (#4372)
+- **Cost-based INL decision** - Cost-based index nested loop decision for semi-joins (#4354, #4361)
+- **Column pruning integration** - Integrate column pruning into aggregation execution (#4377, #4383)
+- **Batch insert optimization** - Use batch insert for INSERT...SELECT bulk transfer
+- **Early short-circuit** - Early termination for constant FALSE WHERE clauses
+
+### Added
+
+#### SQLite Compatibility
+
+- **TCL test suite** - 100% pass rate on Priority 1 tests (select, where, join, aggregate, etc.)
+- **UPDATE FROM** - Multi-table UPDATE syntax (SQLite extension) (#4969)
+- **DELETE with ORDER BY LIMIT** - SQLite extension for ordered deletion (#4973)
+- **CHECK constraint enforcement** - Runtime validation of CHECK constraints (#4967)
+- **Row value comparisons** - Tuple comparison expressions (#4968)
+- **DEFERRABLE constraints** - Foreign key deferral support (#4988)
+- **ON CONFLICT DO NOTHING/UPDATE** - Upsert clause support (#4888)
+- **RTRIM collation** - Collation that ignores trailing spaces (#4962)
+- **json() function** - JSON validation and minification (#4932)
+- **VALUES as view source** - VALUES clause in CREATE VIEW (#4800)
+- **IN table_name syntax** - `column IN table_name` shorthand (#4885)
+- **JSON extraction operators** - `->` and `->>` operators for JSON access
+- **Multiple datetime modifiers** - Chain modifiers in DATETIME function (#4965)
+- **SQLite multi-word type aliases** - Accept type names like `UNSIGNED BIG INT` (#4936)
+- **Parenthesized join aliases** - Alias support for parenthesized join expressions
+
+#### SQL Features
+
+- **Recursive CTE support** - WITH RECURSIVE for hierarchical queries (#4480, #4481)
+- **CREATE ASSERTION** - SQL:1999 F671/F672 runtime enforcement (#4238)
+- **Aggregate ORDER BY** - ORDER BY clause support in aggregate functions (#4590)
+- **Session-scoped temp tables** - Isolated temporary tables per session (#4797)
+- **Temp schema resolution** - Qualified table references for temp schema (#4976)
+- **Expression indexes** - Indexes on computed expressions (#4768, #4975)
+- **Column-level collation** - COLLATE clause on column definitions (#4570)
+- **COLLATE NOCASE** - Case-insensitive comparisons and BETWEEN
+- **GROUPS frame unit** - Window function GROUPS frame support
+- **Window function validation** - Validate argument counts and OVER clause requirement (#4978, #4979, #4982)
+- **ROWID pseudo-column** - INTEGER PRIMARY KEY aliasing (#4562)
+
+#### CLI Improvements
+
+- **Dot-command support** - SQLite-style `.tables`, `.schema`, `.help` commands (#4197, #4203)
+- **Positional database argument** - `vibesql mydb.vbsql` syntax (#4201)
+- **Auto-detection** - Automatic database file format detection
+- **Raw output format** - TCL test compatibility mode (#4222)
+
+#### Developer Experience
+
+- **SQL pretty-printer** - AST node pretty-printing (#4195)
+- **Improved sqlite_master** - Better SQL column for views and triggers (#4189)
+- **Concurrent read queries** - SharedDatabase for parallel read execution (#4306)
+- **TCL test infrastructure** - Native TCL execution with skip list management
+- **Benchmark improvements** - CLI-based TPC-H, MySQL dialect support, Docker auto-start
+
+### Fixed
+
+#### Query Correctness (488 bug fixes)
+
+- **NATURAL/USING JOIN fixes** - Correct column ordering and COALESCE semantics for RIGHT/FULL JOIN (#4791, #4792, #4801, #4811, #4897)
+- **Window function fixes** - Result ordering, context validation, argument count validation (#4987, #4989)
+- **Type affinity handling** - SQLite-compatible coercion in UPDATE, IN expressions, comparisons (#4822, #4889)
+- **LIKE/GLOB improvements** - Unicode support, escape character handling, multi-byte characters (#4809, #4830, #4832, #4884)
+- **Aggregate fixes** - MIN/MAX return NULL for all-NULL values, detect misuse in scalar subqueries (#4823, #4864)
+- **Trigger fixes** - Fire DELETE triggers during REPLACE INTO, default to ROW granularity (#4796, #4898)
+- **Operator precedence** - Correct `||` precedence to match SQLite (#4963)
+- **Generated columns** - Recompute on UPDATE (#4961)
+- **WITHOUT ROWID** - Enforce table constraints (#4970)
+- **Integer display** - Show large integers as exact values, not scientific notation (#4895)
+- **NaN handling** - Convert NaN arithmetic results to NULL (#4820)
+- **Rowid preservation** - Preserve row_id in index scan WHERE clauses (#4964)
+
+#### Join & Subquery Fixes
+
+- **Chained NATURAL JOIN** - Deduplicate joined columns in SELECT * (#4902)
+- **N-way COALESCE** - Proper COALESCE chain for chained NATURAL FULL JOINs (#4903, #4904)
+- **USING column resolution** - Deterministic column selection and ordering (#4842, #4856)
+- **Predicate pushdown** - Prevent pushdown for unqualified columns in outer joins (#4919)
+- **Subquery validation** - Validate ON clause subqueries for right-table references (#4812)
+- **IN→EXISTS rewrite** - Qualify unqualified column refs in rewrite (#4894)
+
+#### Parser & Evaluation
+
+- **Parenthesized subqueries** - Handle in IN expressions
+- **ORDER BY term limit** - Enforce maximum ORDER BY terms (#4933)
+- **ESCAPE validation** - Reject empty and multi-character ESCAPE strings (#4935)
+- **Set operation errors** - Propagate column count mismatch for INTERSECT/EXCEPT (#4931)
+- **CASE WHEN truthiness** - Non-zero numbers as truthy (#4833)
+- **Unary minus on strings** - SQLite compatibility (#4825)
+- **Printf format specifiers** - Correct flags, width, and 32-bit representation (#4835, #4937, #4960)
+
+### Changed
+
+- **Default to native columnar** - Enable native-columnar execution by default for analytical workloads
+- **Schema naming** - Use 'main' schema instead of 'public' for SQLite compatibility (#4623)
+- **Case-sensitive tables** - SQL:1999 compliant table identifier handling (#4396, #4403)
+- **Removed 25+ unused dependencies** - Dependency cleanup across 6 crates (#4860)
+
+### Infrastructure
+
+- **Cloudflare Pages deployment** - Replace GitHub Pages with Cloudflare Pages
+- **TCL test CI integration** - Automated TCL test suite in CI (#4226)
+- **macOS CI update** - Update from deprecated macos-13 to macos-15
+- **vibesql-bench-common** - Shared benchmark infrastructure crate (#4398)
+
+---
+
 ## [0.1.3] - 2025-12-08
 
 This release focuses on **Phase 9 performance optimization** and **cross-connection subscription enhancements**. With over 500 merged PRs since v0.1.2, highlights include O(1) row deletion, skip-scan optimization, Bloom filter joins, selective column updates for subscriptions, and comprehensive observability metrics.
