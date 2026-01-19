@@ -83,7 +83,7 @@ arcstr = "1.2"
 
 # Optional benchmark comparison dependencies (must be in [dependencies] for optional to work)
 duckdb = { version = "1.1", features = ["bundled"], optional = true }
-mysql = { version = "26.0", optional = true }
+mysql = { version = "27.0", optional = true }
 
 [dev-dependencies]
 bytes = "1.0"
