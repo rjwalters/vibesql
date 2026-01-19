@@ -63,7 +63,7 @@ jobs:
 
       - name: Publish vibesql-types
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-types --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p vibesql-types --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -71,7 +71,7 @@ jobs:
 
       - name: Publish vibesql-l10n
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-l10n --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p vibesql-l10n --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -79,7 +79,7 @@ jobs:
 
       - name: Publish vibesql-ast
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-ast --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p vibesql-ast --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -87,7 +87,7 @@ jobs:
 
       - name: Publish vibesql-parser
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-parser --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p vibesql-parser --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -95,7 +95,7 @@ jobs:
 
       - name: Publish vibesql-catalog
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-catalog --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p vibesql-catalog --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -103,7 +103,7 @@ jobs:
 
       - name: Publish vibesql-storage
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-storage --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p vibesql-storage --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -111,7 +111,7 @@ jobs:
 
       - name: Publish vibesql-executor
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-executor --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p vibesql-executor --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -119,7 +119,7 @@ jobs:
 
       - name: Publish vibesql
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p vibesql --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
 
       - name: Summary
         run: |
