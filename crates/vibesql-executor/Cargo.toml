@@ -81,12 +81,13 @@ in-memory-indexes = ["vibesql-storage/in-memory-indexes"]
 # Comparison engines (embedded)
 # Note: DuckDB linking causes significant binary bloat (73MB vs 15MB) which
 # affects CPU cache locality and can slow down benchmarks.
-sqlite = ["dep:rusqlite", "vibesql-bench-common/sqlite"]
-duckdb = ["dep:duckdb", "vibesql-bench-common/duckdb"]
+# Note: vibesql-bench-common features are enabled separately in dev-dependencies
+sqlite = ["dep:rusqlite"]
+duckdb = ["dep:duckdb"]
 
 # Comparison engines (client-server)
 # MySQL requires MYSQL_URL env var (e.g., mysql://root:password@localhost:3306/tpch)
-mysql = ["dep:mysql", "vibesql-bench-common/mysql"]
+mysql = ["dep:mysql"]
 # vibesql-server is a separate crate, not a feature here
 
 # Convenience groups
