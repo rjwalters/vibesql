@@ -239,10 +239,7 @@ impl<'arena> ArenaParser<'arena> {
     fn parse_on_clause_for_insert(
         &mut self,
     ) -> Result<
-        (
-            Option<OnConflictClause<'arena>>,
-            Option<BumpVec<'arena, Assignment<'arena>>>,
-        ),
+        (Option<OnConflictClause<'arena>>, Option<BumpVec<'arena, Assignment<'arena>>>),
         ParseError,
     > {
         if !self.try_consume_keyword(Keyword::On) {
@@ -293,9 +290,7 @@ impl<'arena> ArenaParser<'arena> {
             let assignments = self.parse_assignments()?;
             Ok((None, Some(assignments)))
         } else {
-            Err(ParseError {
-                message: "Expected CONFLICT or DUPLICATE after ON".to_string(),
-            })
+            Err(ParseError { message: "Expected CONFLICT or DUPLICATE after ON".to_string() })
         }
     }
 }

@@ -229,8 +229,8 @@ pub enum Expression {
     Like {
         expr: Box<Expression>,
         pattern: Box<Expression>,
-        negated: bool,                    // false = LIKE, true = NOT LIKE
-        escape: Option<Box<Expression>>,  // Optional ESCAPE character
+        negated: bool,                   // false = LIKE, true = NOT LIKE
+        escape: Option<Box<Expression>>, // Optional ESCAPE character
     },
 
     /// GLOB pattern matching (SQLite)
@@ -241,8 +241,8 @@ pub enum Expression {
     Glob {
         expr: Box<Expression>,
         pattern: Box<Expression>,
-        negated: bool,                    // false = GLOB, true = NOT GLOB
-        escape: Option<Box<Expression>>,  // Optional ESCAPE character
+        negated: bool,                   // false = GLOB, true = NOT GLOB
+        escape: Option<Box<Expression>>, // Optional ESCAPE character
     },
 
     /// EXISTS predicate

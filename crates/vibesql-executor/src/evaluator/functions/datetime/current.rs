@@ -247,8 +247,11 @@ fn parse_base_datetime(value: &SqlValue) -> Result<Option<NaiveDateTime>, Execut
         }
         SqlValue::Timestamp(ts) => {
             // Convert Timestamp to NaiveDateTime
-            let naive_date =
-                chrono::NaiveDate::from_ymd_opt(ts.date.year, ts.date.month as u32, ts.date.day as u32);
+            let naive_date = chrono::NaiveDate::from_ymd_opt(
+                ts.date.year,
+                ts.date.month as u32,
+                ts.date.day as u32,
+            );
             let naive_time = chrono::NaiveTime::from_hms_opt(
                 ts.time.hour as u32,
                 ts.time.minute as u32,
@@ -276,7 +279,9 @@ fn parse_base_datetime(value: &SqlValue) -> Result<Option<NaiveDateTime>, Execut
 
 /// Parse the base datetime value when 'unixepoch' is the first modifier
 /// Numeric values are interpreted as Unix timestamps instead of Julian Days
-fn parse_base_datetime_for_unixepoch(value: &SqlValue) -> Result<Option<NaiveDateTime>, ExecutorError> {
+fn parse_base_datetime_for_unixepoch(
+    value: &SqlValue,
+) -> Result<Option<NaiveDateTime>, ExecutorError> {
     match value {
         SqlValue::Null => Ok(None),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {

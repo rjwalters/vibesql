@@ -417,10 +417,7 @@ impl DeleteExecutor {
         // Maintain expression indexes for each deleted row
         for (row_index, row) in &rows_and_indices_to_delete {
             expression_index_maintenance::maintain_expression_indexes_for_delete(
-                database,
-                table_name,
-                row,
-                *row_index,
+                database, table_name, row, *row_index,
             );
         }
 

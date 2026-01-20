@@ -63,7 +63,8 @@ fn test_update_with_subquery_multiple_rows_uses_first() {
         values: None,
     });
 
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -156,7 +157,8 @@ fn test_update_with_subquery_multiple_columns_error() {
         values: None,
     });
 
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,

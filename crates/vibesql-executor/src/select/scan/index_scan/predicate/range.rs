@@ -17,7 +17,10 @@ use super::RangePredicate;
 /// pushed down to the storage layer's range_scan() method.
 ///
 /// Returns None if no suitable range predicate found for the column.
-pub(in crate::select::scan::index_scan) fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<RangePredicate> {
+pub(in crate::select::scan::index_scan) fn extract_range_predicate(
+    expr: &Expression,
+    column_name: &str,
+) -> Option<RangePredicate> {
     match expr {
         Expression::BinaryOp { left, op, right } => {
             match op {
@@ -159,30 +162,30 @@ pub(in crate::select::scan::index_scan) fn extract_range_predicate(expr: &Expres
                             // Merge the bounds by taking the tighter constraint
                             // For starts: take the greater value (tighter lower bound)
                             // For ends: take the lesser value (tighter upper bound)
-                            let (merged_start, merged_inclusive_start) =
-                                match (&l.start, &r.start) {
-                                    (None, None) => (None, false),
-                                    (Some(v), None) => (Some(v.clone()), l.inclusive_start),
-                                    (None, Some(v)) => (Some(v.clone()), r.inclusive_start),
-                                    (Some(lv), Some(rv)) => {
-                                        // Use Ord::cmp for cross-type comparison (handles Integer vs Real)
-                                        match lv.cmp(rv) {
-                                            std::cmp::Ordering::Greater => {
-                                                (Some(lv.clone()), l.inclusive_start)
-                                            }
-                                            std::cmp::Ordering::Less => {
-                                                (Some(rv.clone()), r.inclusive_start)
-                                            }
-                                            std::cmp::Ordering::Equal => {
-                                                // Equal values - take the more restrictive inclusivity
-                                                (
-                                                    Some(lv.clone()),
-                                                    l.inclusive_start && r.inclusive_start,
-                                                )
-                                            }
+                            let (merged_start, merged_inclusive_start) = match (&l.start, &r.start)
+                            {
+                                (None, None) => (None, false),
+                                (Some(v), None) => (Some(v.clone()), l.inclusive_start),
+                                (None, Some(v)) => (Some(v.clone()), r.inclusive_start),
+                                (Some(lv), Some(rv)) => {
+                                    // Use Ord::cmp for cross-type comparison (handles Integer vs Real)
+                                    match lv.cmp(rv) {
+                                        std::cmp::Ordering::Greater => {
+                                            (Some(lv.clone()), l.inclusive_start)
+                                        }
+                                        std::cmp::Ordering::Less => {
+                                            (Some(rv.clone()), r.inclusive_start)
+                                        }
+                                        std::cmp::Ordering::Equal => {
+                                            // Equal values - take the more restrictive inclusivity
+                                            (
+                                                Some(lv.clone()),
+                                                l.inclusive_start && r.inclusive_start,
+                                            )
                                         }
                                     }
-                                };
+                                }
+                            };
 
                             let (merged_end, merged_inclusive_end) = match (&l.end, &r.end) {
                                 (None, None) => (None, false),
@@ -224,7 +227,8 @@ pub(in crate::select::scan::index_scan) fn extract_range_predicate(expr: &Expres
                                 // For equal bounds with any exclusive: return impossible range marker
                                 // This case needs a marker because start == end would pass the
                                 // storage layer's inverted range check
-                                if start == end && (!merged_inclusive_start || !merged_inclusive_end)
+                                if start == end
+                                    && (!merged_inclusive_start || !merged_inclusive_end)
                                 {
                                     // Use the actual start/end values for type consistency
                                     // but ensure start > end by swapping inclusivity semantics

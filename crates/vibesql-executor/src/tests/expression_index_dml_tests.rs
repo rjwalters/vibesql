@@ -147,11 +147,7 @@ fn test_expression_index_delete_maintenance() {
 
     // Debug: check row count after delete
     let row_count_after = db.get_table("users").unwrap().row_count();
-    assert_eq!(
-        row_count_before - 1,
-        row_count_after,
-        "Row count should decrease by 1"
-    );
+    assert_eq!(row_count_before - 1, row_count_after, "Row count should decrease by 1");
 
     // Verify the expression index was updated
     let index_data = db.get_index_data("idx_lower_name").unwrap();
@@ -218,7 +214,8 @@ fn test_expression_index_replace_maintenance() {
     }
 
     // REPLACE with same id but different name
-    execute_sql(&mut db, "INSERT OR REPLACE INTO products (id, name) VALUES (1, 'Gadget')").unwrap();
+    execute_sql(&mut db, "INSERT OR REPLACE INTO products (id, name) VALUES (1, 'Gadget')")
+        .unwrap();
 
     // Verify the expression index was updated
     let index_data = db.get_index_data("idx_lower_product").unwrap();
@@ -232,10 +229,7 @@ fn test_expression_index_replace_maintenance() {
 
     // New key should be present
     let gadget_key = vec![SqlValue::Varchar(arcstr::ArcStr::from("gadget"))];
-    assert!(
-        index_data.contains_key(&gadget_key),
-        "New 'gadget' key should be added after REPLACE"
-    );
+    assert!(index_data.contains_key(&gadget_key), "New 'gadget' key should be added after REPLACE");
 }
 
 #[test]

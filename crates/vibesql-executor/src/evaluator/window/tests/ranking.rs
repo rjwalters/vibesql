@@ -203,15 +203,9 @@ fn test_ntile_invalid_argument() {
     let result = evaluate_ntile(&partition, 0);
     assert!(result.is_err());
     // Error message aligned with SQLite for TCL test compatibility
-    assert_eq!(
-        result.unwrap_err(),
-        "argument of ntile must be a positive integer"
-    );
+    assert_eq!(result.unwrap_err(), "argument of ntile must be a positive integer");
 
     let result = evaluate_ntile(&partition, -1);
     assert!(result.is_err());
-    assert_eq!(
-        result.unwrap_err(),
-        "argument of ntile must be a positive integer"
-    );
+    assert_eq!(result.unwrap_err(), "argument of ntile must be a positive integer");
 }

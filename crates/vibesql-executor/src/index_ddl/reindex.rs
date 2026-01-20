@@ -74,7 +74,8 @@ mod tests {
     use crate::{index_ddl::create_index::CreateIndexExecutor, CreateTableExecutor};
 
     fn create_test_table(db: &mut Database) {
-        let stmt = CreateTableStmt { temporary: false,
+        let stmt = CreateTableStmt {
+            temporary: false,
             if_not_exists: false,
             table_name: "users".to_string(),
             columns: vec![
@@ -85,7 +86,8 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None, is_exact_integer_type: false,
+                    generated_expr: None,
+                    is_exact_integer_type: false,
                 },
                 ColumnDef {
                     name: "email".to_string(),
@@ -94,7 +96,8 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None, is_exact_integer_type: false,
+                    generated_expr: None,
+                    is_exact_integer_type: false,
                 },
                 ColumnDef {
                     name: "name".to_string(),
@@ -103,13 +106,15 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None, is_exact_integer_type: false,
+                    generated_expr: None,
+                    is_exact_integer_type: false,
                 },
             ],
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
-            as_query: None, without_rowid: false,
+            as_query: None,
+            without_rowid: false,
         };
 
         CreateTableExecutor::execute(&stmt, db).unwrap();

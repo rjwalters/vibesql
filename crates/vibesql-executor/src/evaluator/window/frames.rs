@@ -170,7 +170,9 @@ fn calculate_rows_frame(
 
     // Calculate end boundary
     let end_idx = match end {
-        Some(end_bound) => calculate_rows_boundary(end_bound, current_row_idx, partition_size, false),
+        Some(end_bound) => {
+            calculate_rows_boundary(end_bound, current_row_idx, partition_size, false)
+        }
         None => current_row_idx + 1, // Default: CURRENT ROW (inclusive, so +1 for Range)
     };
 
@@ -209,7 +211,9 @@ fn calculate_range_frame(
 
     // Get the current row's ORDER BY value (use first ORDER BY expression)
     let current_row = &partition.rows[current_row_idx];
-    let current_value = evaluate_expression_with_map(&order_items[0].expr, current_row, &partition.column_map).unwrap_or(SqlValue::Null);
+    let current_value =
+        evaluate_expression_with_map(&order_items[0].expr, current_row, &partition.column_map)
+            .unwrap_or(SqlValue::Null);
 
     // Calculate start boundary
     let start_idx = calculate_range_boundary(
@@ -262,9 +266,8 @@ fn calculate_range_boundary(
     let partition_size = partition.len();
 
     // Check if we have DESC ordering (affects PRECEDING/FOLLOWING semantics)
-    let is_desc = order_items
-        .first()
-        .is_some_and(|item| matches!(item.direction, OrderDirection::Desc));
+    let is_desc =
+        order_items.first().is_some_and(|item| matches!(item.direction, OrderDirection::Desc));
 
     match bound {
         FrameBound::UnboundedPreceding => 0,
@@ -469,8 +472,12 @@ fn build_group_boundaries(partition: &Partition, order_items: &[OrderByItem]) ->
         // Check if this row starts a new group (different ORDER BY values)
         let mut is_new_group = false;
         for item in order_items {
-            let prev_val = evaluate_expression_with_map(&item.expr, prev_row, &partition.column_map).unwrap_or(SqlValue::Null);
-            let curr_val = evaluate_expression_with_map(&item.expr, curr_row, &partition.column_map).unwrap_or(SqlValue::Null);
+            let prev_val =
+                evaluate_expression_with_map(&item.expr, prev_row, &partition.column_map)
+                    .unwrap_or(SqlValue::Null);
+            let curr_val =
+                evaluate_expression_with_map(&item.expr, curr_row, &partition.column_map)
+                    .unwrap_or(SqlValue::Null);
             if compare_values(&prev_val, &curr_val) != Ordering::Equal {
                 is_new_group = true;
                 break;
@@ -508,8 +515,11 @@ fn find_first_peer(
         let mut is_peer = true;
 
         for item in order_items {
-            let curr_val = evaluate_expression_with_map(&item.expr, current_row, &partition.column_map).unwrap_or(SqlValue::Null);
-            let row_val = evaluate_expression_with_map(&item.expr, row, &partition.column_map).unwrap_or(SqlValue::Null);
+            let curr_val =
+                evaluate_expression_with_map(&item.expr, current_row, &partition.column_map)
+                    .unwrap_or(SqlValue::Null);
+            let row_val = evaluate_expression_with_map(&item.expr, row, &partition.column_map)
+                .unwrap_or(SqlValue::Null);
             if compare_values(&curr_val, &row_val) != Ordering::Equal {
                 is_peer = false;
                 break;
@@ -537,8 +547,11 @@ fn find_last_peer(
         let mut is_peer = true;
 
         for item in order_items {
-            let curr_val = evaluate_expression_with_map(&item.expr, current_row, &partition.column_map).unwrap_or(SqlValue::Null);
-            let row_val = evaluate_expression_with_map(&item.expr, row, &partition.column_map).unwrap_or(SqlValue::Null);
+            let curr_val =
+                evaluate_expression_with_map(&item.expr, current_row, &partition.column_map)
+                    .unwrap_or(SqlValue::Null);
+            let row_val = evaluate_expression_with_map(&item.expr, row, &partition.column_map)
+                .unwrap_or(SqlValue::Null);
             if compare_values(&curr_val, &row_val) != Ordering::Equal {
                 is_peer = false;
                 break;
@@ -560,7 +573,8 @@ fn find_first_row_ge(
     target: &SqlValue,
 ) -> usize {
     for (i, row) in partition.rows.iter().enumerate() {
-        let val = evaluate_expression_with_map(&order_items[0].expr, row, &partition.column_map).unwrap_or(SqlValue::Null);
+        let val = evaluate_expression_with_map(&order_items[0].expr, row, &partition.column_map)
+            .unwrap_or(SqlValue::Null);
         if compare_values(&val, target) != Ordering::Less {
             return i;
         }
@@ -575,7 +589,12 @@ fn find_last_row_le(
     target: &SqlValue,
 ) -> usize {
     for i in (0..partition.len()).rev() {
-        let val = evaluate_expression_with_map(&order_items[0].expr, &partition.rows[i], &partition.column_map).unwrap_or(SqlValue::Null);
+        let val = evaluate_expression_with_map(
+            &order_items[0].expr,
+            &partition.rows[i],
+            &partition.column_map,
+        )
+        .unwrap_or(SqlValue::Null);
         if compare_values(&val, target) != Ordering::Greater {
             return i;
         }
@@ -593,7 +612,8 @@ fn find_first_row_le_desc(
     target: &SqlValue,
 ) -> usize {
     for (i, row) in partition.rows.iter().enumerate() {
-        let val = evaluate_expression_with_map(&order_items[0].expr, row, &partition.column_map).unwrap_or(SqlValue::Null);
+        let val = evaluate_expression_with_map(&order_items[0].expr, row, &partition.column_map)
+            .unwrap_or(SqlValue::Null);
         if compare_values(&val, target) != Ordering::Greater {
             return i;
         }
@@ -611,7 +631,12 @@ fn find_last_row_ge_desc(
     target: &SqlValue,
 ) -> usize {
     for i in (0..partition.len()).rev() {
-        let val = evaluate_expression_with_map(&order_items[0].expr, &partition.rows[i], &partition.column_map).unwrap_or(SqlValue::Null);
+        let val = evaluate_expression_with_map(
+            &order_items[0].expr,
+            &partition.rows[i],
+            &partition.column_map,
+        )
+        .unwrap_or(SqlValue::Null);
         if compare_values(&val, target) != Ordering::Less {
             return i;
         }
@@ -802,8 +827,10 @@ fn is_peer(
 
     // Compare all ORDER BY expressions
     for order_item in order_items {
-        let val_a = evaluate_expression_with_map(&order_item.expr, row_a, &partition.column_map).unwrap_or(SqlValue::Null);
-        let val_b = evaluate_expression_with_map(&order_item.expr, row_b, &partition.column_map).unwrap_or(SqlValue::Null);
+        let val_a = evaluate_expression_with_map(&order_item.expr, row_a, &partition.column_map)
+            .unwrap_or(SqlValue::Null);
+        let val_b = evaluate_expression_with_map(&order_item.expr, row_b, &partition.column_map)
+            .unwrap_or(SqlValue::Null);
 
         if compare_values(&val_a, &val_b) != Ordering::Equal {
             return false;

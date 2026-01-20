@@ -19,19 +19,11 @@ pub struct Partition {
 impl Partition {
     pub fn new(rows: Vec<Row>) -> Self {
         let original_indices = (0..rows.len()).collect();
-        Self {
-            rows,
-            original_indices,
-            column_map: std::collections::HashMap::new(),
-        }
+        Self { rows, original_indices, column_map: std::collections::HashMap::new() }
     }
 
     pub fn with_indices(rows: Vec<Row>, original_indices: Vec<usize>) -> Self {
-        Self {
-            rows,
-            original_indices,
-            column_map: std::collections::HashMap::new(),
-        }
+        Self { rows, original_indices, column_map: std::collections::HashMap::new() }
     }
 
     pub fn with_column_map(

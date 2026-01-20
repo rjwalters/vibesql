@@ -242,7 +242,7 @@ fn test_insert_select_invalidates_cache() {
     // Populate source table
     let insert_source = |db: &mut Database, id: i64, name: &str, price: i64| {
         let stmt = vibesql_ast::InsertStmt {
-        with_clause: None,
+            with_clause: None,
             schema_name: None,
             schema_quoted: false,
             table_quoted: false,
@@ -255,7 +255,7 @@ fn test_insert_select_invalidates_cache() {
             ]]),
             conflict_clause: None,
             on_conflict: None,
-        on_duplicate_key_update: None,
+            on_duplicate_key_update: None,
         };
         InsertExecutor::execute(db, &stmt).unwrap();
     };

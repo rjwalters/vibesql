@@ -36,10 +36,16 @@ pub(super) fn get_column_affinity(schema: &CombinedSchema, col_idx: usize) -> Op
 ///
 /// This function normalizes values to a canonical form that can be used for hash-based
 /// lookups, ensuring that TEXT '10.0' can match INTEGER 10 when INTEGER affinity applies.
-pub(super) fn normalize_for_affinity_hash(value: &SqlValue, target_affinity: Option<TypeAffinity>) -> SqlValue {
+pub(super) fn normalize_for_affinity_hash(
+    value: &SqlValue,
+    target_affinity: Option<TypeAffinity>,
+) -> SqlValue {
     match (value, target_affinity) {
         // When target has INTEGER/REAL/NUMERIC affinity and value is TEXT, try to coerce to number
-        (SqlValue::Varchar(s) | SqlValue::Character(s), Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric)) => {
+        (
+            SqlValue::Varchar(s) | SqlValue::Character(s),
+            Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric),
+        ) => {
             // Try to parse as a number
             let s_str = s.as_str().trim();
 
@@ -51,7 +57,10 @@ pub(super) fn normalize_for_affinity_hash(value: &SqlValue, target_affinity: Opt
             // Try float
             if let Ok(f) = s_str.parse::<f64>() {
                 // For INTEGER affinity, if the float is a whole number, convert to integer
-                if matches!(target_affinity, Some(TypeAffinity::Integer)) && f.fract() == 0.0 && f.is_finite() {
+                if matches!(target_affinity, Some(TypeAffinity::Integer))
+                    && f.fract() == 0.0
+                    && f.is_finite()
+                {
                     if f >= i64::MIN as f64 && f <= i64::MAX as f64 {
                         return SqlValue::Integer(f as i64);
                     }
@@ -86,7 +95,9 @@ pub(super) fn normalize_for_affinity_hash(value: &SqlValue, target_affinity: Opt
                 value.clone()
             }
         }
-        (SqlValue::Real(f), Some(TypeAffinity::Integer)) if (*f as f64).fract() == 0.0 && f.is_finite() => {
+        (SqlValue::Real(f), Some(TypeAffinity::Integer))
+            if (*f as f64).fract() == 0.0 && f.is_finite() =>
+        {
             let f64_val = *f as f64;
             if f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
                 SqlValue::Integer(f64_val as i64)
@@ -94,7 +105,9 @@ pub(super) fn normalize_for_affinity_hash(value: &SqlValue, target_affinity: Opt
                 value.clone()
             }
         }
-        (SqlValue::Float(f), Some(TypeAffinity::Integer)) if (*f as f64).fract() == 0.0 && f.is_finite() => {
+        (SqlValue::Float(f), Some(TypeAffinity::Integer))
+            if (*f as f64).fract() == 0.0 && f.is_finite() =>
+        {
             let f64_val = *f as f64;
             if f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
                 SqlValue::Integer(f64_val as i64)
@@ -157,9 +170,15 @@ pub(super) fn hash_semi_join(
     // This is needed when affinities differ and could affect comparison results
     let needs_affinity_aware = match (left_affinity, right_affinity) {
         // TEXT vs numeric needs coercion
-        (Some(TypeAffinity::Text), Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric)) => true,
+        (
+            Some(TypeAffinity::Text),
+            Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric),
+        ) => true,
         // Numeric vs TEXT needs coercion
-        (Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric), Some(TypeAffinity::Text)) => true,
+        (
+            Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric),
+            Some(TypeAffinity::Text),
+        ) => true,
         // Different numeric types may need normalization
         (Some(TypeAffinity::Integer), Some(TypeAffinity::Real)) => true,
         (Some(TypeAffinity::Real), Some(TypeAffinity::Integer)) => true,
@@ -184,7 +203,8 @@ pub(super) fn hash_semi_join(
         )
     } else {
         // Use optimized parallel hash table for same-type comparisons
-        let hash_table = build_existence_hash_table_parallel(right_slice, right_col_idx, &timeout_ctx)?;
+        let hash_table =
+            build_existence_hash_table_parallel(right_slice, right_col_idx, &timeout_ctx)?;
 
         // Probe phase: Check each left row for a match
         let estimated_capacity = left_slice.len().min(100_000);

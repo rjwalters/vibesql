@@ -21,9 +21,7 @@ pub(in crate::evaluator::functions) fn substring(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.len() < 2 || args.len() > 3 {
-        return Err(ExecutorError::WrongNumberOfArguments {
-            function_name: "substr".to_string(),
-        });
+        return Err(ExecutorError::WrongNumberOfArguments { function_name: "substr".to_string() });
     }
 
     let string_val = &args[0];

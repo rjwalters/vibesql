@@ -24,9 +24,7 @@ pub(in crate::evaluator::functions) fn concat(
     sql_mode: &vibesql_types::SqlMode,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.is_empty() {
-        return Err(ExecutorError::WrongNumberOfArguments {
-            function_name: "concat".to_string(),
-        });
+        return Err(ExecutorError::WrongNumberOfArguments { function_name: "concat".to_string() });
     }
 
     // MySQL mode: NULL propagates - any NULL argument returns NULL

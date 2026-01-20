@@ -536,9 +536,6 @@ impl Parser {
 
         // Check if AGAINST follows
         pos < self.tokens.len()
-            && matches!(
-                &self.tokens[pos],
-                Token::Keyword { keyword: Keyword::Against, .. }
-            )
+            && matches!(&self.tokens[pos], Token::Keyword { keyword: Keyword::Against, .. })
     }
 }

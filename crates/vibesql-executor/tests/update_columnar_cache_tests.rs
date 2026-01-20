@@ -51,7 +51,8 @@ fn test_update_invalidates_columnar_cache() {
     );
 
     // Execute UPDATE - give Alice a raise
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -121,7 +122,8 @@ fn test_update_invalidates_prewarmed_cache() {
     assert_eq!(stats_after_get.hits, 1, "Second get should be a cache hit");
 
     // UPDATE to change Bob's salary
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -165,7 +167,8 @@ fn test_update_all_rows_invalidates_cache() {
     let _ = db.get_columnar("employees").unwrap();
 
     // UPDATE all rows - give everyone the same salary
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -201,7 +204,8 @@ fn test_update_no_match_does_not_invalidate_cache() {
     let initial_conversions = initial_stats.conversions;
 
     // UPDATE with WHERE clause that matches no rows
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -244,7 +248,8 @@ fn test_multiple_updates_invalidate_cache() {
     let _ = db.get_columnar("employees").unwrap();
 
     // First UPDATE
-    let stmt1 = UpdateStmt { with_clause: None,
+    let stmt1 = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -273,7 +278,8 @@ fn test_multiple_updates_invalidate_cache() {
     );
 
     // Second UPDATE
-    let stmt2 = UpdateStmt { with_clause: None,
+    let stmt2 = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -318,7 +324,8 @@ fn test_update_multiple_columns_invalidates_cache() {
     let _ = db.get_columnar("employees").unwrap();
 
     // UPDATE multiple columns at once
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,

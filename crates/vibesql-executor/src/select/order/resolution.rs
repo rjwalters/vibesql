@@ -640,15 +640,9 @@ pub(crate) fn resolve_where_aliases(
 /// Call sites should use this BEFORE building schemas to avoid unnecessary work.
 #[inline]
 pub(crate) fn select_list_has_aliases(select_list: &[vibesql_ast::SelectItem]) -> bool {
-    select_list.iter().any(|item| {
-        matches!(
-            item,
-            vibesql_ast::SelectItem::Expression {
-                alias: Some(_),
-                ..
-            }
-        )
-    })
+    select_list
+        .iter()
+        .any(|item| matches!(item, vibesql_ast::SelectItem::Expression { alias: Some(_), .. }))
 }
 
 /// Resolve SELECT aliases in WHERE clause with schema column awareness.
@@ -778,23 +772,29 @@ fn resolve_where_expression_with_schema_ref(
 
         // CASE expression
         Expression::Case { operand, when_clauses, else_result } => Expression::Case {
-            operand: operand
-                .as_ref()
-                .map(|op| Box::new(resolve_where_expression_with_schema_ref(op, select_list, schema))),
+            operand: operand.as_ref().map(|op| {
+                Box::new(resolve_where_expression_with_schema_ref(op, select_list, schema))
+            }),
             when_clauses: when_clauses
                 .iter()
                 .map(|clause| vibesql_ast::CaseWhen {
                     conditions: clause
                         .conditions
                         .iter()
-                        .map(|cond| resolve_where_expression_with_schema_ref(cond, select_list, schema))
+                        .map(|cond| {
+                            resolve_where_expression_with_schema_ref(cond, select_list, schema)
+                        })
                         .collect(),
-                    result: resolve_where_expression_with_schema_ref(&clause.result, select_list, schema),
+                    result: resolve_where_expression_with_schema_ref(
+                        &clause.result,
+                        select_list,
+                        schema,
+                    ),
                 })
                 .collect(),
-            else_result: else_result
-                .as_ref()
-                .map(|e| Box::new(resolve_where_expression_with_schema_ref(e, select_list, schema))),
+            else_result: else_result.as_ref().map(|e| {
+                Box::new(resolve_where_expression_with_schema_ref(e, select_list, schema))
+            }),
         },
 
         // IS NULL / IS NOT NULL
@@ -811,11 +811,17 @@ fn resolve_where_expression_with_schema_ref(
         },
 
         // IS TRUE / IS FALSE / IS UNKNOWN
-        Expression::IsTruthValue { expr: inner, truth_value, negated } => Expression::IsTruthValue {
-            expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
-            truth_value: *truth_value,
-            negated: *negated,
-        },
+        Expression::IsTruthValue { expr: inner, truth_value, negated } => {
+            Expression::IsTruthValue {
+                expr: Box::new(resolve_where_expression_with_schema_ref(
+                    inner,
+                    select_list,
+                    schema,
+                )),
+                truth_value: *truth_value,
+                negated: *negated,
+            }
+        }
 
         // IN list
         Expression::InList { expr: inner, values, negated } => Expression::InList {
@@ -846,7 +852,11 @@ fn resolve_where_expression_with_schema_ref(
         // LIKE
         Expression::Like { expr: inner, pattern, negated, escape } => Expression::Like {
             expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
-            pattern: Box::new(resolve_where_expression_with_schema_ref(pattern, select_list, schema)),
+            pattern: Box::new(resolve_where_expression_with_schema_ref(
+                pattern,
+                select_list,
+                schema,
+            )),
             negated: *negated,
             escape: escape.as_ref().map(|e| {
                 Box::new(resolve_where_expression_with_schema_ref(e, select_list, schema))
@@ -856,7 +866,11 @@ fn resolve_where_expression_with_schema_ref(
         // GLOB
         Expression::Glob { expr: inner, pattern, negated, escape } => Expression::Glob {
             expr: Box::new(resolve_where_expression_with_schema_ref(inner, select_list, schema)),
-            pattern: Box::new(resolve_where_expression_with_schema_ref(pattern, select_list, schema)),
+            pattern: Box::new(resolve_where_expression_with_schema_ref(
+                pattern,
+                select_list,
+                schema,
+            )),
             negated: *negated,
             escape: escape.as_ref().map(|e| {
                 Box::new(resolve_where_expression_with_schema_ref(e, select_list, schema))
@@ -896,15 +910,19 @@ fn resolve_where_expression_with_schema_ref(
                     items
                         .iter()
                         .map(|item| vibesql_ast::OrderByItem {
-                            expr: resolve_where_expression_with_schema_ref(&item.expr, select_list, schema),
+                            expr: resolve_where_expression_with_schema_ref(
+                                &item.expr,
+                                select_list,
+                                schema,
+                            ),
                             direction: item.direction.clone(),
                             nulls_order: item.nulls_order,
                         })
                         .collect()
                 }),
-                filter: filter
-                    .as_ref()
-                    .map(|f| Box::new(resolve_where_expression_with_schema_ref(f, select_list, schema))),
+                filter: filter.as_ref().map(|f| {
+                    Box::new(resolve_where_expression_with_schema_ref(f, select_list, schema))
+                }),
             }
         }
 

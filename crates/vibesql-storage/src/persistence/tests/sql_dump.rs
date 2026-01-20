@@ -269,21 +269,15 @@ fn test_sql_dump_with_indexes() {
         direction: vibesql_ast::OrderDirection::Asc,
         prefix_length: None,
     };
-    db.create_index("idx_name".to_string(), "test_indexes".to_string(), false, vec![idx1])
-        .unwrap();
+    db.create_index("idx_name".to_string(), "test_indexes".to_string(), false, vec![idx1]).unwrap();
 
     let idx2 = vibesql_ast::IndexColumn::Column {
         column_name: "email".to_string(),
         direction: vibesql_ast::OrderDirection::Asc,
         prefix_length: None,
     };
-    db.create_index(
-        "idx_email_unique".to_string(),
-        "test_indexes".to_string(),
-        true,
-        vec![idx2],
-    )
-    .unwrap();
+    db.create_index("idx_email_unique".to_string(), "test_indexes".to_string(), true, vec![idx2])
+        .unwrap();
 
     // Save SQL dump
     let path = "/tmp/test_indexes.sql";

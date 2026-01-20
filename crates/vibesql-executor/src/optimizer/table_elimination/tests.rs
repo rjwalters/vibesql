@@ -141,7 +141,8 @@ mod eliminate_unused_tables_tests {
             join_type: JoinType::Cross,
             condition: None,
             using_columns: None,
-            natural: false, alias: None,
+            natural: false,
+            alias: None,
         }
     }
 

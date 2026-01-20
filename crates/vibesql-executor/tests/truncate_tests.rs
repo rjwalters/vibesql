@@ -21,7 +21,8 @@ use vibesql_types::{DataType, SqlValue};
 
 // Helper function to create a simple table
 fn create_test_table(db: &mut Database, table_name: &str) {
-    let create_stmt = CreateTableStmt { temporary: false,
+    let create_stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: table_name.to_string(),
         columns: vec![
@@ -32,7 +33,8 @@ fn create_test_table(db: &mut Database, table_name: &str) {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "data".to_string(),
@@ -41,13 +43,15 @@ fn create_test_table(db: &mut Database, table_name: &str) {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt, db).unwrap();
 }
@@ -495,7 +499,8 @@ fn test_truncate_preserves_table_structure() {
     let mut db = Database::new();
 
     // Create table with specific structure
-    let create_stmt = CreateTableStmt { temporary: false,
+    let create_stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "structured_table".to_string(),
         columns: vec![
@@ -506,7 +511,8 @@ fn test_truncate_preserves_table_structure() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "email".to_string(),
@@ -515,7 +521,8 @@ fn test_truncate_preserves_table_structure() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "age".to_string(),
@@ -524,13 +531,15 @@ fn test_truncate_preserves_table_structure() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 

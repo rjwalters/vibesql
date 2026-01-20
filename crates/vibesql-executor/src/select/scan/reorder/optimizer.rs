@@ -515,6 +515,8 @@ where
                 &applicable_conditions, // Pass only the applicable conditions for this join
                 &timeout_ctx,
                 cte_results,
+                None, // No outer context (join reordering operates at same query level)
+                None,
             )?);
             let join_time = join_start.elapsed();
             let result_rows = result.as_ref().map(|r| r.data.as_slice().len()).unwrap_or(0);
@@ -830,6 +832,8 @@ where
         &[], // no additional equijoins
         &timeout_ctx,
         cte_results,
+        None, // No outer context (join reordering operates at same query level)
+        None,
     )?;
     let semi_time = semi_start.elapsed();
 
@@ -1043,6 +1047,8 @@ where
                 &[],
                 &timeout_ctx,
                 cte_results,
+                None, // No outer context (join reordering operates at same query level)
+                None,
             );
         }
     };
@@ -1094,6 +1100,8 @@ where
         &[],
         &timeout_ctx,
         cte_results,
+        None, // No outer context (join reordering operates at same query level)
+        None,
     )?;
     let semi_join_time = semi_join_start.elapsed();
 
@@ -1250,6 +1258,8 @@ where
             &equijoins,
             &timeout_ctx,
             cte_results,
+            None, // No outer context (join reordering operates at same query level)
+            None,
         )?;
         let join_time = join_start.elapsed();
 

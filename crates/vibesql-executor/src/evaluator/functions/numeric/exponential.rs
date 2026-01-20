@@ -18,11 +18,9 @@ pub fn numeric_to_f64(val: &SqlValue) -> Result<f64, ExecutorError> {
         SqlValue::Double(f) => Ok(*f),
         SqlValue::Real(f) => Ok(*f as f64),
         // SQLite compatibility: strings can be parsed as numbers
-        SqlValue::Varchar(s) | SqlValue::Character(s) => {
-            s.as_str().parse::<f64>().map_err(|_| {
-                ExecutorError::UnsupportedFeature(format!("Cannot convert '{}' to numeric", s))
-            })
-        }
+        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str().parse::<f64>().map_err(|_| {
+            ExecutorError::UnsupportedFeature(format!("Cannot convert '{}' to numeric", s))
+        }),
         _ => Err(ExecutorError::UnsupportedFeature(format!("Cannot convert {:?} to numeric", val))),
     }
 }

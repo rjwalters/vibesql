@@ -51,19 +51,18 @@ pub fn create_expression_index(
                 evaluator.eval(expr, row)?
             } else if let Some(col_name) = col.column_name() {
                 // Column reference: extract value directly
-                let col_idx =
-                    table_schema.get_column_index(col_name).ok_or_else(|| {
-                        ExecutorError::ColumnNotFound {
-                            column_name: col_name.to_string(),
-                            table_name: table_name.to_string(),
-                            searched_tables: vec![table_name.to_string()],
-                            available_columns: table_schema
-                                .columns
-                                .iter()
-                                .map(|c| c.name.clone())
-                                .collect(),
-                        }
-                    })?;
+                let col_idx = table_schema.get_column_index(col_name).ok_or_else(|| {
+                    ExecutorError::ColumnNotFound {
+                        column_name: col_name.to_string(),
+                        table_name: table_name.to_string(),
+                        searched_tables: vec![table_name.to_string()],
+                        available_columns: table_schema
+                            .columns
+                            .iter()
+                            .map(|c| c.name.clone())
+                            .collect(),
+                    }
+                })?;
                 row.values[col_idx].clone()
             } else {
                 // Should not happen: validated earlier

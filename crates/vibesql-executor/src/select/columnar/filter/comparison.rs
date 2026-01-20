@@ -343,10 +343,8 @@ mod tests {
         use super::super::predicates::ColumnPredicate;
 
         // GreaterThan predicate: column > 123
-        let predicate = ColumnPredicate::GreaterThan {
-            column_idx: 0,
-            value: SqlValue::Integer(123),
-        };
+        let predicate =
+            ColumnPredicate::GreaterThan { column_idx: 0, value: SqlValue::Integer(123) };
 
         // Column value is 'abc' (text)
         let value = SqlValue::Varchar(arcstr::ArcStr::from("abc"));

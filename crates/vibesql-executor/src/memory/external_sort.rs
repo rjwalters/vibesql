@@ -156,11 +156,7 @@ impl SortKeyComparator {
     /// When ORDER BY expressions are equal, SQLite uses rowid as a secondary sort key
     /// to maintain deterministic ordering. This function implements the same behavior
     /// (issue #4893).
-    fn compare_with_rowid(
-        &self,
-        a: &RowWithKeys,
-        b: &RowWithKeys,
-    ) -> Ordering {
+    fn compare_with_rowid(&self, a: &RowWithKeys, b: &RowWithKeys) -> Ordering {
         let key_cmp = self.compare(&a.1, &b.1);
         if key_cmp != Ordering::Equal {
             return key_cmp;

@@ -196,23 +196,23 @@ impl Parser {
         };
 
         // Parse BETWEEN ... AND ... or single bound
-        let (start, end) = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Between, .. })
-        {
-            self.advance(); // consume BETWEEN
+        let (start, end) =
+            if matches!(self.peek(), Token::Keyword { keyword: Keyword::Between, .. }) {
+                self.advance(); // consume BETWEEN
 
-            let start = self.parse_frame_bound()?;
+                let start = self.parse_frame_bound()?;
 
-            self.expect_keyword(Keyword::And)?;
+                self.expect_keyword(Keyword::And)?;
 
-            let end = self.parse_frame_bound()?;
+                let end = self.parse_frame_bound()?;
 
-            (start, Some(end))
-        } else {
-            // Single bound (defaults to CURRENT ROW as end)
-            let start = self.parse_frame_bound()?;
+                (start, Some(end))
+            } else {
+                // Single bound (defaults to CURRENT ROW as end)
+                let start = self.parse_frame_bound()?;
 
-            (start, None)
-        };
+                (start, None)
+            };
 
         // Parse optional EXCLUDE clause
         let exclude = self.parse_frame_exclude()?;
@@ -239,7 +239,7 @@ impl Parser {
             // EXCLUDE CURRENT ROW
             Token::Keyword { keyword: Keyword::Current, .. } => {
                 self.advance(); // consume CURRENT
-                // Accept ROW as either keyword or identifier for compatibility
+                                // Accept ROW as either keyword or identifier for compatibility
                 match self.peek() {
                     Token::Keyword { keyword: Keyword::Row, .. } => {
                         self.advance();

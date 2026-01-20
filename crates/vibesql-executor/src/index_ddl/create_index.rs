@@ -906,11 +906,7 @@ mod tests {
         // Insert test data
         db.insert_row(
             "products",
-            Row::new(vec![
-                SqlValue::Integer(1),
-                SqlValue::Integer(100),
-                SqlValue::Integer(10),
-            ]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100), SqlValue::Integer(10)]),
         )
         .unwrap();
 

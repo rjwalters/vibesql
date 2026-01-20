@@ -201,9 +201,7 @@ impl SelectExecutor<'_> {
 
         // Apply remaining WHERE clause if not already filtered
         let filtered_rows = match (&resolved_where, where_filtered) {
-            (Some(where_expr), false) => {
-                self.apply_where_filter_fast(where_expr, rows, &schema)?
-            }
+            (Some(where_expr), false) => self.apply_where_filter_fast(where_expr, rows, &schema)?,
             _ => rows,
         };
 

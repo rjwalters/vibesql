@@ -187,10 +187,8 @@ fn test_index_column_can_filter_expression() {
     let where_expr = parse_where_expression("lower(email) = 'alice@example.com'");
     let index_expr = parse_index_expression("lower(email)");
 
-    let index_column = IndexColumn::Expression {
-        expr: Box::new(index_expr),
-        direction: OrderDirection::Asc,
-    };
+    let index_column =
+        IndexColumn::Expression { expr: Box::new(index_expr), direction: OrderDirection::Asc };
 
     assert!(
         index_column_can_filter(&where_expr, &index_column),

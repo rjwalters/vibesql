@@ -8,9 +8,7 @@ use super::{
 #[cfg(feature = "parallel")]
 use crate::select::parallel::ParallelConfig;
 use crate::{
-    errors::ExecutorError,
-    evaluator::CombinedExpressionEvaluator,
-    schema::CombinedSchema,
+    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema,
     select::join::combine_rows,
 };
 

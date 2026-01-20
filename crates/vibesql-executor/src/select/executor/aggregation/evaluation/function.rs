@@ -26,8 +26,8 @@ pub(super) fn evaluate(
     // Note: MIN/MAX with >1 argument are scalar functions (SQLite compatibility)
     let name_upper = name.to_uppercase();
     let is_aggregate = match name_upper.as_str() {
-        "COUNT" | "SUM" | "AVG" | "TOTAL" | "GROUP_CONCAT" | "STRING_AGG"
-        | "JSON_GROUP_ARRAY" | "MD5SUM" => true,
+        "COUNT" | "SUM" | "AVG" | "TOTAL" | "GROUP_CONCAT" | "STRING_AGG" | "JSON_GROUP_ARRAY"
+        | "MD5SUM" => true,
         "MIN" | "MAX" => args.len() <= 1, // multi-arg min/max are scalar functions
         _ => false,
     };

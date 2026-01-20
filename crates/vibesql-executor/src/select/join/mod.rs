@@ -380,19 +380,45 @@ fn combine_rows(
 ///
 /// Issue #3562: Added cte_results parameter so IN subqueries in filter expressions
 /// can resolve CTE references.
+///
+/// Issue #4994: Added outer_row and outer_schema parameters so correlated column
+/// references from outer queries can be resolved in JOIN conditions.
 fn apply_post_join_filter(
     result: FromResult,
     filter_expr: &vibesql_ast::Expression,
     database: &vibesql_storage::Database,
     cte_results: &HashMap<String, CteResult>,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&crate::schema::CombinedSchema>,
 ) -> Result<FromResult, ExecutorError> {
     // Extract schema before moving result
     let schema = result.schema.clone();
     // Issue #3562: Use evaluator with CTE context if CTEs exist
-    let evaluator = if cte_results.is_empty() {
-        CombinedExpressionEvaluator::with_database(&schema, database)
-    } else {
-        CombinedExpressionEvaluator::with_database_and_cte(&schema, database, cte_results)
+    // Issue #4994: Also pass outer context for correlated column references
+    let evaluator = match (cte_results.is_empty(), outer_row, outer_schema) {
+        (true, None, _) | (true, _, None) => {
+            CombinedExpressionEvaluator::with_database(&schema, database)
+        }
+        (false, None, _) | (false, _, None) => {
+            CombinedExpressionEvaluator::with_database_and_cte(&schema, database, cte_results)
+        }
+        (true, Some(outer_row), Some(outer_schema)) => {
+            CombinedExpressionEvaluator::with_database_and_outer_context(
+                &schema,
+                database,
+                outer_row,
+                outer_schema,
+            )
+        }
+        (false, Some(outer_row), Some(outer_schema)) => {
+            CombinedExpressionEvaluator::with_database_and_outer_context_and_cte(
+                &schema,
+                database,
+                outer_row,
+                outer_schema,
+                cte_results,
+            )
+        }
     };
 
     // Filter rows based on the expression
@@ -438,6 +464,10 @@ fn apply_post_join_filter(
 ///
 /// Issue #3562: Added cte_results parameter so post-join filters with IN subqueries
 /// can resolve CTE references.
+///
+/// Issue #4994: Added outer_row and outer_schema parameters so JOIN conditions
+/// that reference columns from outer queries (correlated derived tables) can
+/// be properly evaluated.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn nested_loop_join(
     left: FromResult,
@@ -450,6 +480,8 @@ pub(super) fn nested_loop_join(
     additional_equijoins: &[vibesql_ast::Expression],
     timeout_ctx: &TimeoutContext,
     cte_results: &HashMap<String, CteResult>,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&crate::schema::CombinedSchema>,
 ) -> Result<FromResult, ExecutorError> {
     // Try to use hash join for INNER JOINs with simple equi-join conditions
     if let vibesql_ast::JoinType::Inner = join_type {
@@ -495,6 +527,8 @@ pub(super) fn nested_loop_join(
                                 &filter_expr,
                                 database,
                                 cte_results,
+                                outer_row,
+                                outer_schema,
                             )?;
                         }
                     }
@@ -549,8 +583,14 @@ pub(super) fn nested_loop_join(
                 // Apply remaining conditions as post-join filter
                 if !multi_result.remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(multi_result.remaining_conditions) {
-                        result =
-                            apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                        result = apply_post_join_filter(
+                            result,
+                            &filter_expr,
+                            database,
+                            cte_results,
+                            outer_row,
+                            outer_schema,
+                        )?;
                     }
                 }
 
@@ -611,8 +651,14 @@ pub(super) fn nested_loop_join(
                 // Apply remaining OR conditions as post-join filter
                 if !or_result.remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(or_result.remaining_conditions) {
-                        result =
-                            apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                        result = apply_post_join_filter(
+                            result,
+                            &filter_expr,
+                            database,
+                            cte_results,
+                            outer_row,
+                            outer_schema,
+                        )?;
                     }
                 }
 
@@ -746,8 +792,14 @@ pub(super) fn nested_loop_join(
 
                 if !remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(remaining_conditions) {
-                        result =
-                            apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                        result = apply_post_join_filter(
+                            result,
+                            &filter_expr,
+                            database,
+                            cte_results,
+                            outer_row,
+                            outer_schema,
+                        )?;
                     }
                 }
 
@@ -815,8 +867,14 @@ pub(super) fn nested_loop_join(
 
                 if !remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(remaining_conditions) {
-                        result =
-                            apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                        result = apply_post_join_filter(
+                            result,
+                            &filter_expr,
+                            database,
+                            cte_results,
+                            outer_row,
+                            outer_schema,
+                        )?;
                     }
                 }
 
@@ -886,8 +944,14 @@ pub(super) fn nested_loop_join(
 
                 if !remaining_conditions.is_empty() {
                     if let Some(filter_expr) = combine_with_and(remaining_conditions) {
-                        result =
-                            apply_post_join_filter(result, &filter_expr, database, cte_results)?;
+                        result = apply_post_join_filter(
+                            result,
+                            &filter_expr,
+                            database,
+                            cte_results,
+                            outer_row,
+                            outer_schema,
+                        )?;
                     }
                 }
 
@@ -967,7 +1031,14 @@ pub(super) fn nested_loop_join(
                     )?;
                     // For now, apply as post-filter (known issue for multi-column)
                     if let Some(ref filter_expr) = remaining_filter {
-                        r = apply_post_join_filter(r, filter_expr, database, cte_results)?;
+                        r = apply_post_join_filter(
+                            r,
+                            filter_expr,
+                            database,
+                            cte_results,
+                            outer_row,
+                            outer_schema,
+                        )?;
                     }
                     r
                 } else if let Some(ref filter_expr) = remaining_filter {
@@ -1136,6 +1207,8 @@ pub(super) fn nested_loop_join(
                                 &filter_expr,
                                 database,
                                 cte_results,
+                                outer_row,
+                                outer_schema,
                             )?;
                         }
                     }
@@ -1176,6 +1249,8 @@ pub(super) fn nested_loop_join(
                                 &filter_expr,
                                 database,
                                 cte_results,
+                                outer_row,
+                                outer_schema,
                             )?;
                         }
                     }
@@ -1204,19 +1279,44 @@ pub(super) fn nested_loop_join(
         (None, None)
     };
 
+    // Issue #4994: Pass outer context to nested loop joins for correlated column resolution
     let mut result = match join_type {
-        vibesql_ast::JoinType::Inner => {
-            nested_loop_inner_join(left, right, &combined_condition, database, timeout_ctx)
-        }
-        vibesql_ast::JoinType::LeftOuter => {
-            nested_loop_left_outer_join(left, right, &combined_condition, database, timeout_ctx)
-        }
-        vibesql_ast::JoinType::RightOuter => {
-            nested_loop_right_outer_join(left, right, &combined_condition, database, timeout_ctx)
-        }
-        vibesql_ast::JoinType::FullOuter => {
-            nested_loop_full_outer_join(left, right, &combined_condition, database, timeout_ctx)
-        }
+        vibesql_ast::JoinType::Inner => nested_loop_inner_join(
+            left,
+            right,
+            &combined_condition,
+            database,
+            timeout_ctx,
+            outer_row,
+            outer_schema,
+        ),
+        vibesql_ast::JoinType::LeftOuter => nested_loop_left_outer_join(
+            left,
+            right,
+            &combined_condition,
+            database,
+            timeout_ctx,
+            outer_row,
+            outer_schema,
+        ),
+        vibesql_ast::JoinType::RightOuter => nested_loop_right_outer_join(
+            left,
+            right,
+            &combined_condition,
+            database,
+            timeout_ctx,
+            outer_row,
+            outer_schema,
+        ),
+        vibesql_ast::JoinType::FullOuter => nested_loop_full_outer_join(
+            left,
+            right,
+            &combined_condition,
+            database,
+            timeout_ctx,
+            outer_row,
+            outer_schema,
+        ),
         vibesql_ast::JoinType::Cross => {
             // CROSS JOIN with any condition (from USING clause, NATURAL, or explicit ON)
             // should be executed as INNER JOIN - the condition filters the Cartesian product.
@@ -1224,17 +1324,45 @@ pub(super) fn nested_loop_join(
             // post-process by the caller (join_scan.rs), but `combined_condition` will
             // contain the generated USING equality conditions.
             if combined_condition.is_some() {
-                nested_loop_inner_join(left, right, &combined_condition, database, timeout_ctx)
+                nested_loop_inner_join(
+                    left,
+                    right,
+                    &combined_condition,
+                    database,
+                    timeout_ctx,
+                    outer_row,
+                    outer_schema,
+                )
             } else {
-                nested_loop_cross_join(left, right, &combined_condition, database, timeout_ctx)
+                nested_loop_cross_join(
+                    left,
+                    right,
+                    &combined_condition,
+                    database,
+                    timeout_ctx,
+                    outer_row,
+                    outer_schema,
+                )
             }
         }
-        vibesql_ast::JoinType::Semi => {
-            nested_loop_semi_join(left, right, &combined_condition, database, timeout_ctx)
-        }
-        vibesql_ast::JoinType::Anti => {
-            nested_loop_anti_join(left, right, &combined_condition, database, timeout_ctx)
-        }
+        vibesql_ast::JoinType::Semi => nested_loop_semi_join(
+            left,
+            right,
+            &combined_condition,
+            database,
+            timeout_ctx,
+            outer_row,
+            outer_schema,
+        ),
+        vibesql_ast::JoinType::Anti => nested_loop_anti_join(
+            left,
+            right,
+            &combined_condition,
+            database,
+            timeout_ctx,
+            outer_row,
+            outer_schema,
+        ),
     }?;
 
     // For NATURAL JOIN or USING clause, remove duplicate columns from the result
@@ -1310,10 +1438,7 @@ fn coalesce_using_columns_for_outer_join(
         for (col_idx, col) in table_schema.columns.iter().enumerate() {
             let lowercase = col.name.to_lowercase();
             if using_cols_lower.contains(&lowercase) {
-                left_column_map
-                    .entry(lowercase)
-                    .or_default()
-                    .push(table_start_idx + col_idx);
+                left_column_map.entry(lowercase).or_default().push(table_start_idx + col_idx);
             }
         }
     }
@@ -1369,10 +1494,8 @@ fn remove_duplicate_columns_for_natural_join(
 
     // For RIGHT/FULL OUTER JOINs, we need to hide left-side columns and add coalesce pairs
     // For other join types, we hide right-side columns
-    let is_right_or_full = matches!(
-        join_type,
-        vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter
-    );
+    let is_right_or_full =
+        matches!(join_type, vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter);
 
     // Find common column names (case-insensitive)
     // Use table_start_idx to compute correct absolute positions
@@ -1447,21 +1570,27 @@ fn remove_duplicate_columns_for_natural_join(
                             right_schema.using_coalesce_indices.get(&lowercase)
                         {
                             // Add left_idx first
-                            result
-                                .schema
-                                .add_using_coalesce_pair(actual_name, *left_idx, *left_idx);
+                            result.schema.add_using_coalesce_pair(
+                                actual_name,
+                                *left_idx,
+                                *left_idx,
+                            );
                             // Then add all indices from the right side's chain
                             for &existing_idx in right_coalesce_indices {
                                 let adjusted_idx = left_col_count + existing_idx;
-                                result
-                                    .schema
-                                    .add_using_coalesce_pair(actual_name, *left_idx, adjusted_idx);
+                                result.schema.add_using_coalesce_pair(
+                                    actual_name,
+                                    *left_idx,
+                                    adjusted_idx,
+                                );
                             }
                         } else {
                             // No existing chain, just add the single pair
-                            result
-                                .schema
-                                .add_using_coalesce_pair(actual_name, *left_idx, right_idx);
+                            result.schema.add_using_coalesce_pair(
+                                actual_name,
+                                *left_idx,
+                                right_idx,
+                            );
                         }
                     }
 
@@ -1532,10 +1661,8 @@ fn remove_duplicate_columns_for_using_join(
     // - RIGHT OUTER: left can be NULL for unmatched rows from right
     // - FULL OUTER: either side can be NULL for unmatched rows
     // Issue #4783: USING column semantics differ from SQLite in OUTER JOINs
-    let _needs_coalesce = matches!(
-        join_type,
-        vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter
-    );
+    let _needs_coalesce =
+        matches!(join_type, vibesql_ast::JoinType::RightOuter | vibesql_ast::JoinType::FullOuter);
 
     // Build a map of column name -> leftmost left column index
     // This is the index that unqualified references will resolve to
@@ -1585,9 +1712,7 @@ fn remove_duplicate_columns_for_using_join(
                 // output (the left column value is used directly), but the chain
                 // structure is needed for correct column filtering.
                 if let Some(&left_idx) = leftmost_left_indices.get(&lowercase) {
-                    result
-                        .schema
-                        .add_using_coalesce_pair(&col.name, left_idx, right_idx);
+                    result.schema.add_using_coalesce_pair(&col.name, left_idx, right_idx);
                 }
             }
         }

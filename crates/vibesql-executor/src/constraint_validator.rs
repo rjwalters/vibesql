@@ -90,10 +90,8 @@ impl ConstraintValidator {
                     ColumnConstraintKind::Check(expr) => {
                         // Use explicit name if provided, otherwise use expression text
                         // This matches SQLite's behavior for error messages
-                        let constraint_name = constraint
-                            .name
-                            .clone()
-                            .unwrap_or_else(|| expr.to_sql());
+                        let constraint_name =
+                            constraint.name.clone().unwrap_or_else(|| expr.to_sql());
                         result.check_constraints.push((constraint_name, (**expr).clone()));
                     }
                     ColumnConstraintKind::NotNull
@@ -156,10 +154,8 @@ impl ConstraintValidator {
                 TableConstraintKind::Check { expr } => {
                     // Use explicit name if provided, otherwise use expression text
                     // This matches SQLite's behavior for error messages
-                    let constraint_name = table_constraint
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| expr.to_sql());
+                    let constraint_name =
+                        table_constraint.name.clone().unwrap_or_else(|| expr.to_sql());
                     result.check_constraints.push((constraint_name, (**expr).clone()));
                 }
                 TableConstraintKind::ForeignKey { .. } => {
@@ -242,7 +238,8 @@ mod tests {
                 .collect(),
             default_value: None,
             comment: None,
-            generated_expr: None, is_exact_integer_type: false,
+            generated_expr: None,
+            is_exact_integer_type: false,
         }
     }
 

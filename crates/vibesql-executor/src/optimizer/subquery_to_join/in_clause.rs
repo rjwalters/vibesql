@@ -161,14 +161,13 @@ pub(super) fn try_convert_in_to_join(
         //
         // Here 'x' might be from t2, and qualifying as 't1.x' would be wrong.
         // The is_simple_single_table_self_join check above already filters out these cases.
-        let qualified_expr =
-            if let Some(outer_table) = get_outer_table_name(from) {
-                // Simple self-join: qualify outer expression with outer table name
-                rewrite_column_refs_with_alias(expr, &outer_table, &outer_table)
-            } else {
-                // Complex FROM clause: let SQL resolution handle it
-                expr.clone()
-            };
+        let qualified_expr = if let Some(outer_table) = get_outer_table_name(from) {
+            // Simple self-join: qualify outer expression with outer table name
+            rewrite_column_refs_with_alias(expr, &outer_table, &outer_table)
+        } else {
+            // Complex FROM clause: let SQL resolution handle it
+            expr.clone()
+        };
 
         // Use the table alias (if present) for matching column references, not just the table name
         // This is critical for Q21 where the subquery uses an alias like "l2" or "l3"
@@ -257,7 +256,7 @@ pub(super) fn try_convert_in_to_join(
         condition: final_condition.clone(),
         using_columns: None,
         natural: false,
-                alias: None,
+        alias: None,
     };
 
     if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
@@ -347,7 +346,7 @@ fn try_convert_aggregate_in_to_join(
         condition: Some(join_condition.clone()),
         using_columns: None,
         natural: false,
-                alias: None,
+        alias: None,
     };
 
     if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {

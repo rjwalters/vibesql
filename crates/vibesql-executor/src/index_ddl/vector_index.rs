@@ -191,7 +191,9 @@ pub fn create_hnsw_index(
 }
 
 /// Convert AST VectorDistanceMetric to catalog VectorDistanceMetric.
-fn convert_metric_to_catalog(metric: VectorDistanceMetric) -> vibesql_catalog::VectorDistanceMetric {
+fn convert_metric_to_catalog(
+    metric: VectorDistanceMetric,
+) -> vibesql_catalog::VectorDistanceMetric {
     match metric {
         VectorDistanceMetric::L2 => vibesql_catalog::VectorDistanceMetric::L2,
         VectorDistanceMetric::Cosine => vibesql_catalog::VectorDistanceMetric::Cosine,

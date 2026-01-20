@@ -517,11 +517,7 @@ fn collect_eqp_entries(node: &PlanNode) -> Vec<String> {
 /// Format a compound query in SQLite EQP style
 fn format_compound_query_eqp(node: &PlanNode, indent: &str, is_last: bool, output: &mut String) {
     let connector = if is_last { "`--" } else { "|--" };
-    let child_indent = if is_last {
-        format!("{}   ", indent)
-    } else {
-        format!("{}|  ", indent)
-    };
+    let child_indent = if is_last { format!("{}   ", indent) } else { format!("{}|  ", indent) };
 
     // Write COMPOUND QUERY header
     writeln!(output, "{}{}COMPOUND QUERY", indent, connector).unwrap();
@@ -545,7 +541,14 @@ fn format_compound_query_eqp(node: &PlanNode, indent: &str, is_last: bool, outpu
             for (j, scan_node) in scan_nodes.iter().enumerate() {
                 let is_scan_last = j == scan_nodes.len() - 1;
                 let scan_connector = if is_scan_last { "`--" } else { "|--" };
-                writeln!(output, "{}{}{}", grandchild_indent, scan_connector, format_sqlite_eqp_node(scan_node)).unwrap();
+                writeln!(
+                    output,
+                    "{}{}{}",
+                    grandchild_indent,
+                    scan_connector,
+                    format_sqlite_eqp_node(scan_node)
+                )
+                .unwrap();
             }
         } else {
             // Subsequent parts with set operation label
@@ -556,7 +559,14 @@ fn format_compound_query_eqp(node: &PlanNode, indent: &str, is_last: bool, outpu
             for (j, scan_node) in scan_nodes.iter().enumerate() {
                 let is_scan_last = j == scan_nodes.len() - 1;
                 let scan_connector = if is_scan_last { "`--" } else { "|--" };
-                writeln!(output, "{}{}{}", grandchild_indent, scan_connector, format_sqlite_eqp_node(scan_node)).unwrap();
+                writeln!(
+                    output,
+                    "{}{}{}",
+                    grandchild_indent,
+                    scan_connector,
+                    format_sqlite_eqp_node(scan_node)
+                )
+                .unwrap();
             }
         }
     }
@@ -741,11 +751,8 @@ impl ExplainExecutor {
         // Check if we need a temp B-tree for ORDER BY
         // This happens when ORDER BY cannot be satisfied by an index
         if let Some(ref order_by) = stmt.order_by {
-            let needs_temp = Self::needs_temp_btree_for_order_by(
-                stmt.from.as_ref(),
-                order_by,
-                database,
-            );
+            let needs_temp =
+                Self::needs_temp_btree_for_order_by(stmt.from.as_ref(), order_by, database);
             root.needs_temp_btree_for_order_by = needs_temp;
         }
 
@@ -773,7 +780,10 @@ impl ExplainExecutor {
     }
 
     /// Generate execution plan for a compound SELECT (UNION, INTERSECT, EXCEPT)
-    fn explain_compound_select(stmt: &SelectStmt, database: &Database) -> Result<PlanNode, ExecutorError> {
+    fn explain_compound_select(
+        stmt: &SelectStmt,
+        database: &Database,
+    ) -> Result<PlanNode, ExecutorError> {
         let mut root = PlanNode::new("CompoundQuery");
         root.is_compound_query = true;
 
@@ -893,16 +903,14 @@ impl ExplainExecutor {
         database: &Database,
     ) -> Result<PlanNode, ExecutorError> {
         match from {
-            vibesql_ast::FromClause::Table { name, alias, .. } => {
-                Self::explain_table_scan(
-                    name,
-                    alias.as_deref(),
-                    where_clause,
-                    order_by,
-                    needed_columns,
-                    database,
-                )
-            }
+            vibesql_ast::FromClause::Table { name, alias, .. } => Self::explain_table_scan(
+                name,
+                alias.as_deref(),
+                where_clause,
+                order_by,
+                needed_columns,
+                database,
+            ),
             vibesql_ast::FromClause::Join {
                 left,
                 right,
@@ -937,8 +945,13 @@ impl ExplainExecutor {
                 }
 
                 // Add left child
-                let left_child =
-                    Self::explain_from_clause(left, where_clause, order_by, needed_columns, database)?;
+                let left_child = Self::explain_from_clause(
+                    left,
+                    where_clause,
+                    order_by,
+                    needed_columns,
+                    database,
+                )?;
                 join_node.add_child(left_child);
 
                 // Add right child (no WHERE pushdown for right side in simple case)
@@ -1260,7 +1273,7 @@ fn collect_column_refs(expr: &Expression, columns: &mut HashSet<String>) {
         | Expression::NumberedPlaceholder(_)
         | Expression::NamedPlaceholder(_)
         | Expression::Wildcard => {}
-        _ => {}  // Handle any other variants
+        _ => {} // Handle any other variants
     }
 }
 

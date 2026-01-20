@@ -67,11 +67,7 @@ pub enum AggregateAccumulator {
         seen: Option<HashSet<vibesql_types::SqlValue>>,
     },
     /// MD5SUM - Compute MD5 hash of concatenated values (SQLite TCL test compatible)
-    Md5sum {
-        values: Vec<String>,
-        distinct: bool,
-        seen: Option<HashSet<String>>,
-    },
+    Md5sum { values: Vec<String>, distinct: bool, seen: Option<HashSet<String>> },
 }
 
 impl AggregateAccumulator {
@@ -420,7 +416,9 @@ impl AggregateAccumulator {
 
     pub fn finalize(&self) -> Result<vibesql_types::SqlValue, crate::errors::ExecutorError> {
         match self {
-            AggregateAccumulator::Count { count, .. } => Ok(vibesql_types::SqlValue::Integer(*count)),
+            AggregateAccumulator::Count { count, .. } => {
+                Ok(vibesql_types::SqlValue::Integer(*count))
+            }
             AggregateAccumulator::Sum { sum, count, has_non_integer, overflow_error, .. } => {
                 // Check for overflow error first
                 if *overflow_error {
@@ -820,12 +818,7 @@ fn add_sql_values(
 
     use crate::evaluator::operators::OperatorRegistry;
 
-    OperatorRegistry::eval_binary_op(
-        a,
-        &BinaryOperator::Plus,
-        b,
-        vibesql_types::SqlMode::default(),
-    )
+    OperatorRegistry::eval_binary_op(a, &BinaryOperator::Plus, b, vibesql_types::SqlMode::default())
 }
 
 /// Convert SqlValue to f64 for numeric operations
@@ -865,21 +858,15 @@ fn try_coerce_to_numeric(
 ) -> Option<(vibesql_types::SqlValue, bool)> {
     match value {
         // Already numeric types - return as-is (preserve original type)
-        vibesql_types::SqlValue::Integer(v) => {
-            Some((vibesql_types::SqlValue::Integer(*v), true))
-        }
+        vibesql_types::SqlValue::Integer(v) => Some((vibesql_types::SqlValue::Integer(*v), true)),
         vibesql_types::SqlValue::Bigint(v) => Some((vibesql_types::SqlValue::Bigint(*v), true)),
-        vibesql_types::SqlValue::Smallint(v) => {
-            Some((vibesql_types::SqlValue::Smallint(*v), true))
-        }
+        vibesql_types::SqlValue::Smallint(v) => Some((vibesql_types::SqlValue::Smallint(*v), true)),
         vibesql_types::SqlValue::Unsigned(v) => {
             Some((vibesql_types::SqlValue::Integer(*v as i64), true))
         }
         vibesql_types::SqlValue::Float(v) => Some((vibesql_types::SqlValue::Float(*v), false)),
         vibesql_types::SqlValue::Double(v) => Some((vibesql_types::SqlValue::Double(*v), false)),
-        vibesql_types::SqlValue::Numeric(v) => {
-            Some((vibesql_types::SqlValue::Numeric(*v), false))
-        }
+        vibesql_types::SqlValue::Numeric(v) => Some((vibesql_types::SqlValue::Numeric(*v), false)),
         vibesql_types::SqlValue::Real(v) => Some((vibesql_types::SqlValue::Real(*v), false)),
 
         // Text types - try to parse as integer first, then as real

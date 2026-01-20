@@ -441,7 +441,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                                     // Empty string or multi-character string: error per SQLite
                                     return Err(ExecutorError::SqliteCompatError(
                                         "ESCAPE expression must be a single character".to_string(),
-                                    ))
+                                    ));
                                 }
                             }
                         }

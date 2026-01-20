@@ -27,11 +27,8 @@ impl Database {
             vibesql_catalog::Catalog::is_temp_schema(schema)
         } else {
             // Unqualified name - check if it exists in this session's temp schema
-            let temp_qualified = format!(
-                "{}.{}",
-                self.catalog.temp_schema_name(),
-                table_name.to_lowercase()
-            );
+            let temp_qualified =
+                format!("{}.{}", self.catalog.temp_schema_name(), table_name.to_lowercase());
             self.tables.contains_key(&temp_qualified)
         }
     }

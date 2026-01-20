@@ -138,9 +138,7 @@ fn validate_set_operation_column_counts(
             (vibesql_ast::SetOperator::Except, true) => "EXCEPT ALL",
             (vibesql_ast::SetOperator::Except, false) => "EXCEPT",
         };
-        return Err(ExecutorError::SetOperationColumnMismatch {
-            operator: operator.to_string(),
-        });
+        return Err(ExecutorError::SetOperationColumnMismatch { operator: operator.to_string() });
     }
 
     // Recursively validate nested set operations
@@ -208,8 +206,7 @@ fn compute_single_select_column_count(
                 }
                 // Check for views before regular tables
                 if let Some(view) = database.catalog.get_view(qualifier) {
-                    count +=
-                        compute_select_list_column_count(&view.query, database, cte_results)?;
+                    count += compute_select_list_column_count(&view.query, database, cte_results)?;
                     continue;
                 }
                 let tbl = database

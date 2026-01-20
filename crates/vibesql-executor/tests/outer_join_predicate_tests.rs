@@ -176,21 +176,12 @@ fn setup_view_join_db() -> Database {
         vec!["id".to_string()],
     );
     db.create_table(t4_schema).unwrap();
-    db.insert_row(
-        "T4",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("alice".into())]),
-    )
-    .unwrap();
-    db.insert_row(
-        "T4",
-        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar("bob".into())]),
-    )
-    .unwrap();
-    db.insert_row(
-        "T4",
-        Row::new(vec![SqlValue::Integer(6), SqlValue::Varchar("cindy".into())]),
-    )
-    .unwrap();
+    db.insert_row("T4", Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("alice".into())]))
+        .unwrap();
+    db.insert_row("T4", Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar("bob".into())]))
+        .unwrap();
+    db.insert_row("T4", Row::new(vec![SqlValue::Integer(6), SqlValue::Varchar("cindy".into())]))
+        .unwrap();
 
     // Create t5 table
     let t5_schema = TableSchema::with_primary_key(
@@ -202,16 +193,10 @@ fn setup_view_join_db() -> Database {
         vec!["id".to_string()],
     );
     db.create_table(t5_schema).unwrap();
-    db.insert_row(
-        "T5",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("orange".into())]),
-    )
-    .unwrap();
-    db.insert_row(
-        "T5",
-        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar("green".into())]),
-    )
-    .unwrap();
+    db.insert_row("T5", Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("orange".into())]))
+        .unwrap();
+    db.insert_row("T5", Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar("green".into())]))
+        .unwrap();
 
     // Create view v4 - parse the SELECT statement and extract the SelectStmt
     let view_select = match Parser::parse_sql("SELECT id, x FROM t4") {
@@ -243,11 +228,7 @@ fn test_issue_4918_unqualified_is_null_with_view_full_join() {
     let sql = "SELECT id, x, y FROM v4 NATURAL FULL JOIN t5 WHERE x IS NULL ORDER BY 1";
     let select = parse_select(sql);
     let result = SelectExecutor::new(&db).execute(&select).unwrap();
-    assert_eq!(
-        result.len(),
-        0,
-        "x IS NULL should return 0 rows - no actual NULL x values"
-    );
+    assert_eq!(result.len(), 0, "x IS NULL should return 0 rows - no actual NULL x values");
 
     // Test 2: x IS NOT NULL should return all 3 rows
     let sql = "SELECT id, x, y FROM v4 NATURAL FULL JOIN t5 WHERE x IS NOT NULL ORDER BY 1";
@@ -256,7 +237,8 @@ fn test_issue_4918_unqualified_is_null_with_view_full_join() {
     assert_eq!(result.len(), 3, "x IS NOT NULL should return all 3 rows");
 
     // Test 3: x <> 'bob' OR x IS NULL should return 2 rows (ids 2 and 6)
-    let sql = "SELECT id, x, y FROM v4 NATURAL FULL JOIN t5 WHERE x <> 'bob' OR x IS NULL ORDER BY 1";
+    let sql =
+        "SELECT id, x, y FROM v4 NATURAL FULL JOIN t5 WHERE x <> 'bob' OR x IS NULL ORDER BY 1";
     let select = parse_select(sql);
     let result = SelectExecutor::new(&db).execute(&select).unwrap();
     assert_eq!(result.len(), 2, "Should return 2 rows (alice and cindy)");

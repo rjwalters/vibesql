@@ -4,7 +4,9 @@ use std::collections::HashSet;
 
 use vibesql_ast::Assignment;
 
-use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator, insert::validation::coerce_value};
+use crate::{
+    errors::ExecutorError, evaluator::ExpressionEvaluator, insert::validation::coerce_value,
+};
 
 /// Applies assignment expressions to rows
 pub struct ValueUpdater<'a> {
@@ -38,7 +40,8 @@ impl<'a> ValueUpdater<'a> {
         for assignment in assignments {
             // Check if this is a rowid assignment (SQLite compatibility)
             let col_name_lower = assignment.column.to_lowercase();
-            let is_rowid = col_name_lower == "rowid" || col_name_lower == "_rowid_" || col_name_lower == "oid";
+            let is_rowid =
+                col_name_lower == "rowid" || col_name_lower == "_rowid_" || col_name_lower == "oid";
 
             if is_rowid {
                 // Handle rowid update

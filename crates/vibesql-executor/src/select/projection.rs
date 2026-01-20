@@ -58,9 +58,7 @@ pub(crate) fn project_row_combined(
                                 .filter(|t| !schema.alias_tables.contains(*t))
                                 .collect();
                             // Check if all non-alias tables are shadowed by this alias
-                            non_alias_tables
-                                .iter()
-                                .all(|t| shadowed.contains(*t))
+                            non_alias_tables.iter().all(|t| shadowed.contains(*t))
                         } else {
                             false
                         }
@@ -73,10 +71,9 @@ pub(crate) fn project_row_combined(
                             for col_schema in &alias_schema.columns {
                                 // Resolve the actual row index for this column
                                 let alias_name = alias_id.display().to_string();
-                                if let Some(actual_idx) = schema.get_column_index(
-                                    Some(&alias_name),
-                                    &col_schema.name,
-                                ) {
+                                if let Some(actual_idx) =
+                                    schema.get_column_index(Some(&alias_name), &col_schema.name)
+                                {
                                     if actual_idx < max_col {
                                         indices.push(actual_idx);
                                     }
@@ -116,7 +113,9 @@ pub(crate) fn project_row_combined(
                                 // Check if column should be included
                                 let should_include = if schema.is_column_hidden(abs_idx) {
                                     schema.get_column_replacement(abs_idx).is_some()
-                                        || schema.get_using_coalesce_right_for_left(abs_idx).is_some()
+                                        || schema
+                                            .get_using_coalesce_right_for_left(abs_idx)
+                                            .is_some()
                                 } else {
                                     true
                                 };

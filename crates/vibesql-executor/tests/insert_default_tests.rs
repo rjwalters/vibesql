@@ -315,7 +315,7 @@ fn test_insert_default_values_with_integer_primary_key() {
             source: vibesql_ast::InsertSource::DefaultValues,
             conflict_clause: None,
             on_conflict: None,
-        on_duplicate_key_update: None,
+            on_duplicate_key_update: None,
         };
         InsertExecutor::execute(&mut db, &stmt).unwrap();
     }

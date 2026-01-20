@@ -12,6 +12,10 @@ use crate::{
 };
 
 /// Execute optimized equijoin by comparing values before allocating combined_row
+///
+/// Issue #4994: Added outer_row and outer_schema parameters so remaining JOIN conditions
+/// that reference columns from outer queries (correlated derived tables) can
+/// be properly evaluated.
 #[allow(clippy::too_many_arguments)]
 pub fn execute_optimized_equijoin(
     left_rows: &[vibesql_storage::Row],
@@ -24,13 +28,26 @@ pub fn execute_optimized_equijoin(
     timeout_ctx: &TimeoutContext,
     left_table_names: &[String],
     right_table_names: &[String],
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     let mut result_rows = Vec::new();
     let mut iterations = 0;
 
     // Create evaluator for remaining conditions if needed
+    // Issue #4994: Create evaluator with outer context if available
     let evaluator = if remaining_condition.is_some() {
-        Some(CombinedExpressionEvaluator::with_database(schema, database))
+        Some(match (outer_row, outer_schema) {
+            (Some(outer_row), Some(outer_schema)) => {
+                CombinedExpressionEvaluator::with_database_and_outer_context(
+                    schema,
+                    database,
+                    outer_row,
+                    outer_schema,
+                )
+            }
+            _ => CombinedExpressionEvaluator::with_database(schema, database),
+        })
     } else {
         None
     };
@@ -95,6 +112,10 @@ pub fn execute_optimized_equijoin(
 /// This function uses morsel-driven parallelism when the outer relation is large enough
 /// to benefit from parallel execution. The decision is based on
 /// `ParallelConfig::should_parallelize_join()`.
+///
+/// Issue #4994: Added outer_row and outer_schema parameters so JOIN conditions
+/// that reference columns from outer queries (correlated derived tables) can
+/// be properly evaluated.
 #[allow(clippy::too_many_arguments)]
 pub fn execute_nested_loop_classic(
     left_rows: &[vibesql_storage::Row],
@@ -105,6 +126,8 @@ pub fn execute_nested_loop_classic(
     timeout_ctx: &TimeoutContext,
     left_table_names: &[String],
     right_table_names: &[String],
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     // OPTIMIZATION: Fast path for cross joins with no condition (#3388)
     // When there's no condition to evaluate, skip evaluator overhead entirely.
@@ -149,10 +172,16 @@ pub fn execute_nested_loop_classic(
         timeout_ctx,
         left_table_names,
         right_table_names,
+        outer_row,
+        outer_schema,
     )
 }
 
 /// Pure sequential nested loop join (no parallel dispatch)
+///
+/// Issue #4994: Added outer_row and outer_schema parameters so JOIN conditions
+/// that reference columns from outer queries (correlated derived tables) can
+/// be properly evaluated.
 #[allow(clippy::too_many_arguments)]
 pub fn execute_nested_loop_sequential(
     left_rows: &[vibesql_storage::Row],
@@ -163,8 +192,21 @@ pub fn execute_nested_loop_sequential(
     timeout_ctx: &TimeoutContext,
     left_table_names: &[String],
     right_table_names: &[String],
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
-    let evaluator = CombinedExpressionEvaluator::with_database(schema, database);
+    // Issue #4994: Create evaluator with outer context if available
+    let evaluator = match (outer_row, outer_schema) {
+        (Some(outer_row), Some(outer_schema)) => {
+            CombinedExpressionEvaluator::with_database_and_outer_context(
+                schema,
+                database,
+                outer_row,
+                outer_schema,
+            )
+        }
+        _ => CombinedExpressionEvaluator::with_database(schema, database),
+    };
     let mut result_rows = Vec::new();
     let mut iterations = 0;
 
@@ -250,6 +292,10 @@ pub fn execute_cross_product_fast(
 }
 
 /// Execute join with selected strategy
+///
+/// Issue #4994: Added outer_row and outer_schema parameters so JOIN conditions
+/// that reference columns from outer queries (correlated derived tables) can
+/// be properly evaluated.
 #[allow(clippy::too_many_arguments)]
 pub fn execute_with_strategy(
     left_rows: &[vibesql_storage::Row],
@@ -261,6 +307,8 @@ pub fn execute_with_strategy(
     timeout_ctx: &TimeoutContext,
     left_table_names: &[String],
     right_table_names: &[String],
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     match eval_strategy {
         EquijoinEvalStrategy::Simple { left_col_idx, right_col_idx, remaining_condition } => {
@@ -276,6 +324,8 @@ pub fn execute_with_strategy(
                 timeout_ctx,
                 left_table_names,
                 right_table_names,
+                outer_row,
+                outer_schema,
             )
         }
         EquijoinEvalStrategy::Complex => {
@@ -289,6 +339,8 @@ pub fn execute_with_strategy(
                 timeout_ctx,
                 left_table_names,
                 right_table_names,
+                outer_row,
+                outer_schema,
             )
         }
     }

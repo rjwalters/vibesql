@@ -781,7 +781,7 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0][1], SqlValue::Integer(2)); // COUNT = 2 (NULLs not counted)
-        // SUM = 30 as Integer (NULLs are skipped, don't affect type - SQLite behavior)
+                                                         // SUM = 30 as Integer (NULLs are skipped, don't affect type - SQLite behavior)
         assert_eq!(results[0][2], SqlValue::Integer(30));
     }
 

@@ -28,7 +28,8 @@ mod update;
 
 /// Helper to create audit log table for tracking trigger executions
 pub(super) fn create_audit_table(db: &mut Database) {
-    let stmt = vibesql_ast::CreateTableStmt { temporary: false,
+    let stmt = vibesql_ast::CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "AUDIT_LOG".to_string(),
         columns: vec![vibesql_ast::ColumnDef {
@@ -38,19 +39,22 @@ pub(super) fn create_audit_table(db: &mut Database) {
             constraints: vec![],
             default_value: None,
             comment: None,
-            generated_expr: None, is_exact_integer_type: false,
+            generated_expr: None,
+            is_exact_integer_type: false,
         }],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&stmt, db).expect("Failed to create audit_log table");
 }
 
 /// Helper to create users table for testing trigger operations
 pub(super) fn create_users_table(db: &mut Database) {
-    let stmt = vibesql_ast::CreateTableStmt { temporary: false,
+    let stmt = vibesql_ast::CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "USERS".to_string(),
         columns: vec![
@@ -61,7 +65,8 @@ pub(super) fn create_users_table(db: &mut Database) {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             vibesql_ast::ColumnDef {
                 name: "username".to_string(),
@@ -70,13 +75,15 @@ pub(super) fn create_users_table(db: &mut Database) {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&stmt, db).expect("Failed to create users table");
 }

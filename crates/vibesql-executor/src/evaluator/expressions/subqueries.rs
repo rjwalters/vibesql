@@ -28,18 +28,21 @@ impl ExpressionEvaluator<'_> {
 
         // Handle row value IN subquery: (a, b) IN (SELECT x, y FROM t)
         if let vibesql_ast::Expression::RowValueConstructor(expr_elements) = expr {
-            return self.eval_row_value_in_subquery(expr_elements, subquery, negated, row, database);
+            return self.eval_row_value_in_subquery(
+                expr_elements,
+                subquery,
+                negated,
+                row,
+                database,
+            );
         }
 
         let expr_val = self.eval(expr, row)?;
 
         // Convert TableSchema to CombinedSchema for outer context
         // Use table_alias if set (for UPDATE t1 AS xyz), otherwise use schema name
-        let table_name_for_outer = self
-            .table_alias
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| self.schema.name.clone());
+        let table_name_for_outer =
+            self.table_alias.as_ref().cloned().unwrap_or_else(|| self.schema.name.clone());
         let outer_combined =
             crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
@@ -63,7 +66,9 @@ impl ExpressionEvaluator<'_> {
                 // IMPORTANT: Propagate depth to prevent bypassing MAX_EXPRESSION_DEPTH
                 // Use CTE context if available for WITH clause support in UPDATE/DELETE
                 let select_executor = if let Some(cte_ctx) = self.cte_context {
-                    crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+                    crate::select::SelectExecutor::new_with_cte_and_depth(
+                        database, cte_ctx, self.depth,
+                    )
                 } else {
                     crate::select::SelectExecutor::new_with_depth(database, self.depth)
                 };
@@ -203,11 +208,8 @@ impl ExpressionEvaluator<'_> {
 
         // Convert TableSchema to CombinedSchema for outer context
         // Use table_alias if set (for UPDATE t1 AS xyz), otherwise use schema name
-        let table_name_for_outer = self
-            .table_alias
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| self.schema.name.clone());
+        let table_name_for_outer =
+            self.table_alias.as_ref().cloned().unwrap_or_else(|| self.schema.name.clone());
         let outer_combined =
             crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
@@ -229,7 +231,9 @@ impl ExpressionEvaluator<'_> {
                 // Cache miss - execute and cache
                 // Use CTE context if available for WITH clause support in UPDATE/DELETE
                 let select_executor = if let Some(cte_ctx) = self.cte_context {
-                    crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+                    crate::select::SelectExecutor::new_with_cte_and_depth(
+                        database, cte_ctx, self.depth,
+                    )
                 } else {
                     crate::select::SelectExecutor::new_with_depth(database, self.depth)
                 };
@@ -283,11 +287,8 @@ impl ExpressionEvaluator<'_> {
 
         // Convert TableSchema to CombinedSchema for outer context
         // Use table_alias if set (for UPDATE t1 AS xyz), otherwise use schema name
-        let table_name_for_outer = self
-            .table_alias
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| self.schema.name.clone());
+        let table_name_for_outer =
+            self.table_alias.as_ref().cloned().unwrap_or_else(|| self.schema.name.clone());
         let outer_combined =
             crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
@@ -309,7 +310,9 @@ impl ExpressionEvaluator<'_> {
                 // Cache miss - execute and cache
                 // Use CTE context if available for WITH clause support in UPDATE/DELETE
                 let select_executor = if let Some(cte_ctx) = self.cte_context {
-                    crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+                    crate::select::SelectExecutor::new_with_cte_and_depth(
+                        database, cte_ctx, self.depth,
+                    )
                 } else {
                     crate::select::SelectExecutor::new_with_depth(database, self.depth)
                 };
@@ -368,11 +371,8 @@ impl ExpressionEvaluator<'_> {
 
         // Convert TableSchema to CombinedSchema for outer context
         // Use table_alias if set (for UPDATE t1 AS xyz), otherwise use schema name
-        let table_name_for_outer = self
-            .table_alias
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| self.schema.name.clone());
+        let table_name_for_outer =
+            self.table_alias.as_ref().cloned().unwrap_or_else(|| self.schema.name.clone());
         let outer_combined =
             crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
@@ -394,7 +394,9 @@ impl ExpressionEvaluator<'_> {
                 // Cache miss - execute and cache
                 // Use CTE context if available for WITH clause support in UPDATE/DELETE
                 let select_executor = if let Some(cte_ctx) = self.cte_context {
-                    crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+                    crate::select::SelectExecutor::new_with_cte_and_depth(
+                        database, cte_ctx, self.depth,
+                    )
                 } else {
                     crate::select::SelectExecutor::new_with_depth(database, self.depth)
                 };
@@ -462,11 +464,8 @@ impl ExpressionEvaluator<'_> {
         }
 
         // Convert TableSchema to CombinedSchema for outer context
-        let table_name_for_outer = self
-            .table_alias
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| self.schema.name.clone());
+        let table_name_for_outer =
+            self.table_alias.as_ref().cloned().unwrap_or_else(|| self.schema.name.clone());
         let outer_combined =
             crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
@@ -482,7 +481,9 @@ impl ExpressionEvaluator<'_> {
                 cached_rows
             } else {
                 let select_executor = if let Some(cte_ctx) = self.cte_context {
-                    crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+                    crate::select::SelectExecutor::new_with_cte_and_depth(
+                        database, cte_ctx, self.depth,
+                    )
                 } else {
                     crate::select::SelectExecutor::new_with_depth(database, self.depth)
                 };
@@ -649,32 +650,20 @@ fn apply_in_subquery_affinity_coercion(
     // If right has TEXT affinity and left is numeric, convert numeric to TEXT
     if matches!(right_affinity, Some(TypeAffinity::Text)) {
         if let SqlValue::Integer(n) = &left_val {
-            return (
-                SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
-                right_val,
-            );
+            return (SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())), right_val);
         }
         if let SqlValue::Real(n) | SqlValue::Double(n) = &left_val {
-            return (
-                SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*n))),
-                right_val,
-            );
+            return (SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*n))), right_val);
         }
     }
 
     // If left has TEXT affinity and right is numeric, convert numeric to TEXT
     if matches!(left_affinity, Some(TypeAffinity::Text)) {
         if let SqlValue::Integer(n) = &right_val {
-            return (
-                left_val,
-                SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
-            );
+            return (left_val, SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())));
         }
         if let SqlValue::Real(n) | SqlValue::Double(n) = &right_val {
-            return (
-                left_val,
-                SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*n))),
-            );
+            return (left_val, SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*n))));
         }
     }
 

@@ -502,19 +502,15 @@ impl ToSql for Expression {
 
             Expression::Like { expr, pattern, negated, escape } => {
                 let not_str = if *negated { "NOT " } else { "" };
-                let escape_str = escape
-                    .as_ref()
-                    .map(|e| format!(" ESCAPE {}", e.to_sql()))
-                    .unwrap_or_default();
+                let escape_str =
+                    escape.as_ref().map(|e| format!(" ESCAPE {}", e.to_sql())).unwrap_or_default();
                 format!("{} {}LIKE {}{}", expr.to_sql(), not_str, pattern.to_sql(), escape_str)
             }
 
             Expression::Glob { expr, pattern, negated, escape } => {
                 let not_str = if *negated { "NOT " } else { "" };
-                let escape_str = escape
-                    .as_ref()
-                    .map(|e| format!(" ESCAPE {}", e.to_sql()))
-                    .unwrap_or_default();
+                let escape_str =
+                    escape.as_ref().map(|e| format!(" ESCAPE {}", e.to_sql())).unwrap_or_default();
                 format!("{} {}GLOB {}{}", expr.to_sql(), not_str, pattern.to_sql(), escape_str)
             }
 
@@ -992,7 +988,15 @@ impl ToSql for FromClause {
                 }
                 result
             }
-            FromClause::Join { left, right, join_type, condition, using_columns, natural, alias } => {
+            FromClause::Join {
+                left,
+                right,
+                join_type,
+                condition,
+                using_columns,
+                natural,
+                alias,
+            } => {
                 let mut result = left.to_sql();
 
                 if *natural {

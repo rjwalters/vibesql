@@ -274,7 +274,8 @@ pub(super) fn build_column_to_table_map(
                 // Regular table: get columns from database
                 // Try multiple case variations and schema prefixes since database keys may vary
                 let actual_table_name = &tr.name;
-                let schema_prefixed = format!("{}.{}", vibesql_catalog::DEFAULT_SCHEMA, actual_table_name);
+                let schema_prefixed =
+                    format!("{}.{}", vibesql_catalog::DEFAULT_SCHEMA, actual_table_name);
                 let table = database
                     .tables
                     .get(actual_table_name)

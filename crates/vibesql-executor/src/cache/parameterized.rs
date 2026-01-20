@@ -15,7 +15,7 @@ pub enum LiteralValue {
     Unsigned(u64),
     Numeric(f64),
     Float(f32),
-    Real(f64),  // SQLite REAL is 8-byte IEEE float
+    Real(f64), // SQLite REAL is 8-byte IEEE float
     Double(f64),
     Character(String),
     Varchar(String),

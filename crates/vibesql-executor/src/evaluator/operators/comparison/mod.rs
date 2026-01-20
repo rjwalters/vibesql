@@ -271,16 +271,12 @@ where
         // Mixed Float/Integer comparisons - use precise comparison for large values
         // SQLite handles edge cases near i64::MAX/i64::MIN specially to avoid
         // precision loss when converting large integers to f64.
-        (left_val @ (Float(_) | Real(_) | Double(_)), right_val)
-            if is_exact_numeric(right_val) =>
-        {
+        (left_val @ (Float(_) | Real(_) | Double(_)), right_val) if is_exact_numeric(right_val) => {
             let left_f64 = to_f64(left_val)?;
             let right_i64 = to_i64(right_val)?;
             Ok(Boolean(predicate(compare_float_int(left_f64, right_i64))))
         }
-        (left_val, right_val @ (Float(_) | Real(_) | Double(_)))
-            if is_exact_numeric(left_val) =>
-        {
+        (left_val, right_val @ (Float(_) | Real(_) | Double(_))) if is_exact_numeric(left_val) => {
             let left_i64 = to_i64(left_val)?;
             let right_f64 = to_f64(right_val)?;
             Ok(Boolean(predicate(compare_int_float(left_i64, right_f64))))
@@ -316,13 +312,19 @@ where
         // In SQLite, comparing DATETIME with INTEGER returns 0/1 based on type ordering,
         // not a type mismatch error. Different types are considered unequal.
         // This enables queries like: WHERE datetime(x) = y where y might be an integer
-        (Timestamp(_) | Date(_) | Time(_), Integer(_) | Smallint(_) | Bigint(_) | Float(_) | Real(_) | Double(_) | Numeric(_)) => {
+        (
+            Timestamp(_) | Date(_) | Time(_),
+            Integer(_) | Smallint(_) | Bigint(_) | Float(_) | Real(_) | Double(_) | Numeric(_),
+        ) => {
             // For = comparison, different types are never equal
             // For < / > comparisons, SQLite uses type ordering (TEXT < INTEGER)
             // We follow SQLite's behavior: temporal types != numeric types
             Ok(Boolean(false))
         }
-        (Integer(_) | Smallint(_) | Bigint(_) | Float(_) | Real(_) | Double(_) | Numeric(_), Timestamp(_) | Date(_) | Time(_)) => {
+        (
+            Integer(_) | Smallint(_) | Bigint(_) | Float(_) | Real(_) | Double(_) | Numeric(_),
+            Timestamp(_) | Date(_) | Time(_),
+        ) => {
             // Symmetric case
             Ok(Boolean(false))
         }
@@ -375,9 +377,7 @@ fn compare_int_float(int_val: i64, float_val: f64) -> std::cmp::Ordering {
     // For floats with fractional parts, convert int to float and compare
     if float_val.fract() != 0.0 {
         let int_as_float = int_val as f64;
-        return int_as_float
-            .partial_cmp(&float_val)
-            .unwrap_or(std::cmp::Ordering::Equal);
+        return int_as_float.partial_cmp(&float_val).unwrap_or(std::cmp::Ordering::Equal);
     }
 
     // Handle the imprecise range: floats between 2^53 and i64 bounds
@@ -430,9 +430,7 @@ fn compare_int_float(int_val: i64, float_val: f64) -> std::cmp::Ordering {
     }
 
     // Standard float comparison
-    int_as_float
-        .partial_cmp(&float_val)
-        .unwrap_or(std::cmp::Ordering::Equal)
+    int_as_float.partial_cmp(&float_val).unwrap_or(std::cmp::Ordering::Equal)
 }
 
 /// Compare a float (f64) with an integer (i64) - returns float.cmp(int)

@@ -460,7 +460,7 @@ pub(crate) fn cast_value(
         // Cast to FLOAT (f32)
         Float { .. } => match value {
             SqlValue::Float(n) => Ok(SqlValue::Float(*n)),
-            SqlValue::Real(n) => Ok(SqlValue::Float(*n as f32)),  // Real is now f64
+            SqlValue::Real(n) => Ok(SqlValue::Float(*n as f32)), // Real is now f64
             SqlValue::Double(n) => Ok(SqlValue::Float(*n as f32)),
             SqlValue::Integer(n) => Ok(SqlValue::Float(*n as f32)),
             SqlValue::Smallint(n) => Ok(SqlValue::Float(*n as f32)),

@@ -283,10 +283,8 @@ pub(super) fn collect_column_predicates(
                     // Merge with existing IN list by computing intersection
                     // col IN (1,2,3) AND col IN (2,3,4) => col IN (2,3)
                     if let Some(existing) = in_values.take() {
-                        let intersection: Vec<SqlValue> = existing
-                            .into_iter()
-                            .filter(|v| values.contains(v))
-                            .collect();
+                        let intersection: Vec<SqlValue> =
+                            existing.into_iter().filter(|v| values.contains(v)).collect();
                         *in_values = Some(intersection);
                     } else {
                         *in_values = Some(values);

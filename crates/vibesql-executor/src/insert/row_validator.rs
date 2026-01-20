@@ -174,10 +174,8 @@ impl<'a> RowValidator<'a> {
             if self.batch_pk_values.contains(new_pk_values) {
                 let pk_col_names: Vec<String> = self.schema.primary_key.as_ref().unwrap().clone();
                 // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
-                let qualified_cols: Vec<String> = pk_col_names
-                    .iter()
-                    .map(|col| format!("{}.{}", self.table_name, col))
-                    .collect();
+                let qualified_cols: Vec<String> =
+                    pk_col_names.iter().map(|col| format!("{}.{}", self.table_name, col)).collect();
                 // SQLite-compatible: output the message as-is without prefix
                 return Err(ExecutorError::SqliteCompatError(format!(
                     "UNIQUE constraint failed: {}",

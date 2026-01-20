@@ -22,30 +22,22 @@ fn apply_collation<'a>(
     if let Some(coll) = collation {
         if coll.eq_ignore_ascii_case("nocase") {
             match val {
-                vibesql_types::SqlValue::Varchar(s) => {
-                    Cow::Owned(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-                        s.to_uppercase(),
-                    )))
-                }
-                vibesql_types::SqlValue::Character(s) => {
-                    Cow::Owned(vibesql_types::SqlValue::Character(arcstr::ArcStr::from(
-                        s.to_uppercase(),
-                    )))
-                }
+                vibesql_types::SqlValue::Varchar(s) => Cow::Owned(
+                    vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())),
+                ),
+                vibesql_types::SqlValue::Character(s) => Cow::Owned(
+                    vibesql_types::SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())),
+                ),
                 other => Cow::Borrowed(other),
             }
         } else if coll.eq_ignore_ascii_case("rtrim") {
             match val {
                 vibesql_types::SqlValue::Varchar(s) => {
-                    Cow::Owned(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-                        s.trim_end(),
-                    )))
+                    Cow::Owned(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end())))
                 }
-                vibesql_types::SqlValue::Character(s) => {
-                    Cow::Owned(vibesql_types::SqlValue::Character(arcstr::ArcStr::from(
-                        s.trim_end(),
-                    )))
-                }
+                vibesql_types::SqlValue::Character(s) => Cow::Owned(
+                    vibesql_types::SqlValue::Character(arcstr::ArcStr::from(s.trim_end())),
+                ),
                 other => Cow::Borrowed(other),
             }
         } else {
@@ -102,9 +94,7 @@ pub(super) fn compare_rows_by_sort_keys(keys_a: &[SortKey], keys_b: &[SortKey]) 
 
                 // Compare non-NULL values, respecting direction
                 match dir {
-                    vibesql_ast::OrderDirection::Asc => {
-                        compare_sql_values(&cmp_val_a, &cmp_val_b)
-                    }
+                    vibesql_ast::OrderDirection::Asc => compare_sql_values(&cmp_val_a, &cmp_val_b),
                     vibesql_ast::OrderDirection::Desc => {
                         compare_sql_values(&cmp_val_a, &cmp_val_b).reverse()
                     }

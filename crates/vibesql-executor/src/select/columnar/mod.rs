@@ -578,20 +578,25 @@ fn strict_type_equal(a: &SqlValue, b: &SqlValue) -> bool {
         | (SqlValue::Bigint(y), SqlValue::Integer(x)) => *x as i64 == *y,
 
         // Float types with integer
-        (SqlValue::Float(x), SqlValue::Integer(y))
-        | (SqlValue::Integer(y), SqlValue::Float(x)) => (*x as f64 - *y as f64).abs() < f64::EPSILON,
+        (SqlValue::Float(x), SqlValue::Integer(y)) | (SqlValue::Integer(y), SqlValue::Float(x)) => {
+            (*x as f64 - *y as f64).abs() < f64::EPSILON
+        }
         (SqlValue::Double(x), SqlValue::Integer(y))
         | (SqlValue::Integer(y), SqlValue::Double(x)) => (*x - *y as f64).abs() < f64::EPSILON,
-        (SqlValue::Real(x), SqlValue::Integer(y))
-        | (SqlValue::Integer(y), SqlValue::Real(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+        (SqlValue::Real(x), SqlValue::Integer(y)) | (SqlValue::Integer(y), SqlValue::Real(x)) => {
+            (*x - *y as f64).abs() < f64::EPSILON
+        }
 
         // Mixed float types
-        (SqlValue::Float(x), SqlValue::Double(y))
-        | (SqlValue::Double(y), SqlValue::Float(x)) => (*x as f64 - *y).abs() < f64::EPSILON,
-        (SqlValue::Float(x), SqlValue::Real(y))
-        | (SqlValue::Real(y), SqlValue::Float(x)) => (*x as f64 - *y).abs() < f64::EPSILON,
-        (SqlValue::Double(x), SqlValue::Real(y))
-        | (SqlValue::Real(y), SqlValue::Double(x)) => (*x - *y).abs() < f64::EPSILON,
+        (SqlValue::Float(x), SqlValue::Double(y)) | (SqlValue::Double(y), SqlValue::Float(x)) => {
+            (*x as f64 - *y).abs() < f64::EPSILON
+        }
+        (SqlValue::Float(x), SqlValue::Real(y)) | (SqlValue::Real(y), SqlValue::Float(x)) => {
+            (*x as f64 - *y).abs() < f64::EPSILON
+        }
+        (SqlValue::Double(x), SqlValue::Real(y)) | (SqlValue::Real(y), SqlValue::Double(x)) => {
+            (*x - *y).abs() < f64::EPSILON
+        }
 
         // Numeric type (f64) with integer types
         (SqlValue::Numeric(x), SqlValue::Integer(y))
@@ -602,12 +607,14 @@ fn strict_type_equal(a: &SqlValue, b: &SqlValue) -> bool {
         | (SqlValue::Smallint(y), SqlValue::Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
 
         // Numeric with float types
-        (SqlValue::Numeric(x), SqlValue::Float(y))
-        | (SqlValue::Float(y), SqlValue::Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+        (SqlValue::Numeric(x), SqlValue::Float(y)) | (SqlValue::Float(y), SqlValue::Numeric(x)) => {
+            (*x - *y as f64).abs() < f64::EPSILON
+        }
         (SqlValue::Numeric(x), SqlValue::Double(y))
         | (SqlValue::Double(y), SqlValue::Numeric(x)) => (*x - *y).abs() < f64::EPSILON,
-        (SqlValue::Numeric(x), SqlValue::Real(y))
-        | (SqlValue::Real(y), SqlValue::Numeric(x)) => (*x - *y).abs() < f64::EPSILON,
+        (SqlValue::Numeric(x), SqlValue::Real(y)) | (SqlValue::Real(y), SqlValue::Numeric(x)) => {
+            (*x - *y).abs() < f64::EPSILON
+        }
         (SqlValue::Numeric(x), SqlValue::Numeric(y)) => (*x - *y).abs() < f64::EPSILON,
 
         // Different storage classes not handled above - NOT equal

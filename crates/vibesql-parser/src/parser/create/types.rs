@@ -460,7 +460,7 @@ impl Parser {
                 // Maps to VARCHAR without length constraint (unlimited)
                 if matches!(self.peek(), Token::LParen) {
                     self.advance(); // consume (
-                    // Parse and ignore the size parameter (SQLite compatibility)
+                                    // Parse and ignore the size parameter (SQLite compatibility)
                     match self.peek() {
                         Token::Number(n) => {
                             let _ = n.parse::<usize>().map_err(|_| ParseError {

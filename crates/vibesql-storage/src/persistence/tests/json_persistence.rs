@@ -865,8 +865,7 @@ fn test_json_index_roundtrip() {
         prefix_length: None,
     };
 
-    db.create_index("idx_name".to_string(), "test_indexes".to_string(), false, vec![idx])
-        .unwrap();
+    db.create_index("idx_name".to_string(), "test_indexes".to_string(), false, vec![idx]).unwrap();
 
     // Save to JSON
     let path = "/tmp/test_index_roundtrip.json";

@@ -322,13 +322,13 @@ fn expression_contains_matching_predicate(expr: &Expression, target_hash: u64) -
         // BETWEEN: expr BETWEEN low AND high
         Expression::Between { expr, .. } => ExpressionHasher::hash(expr) == target_hash,
         // Conjunction: AND
-        Expression::Conjunction(exprs) => exprs
-            .iter()
-            .any(|e| expression_contains_matching_predicate(e, target_hash)),
+        Expression::Conjunction(exprs) => {
+            exprs.iter().any(|e| expression_contains_matching_predicate(e, target_hash))
+        }
         // Disjunction: OR
-        Expression::Disjunction(exprs) => exprs
-            .iter()
-            .any(|e| expression_contains_matching_predicate(e, target_hash)),
+        Expression::Disjunction(exprs) => {
+            exprs.iter().any(|e| expression_contains_matching_predicate(e, target_hash))
+        }
         _ => false,
     }
 }
@@ -716,10 +716,7 @@ fn collect_equality_columns(expr: &Expression, columns: &mut std::collections::H
 ///
 /// This is used for expression index support. It collects non-column expressions
 /// that are compared to literals in equality predicates.
-fn collect_equality_expressions<'a>(
-    expr: &'a Expression,
-    expressions: &mut Vec<&'a Expression>,
-) {
+fn collect_equality_expressions<'a>(expr: &'a Expression, expressions: &mut Vec<&'a Expression>) {
     match expr {
         Expression::BinaryOp { left, op, right } => {
             match op {
@@ -894,9 +891,8 @@ pub(crate) fn cost_based_index_selection(
 
             // Get column statistics for the indexed column (case-insensitive lookup)
             // For expression indexes, we don't have direct column stats - fall back to rule-based
-            let col_stats = column_name.and_then(|cn| {
-                get_column_stats_ignore_case(&table_stats.columns, cn)
-            });
+            let col_stats =
+                column_name.and_then(|cn| get_column_stats_ignore_case(&table_stats.columns, cn));
             if col_stats.is_none() {
                 // Track that we found an applicable index without column stats
                 // We'll fall back to rule-based selection if cost-based fails
@@ -1134,15 +1130,13 @@ pub(crate) fn estimate_selectivity(
         Expression::IsDistinctFrom { left, right, negated: true } => {
             // Check if this is a predicate on our column (case-insensitive)
             // For literal values, use actual statistics
-            if let (Expression::ColumnRef(col_id), Expression::Literal(value)) =
-                (&**left, &**right)
+            if let (Expression::ColumnRef(col_id), Expression::Literal(value)) = (&**left, &**right)
             {
                 if col_id.column_canonical().eq_ignore_ascii_case(column_name) {
                     return col_stats.estimate_eq_selectivity(value);
                 }
             }
-            if let (Expression::Literal(value), Expression::ColumnRef(col_id)) =
-                (&**left, &**right)
+            if let (Expression::Literal(value), Expression::ColumnRef(col_id)) = (&**left, &**right)
             {
                 if col_id.column_canonical().eq_ignore_ascii_case(column_name) {
                     return col_stats.estimate_eq_selectivity(value);

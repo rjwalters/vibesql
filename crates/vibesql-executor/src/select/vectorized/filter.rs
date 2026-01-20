@@ -274,7 +274,7 @@ fn compare_float64(
     })?;
 
     let val = match literal {
-        SqlValue::Double(f) | SqlValue::Numeric(f) | SqlValue::Real(f) => *f,  // Real is now f64
+        SqlValue::Double(f) | SqlValue::Numeric(f) | SqlValue::Real(f) => *f, // Real is now f64
         SqlValue::Float(f) => *f as f64,
         SqlValue::Integer(i) => *i as f64,
         // SQLite type affinity: coerce string literals to floats for numeric column comparisons

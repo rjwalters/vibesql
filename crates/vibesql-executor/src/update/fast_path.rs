@@ -18,8 +18,8 @@ use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
 use crate::{
-    errors::ExecutorError, evaluator::ExpressionEvaluator,
-    expression_index_maintenance, insert::validation::coerce_value,
+    errors::ExecutorError, evaluator::ExpressionEvaluator, expression_index_maintenance,
+    insert::validation::coerce_value,
 };
 
 /// Try to execute UPDATE via fast path for simple single-row PK updates.
@@ -203,11 +203,7 @@ pub(super) fn try_fast_path_update(
 
     // Maintain expression indexes for this update
     expression_index_maintenance::maintain_expression_indexes_for_update(
-        database,
-        table_name,
-        &old_row,
-        &new_row,
-        row_index,
+        database, table_name, &old_row, &new_row, row_index,
     );
 
     // Apply the update directly (transfers ownership of new_row, no clone needed)

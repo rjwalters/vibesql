@@ -51,12 +51,12 @@ use tokio::{net::TcpListener, runtime::Runtime, sync::oneshot};
 // PostgreSQL wire protocol client
 use tokio_postgres::NoTls;
 #[cfg(feature = "mysql")]
-use tpch::schema::load_mysql;
-#[cfg(feature = "mysql")]
 use tpch::queries::{
-    TPCH_Q3_MYSQL, TPCH_Q4_MYSQL, TPCH_Q5_MYSQL, TPCH_Q7_MYSQL, TPCH_Q8_MYSQL, TPCH_Q9_MYSQL,
-    TPCH_Q10_MYSQL, TPCH_Q12_MYSQL, TPCH_Q13_MYSQL, TPCH_Q18_MYSQL,
+    TPCH_Q10_MYSQL, TPCH_Q12_MYSQL, TPCH_Q13_MYSQL, TPCH_Q18_MYSQL, TPCH_Q3_MYSQL, TPCH_Q4_MYSQL,
+    TPCH_Q5_MYSQL, TPCH_Q7_MYSQL, TPCH_Q8_MYSQL, TPCH_Q9_MYSQL,
 };
+#[cfg(feature = "mysql")]
+use tpch::schema::load_mysql;
 use tpch::{queries::*, schema::load_vibesql};
 
 /// Default port for vibesql-server (different from sysbench_server to avoid conflicts)
@@ -272,7 +272,9 @@ impl MysqlExecutor {
         let mut conn = self.pool.get_conn()?;
         // Disable ONLY_FULL_GROUP_BY for TPC-H queries that have non-aggregated
         // columns in SELECT that are functionally dependent on GROUP BY columns
-        conn.query_drop("SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))")?;
+        conn.query_drop(
+            "SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))",
+        )?;
         let result: Vec<mysql::Row> = conn.query(sql)?;
         Ok(result.len())
     }

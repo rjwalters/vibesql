@@ -441,7 +441,9 @@ fn test_having_outer_aggregate_expression_in_correlated_subquery() {
     use vibesql_parser::Parser;
     use vibesql_types::SqlValue;
 
-    use crate::{create_table::CreateTableExecutor, insert::InsertExecutor, select::SelectExecutor};
+    use crate::{
+        create_table::CreateTableExecutor, insert::InsertExecutor, select::SelectExecutor,
+    };
 
     let mut db = vibesql_storage::Database::new();
 
@@ -491,11 +493,7 @@ fn test_having_outer_aggregate_expression_in_correlated_subquery() {
             let rows = result.unwrap();
 
             // Only x=107 should be returned
-            assert_eq!(
-                rows.len(),
-                1,
-                "Only the group with the minimum average should be returned"
-            );
+            assert_eq!(rows.len(), 1, "Only the group with the minimum average should be returned");
 
             let x_value = match &rows[0].values[0] {
                 SqlValue::Integer(v) => *v,

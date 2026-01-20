@@ -158,10 +158,8 @@ pub fn execute_update_from_join(
     for row in rows {
         // Extract identifier values (first num_id_columns values)
         // Normalize integer types to ensure consistent comparison
-        let id_values: Vec<SqlValue> = row.values[..num_id_columns]
-            .iter()
-            .map(normalize_integer_type)
-            .collect();
+        let id_values: Vec<SqlValue> =
+            row.values[..num_id_columns].iter().map(normalize_integer_type).collect();
 
         // Skip NULL identifiers
         if id_values.iter().any(|v| matches!(v, SqlValue::Null)) {
@@ -175,12 +173,7 @@ pub fn execute_update_from_join(
 
         // Extract SET values
         let set_values: Vec<SqlValue> = (0..num_assignments)
-            .map(|i| {
-                row.values
-                    .get(num_id_columns + i)
-                    .cloned()
-                    .unwrap_or(SqlValue::Null)
-            })
+            .map(|i| row.values.get(num_id_columns + i).cloned().unwrap_or(SqlValue::Null))
             .collect();
 
         id_to_set_values.insert(id_values, set_values);
@@ -197,10 +190,7 @@ pub fn execute_update_from_join(
     let pk_indices: Vec<usize> = if use_rowid {
         vec![] // Not used when using rowid
     } else {
-        pk_columns
-            .iter()
-            .filter_map(|name| target_schema.get_column_index(name))
-            .collect()
+        pk_columns.iter().filter_map(|name| target_schema.get_column_index(name)).collect()
     };
 
     for (row_index, target_row) in target_table.scan().iter().enumerate() {
@@ -261,15 +251,7 @@ fn combine_with_from_clause(accumulated: FromClause, from_clause: FromClause) ->
             }
         }
         // For a JOIN, we need to inject the accumulated clause on the left side
-        FromClause::Join {
-            left,
-            right,
-            join_type,
-            condition,
-            using_columns,
-            natural,
-            alias,
-        } => {
+        FromClause::Join { left, right, join_type, condition, using_columns, natural, alias } => {
             // Recursively combine with the left side of the join
             let new_left = combine_with_from_clause(accumulated, *left);
             FromClause::Join {
@@ -336,9 +318,10 @@ pub fn apply_update_from_matches(
             }
 
             // Find column index
-            let col_index = target_schema.get_column_index(&assignment.column).ok_or_else(|| {
-                ExecutorError::NoSuchColumn { column_ref: assignment.column.clone() }
-            })?;
+            let col_index =
+                target_schema.get_column_index(&assignment.column).ok_or_else(|| {
+                    ExecutorError::NoSuchColumn { column_ref: assignment.column.clone() }
+                })?;
 
             // Coerce value to column type
             let coerced_value = crate::insert::validation::coerce_value(

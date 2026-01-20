@@ -223,10 +223,7 @@ pub(super) fn try_convert_scalar_comparison_to_join(
     }
 
     // Generate unique alias for the derived table
-    let alias = format!(
-        "__scalar_subq_{}",
-        SCALAR_SUBQ_COUNTER.fetch_add(1, Ordering::Relaxed)
-    );
+    let alias = format!("__scalar_subq_{}", SCALAR_SUBQ_COUNTER.fetch_add(1, Ordering::Relaxed));
     let agg_column_name = "__scalar_agg".to_string();
 
     // Build the decorrelated subquery:
@@ -306,16 +303,12 @@ pub(super) fn try_convert_scalar_comparison_to_join(
         condition: Some(join_condition),
         using_columns: None,
         natural: false,
-                alias: None,
+        alias: None,
     };
 
     // Create the replacement expression: left op COALESCE(alias.__scalar_agg, 0)
-    let agg_ref = Expression::ColumnRef(ColumnIdentifier::qualified(
-        &alias,
-        false,
-        &agg_column_name,
-        false,
-    ));
+    let agg_ref =
+        Expression::ColumnRef(ColumnIdentifier::qualified(&alias, false, &agg_column_name, false));
 
     // Use COALESCE to handle NULL when there's no matching row
     // For comparisons like >, >=, we use 0 as default (conservative)
@@ -332,20 +325,11 @@ pub(super) fn try_convert_scalar_comparison_to_join(
     };
 
     if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
-        eprintln!(
-            "[SUBQUERY_TRANSFORM] Created LEFT JOIN with derived table alias: {}",
-            alias
-        );
-        eprintln!(
-            "[SUBQUERY_TRANSFORM] Replacement expression: {:?}",
-            replacement_expr
-        );
+        eprintln!("[SUBQUERY_TRANSFORM] Created LEFT JOIN with derived table alias: {}", alias);
+        eprintln!("[SUBQUERY_TRANSFORM] Replacement expression: {:?}", replacement_expr);
     }
 
-    Some(ScalarComparisonResult {
-        from: new_from,
-        replacement_expr,
-    })
+    Some(ScalarComparisonResult { from: new_from, replacement_expr })
 }
 
 /// Check if an expression contains an aggregate function
@@ -369,19 +353,12 @@ fn contains_aggregate(expr: &Expression) -> bool {
         }
         Expression::UnaryOp { expr, .. } => contains_aggregate(expr),
         Expression::Cast { expr, .. } => contains_aggregate(expr),
-        Expression::Case {
-            operand,
-            when_clauses,
-            else_result,
-        } => {
+        Expression::Case { operand, when_clauses, else_result } => {
             operand.as_ref().map(|o| contains_aggregate(o)).unwrap_or(false)
                 || when_clauses.iter().any(|w| {
                     w.conditions.iter().any(contains_aggregate) || contains_aggregate(&w.result)
                 })
-                || else_result
-                    .as_ref()
-                    .map(|e| contains_aggregate(e))
-                    .unwrap_or(false)
+                || else_result.as_ref().map(|e| contains_aggregate(e)).unwrap_or(false)
         }
         _ => false,
     }
@@ -399,7 +376,13 @@ fn extract_correlation_predicates(
     let mut correlation = Vec::new();
     let mut non_correlated = Vec::new();
 
-    extract_predicates_recursive(expr, outer_tables, inner_table, &mut correlation, &mut non_correlated);
+    extract_predicates_recursive(
+        expr,
+        outer_tables,
+        inner_table,
+        &mut correlation,
+        &mut non_correlated,
+    );
 
     Some((correlation, non_correlated))
 }
@@ -412,17 +395,31 @@ fn extract_predicates_recursive(
     non_correlated: &mut Vec<Expression>,
 ) {
     match expr {
-        Expression::BinaryOp {
-            op: BinaryOperator::And,
-            left,
-            right,
-        } => {
-            extract_predicates_recursive(left, _outer_tables, inner_table, correlation, non_correlated);
-            extract_predicates_recursive(right, _outer_tables, inner_table, correlation, non_correlated);
+        Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
+            extract_predicates_recursive(
+                left,
+                _outer_tables,
+                inner_table,
+                correlation,
+                non_correlated,
+            );
+            extract_predicates_recursive(
+                right,
+                _outer_tables,
+                inner_table,
+                correlation,
+                non_correlated,
+            );
         }
         Expression::Conjunction(children) => {
             for child in children {
-                extract_predicates_recursive(child, _outer_tables, inner_table, correlation, non_correlated);
+                extract_predicates_recursive(
+                    child,
+                    _outer_tables,
+                    inner_table,
+                    correlation,
+                    non_correlated,
+                );
             }
         }
         _ => {
@@ -442,11 +439,7 @@ fn extract_predicates_recursive(
 /// Check if an expression is a correlation predicate (equality with mixed table references)
 fn is_correlation_predicate(expr: &Expression, inner_table: &str) -> bool {
     match expr {
-        Expression::BinaryOp {
-            op: BinaryOperator::Equal,
-            left,
-            right,
-        } => {
+        Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
             // Check if one side is from inner table and other is from outer
             let left_inner = is_column_from_table(left, inner_table);
             let right_inner = is_column_from_table(right, inner_table);
@@ -524,11 +517,7 @@ fn extract_correlation_columns(
 
     for pred in predicates {
         match pred {
-            Expression::BinaryOp {
-                op: BinaryOperator::Equal,
-                left,
-                right,
-            } => {
+            Expression::BinaryOp { op: BinaryOperator::Equal, left, right } => {
                 // Match pattern: inner_col = outer_col or outer_col = inner_col
                 if let (Expression::ColumnRef(left_col), Expression::ColumnRef(right_col)) =
                     (left.as_ref(), right.as_ref())

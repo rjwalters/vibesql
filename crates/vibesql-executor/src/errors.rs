@@ -663,13 +663,22 @@ impl std::fmt::Display for ExecutorError {
                     )
                 )
             }
-            ExecutorError::InsertColumnCountMismatch { table_name, expected, provided, has_explicit_columns } => {
+            ExecutorError::InsertColumnCountMismatch {
+                table_name,
+                expected,
+                provided,
+                has_explicit_columns,
+            } => {
                 if *has_explicit_columns {
                     // SQLite format when explicit column list: "M values for N columns"
                     write!(f, "{} values for {} columns", provided, expected)
                 } else {
                     // SQLite format when no column list: "table T has N columns but M values were supplied"
-                    write!(f, "table {} has {} columns but {} values were supplied", table_name, expected, provided)
+                    write!(
+                        f,
+                        "table {} has {} columns but {} values were supplied",
+                        table_name, expected, provided
+                    )
                 }
             }
             ExecutorError::ValuesRowCountMismatch => {

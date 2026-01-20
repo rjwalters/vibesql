@@ -340,7 +340,10 @@ fn execute_insert_internal(
                         // SQLite type affinity: convert float literals to integers if whole numbers
                         vibesql_types::SqlValue::Float(f) => {
                             let f64_val = *f as f64;
-                            if f64_val.fract() == 0.0 && f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
+                            if f64_val.fract() == 0.0
+                                && f64_val >= i64::MIN as f64
+                                && f64_val <= i64::MAX as f64
+                            {
                                 let i = f64_val as i64;
                                 if resolved_columns.rowid_is_pseudo_column && i <= 0 {
                                     return Err(ExecutorError::UnsupportedExpression(
@@ -358,7 +361,9 @@ fn execute_insert_internal(
                                 ));
                             }
                         }
-                        vibesql_types::SqlValue::Real(f) | vibesql_types::SqlValue::Double(f) | vibesql_types::SqlValue::Numeric(f) => {
+                        vibesql_types::SqlValue::Real(f)
+                        | vibesql_types::SqlValue::Double(f)
+                        | vibesql_types::SqlValue::Numeric(f) => {
                             if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
                                 let i = *f as i64;
                                 if resolved_columns.rowid_is_pseudo_column && i <= 0 {
@@ -477,17 +482,18 @@ fn execute_insert_internal(
         // Filter out the rowid value when iterating over column values
         // Only filter if it's a pseudo-column (rowid, _rowid_, oid) that's not in the schema
         // For INTEGER PRIMARY KEY columns, the value IS part of the columns list
-        let column_values: Vec<_> =
-            if let Some(rowid_pos) = rowid_position.filter(|_| resolved_columns.rowid_is_pseudo_column) {
-                value_exprs
-                    .iter()
-                    .enumerate()
-                    .filter(|(idx, _)| *idx != rowid_pos)
-                    .map(|(_, expr)| expr)
-                    .collect()
-            } else {
-                value_exprs.iter().collect()
-            };
+        let column_values: Vec<_> = if let Some(rowid_pos) =
+            rowid_position.filter(|_| resolved_columns.rowid_is_pseudo_column)
+        {
+            value_exprs
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| *idx != rowid_pos)
+                .map(|(_, expr)| expr)
+                .collect()
+        } else {
+            value_exprs.iter().collect()
+        };
 
         // Track which columns have been assigned (SQLite uses first occurrence for duplicates)
         let mut assigned_columns = std::collections::HashSet::new();

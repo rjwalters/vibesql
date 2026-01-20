@@ -263,8 +263,7 @@ fn test_match_as_function_in_where() {
 #[test]
 fn test_match_against_still_works() {
     // Ensure we haven't broken MATCH...AGAINST syntax
-    let result =
-        Parser::parse_sql("SELECT * FROM articles WHERE MATCH(title) AGAINST ('search');");
+    let result = Parser::parse_sql("SELECT * FROM articles WHERE MATCH(title) AGAINST ('search');");
     assert!(result.is_ok(), "MATCH...AGAINST should still work: {:?}", result);
 
     let stmt = result.unwrap();

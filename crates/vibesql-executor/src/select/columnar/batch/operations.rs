@@ -493,12 +493,12 @@ impl ColumnArray {
                         row_values[i].push(if is_null {
                             SqlValue::Null
                         } else {
-                            SqlValue::Float(v)  // Float32 → SqlValue::Float (f32)
+                            SqlValue::Float(v) // Float32 → SqlValue::Float (f32)
                         });
                     }
                 } else {
                     for (i, &v) in values.iter().enumerate() {
-                        row_values[i].push(SqlValue::Float(v));  // Float32 → SqlValue::Float (f32)
+                        row_values[i].push(SqlValue::Float(v)); // Float32 → SqlValue::Float (f32)
                     }
                 }
             }

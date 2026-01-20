@@ -71,17 +71,17 @@ use mysql::prelude::*;
 use mysql::PooledConn;
 #[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
+#[cfg(feature = "mysql")]
+use tpch::queries::{
+    TPCH_Q10_MYSQL, TPCH_Q12_MYSQL, TPCH_Q13_MYSQL, TPCH_Q18_MYSQL, TPCH_Q3_MYSQL, TPCH_Q4_MYSQL,
+    TPCH_Q5_MYSQL, TPCH_Q7_MYSQL, TPCH_Q8_MYSQL, TPCH_Q9_MYSQL,
+};
 #[cfg(feature = "duckdb")]
 use tpch::schema::load_duckdb;
 #[cfg(feature = "mysql")]
 use tpch::schema::load_mysql;
 #[cfg(feature = "sqlite")]
 use tpch::schema::load_sqlite;
-#[cfg(feature = "mysql")]
-use tpch::queries::{
-    TPCH_Q3_MYSQL, TPCH_Q4_MYSQL, TPCH_Q5_MYSQL, TPCH_Q7_MYSQL, TPCH_Q8_MYSQL, TPCH_Q9_MYSQL,
-    TPCH_Q10_MYSQL, TPCH_Q12_MYSQL, TPCH_Q13_MYSQL, TPCH_Q18_MYSQL,
-};
 use tpch::{queries::*, schema::load_vibesql};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;

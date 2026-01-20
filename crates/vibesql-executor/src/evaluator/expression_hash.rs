@@ -148,9 +148,7 @@ impl ExpressionHasher {
 
             vibesql_ast::Expression::InList { expr, values, .. } => {
                 Self::is_deterministic_impl(expr, allow_column_refs)
-                    && values
-                        .iter()
-                        .all(|v| Self::is_deterministic_impl(v, allow_column_refs))
+                    && values.iter().all(|v| Self::is_deterministic_impl(v, allow_column_refs))
             }
 
             vibesql_ast::Expression::Like { expr, pattern, .. }
@@ -214,9 +212,9 @@ impl ExpressionHasher {
             // Conjunction, Disjunction, and RowValueConstructor - check all children
             vibesql_ast::Expression::Conjunction(children)
             | vibesql_ast::Expression::Disjunction(children)
-            | vibesql_ast::Expression::RowValueConstructor(children) => children
-                .iter()
-                .all(|c| Self::is_deterministic_impl(c, allow_column_refs)),
+            | vibesql_ast::Expression::RowValueConstructor(children) => {
+                children.iter().all(|c| Self::is_deterministic_impl(c, allow_column_refs))
+            }
 
             vibesql_ast::Expression::Collate { expr, .. } => {
                 Self::is_deterministic_impl(expr, allow_column_refs)

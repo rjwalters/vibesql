@@ -102,7 +102,11 @@ fn test_unique_index_basic_insert_enforcement() {
         vibesql_storage::StorageError::UniqueConstraintViolation(msg) => {
             assert!(msg.contains("UNIQUE constraint"));
             // SQLite-compatible format: "UNIQUE constraint failed: table.column"
-            assert!(msg.contains("users.email"), "Expected message to contain 'users.email', got: {}", msg);
+            assert!(
+                msg.contains("users.email"),
+                "Expected message to contain 'users.email', got: {}",
+                msg
+            );
         }
         e => panic!("Expected UniqueConstraintViolation, got {:?}", e),
     }
@@ -247,8 +251,11 @@ fn test_unique_index_composite_key() {
         vibesql_storage::StorageError::UniqueConstraintViolation(msg) => {
             assert!(msg.contains("UNIQUE constraint"));
             // SQLite-compatible format: "UNIQUE constraint failed: table.col1, table.col2"
-            assert!(msg.contains("users.first_name") && msg.contains("users.last_name"),
-                "Expected message to contain 'users.first_name' and 'users.last_name', got: {}", msg);
+            assert!(
+                msg.contains("users.first_name") && msg.contains("users.last_name"),
+                "Expected message to contain 'users.first_name' and 'users.last_name', got: {}",
+                msg
+            );
         }
         e => panic!("Expected UniqueConstraintViolation, got {:?}", e),
     }

@@ -117,11 +117,8 @@ pub fn evaluate_predicate_i64_simd(
 
         ColumnPredicate::Between { low, high, .. } => {
             // SQLite affinity: try to parse strings as numbers for numeric comparison
-            let low_f64 = if is_string_value(low) {
-                try_parse_string_as_f64(low)
-            } else {
-                value_to_f64(low)
-            };
+            let low_f64 =
+                if is_string_value(low) { try_parse_string_as_f64(low) } else { value_to_f64(low) };
             let high_f64 = if is_string_value(high) {
                 try_parse_string_as_f64(high)
             } else {
@@ -545,11 +542,8 @@ pub fn evaluate_predicate_f64_simd(
 
         ColumnPredicate::Between { low, high, .. } => {
             // SQLite affinity: try to parse strings as numbers for numeric comparison
-            let low_f64 = if is_string_value(low) {
-                try_parse_string_as_f64(low)
-            } else {
-                value_to_f64(low)
-            };
+            let low_f64 =
+                if is_string_value(low) { try_parse_string_as_f64(low) } else { value_to_f64(low) };
             let high_f64 = if is_string_value(high) {
                 try_parse_string_as_f64(high)
             } else {
@@ -642,7 +636,11 @@ pub fn evaluate_predicate_f64_simd(
 // ============================================================================
 
 /// Helper to create packed mask with constant value and null handling
-fn apply_null_mask_constant_packed(nulls: Option<&[bool]>, len: usize, constant: bool) -> PackedMask {
+fn apply_null_mask_constant_packed(
+    nulls: Option<&[bool]>,
+    len: usize,
+    constant: bool,
+) -> PackedMask {
     if constant {
         let mut mask = PackedMask::new_all_set(len);
         if let Some(null_mask) = nulls {
@@ -747,11 +745,8 @@ pub fn evaluate_predicate_i64_packed(
 
         ColumnPredicate::Between { low, high, .. } => {
             // SQLite affinity: try to parse strings as numbers for numeric comparison
-            let low_f64 = if is_string_value(low) {
-                try_parse_string_as_f64(low)
-            } else {
-                value_to_f64(low)
-            };
+            let low_f64 =
+                if is_string_value(low) { try_parse_string_as_f64(low) } else { value_to_f64(low) };
             let high_f64 = if is_string_value(high) {
                 try_parse_string_as_f64(high)
             } else {
@@ -1169,11 +1164,8 @@ pub fn evaluate_predicate_f64_packed(
 
         ColumnPredicate::Between { low, high, .. } => {
             // SQLite affinity: try to parse strings as numbers for numeric comparison
-            let low_f64 = if is_string_value(low) {
-                try_parse_string_as_f64(low)
-            } else {
-                value_to_f64(low)
-            };
+            let low_f64 =
+                if is_string_value(low) { try_parse_string_as_f64(low) } else { value_to_f64(low) };
             let high_f64 = if is_string_value(high) {
                 try_parse_string_as_f64(high)
             } else {

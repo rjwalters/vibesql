@@ -31,7 +31,9 @@ use crate::{
     sqlite_schema::{
         execute_sqlite_schema_query, get_sqlite_schema_table_schema, is_sqlite_schema_table,
     },
-    sqlite_stat::{execute_sqlite_stat1_query, get_sqlite_stat1_table_schema, is_sqlite_stat_table},
+    sqlite_stat::{
+        execute_sqlite_stat1_query, get_sqlite_stat1_table_schema, is_sqlite_stat_table,
+    },
 };
 use vibesql_catalog::TableIdentifier;
 
@@ -94,12 +96,27 @@ fn sort_rows_by_integer_primary_key(rows: &mut Vec<vibesql_storage::Row>, ipk_co
         let b_val = b.get(ipk_col_idx);
 
         match (a_val, b_val) {
-            (Some(vibesql_types::SqlValue::Integer(a)), Some(vibesql_types::SqlValue::Integer(b))) => a.cmp(b),
-            (Some(vibesql_types::SqlValue::Bigint(a)), Some(vibesql_types::SqlValue::Bigint(b))) => a.cmp(b),
-            (Some(vibesql_types::SqlValue::Unsigned(a)), Some(vibesql_types::SqlValue::Unsigned(b))) => a.cmp(b),
+            (
+                Some(vibesql_types::SqlValue::Integer(a)),
+                Some(vibesql_types::SqlValue::Integer(b)),
+            ) => a.cmp(b),
+            (
+                Some(vibesql_types::SqlValue::Bigint(a)),
+                Some(vibesql_types::SqlValue::Bigint(b)),
+            ) => a.cmp(b),
+            (
+                Some(vibesql_types::SqlValue::Unsigned(a)),
+                Some(vibesql_types::SqlValue::Unsigned(b)),
+            ) => a.cmp(b),
             // Cross-type comparisons (SQLite INTEGER can be any of these)
-            (Some(vibesql_types::SqlValue::Integer(a)), Some(vibesql_types::SqlValue::Bigint(b))) => (*a).cmp(b),
-            (Some(vibesql_types::SqlValue::Bigint(a)), Some(vibesql_types::SqlValue::Integer(b))) => a.cmp(&(*b)),
+            (
+                Some(vibesql_types::SqlValue::Integer(a)),
+                Some(vibesql_types::SqlValue::Bigint(b)),
+            ) => (*a).cmp(b),
+            (
+                Some(vibesql_types::SqlValue::Bigint(a)),
+                Some(vibesql_types::SqlValue::Integer(b)),
+            ) => a.cmp(&(*b)),
             // NULL handling: NULLs sort first (SQLite behavior)
             (None, _) | (Some(vibesql_types::SqlValue::Null), _) => std::cmp::Ordering::Less,
             (_, None) | (_, Some(vibesql_types::SqlValue::Null)) => std::cmp::Ordering::Greater,
@@ -499,7 +516,10 @@ pub(crate) fn execute_table_scan(
         // If so, return empty result immediately - no need to scan the table
         if predicate_plan.is_always_false() {
             if crate::profiling::is_scan_debug_enabled() {
-                eprintln!("[SCAN_PATH] {} table: WHERE clause is always false, returning empty", table_name);
+                eprintln!(
+                    "[SCAN_PATH] {} table: WHERE clause is always false, returning empty",
+                    table_name
+                );
             }
             return Ok(super::FromResult::from_rows_where_filtered(schema, Vec::new(), None));
         }
@@ -552,7 +572,8 @@ pub(crate) fn execute_table_scan(
                 // For native columnar tables, use SIMD filtering on typed columns
                 // This avoids SqlValue overhead by working directly on i64/f64/String arrays
                 if table.is_native_columnar() && all_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
-                    if let Ok(mut filtered_rows) = filter_with_simd_columnar(table, &column_predicates)
+                    if let Ok(mut filtered_rows) =
+                        filter_with_simd_columnar(table, &column_predicates)
                     {
                         // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
                         if order_by.is_none() {
@@ -561,7 +582,11 @@ pub(crate) fn execute_table_scan(
                             }
                         }
                         // Mark WHERE as already filtered to avoid double-evaluation
-                        return Ok(super::FromResult::from_rows_where_filtered(schema, filtered_rows, None));
+                        return Ok(super::FromResult::from_rows_where_filtered(
+                            schema,
+                            filtered_rows,
+                            None,
+                        ));
                     }
                     // Fall through to row-based path if SIMD fails
                 }
@@ -583,7 +608,11 @@ pub(crate) fn execute_table_scan(
                             }
                         }
                         // Mark WHERE as already filtered to avoid double-evaluation
-                        return Ok(super::FromResult::from_rows_where_filtered(schema, filtered_rows, None));
+                        return Ok(super::FromResult::from_rows_where_filtered(
+                            schema,
+                            filtered_rows,
+                            None,
+                        ));
                     }
                     // Fall through to row-based path if cached columnar fails
                 }
@@ -617,7 +646,11 @@ pub(crate) fn execute_table_scan(
                     }
                 }
                 // Mark WHERE as already filtered to avoid double-evaluation
-                return Ok(super::FromResult::from_rows_where_filtered(schema, filtered_rows, None));
+                return Ok(super::FromResult::from_rows_where_filtered(
+                    schema,
+                    filtered_rows,
+                    None,
+                ));
             }
 
             // extract_column_predicates returned None - fall back
@@ -1033,7 +1066,10 @@ fn coerce_value_to_column_type(
 
     match (col_affinity, &val) {
         // INTEGER/NUMERIC affinity column with string value: try to parse as number
-        (TypeAffinity::Integer | TypeAffinity::Numeric, SqlValue::Varchar(s) | SqlValue::Character(s)) => {
+        (
+            TypeAffinity::Integer | TypeAffinity::Numeric,
+            SqlValue::Varchar(s) | SqlValue::Character(s),
+        ) => {
             // Try to parse as integer first
             if let Ok(i) = s.parse::<i64>() {
                 return SqlValue::Integer(i);

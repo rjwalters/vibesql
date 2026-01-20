@@ -464,7 +464,9 @@ fn test_datetime_start_of_month() {
             create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
                 "2003-10-22 12:34:00",
             ))),
-            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("start of month"))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "start of month",
+            ))),
         ],
     );
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -584,7 +586,9 @@ fn test_datetime_multiple_modifiers() {
             create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
                 "2003-10-22 12:34:00",
             ))),
-            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("start of month"))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "start of month",
+            ))),
             create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("+1 day"))),
         ],
     );
@@ -610,7 +614,9 @@ fn test_datetime_multiple_modifiers_complex() {
             create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
                 "2003-10-22 12:34:00",
             ))),
-            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("start of month"))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "start of month",
+            ))),
             create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("+1 month"))),
             create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("-1 day"))),
         ],
@@ -736,7 +742,9 @@ fn test_datetime_invalid_start_of_unit_returns_null() {
             create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
                 "2003-10-22 12:34:00",
             ))),
-            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("start of bogus"))),
+            create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "start of bogus",
+            ))),
         ],
     );
     let result = evaluator.eval(&expr, &row).unwrap();

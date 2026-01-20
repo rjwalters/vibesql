@@ -187,7 +187,8 @@ fn test_inner_join_with_group_by_count() {
                     )),
                 }),
                 using_columns: None,
-                natural: false, alias: None,
+                natural: false,
+                alias: None,
             }),
             where_clause: None,
             group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
@@ -299,7 +300,8 @@ fn test_left_join_with_group_by_avg_salary() {
                     )),
                 }),
                 using_columns: None,
-                natural: false, alias: None,
+                natural: false,
+                alias: None,
             }),
             where_clause: None,
             group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
@@ -412,7 +414,8 @@ fn test_join_group_by_with_having() {
                     )),
                 }),
                 using_columns: None,
-                natural: false, alias: None,
+                natural: false,
+                alias: None,
             }),
             where_clause: None,
             group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
@@ -537,7 +540,8 @@ fn test_join_group_by_multiple_aggregates() {
                     )),
                 }),
                 using_columns: None,
-                natural: false, alias: None,
+                natural: false,
+                alias: None,
             }),
             where_clause: None,
             group_by: Some(vibesql_ast::GroupByClause::Simple(vec![

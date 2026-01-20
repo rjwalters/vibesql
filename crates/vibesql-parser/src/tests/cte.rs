@@ -294,8 +294,6 @@ fn test_parse_cte_default_materialization() {
 
 #[test]
 fn test_parse_cte_materialized_with_column_list() {
-    let result = Parser::parse_sql(
-        "WITH t(a, b) AS MATERIALIZED (SELECT 1, 2) SELECT * FROM t;",
-    );
+    let result = Parser::parse_sql("WITH t(a, b) AS MATERIALIZED (SELECT 1, 2) SELECT * FROM t;");
     assert!(result.is_ok(), "CTE with column list and MATERIALIZED should parse: {:?}", result);
 }

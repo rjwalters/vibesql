@@ -6,7 +6,8 @@ use vibesql_ast::*;
 
 #[test]
 fn test_create_table_statement() {
-    let stmt = Statement::CreateTable(CreateTableStmt { temporary: false,
+    let stmt = Statement::CreateTable(CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
@@ -17,7 +18,8 @@ fn test_create_table_statement() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -26,13 +28,15 @@ fn test_create_table_statement() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     });
 
     match stmt {
@@ -50,7 +54,8 @@ fn test_column_def() {
         constraints: vec![],
         default_value: None,
         comment: None,
-        generated_expr: None, is_exact_integer_type: false,
+        generated_expr: None,
+        is_exact_integer_type: false,
     };
     assert_eq!(col.name, "email");
     assert!(!col.nullable);

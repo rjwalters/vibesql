@@ -136,11 +136,7 @@ pub fn resolve_target_columns_with_rowid(
             }
         }
 
-        Ok(ResolvedInsertColumns {
-            columns,
-            rowid_position,
-            rowid_is_pseudo_column,
-        })
+        Ok(ResolvedInsertColumns { columns, rowid_position, rowid_is_pseudo_column })
     }
 }
 
@@ -239,7 +235,7 @@ pub fn coerce_value(
 
         // Numeric literal → Float/Real/Double
         (SqlValue::Numeric(f), DataType::Float { .. }) => Ok(SqlValue::Float(*f as f32)),
-        (SqlValue::Numeric(f), DataType::Real) => Ok(SqlValue::Real(*f)),  // Real is now f64
+        (SqlValue::Numeric(f), DataType::Real) => Ok(SqlValue::Real(*f)), // Real is now f64
         (SqlValue::Numeric(f), DataType::DoublePrecision) => Ok(SqlValue::Double(*f)),
 
         // Numeric literal → Integer types
@@ -363,13 +359,13 @@ pub fn coerce_value(
 
         // Integer → Float types (safe widening conversion)
         (SqlValue::Integer(i), DataType::Float { .. }) => Ok(SqlValue::Float(*i as f32)),
-        (SqlValue::Integer(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)),  // Real is now f64
+        (SqlValue::Integer(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)), // Real is now f64
         (SqlValue::Integer(i), DataType::DoublePrecision) => Ok(SqlValue::Double(*i as f64)),
         (SqlValue::Smallint(i), DataType::Float { .. }) => Ok(SqlValue::Float(*i as f32)),
-        (SqlValue::Smallint(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)),  // Real is now f64
+        (SqlValue::Smallint(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)), // Real is now f64
         (SqlValue::Smallint(i), DataType::DoublePrecision) => Ok(SqlValue::Double(*i as f64)),
         (SqlValue::Bigint(i), DataType::Float { .. }) => Ok(SqlValue::Float(*i as f32)),
-        (SqlValue::Bigint(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)),  // Real is now f64
+        (SqlValue::Bigint(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)), // Real is now f64
         (SqlValue::Bigint(i), DataType::DoublePrecision) => Ok(SqlValue::Double(*i as f64)),
 
         // Integer → Numeric/Decimal (SQLite type affinity - integers can be stored in NUMERIC columns)
@@ -531,9 +527,7 @@ pub fn coerce_value(
                                 Ok(SqlValue::Integer(i))
                             } else if let Ok(f) = s.trim().parse::<f64>() {
                                 // Try as float, convert to int if whole number
-                                if f.fract() == 0.0
-                                    && f >= i64::MIN as f64
-                                    && f <= i64::MAX as f64
+                                if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64
                                 {
                                     Ok(SqlValue::Integer(f as i64))
                                 } else {
@@ -591,9 +585,7 @@ pub fn coerce_value(
                             // Try float next
                             if let Ok(f) = trimmed.parse::<f64>() {
                                 // SQLite converts to integer if it's a whole number
-                                if f.fract() == 0.0
-                                    && f >= i64::MIN as f64
-                                    && f <= i64::MAX as f64
+                                if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64
                                 {
                                     return Ok(SqlValue::Integer(f as i64));
                                 }

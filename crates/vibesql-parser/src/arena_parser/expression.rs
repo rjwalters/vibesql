@@ -192,8 +192,7 @@ impl<'arena> ArenaParser<'arena> {
             self.expect_token(Token::LParen)?;
 
             // Check for parenthesized subqueries like IN ((SELECT ...))
-            let (is_subquery_through_parens, extra_paren_depth) =
-                self.peek_select_through_parens();
+            let (is_subquery_through_parens, extra_paren_depth) = self.peek_select_through_parens();
 
             if self.peek_keyword(Keyword::Select)
                 || self.peek_keyword(Keyword::Values)
@@ -452,7 +451,11 @@ impl<'arena> ArenaParser<'arena> {
             let right = self.parse_multiplicative_expression()?;
             let left_ref = self.arena.alloc(left);
             let right_ref = self.arena.alloc(right);
-            left = Expression::BinaryOp { op: BinaryOperator::Concat, left: left_ref, right: right_ref };
+            left = Expression::BinaryOp {
+                op: BinaryOperator::Concat,
+                left: left_ref,
+                right: right_ref,
+            };
         }
 
         Ok(left)

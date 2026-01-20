@@ -290,12 +290,8 @@ mod tests {
         // Use a simple binary expression for testing: 1 + 1
         let expr = vibesql_ast::Expression::BinaryOp {
             op: vibesql_ast::BinaryOperator::Plus,
-            left: Box::new(vibesql_ast::Expression::Literal(
-                vibesql_types::SqlValue::Integer(1),
-            )),
-            right: Box::new(vibesql_ast::Expression::Literal(
-                vibesql_types::SqlValue::Integer(1),
-            )),
+            left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
+            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
         };
         let index = IndexMetadata::new(
             "idx_expr".to_string(),

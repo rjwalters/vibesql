@@ -868,10 +868,8 @@ impl CombinedSchema {
     ///
     /// Issue #4783, #4903: USING column semantics in OUTER JOINs with N-way coalescing
     pub fn add_using_coalesce_pair(&mut self, column: &str, left_idx: usize, right_idx: usize) {
-        let indices = self
-            .using_coalesce_indices
-            .entry(column.to_lowercase())
-            .or_insert_with(Vec::new);
+        let indices =
+            self.using_coalesce_indices.entry(column.to_lowercase()).or_insert_with(Vec::new);
 
         // Issue #4909: For chained NATURAL FULL JOINs like `t3 NATURAL FULL JOIN (inner)`,
         // the Vec may already have entries from the inner join (e.g., [t4.id, t5.id]).
@@ -994,7 +992,9 @@ impl CombinedSchema {
         let mut map = std::collections::HashMap::new();
 
         // Collect entries sorted by start_index to ensure deterministic ordering
-        let mut entries: Vec<_> = self.table_schemas.iter()
+        let mut entries: Vec<_> = self
+            .table_schemas
+            .iter()
             .filter(|(table_id, _)| !self.alias_tables.contains(*table_id))
             .map(|(_, (start_index, schema))| (*start_index, schema))
             .collect();

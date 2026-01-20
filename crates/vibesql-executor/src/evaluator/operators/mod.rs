@@ -29,7 +29,11 @@ use crate::errors::ExecutorError;
 /// Extracts a value from a JSON string using a key or path
 /// - as_text=false: returns JSON value (->)
 /// - as_text=true: returns text value (->>)
-fn json_extract(left: &SqlValue, right: &SqlValue, as_text: bool) -> Result<SqlValue, ExecutorError> {
+fn json_extract(
+    left: &SqlValue,
+    right: &SqlValue,
+    as_text: bool,
+) -> Result<SqlValue, ExecutorError> {
     // Get the JSON string from left operand
     let json_str = match left {
         SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
@@ -76,9 +80,19 @@ fn json_extract(left: &SqlValue, right: &SqlValue, as_text: bool) -> Result<SqlV
                 // ->> returns text (unquoted for strings, serialized for others)
                 match value {
                     serde_json::Value::Null => Ok(SqlValue::Null),
-                    serde_json::Value::String(s) => Ok(SqlValue::Varchar(arcstr::ArcStr::from(s.as_str()))),
-                    serde_json::Value::Number(n) => Ok(SqlValue::Varchar(arcstr::ArcStr::from(n.to_string()))),
-                    serde_json::Value::Bool(b) => Ok(SqlValue::Varchar(arcstr::ArcStr::from(if *b { "true" } else { "false" }))),
+                    serde_json::Value::String(s) => {
+                        Ok(SqlValue::Varchar(arcstr::ArcStr::from(s.as_str())))
+                    }
+                    serde_json::Value::Number(n) => {
+                        Ok(SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())))
+                    }
+                    serde_json::Value::Bool(b) => {
+                        Ok(SqlValue::Varchar(arcstr::ArcStr::from(if *b {
+                            "true"
+                        } else {
+                            "false"
+                        })))
+                    }
                     _ => Ok(SqlValue::Varchar(arcstr::ArcStr::from(value.to_string()))),
                 }
             } else {

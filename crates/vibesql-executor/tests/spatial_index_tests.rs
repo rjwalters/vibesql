@@ -10,7 +10,8 @@ fn test_create_spatial_index_basic() {
     let mut db = Database::new();
 
     // Create table with geometry column
-    let create_table_stmt = CreateTableStmt { temporary: false,
+    let create_table_stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "places".to_string(),
         columns: vec![
@@ -21,7 +22,8 @@ fn test_create_spatial_index_basic() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "location".to_string(),
@@ -30,13 +32,15 @@ fn test_create_spatial_index_basic() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
@@ -64,7 +68,8 @@ fn test_spatial_index_multiple_columns_error() {
     let mut db = Database::new();
 
     // Create table
-    let create_table_stmt = CreateTableStmt { temporary: false,
+    let create_table_stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "places".to_string(),
         columns: vec![
@@ -75,7 +80,8 @@ fn test_spatial_index_multiple_columns_error() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "location1".to_string(),
@@ -84,7 +90,8 @@ fn test_spatial_index_multiple_columns_error() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "location2".to_string(),
@@ -93,13 +100,15 @@ fn test_spatial_index_multiple_columns_error() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
@@ -133,7 +142,8 @@ fn test_drop_spatial_index() {
     let mut db = Database::new();
 
     // Create table with geometry column
-    let create_table_stmt = CreateTableStmt { temporary: false,
+    let create_table_stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "places".to_string(),
         columns: vec![
@@ -144,7 +154,8 @@ fn test_drop_spatial_index() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "location".to_string(),
@@ -153,13 +164,15 @@ fn test_drop_spatial_index() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
@@ -194,7 +207,8 @@ fn test_spatial_index_if_not_exists() {
     let mut db = Database::new();
 
     // Create table
-    let create_table_stmt = CreateTableStmt { temporary: false,
+    let create_table_stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "places".to_string(),
         columns: vec![
@@ -205,7 +219,8 @@ fn test_spatial_index_if_not_exists() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "location".to_string(),
@@ -214,13 +229,15 @@ fn test_spatial_index_if_not_exists() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();

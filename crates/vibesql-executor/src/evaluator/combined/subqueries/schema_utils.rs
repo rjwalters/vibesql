@@ -94,7 +94,8 @@ pub fn compute_select_list_column_count(
     database: &vibesql_storage::Database,
     cte_results: Option<&HashMap<String, CteResult>>,
 ) -> Result<usize, ExecutorError> {
-    let left_count = compute_single_select_column_count(&stmt.select_list, &stmt.from, database, cte_results)?;
+    let left_count =
+        compute_single_select_column_count(&stmt.select_list, &stmt.from, database, cte_results)?;
 
     // Issue #4881: Validate set operation column counts
     // If this SELECT has a set operation (UNION, INTERSECT, EXCEPT),
@@ -132,9 +133,7 @@ fn validate_set_operation_column_counts(
             (vibesql_ast::SetOperator::Except, true) => "EXCEPT ALL",
             (vibesql_ast::SetOperator::Except, false) => "EXCEPT",
         };
-        return Err(ExecutorError::SetOperationColumnMismatch {
-            operator: operator.to_string(),
-        });
+        return Err(ExecutorError::SetOperationColumnMismatch { operator: operator.to_string() });
     }
 
     // Recursively validate nested set operations

@@ -148,7 +148,11 @@ pub(crate) fn zeroblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         }
         SqlValue::Boolean(b) => {
             // Boolean converts to 0 or 1
-            if *b { 1 } else { 0 }
+            if *b {
+                1
+            } else {
+                0
+            }
         }
         _ => {
             return Err(ExecutorError::UnsupportedFeature(

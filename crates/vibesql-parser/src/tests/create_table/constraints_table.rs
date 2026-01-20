@@ -486,9 +486,8 @@ fn test_parse_on_conflict_table_constraints() {
 /// Test DEFERRABLE constraint on table-level FOREIGN KEY
 #[test]
 fn test_parse_foreign_key_deferrable() {
-    let result = Parser::parse_sql(
-        "CREATE TABLE t(a INTEGER, FOREIGN KEY(a) REFERENCES p(x) DEFERRABLE)"
-    );
+    let result =
+        Parser::parse_sql("CREATE TABLE t(a INTEGER, FOREIGN KEY(a) REFERENCES p(x) DEFERRABLE)");
     assert!(result.is_ok(), "Should parse FOREIGN KEY with DEFERRABLE: {:?}", result.err());
     let stmt = result.unwrap();
 
@@ -521,21 +520,19 @@ fn test_parse_foreign_key_deferrable() {
 #[test]
 fn test_parse_foreign_key_not_deferrable() {
     let result = Parser::parse_sql(
-        "CREATE TABLE t(a INTEGER, FOREIGN KEY(a) REFERENCES p(x) NOT DEFERRABLE)"
+        "CREATE TABLE t(a INTEGER, FOREIGN KEY(a) REFERENCES p(x) NOT DEFERRABLE)",
     );
     assert!(result.is_ok(), "Should parse FOREIGN KEY with NOT DEFERRABLE: {:?}", result.err());
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::CreateTable(create) => {
-            match &create.table_constraints[0].kind {
-                vibesql_ast::TableConstraintKind::ForeignKey { deferral, .. } => {
-                    let deferral = deferral.expect("Should have deferral");
-                    assert!(!deferral.is_deferrable, "Should NOT be deferrable");
-                }
-                _ => panic!("Expected FOREIGN KEY constraint"),
+        vibesql_ast::Statement::CreateTable(create) => match &create.table_constraints[0].kind {
+            vibesql_ast::TableConstraintKind::ForeignKey { deferral, .. } => {
+                let deferral = deferral.expect("Should have deferral");
+                assert!(!deferral.is_deferrable, "Should NOT be deferrable");
             }
-        }
+            _ => panic!("Expected FOREIGN KEY constraint"),
+        },
         _ => panic!("Expected CREATE TABLE statement"),
     }
 }
@@ -544,22 +541,20 @@ fn test_parse_foreign_key_not_deferrable() {
 #[test]
 fn test_parse_foreign_key_deferrable_initially_deferred() {
     let result = Parser::parse_sql(
-        "CREATE TABLE t(a INTEGER, FOREIGN KEY(a) REFERENCES p(x) DEFERRABLE INITIALLY DEFERRED)"
+        "CREATE TABLE t(a INTEGER, FOREIGN KEY(a) REFERENCES p(x) DEFERRABLE INITIALLY DEFERRED)",
     );
     assert!(result.is_ok(), "Should parse DEFERRABLE INITIALLY DEFERRED: {:?}", result.err());
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::CreateTable(create) => {
-            match &create.table_constraints[0].kind {
-                vibesql_ast::TableConstraintKind::ForeignKey { deferral, .. } => {
-                    let deferral = deferral.expect("Should have deferral");
-                    assert!(deferral.is_deferrable, "Should be deferrable");
-                    assert!(deferral.initially_deferred, "Should be INITIALLY DEFERRED");
-                }
-                _ => panic!("Expected FOREIGN KEY constraint"),
+        vibesql_ast::Statement::CreateTable(create) => match &create.table_constraints[0].kind {
+            vibesql_ast::TableConstraintKind::ForeignKey { deferral, .. } => {
+                let deferral = deferral.expect("Should have deferral");
+                assert!(deferral.is_deferrable, "Should be deferrable");
+                assert!(deferral.initially_deferred, "Should be INITIALLY DEFERRED");
             }
-        }
+            _ => panic!("Expected FOREIGN KEY constraint"),
+        },
         _ => panic!("Expected CREATE TABLE statement"),
     }
 }
@@ -568,22 +563,20 @@ fn test_parse_foreign_key_deferrable_initially_deferred() {
 #[test]
 fn test_parse_foreign_key_deferrable_initially_immediate() {
     let result = Parser::parse_sql(
-        "CREATE TABLE t(a INTEGER, FOREIGN KEY(a) REFERENCES p(x) DEFERRABLE INITIALLY IMMEDIATE)"
+        "CREATE TABLE t(a INTEGER, FOREIGN KEY(a) REFERENCES p(x) DEFERRABLE INITIALLY IMMEDIATE)",
     );
     assert!(result.is_ok(), "Should parse DEFERRABLE INITIALLY IMMEDIATE: {:?}", result.err());
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::CreateTable(create) => {
-            match &create.table_constraints[0].kind {
-                vibesql_ast::TableConstraintKind::ForeignKey { deferral, .. } => {
-                    let deferral = deferral.expect("Should have deferral");
-                    assert!(deferral.is_deferrable, "Should be deferrable");
-                    assert!(!deferral.initially_deferred, "Should be INITIALLY IMMEDIATE");
-                }
-                _ => panic!("Expected FOREIGN KEY constraint"),
+        vibesql_ast::Statement::CreateTable(create) => match &create.table_constraints[0].kind {
+            vibesql_ast::TableConstraintKind::ForeignKey { deferral, .. } => {
+                let deferral = deferral.expect("Should have deferral");
+                assert!(deferral.is_deferrable, "Should be deferrable");
+                assert!(!deferral.initially_deferred, "Should be INITIALLY IMMEDIATE");
             }
-        }
+            _ => panic!("Expected FOREIGN KEY constraint"),
+        },
         _ => panic!("Expected CREATE TABLE statement"),
     }
 }
@@ -594,24 +587,26 @@ fn test_parse_foreign_key_deferrable_with_actions() {
     let result = Parser::parse_sql(
         "CREATE TABLE t(a INTEGER, FOREIGN KEY(a) REFERENCES p(x) ON DELETE CASCADE ON UPDATE SET NULL DEFERRABLE INITIALLY DEFERRED)"
     );
-    assert!(result.is_ok(), "Should parse with ON DELETE/UPDATE and DEFERRABLE: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse with ON DELETE/UPDATE and DEFERRABLE: {:?}",
+        result.err()
+    );
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::CreateTable(create) => {
-            match &create.table_constraints[0].kind {
-                vibesql_ast::TableConstraintKind::ForeignKey {
-                    on_delete, on_update, deferral, ..
-                } => {
-                    assert_eq!(on_delete, &Some(vibesql_ast::ReferentialAction::Cascade));
-                    assert_eq!(on_update, &Some(vibesql_ast::ReferentialAction::SetNull));
-                    let deferral = deferral.expect("Should have deferral");
-                    assert!(deferral.is_deferrable);
-                    assert!(deferral.initially_deferred);
-                }
-                _ => panic!("Expected FOREIGN KEY constraint"),
+        vibesql_ast::Statement::CreateTable(create) => match &create.table_constraints[0].kind {
+            vibesql_ast::TableConstraintKind::ForeignKey {
+                on_delete, on_update, deferral, ..
+            } => {
+                assert_eq!(on_delete, &Some(vibesql_ast::ReferentialAction::Cascade));
+                assert_eq!(on_update, &Some(vibesql_ast::ReferentialAction::SetNull));
+                let deferral = deferral.expect("Should have deferral");
+                assert!(deferral.is_deferrable);
+                assert!(deferral.initially_deferred);
             }
-        }
+            _ => panic!("Expected FOREIGN KEY constraint"),
+        },
         _ => panic!("Expected CREATE TABLE statement"),
     }
 }

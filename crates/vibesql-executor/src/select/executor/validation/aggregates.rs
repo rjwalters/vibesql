@@ -547,10 +547,8 @@ pub fn find_window_function_in_expression(expr: &Expression) -> Option<String> {
             }
             None
         }
-        Expression::BinaryOp { left, right, .. } => {
-            find_window_function_in_expression(left)
-                .or_else(|| find_window_function_in_expression(right))
-        }
+        Expression::BinaryOp { left, right, .. } => find_window_function_in_expression(left)
+            .or_else(|| find_window_function_in_expression(right)),
         Expression::UnaryOp { expr, .. } => find_window_function_in_expression(expr),
         Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
@@ -575,10 +573,8 @@ pub fn find_window_function_in_expression(expr: &Expression) -> Option<String> {
             }
         }
         Expression::IsNull { expr, .. } => find_window_function_in_expression(expr),
-        Expression::IsDistinctFrom { left, right, .. } => {
-            find_window_function_in_expression(left)
-                .or_else(|| find_window_function_in_expression(right))
-        }
+        Expression::IsDistinctFrom { left, right, .. } => find_window_function_in_expression(left)
+            .or_else(|| find_window_function_in_expression(right)),
         Expression::IsTruthValue { expr, .. } => find_window_function_in_expression(expr),
         Expression::Between { expr, low, high, .. } => find_window_function_in_expression(expr)
             .or_else(|| find_window_function_in_expression(low))
