@@ -199,7 +199,7 @@ pub use revoke::{CascadeOption, RevokeStmt};
 pub use select::{
     CommonTableExpr, CteMaterialization, FromClause, GroupByClause, GroupingElement, GroupingSet,
     JoinType, MixedGroupingItem, NullsOrder, OrderByItem, OrderDirection, SelectItem, SelectStmt,
-    SetOperation, SetOperator,
+    SetOperation, SetOperator, WindowDefinition,
 };
 pub use statement::Statement;
 

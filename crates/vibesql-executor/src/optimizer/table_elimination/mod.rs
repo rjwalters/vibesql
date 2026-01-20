@@ -308,6 +308,7 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
         where_clause: new_where,
         group_by: stmt.group_by.clone(),
         having: stmt.having.clone(),
+        window_definitions: stmt.window_definitions.clone(),
         order_by: stmt.order_by.clone(),
         limit: stmt.limit.clone(),
         offset: stmt.offset.clone(),

@@ -207,7 +207,7 @@ impl SelectExecutor<'_> {
         // Process window functions - this adds computed values to each row
         // and returns a mapping from WindowFunctionKey to column index
         let (rows_with_windows, window_mapping) =
-            evaluate_window_functions(rows, &stmt.select_list, &evaluator)?;
+            evaluate_window_functions(rows, &stmt.select_list, stmt.window_definitions.as_ref(), &evaluator)?;
         rows = rows_with_windows;
 
         // Now evaluate the SELECT list with the window mapping

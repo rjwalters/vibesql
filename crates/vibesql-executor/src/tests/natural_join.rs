@@ -142,6 +142,7 @@ fn test_natural_join_single_common_column() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,
@@ -286,6 +287,7 @@ fn test_natural_join_respects_collation() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,
@@ -393,6 +395,7 @@ fn test_using_join_respects_collation() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,
@@ -581,6 +584,7 @@ fn test_issue_4843_inner_join_using_with_nested_left_join_nulls() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
             expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
                 "t2", false, "a", false,

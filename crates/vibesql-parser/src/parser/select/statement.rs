@@ -135,6 +135,15 @@ impl Parser {
             None
         };
 
+        // Parse optional WINDOW clause (named window definitions)
+        // Example: WINDOW win AS (PARTITION BY x ORDER BY y)
+        let window_definitions = if self.peek_keyword(Keyword::Window) {
+            self.consume_keyword(Keyword::Window)?;
+            Some(self.parse_window_definitions()?)
+        } else {
+            None
+        };
+
         // Parse set operations (UNION, INTERSECT, EXCEPT) before ORDER BY/LIMIT
         // This ensures ORDER BY/LIMIT apply to the entire set operation result
         let set_operation = if self.peek_keyword(Keyword::Union)
@@ -400,6 +409,7 @@ impl Parser {
             where_clause,
             group_by,
             having,
+            window_definitions,
             order_by,
             limit,
             offset,
@@ -740,6 +750,7 @@ impl Parser {
             where_clause: None,
             group_by: None,
             having: None,
+            window_definitions: None,
             order_by,
             limit,
             offset,

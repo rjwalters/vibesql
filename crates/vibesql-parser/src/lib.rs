@@ -175,4 +175,27 @@ mod arena_fallback_tests {
             panic!("Expected SELECT statement");
         }
     }
+
+    #[test]
+    fn test_window_clause_parsing() {
+        // Test 1: Just OVER win (without WINDOW clause) - window name reference
+        let sql = "SELECT sum(x) OVER win FROM t1";
+        let result = Parser::parse_sql(sql);
+        assert!(result.is_ok(), "OVER win reference failed: {:?}", result.err());
+
+        // Test 2: WINDOW clause definition
+        let sql = "SELECT 1 FROM t1 WINDOW win AS (ORDER BY y)";
+        let result = Parser::parse_sql(sql);
+        assert!(result.is_ok(), "WINDOW clause failed: {:?}", result.err());
+
+        // Test 3: Full window clause with reference
+        let sql = "SELECT sum(x) OVER win FROM t1 WINDOW win AS (ORDER BY y)";
+        let result = Parser::parse_sql(sql);
+        assert!(result.is_ok(), "Full WINDOW clause failed: {:?}", result.err());
+
+        // Test 4: Window inheritance (WINDOW win2 AS (win ORDER BY ...))
+        let sql = "SELECT row_number() OVER win2 FROM t1 WINDOW win AS (PARTITION BY z), win2 AS (win ORDER BY x)";
+        let result = Parser::parse_sql(sql);
+        assert!(result.is_ok(), "Window inheritance failed: {:?}", result.err());
+    }
 }

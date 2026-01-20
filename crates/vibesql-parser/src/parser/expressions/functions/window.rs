@@ -92,10 +92,44 @@ impl Parser {
     }
 
     /// Parse window specification (OVER clause contents)
+    ///
+    /// Supports:
+    /// - `OVER ()` - empty window
+    /// - `OVER (PARTITION BY ... ORDER BY ...)` - full specification
+    /// - `OVER window_name` - reference to named window (no parens)
+    /// - `OVER (window_name)` - reference to named window
+    /// - `OVER (window_name ORDER BY ...)` - inherit from named window with additions
     pub(super) fn parse_window_spec(&mut self) -> Result<vibesql_ast::WindowSpec, ParseError> {
-        // OVER ( [PARTITION BY expr_list] [ORDER BY order_list] [frame_clause] )
+        // Check for OVER window_name (bare identifier, no parentheses)
+        // This handles: OVER win
+        match self.peek() {
+            Token::Identifier(name) => {
+                let base_name = name.clone();
+                self.advance();
+                return Ok(vibesql_ast::WindowSpec {
+                    base_window_name: Some(base_name),
+                    partition_by: None,
+                    order_by: None,
+                    frame: None,
+                });
+            }
+            Token::LParen => {
+                // Fall through to parenthesized window spec parsing
+            }
+            other => {
+                return Err(ParseError {
+                    message: format!(
+                        "Expected window specification (identifier or '('), found {:?}",
+                        other
+                    ),
+                });
+            }
+        }
+
+        // OVER ( [window_name] [PARTITION BY expr_list] [ORDER BY order_list] [frame_clause] )
         self.expect_token(Token::LParen)?;
 
+        let mut base_window_name = None;
         let mut partition_by = None;
         let mut order_by = None;
         let mut frame = None;
@@ -103,7 +137,47 @@ impl Parser {
         // Check for empty OVER()
         if matches!(self.peek(), Token::RParen) {
             self.advance();
-            return Ok(vibesql_ast::WindowSpec { partition_by, order_by, frame });
+            return Ok(vibesql_ast::WindowSpec { base_window_name, partition_by, order_by, frame });
+        }
+
+        // Check for base window name (inheriting from a named window)
+        // This handles: OVER (win ...) or OVER (win)
+        // The identifier must be followed by a clause keyword (PARTITION, ORDER, ROWS, RANGE, GROUPS)
+        // or closing paren - not followed by something that would make it an expression
+        if let Token::Identifier(name) = self.peek() {
+            // Peek ahead to see what follows
+            let name_clone = name.clone();
+
+            // Look at the next token after the identifier
+            // Save position and advance to check
+            self.advance(); // consume identifier
+
+            // Check if this looks like a window name reference
+            match self.peek() {
+                Token::RParen
+                | Token::Keyword { keyword: Keyword::Partition, .. }
+                | Token::Keyword { keyword: Keyword::Order, .. }
+                | Token::Keyword { keyword: Keyword::Rows, .. }
+                | Token::Keyword { keyword: Keyword::Range, .. }
+                | Token::Keyword { keyword: Keyword::Groups, .. } => {
+                    // This is a window name reference
+                    base_window_name = Some(name_clone);
+                }
+                _ => {
+                    // Not a window name, backtrack and parse normally as expression
+                    // This case handles things like OVER (1) which isn't valid anyway
+                    // but we'll let it fall through to PARTITION BY parsing
+                    // Actually, we need to restore - but we can't easily backtrack
+                    // So let's just error if we're in this ambiguous state
+                    return Err(ParseError {
+                        message: format!(
+                            "Expected PARTITION BY, ORDER BY, frame clause, or ')' after window name '{}', found {:?}",
+                            name_clone,
+                            self.peek()
+                        ),
+                    });
+                }
+            }
         }
 
         // Parse PARTITION BY clause
@@ -166,7 +240,7 @@ impl Parser {
 
         self.expect_token(Token::RParen)?;
 
-        Ok(vibesql_ast::WindowSpec { partition_by, order_by, frame })
+        Ok(vibesql_ast::WindowSpec { base_window_name, partition_by, order_by, frame })
     }
 
     /// Parse frame clause (ROWS/RANGE/GROUPS BETWEEN ... AND ... [EXCLUDE ...])
@@ -347,5 +421,155 @@ impl Parser {
                 }
             }
         }
+    }
+
+    /// Parse WINDOW clause definitions
+    ///
+    /// Syntax: WINDOW name AS (window_spec) [, name AS (window_spec) ...]
+    ///
+    /// Example: WINDOW win AS (PARTITION BY x ORDER BY y), win2 AS (ORDER BY z)
+    pub(crate) fn parse_window_definitions(
+        &mut self,
+    ) -> Result<Vec<vibesql_ast::WindowDefinition>, ParseError> {
+        let mut definitions = Vec::new();
+
+        loop {
+            // Parse window name
+            let name = match self.peek() {
+                Token::Identifier(id) => {
+                    let name = id.clone();
+                    self.advance();
+                    name
+                }
+                Token::Keyword { original, .. } => {
+                    // Allow keywords as window names (for compatibility)
+                    let name = original.clone();
+                    self.advance();
+                    name
+                }
+                _ => {
+                    return Err(ParseError {
+                        message: format!(
+                            "Expected window name identifier, found {:?}",
+                            self.peek()
+                        ),
+                    })
+                }
+            };
+
+            // Expect AS keyword
+            self.expect_keyword(Keyword::As)?;
+
+            // Parse the window specification (including parentheses)
+            self.expect_token(Token::LParen)?;
+
+            let mut base_window_name = None;
+            let mut partition_by = None;
+            let mut order_by = None;
+            let mut frame = None;
+
+            // Check for empty window spec
+            if !matches!(self.peek(), Token::RParen) {
+                // Check for base window name
+                if let Token::Identifier(base_name) = self.peek() {
+                    let base_name_clone = base_name.clone();
+                    self.advance();
+
+                    // Check if this looks like a window name reference
+                    match self.peek() {
+                        Token::RParen
+                        | Token::Keyword { keyword: Keyword::Partition, .. }
+                        | Token::Keyword { keyword: Keyword::Order, .. }
+                        | Token::Keyword { keyword: Keyword::Rows, .. }
+                        | Token::Keyword { keyword: Keyword::Range, .. }
+                        | Token::Keyword { keyword: Keyword::Groups, .. } => {
+                            base_window_name = Some(base_name_clone);
+                        }
+                        _ => {
+                            return Err(ParseError {
+                                message: format!(
+                                    "Expected window specification clause after '{}', found {:?}",
+                                    base_name_clone,
+                                    self.peek()
+                                ),
+                            });
+                        }
+                    }
+                }
+
+                // Parse PARTITION BY clause
+                if matches!(self.peek(), Token::Keyword { keyword: Keyword::Partition, .. }) {
+                    self.advance();
+                    self.expect_keyword(Keyword::By)?;
+
+                    let mut expressions = vec![self.parse_expression()?];
+                    while matches!(self.peek(), Token::Comma) {
+                        self.advance();
+                        expressions.push(self.parse_expression()?);
+                    }
+                    partition_by = Some(expressions);
+                }
+
+                // Parse ORDER BY clause
+                if matches!(self.peek(), Token::Keyword { keyword: Keyword::Order, .. }) {
+                    self.advance();
+                    self.expect_keyword(Keyword::By)?;
+
+                    let mut order_items = Vec::new();
+                    loop {
+                        let expr = self.parse_expression()?;
+                        let direction =
+                            if matches!(self.peek(), Token::Keyword { keyword: Keyword::Asc, .. }) {
+                                self.advance();
+                                vibesql_ast::OrderDirection::Asc
+                            } else if matches!(
+                                self.peek(),
+                                Token::Keyword { keyword: Keyword::Desc, .. }
+                            ) {
+                                self.advance();
+                                vibesql_ast::OrderDirection::Desc
+                            } else {
+                                vibesql_ast::OrderDirection::Asc
+                            };
+
+                        order_items
+                            .push(vibesql_ast::OrderByItem { expr, direction, nulls_order: None });
+
+                        if matches!(self.peek(), Token::Comma) {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    order_by = Some(order_items);
+                }
+
+                // Parse frame clause
+                if matches!(
+                    self.peek(),
+                    Token::Keyword { keyword: Keyword::Rows, .. }
+                        | Token::Keyword { keyword: Keyword::Range, .. }
+                        | Token::Keyword { keyword: Keyword::Groups, .. }
+                ) {
+                    frame = Some(self.parse_frame_clause()?);
+                }
+            }
+
+            self.expect_token(Token::RParen)?;
+
+            definitions.push(vibesql_ast::WindowDefinition {
+                name,
+                spec: vibesql_ast::WindowSpec { base_window_name, partition_by, order_by, frame },
+            });
+
+            // Check for more window definitions
+            if matches!(self.peek(), Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        Ok(definitions)
     }
 }

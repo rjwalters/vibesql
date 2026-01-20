@@ -234,6 +234,7 @@ where
         where_clause: cte.query.where_clause.clone(),
         group_by: cte.query.group_by.clone(),
         having: cte.query.having.clone(),
+        window_definitions: cte.query.window_definitions.clone(),
         order_by: cte.query.order_by.clone(),
         limit: cte.query.limit.clone(),
         offset: cte.query.offset.clone(),

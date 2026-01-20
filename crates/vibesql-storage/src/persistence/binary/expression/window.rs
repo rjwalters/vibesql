@@ -163,7 +163,7 @@ pub(super) fn read_window_spec<R: Read>(reader: &mut R) -> Result<WindowSpec, St
     let has_frame = read_bool(reader)?;
     let frame = if has_frame { Some(read_window_frame(reader)?) } else { None };
 
-    Ok(WindowSpec { partition_by, order_by: None, frame })
+    Ok(WindowSpec { base_window_name: None, partition_by, order_by: None, frame })
 }
 
 fn write_window_frame<W: Write>(writer: &mut W, frame: &WindowFrame) -> Result<(), StorageError> {

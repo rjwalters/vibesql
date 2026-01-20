@@ -115,6 +115,7 @@ fn test_index_ordering() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
             expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
                 "name", false,

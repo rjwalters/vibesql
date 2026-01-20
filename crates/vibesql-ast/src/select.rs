@@ -3,7 +3,27 @@
 //! This module contains all types related to SELECT queries including
 //! SELECT items, FROM clauses, JOINs, and ORDER BY.
 
-use crate::Expression;
+use crate::{Expression, WindowSpec};
+
+// ============================================================================
+// Named Window Definitions (WINDOW clause)
+// ============================================================================
+
+/// A named window definition from the WINDOW clause
+///
+/// SQL:2003 allows naming window specifications for reuse:
+/// `SELECT ... FROM t WINDOW win AS (PARTITION BY x ORDER BY y)`
+///
+/// Window functions can then reference the named window:
+/// - `sum(a) OVER win` - uses the named window directly
+/// - `sum(a) OVER (win ORDER BY z)` - inherits from win and adds/overrides ORDER BY
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowDefinition {
+    /// Name of the window (identifier after WINDOW keyword)
+    pub name: String,
+    /// The window specification
+    pub spec: WindowSpec,
+}
 
 // ============================================================================
 // Common Table Expressions (CTEs)
@@ -73,6 +93,9 @@ pub struct SelectStmt {
     pub where_clause: Option<Expression>,
     pub group_by: Option<GroupByClause>,
     pub having: Option<Expression>,
+    /// Named window definitions (WINDOW clause)
+    /// Example: `SELECT ... FROM t1 WINDOW win AS (ORDER BY x)`
+    pub window_definitions: Option<Vec<WindowDefinition>>,
     pub order_by: Option<Vec<OrderByItem>>,
     pub limit: Option<Expression>,
     pub offset: Option<Expression>,

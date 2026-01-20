@@ -58,6 +58,7 @@ fn test_nested_comparisons() {
         }),
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,

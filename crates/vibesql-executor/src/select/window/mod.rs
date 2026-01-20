@@ -17,7 +17,7 @@ pub(super) use detection::{expression_has_window_function, has_window_functions}
 pub(super) use order_by::{collect_order_by_window_functions, evaluate_order_by_window_functions};
 // Re-export public types
 pub use types::WindowFunctionKey;
-use vibesql_ast::SelectItem;
+use vibesql_ast::{SelectItem, WindowDefinition};
 use vibesql_storage::Row;
 
 use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
@@ -34,7 +34,7 @@ use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 /// - mapping: HashMap mapping WindowFunctionKey to column index in extended row
 ///
 /// # Algorithm
-/// 1. Find all window functions in SELECT list
+/// 1. Find all window functions in SELECT list (resolving named window references)
 /// 2. Group window functions by their window specification (for optimization)
 /// 3. For each unique window spec:
 ///    - Partition rows according to PARTITION BY
@@ -46,10 +46,11 @@ use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 pub(super) fn evaluate_window_functions(
     mut rows: Vec<Row>,
     select_list: &[SelectItem],
+    window_definitions: Option<&Vec<WindowDefinition>>,
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<(Vec<Row>, HashMap<WindowFunctionKey, usize>), ExecutorError> {
-    // Find all window functions in SELECT list
-    let window_functions = collection::collect_window_functions(select_list)?;
+    // Find all window functions in SELECT list, resolving named window references
+    let window_functions = collection::collect_window_functions(select_list, window_definitions)?;
 
     if window_functions.is_empty() {
         return Ok((rows, HashMap::new()));
@@ -77,8 +78,9 @@ pub(super) fn evaluate_window_functions(
         }
 
         // Build mapping: WindowFunctionKey -> column index
+        // Use original_window_spec for key generation to match lookups using unresolved expressions
         let key =
-            WindowFunctionKey::from_expression(&win_func.function_spec, &win_func.window_spec);
+            WindowFunctionKey::from_expression(&win_func.function_spec, &win_func.original_window_spec);
         let col_idx = base_column_count + idx;
         window_mapping.insert(key, col_idx);
     }

@@ -181,6 +181,7 @@ fn test_having_clause() {
                 150,
             ))),
         }),
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,

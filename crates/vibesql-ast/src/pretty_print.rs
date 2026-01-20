@@ -767,6 +767,11 @@ impl ToSql for WindowSpec {
     fn to_sql(&self) -> String {
         let mut parts = Vec::new();
 
+        // Add base window name if present (for window inheritance)
+        if let Some(base_name) = &self.base_window_name {
+            parts.push(base_name.clone());
+        }
+
         if let Some(partition_by) = &self.partition_by {
             let exprs: Vec<String> = partition_by.iter().map(|e| e.to_sql()).collect();
             parts.push(format!("PARTITION BY {}", exprs.join(", ")));
@@ -1449,6 +1454,7 @@ mod tests {
                 args: vec![],
             },
             over: WindowSpec {
+                base_window_name: None,
                 partition_by: Some(vec![Expression::ColumnRef(ColumnIdentifier::simple(
                     "dept", false,
                 ))]),

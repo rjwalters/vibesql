@@ -252,6 +252,7 @@ fn try_convert_complex_exists_to_join(
         where_clause: internal_where,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,

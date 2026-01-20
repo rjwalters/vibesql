@@ -200,6 +200,7 @@ fn test_inner_join_with_group_by_count() {
                 )),
             ])),
             having: None,
+            window_definitions: None,
             order_by: None, // ORDER BY with aggregate aliases not yet supported
             limit: None,
             offset: None,
@@ -313,6 +314,7 @@ fn test_left_join_with_group_by_avg_salary() {
                 )),
             ])),
             having: None,
+            window_definitions: None,
             order_by: None, // ORDER BY with aggregate aliases not yet supported
             limit: None,
             offset: None,
@@ -437,6 +439,7 @@ fn test_join_group_by_with_having() {
                 op: vibesql_ast::BinaryOperator::GreaterThanOrEqual,
                 right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Integer(2))),
             }),
+            window_definitions: None,
             order_by: None,
             limit: None,
             offset: None,
@@ -553,6 +556,7 @@ fn test_join_group_by_multiple_aggregates() {
                 )),
             ])),
             having: None,
+            window_definitions: None,
             order_by: None,
             limit: None,
             offset: None,

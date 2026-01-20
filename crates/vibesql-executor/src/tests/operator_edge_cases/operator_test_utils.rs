@@ -26,6 +26,7 @@ pub fn create_select_stmt(expr: vibesql_ast::Expression, alias: &str) -> vibesql
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,

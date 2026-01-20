@@ -67,6 +67,7 @@ fn test_trigger_failure_causes_rollback() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,

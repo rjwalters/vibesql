@@ -278,6 +278,7 @@ pub(super) fn try_convert_scalar_comparison_to_join(
         where_clause: new_where,
         group_by: Some(GroupByClause::Simple(group_by)),
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,

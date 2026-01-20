@@ -776,6 +776,7 @@ fn resolve_outer_aliases_in_subquery(
         where_clause: resolved_where,
         group_by: subquery.group_by.clone(),
         having: resolved_having,
+        window_definitions: None,
         order_by: subquery.order_by.clone(),
         limit: subquery.limit.clone(),
         offset: subquery.offset.clone(),
