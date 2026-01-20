@@ -21,9 +21,7 @@ use crate::errors::ExecutorError;
 /// Reference: https://www.sqlite.org/json1.html#the_json_function
 pub(crate) fn json(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
-        return Err(ExecutorError::WrongNumberOfArguments {
-            function_name: "json".to_string(),
-        });
+        return Err(ExecutorError::WrongNumberOfArguments { function_name: "json".to_string() });
     }
 
     match &args[0] {
@@ -114,10 +112,7 @@ mod tests {
         let input = r#"{"a": {"b": [1, 2, 3]}, "c": "test"}"#;
         let result = json(&[SqlValue::Varchar(input.into())]).unwrap();
         // serde_json preserves key order in minified output
-        assert_eq!(
-            result,
-            SqlValue::Varchar(r#"{"a":{"b":[1,2,3]},"c":"test"}"#.into())
-        );
+        assert_eq!(result, SqlValue::Varchar(r#"{"a":{"b":[1,2,3]},"c":"test"}"#.into()));
     }
 
     #[test]
@@ -127,10 +122,7 @@ mod tests {
         assert!(result.is_err());
 
         // Too many arguments
-        let result = json(&[
-            SqlValue::Varchar("[]".into()),
-            SqlValue::Varchar("[]".into()),
-        ]);
+        let result = json(&[SqlValue::Varchar("[]".into()), SqlValue::Varchar("[]".into())]);
         assert!(result.is_err());
     }
 

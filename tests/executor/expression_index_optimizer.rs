@@ -104,7 +104,10 @@ fn test_expression_index_with_upper() {
     execute(&mut db, "CREATE INDEX idx_dept_upper ON employees(UPPER(department))");
 
     // Query using UPPER(department)
-    let results = query(&mut db, "SELECT id FROM employees WHERE UPPER(department) = 'ENGINEERING' ORDER BY id");
+    let results = query(
+        &mut db,
+        "SELECT id FROM employees WHERE UPPER(department) = 'ENGINEERING' ORDER BY id",
+    );
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].values[0], SqlValue::Integer(1));
     assert_eq!(results[1].values[0], SqlValue::Integer(4));
@@ -132,10 +135,7 @@ fn test_expression_index_range_query() {
     execute(&mut db, "CREATE INDEX idx_abs_price ON products(ABS(price))");
 
     // Range query on expression - should use index
-    let results = query(
-        &mut db,
-        "SELECT id FROM products WHERE ABS(price) > 30 ORDER BY id",
-    );
+    let results = query(&mut db, "SELECT id FROM products WHERE ABS(price) > 30 ORDER BY id");
     assert_eq!(results.len(), 2); // Products with ABS(price) > 30: 100 and |-50|=50
     assert_eq!(results[0].values[0], SqlValue::Integer(1)); // price 100
     assert_eq!(results[1].values[0], SqlValue::Integer(2)); // price -50, abs=50

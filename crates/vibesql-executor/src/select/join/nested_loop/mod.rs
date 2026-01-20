@@ -39,12 +39,18 @@ use crate::{
 };
 
 /// Nested loop INNER JOIN implementation
+///
+/// Issue #4994: Added outer_row and outer_schema parameters so JOIN conditions
+/// that reference columns from outer queries (correlated derived tables) can
+/// be properly evaluated.
 pub(in crate::select::join) fn nested_loop_inner_join(
     left: FromResult,
     right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<FromResult, ExecutorError> {
     // Check for potential cartesian product before execution
     // This catches INNER JOINs with non-selective conditions (e.g., WHERE true)
@@ -90,6 +96,7 @@ pub(in crate::select::join) fn nested_loop_inner_join(
     let right_table_names = right.schema.table_names();
 
     // Execute join with optimized strategy
+    // Issue #4994: Pass outer context so JOIN conditions can reference outer columns
     let result_rows = execute_with_strategy(
         left_slice,
         right_slice,
@@ -100,18 +107,26 @@ pub(in crate::select::join) fn nested_loop_inner_join(
         timeout_ctx,
         &left_table_names,
         &right_table_names,
+        outer_row,
+        outer_schema,
     )?;
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
 }
 
 /// Nested loop LEFT OUTER JOIN implementation
+///
+/// Issue #4994: Added outer_row and outer_schema parameters so JOIN conditions
+/// that reference columns from outer queries (correlated derived tables) can
+/// be properly evaluated.
 pub(in crate::select::join) fn nested_loop_left_outer_join(
     left: FromResult,
     right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<FromResult, ExecutorError> {
     // Note: No memory check here. Hash join is selected in mod.rs BEFORE this function is called.
     // OUTER JOINs typically preserve at least the left table size, making estimates more reliable.
@@ -125,7 +140,18 @@ pub(in crate::select::join) fn nested_loop_left_outer_join(
 
     // Combine schemas using merge to preserve all tables from nested joins
     let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
-    let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
+    // Issue #4994: Create evaluator with outer context if available
+    let evaluator = match (outer_row, outer_schema) {
+        (Some(outer_row), Some(outer_schema)) => {
+            CombinedExpressionEvaluator::with_database_and_outer_context(
+                &combined_schema,
+                database,
+                outer_row,
+                outer_schema,
+            )
+        }
+        _ => CombinedExpressionEvaluator::with_database(&combined_schema, database),
+    };
 
     // Use as_slice() for zero-cost access without triggering row materialization
     let left_slice = left.as_slice();
@@ -196,12 +222,18 @@ pub(in crate::select::join) fn nested_loop_left_outer_join(
 }
 
 /// Nested loop RIGHT OUTER JOIN implementation
+///
+/// Issue #4994: Added outer_row and outer_schema parameters so JOIN conditions
+/// that reference columns from outer queries (correlated derived tables) can
+/// be properly evaluated.
 pub(in crate::select::join) fn nested_loop_right_outer_join(
     left: FromResult,
     right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<FromResult, ExecutorError> {
     // Note: Memory check removed - delegates to LEFT OUTER JOIN which also doesn't check.
 
@@ -216,8 +248,16 @@ pub(in crate::select::join) fn nested_loop_right_outer_join(
     let right_col_count = right_schema.total_columns;
 
     // Do LEFT OUTER JOIN with swapped sides
-    let swapped_result =
-        nested_loop_left_outer_join(right, left, condition, database, timeout_ctx)?;
+    // Issue #4994: Pass outer context through
+    let swapped_result = nested_loop_left_outer_join(
+        right,
+        left,
+        condition,
+        database,
+        timeout_ctx,
+        outer_row,
+        outer_schema,
+    )?;
 
     // Now we need to reorder the columns in the result
     // The swapped result has right columns first, then left columns
@@ -246,12 +286,18 @@ pub(in crate::select::join) fn nested_loop_right_outer_join(
 }
 
 /// Nested loop FULL OUTER JOIN implementation
+///
+/// Issue #4994: Added outer_row and outer_schema parameters so JOIN conditions
+/// that reference columns from outer queries (correlated derived tables) can
+/// be properly evaluated.
 pub(in crate::select::join) fn nested_loop_full_outer_join(
     left: FromResult,
     right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<FromResult, ExecutorError> {
     // Note: Memory check removed - full outer joins are rare and typically used
     // with smaller datasets. Hash join is tried first for equijoins anyway.
@@ -262,7 +308,18 @@ pub(in crate::select::join) fn nested_loop_full_outer_join(
 
     // Combine schemas using merge to preserve all tables from nested joins
     let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
-    let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
+    // Issue #4994: Create evaluator with outer context if available
+    let evaluator = match (outer_row, outer_schema) {
+        (Some(outer_row), Some(outer_schema)) => {
+            CombinedExpressionEvaluator::with_database_and_outer_context(
+                &combined_schema,
+                database,
+                outer_row,
+                outer_schema,
+            )
+        }
+        _ => CombinedExpressionEvaluator::with_database(&combined_schema, database),
+    };
 
     // Use as_slice() for zero-cost access without triggering row materialization
     let left_slice = left.as_slice();
@@ -330,12 +387,18 @@ pub(in crate::select::join) fn nested_loop_full_outer_join(
 }
 
 /// Nested loop CROSS JOIN implementation (Cartesian product)
+///
+/// Issue #4994: Added outer_row and outer_schema parameters for consistency with other
+/// join functions, though CROSS JOIN doesn't support ON clause and doesn't use them.
+#[allow(unused_variables)]
 pub(in crate::select::join) fn nested_loop_cross_join(
     left: FromResult,
     right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     _database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<FromResult, ExecutorError> {
     // CROSS JOIN should not have a condition
     if condition.is_some() {
@@ -410,12 +473,18 @@ pub(in crate::select::join) fn nested_loop_cross_join(
 ///
 /// Semi-join returns left rows that have at least one match in the right table.
 /// Unlike INNER JOIN, each left row is returned at most once (no duplicates).
+///
+/// Issue #4994: Added outer_row and outer_schema parameters so JOIN conditions
+/// that reference columns from outer queries (correlated derived tables) can
+/// be properly evaluated.
 pub(in crate::select::join) fn nested_loop_semi_join(
     left: FromResult,
     right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<FromResult, ExecutorError> {
     let left_schema = left.schema.clone();
 
@@ -446,8 +515,18 @@ pub(in crate::select::join) fn nested_loop_semi_join(
         right_schema_def,
     );
 
-    // Create evaluator for condition
-    let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
+    // Issue #4994: Create evaluator with outer context if available
+    let evaluator = match (outer_row, outer_schema) {
+        (Some(outer_row), Some(outer_schema)) => {
+            CombinedExpressionEvaluator::with_database_and_outer_context(
+                &combined_schema,
+                database,
+                outer_row,
+                outer_schema,
+            )
+        }
+        _ => CombinedExpressionEvaluator::with_database(&combined_schema, database),
+    };
 
     // Use as_slice() for zero-cost access without triggering row materialization
     let left_slice = left.as_slice();
@@ -516,12 +595,18 @@ pub(in crate::select::join) fn nested_loop_semi_join(
 /// Nested loop ANTI JOIN implementation
 ///
 /// Anti-join returns left rows that have NO matches in the right table.
+///
+/// Issue #4994: Added outer_row and outer_schema parameters so JOIN conditions
+/// that reference columns from outer queries (correlated derived tables) can
+/// be properly evaluated.
 pub(in crate::select::join) fn nested_loop_anti_join(
     left: FromResult,
     right: FromResult,
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<FromResult, ExecutorError> {
     let left_schema = left.schema.clone();
 
@@ -552,8 +637,18 @@ pub(in crate::select::join) fn nested_loop_anti_join(
         right_schema_def,
     );
 
-    // Create evaluator for condition
-    let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
+    // Issue #4994: Create evaluator with outer context if available
+    let evaluator = match (outer_row, outer_schema) {
+        (Some(outer_row), Some(outer_schema)) => {
+            CombinedExpressionEvaluator::with_database_and_outer_context(
+                &combined_schema,
+                database,
+                outer_row,
+                outer_schema,
+            )
+        }
+        _ => CombinedExpressionEvaluator::with_database(&combined_schema, database),
+    };
 
     // Use as_slice() for zero-cost access without triggering row materialization
     let left_slice = left.as_slice();

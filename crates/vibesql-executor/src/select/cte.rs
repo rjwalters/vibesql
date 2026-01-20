@@ -422,12 +422,8 @@ fn stmt_references_table(stmt: &vibesql_ast::SelectStmt, table_name: &str) -> bo
 /// Check if a FROM clause references a table name
 fn from_clause_references_table(from: &vibesql_ast::FromClause, table_name: &str) -> bool {
     match from {
-        vibesql_ast::FromClause::Table { name, .. } => {
-            name.eq_ignore_ascii_case(table_name)
-        }
-        vibesql_ast::FromClause::Subquery { query, .. } => {
-            stmt_references_table(query, table_name)
-        }
+        vibesql_ast::FromClause::Table { name, .. } => name.eq_ignore_ascii_case(table_name),
+        vibesql_ast::FromClause::Subquery { query, .. } => stmt_references_table(query, table_name),
         vibesql_ast::FromClause::Join { left, right, condition, .. } => {
             from_clause_references_table(left, table_name)
                 || from_clause_references_table(right, table_name)
@@ -443,18 +439,14 @@ fn expr_references_table(expr: &vibesql_ast::Expression, table_name: &str) -> bo
         vibesql_ast::Expression::ScalarSubquery(subquery) => {
             stmt_references_table(subquery, table_name)
         }
-        vibesql_ast::Expression::In { subquery, .. } => {
-            stmt_references_table(subquery, table_name)
-        }
+        vibesql_ast::Expression::In { subquery, .. } => stmt_references_table(subquery, table_name),
         vibesql_ast::Expression::Exists { subquery, .. } => {
             stmt_references_table(subquery, table_name)
         }
         vibesql_ast::Expression::BinaryOp { left, right, .. } => {
             expr_references_table(left, table_name) || expr_references_table(right, table_name)
         }
-        vibesql_ast::Expression::UnaryOp { expr, .. } => {
-            expr_references_table(expr, table_name)
-        }
+        vibesql_ast::Expression::UnaryOp { expr, .. } => expr_references_table(expr, table_name),
         vibesql_ast::Expression::Function { args, .. } => {
             args.iter().any(|arg| expr_references_table(arg, table_name))
         }
@@ -480,9 +472,7 @@ fn expr_references_table(expr: &vibesql_ast::Expression, table_name: &str) -> bo
                 || values.iter().any(|e| expr_references_table(e, table_name))
         }
         vibesql_ast::Expression::Cast { expr, .. }
-        | vibesql_ast::Expression::Collate { expr, .. } => {
-            expr_references_table(expr, table_name)
-        }
+        | vibesql_ast::Expression::Collate { expr, .. } => expr_references_table(expr, table_name),
         vibesql_ast::Expression::Conjunction(exprs)
         | vibesql_ast::Expression::Disjunction(exprs) => {
             exprs.iter().any(|e| expr_references_table(e, table_name))

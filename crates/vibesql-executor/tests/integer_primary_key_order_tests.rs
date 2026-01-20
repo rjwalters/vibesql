@@ -13,7 +13,8 @@ fn setup_db() -> Database {
     let mut db = Database::new();
 
     // Create table with INTEGER PRIMARY KEY
-    let create = Parser::parse_sql("CREATE TABLE t1 (a INTEGER PRIMARY KEY, b TEXT, c TEXT)").unwrap();
+    let create =
+        Parser::parse_sql("CREATE TABLE t1 (a INTEGER PRIMARY KEY, b TEXT, c TEXT)").unwrap();
     if let vibesql_ast::Statement::CreateTable(stmt) = create {
         CreateTableExecutor::execute(&stmt, &mut db).unwrap();
     }

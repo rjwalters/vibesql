@@ -8,10 +8,8 @@ use std::collections::{HashMap, HashSet};
 use ahash::AHashSet;
 
 use crate::{
-    errors::ExecutorError,
-    evaluator::CombinedExpressionEvaluator,
-    optimizer::where_pushdown::flatten_conjuncts,
-    schema::CombinedSchema,
+    errors::ExecutorError, evaluator::CombinedExpressionEvaluator,
+    optimizer::where_pushdown::flatten_conjuncts, schema::CombinedSchema,
 };
 
 use super::semi_anti::parse_semi_join_condition;

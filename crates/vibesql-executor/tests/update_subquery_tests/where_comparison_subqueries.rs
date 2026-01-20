@@ -59,7 +59,8 @@ fn test_update_where_scalar_subquery_equal() {
     });
 
     // UPDATE employees SET salary = 55000 WHERE salary = (SELECT min_salary FROM config)
-    let stmt = vibesql_ast::UpdateStmt { with_clause: None,
+    let stmt = vibesql_ast::UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -147,7 +148,8 @@ fn test_update_where_scalar_subquery_less_than() {
     });
 
     // UPDATE employees SET bonus = 5000 WHERE salary < (SELECT AVG(salary) FROM employees)
-    let stmt = vibesql_ast::UpdateStmt { with_clause: None,
+    let stmt = vibesql_ast::UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -227,7 +229,8 @@ fn test_update_where_subquery_returns_null() {
     });
 
     // UPDATE employees SET salary = 60000 WHERE salary < (SELECT max_salary FROM config)
-    let stmt = vibesql_ast::UpdateStmt { with_clause: None,
+    let stmt = vibesql_ast::UpdateStmt {
+        with_clause: None,
         from_clause: None,
         table_name: "employees".to_string(),
         quoted: false,
@@ -319,7 +322,8 @@ fn test_update_where_subquery_with_aggregate() {
     });
 
     // UPDATE items SET discounted = TRUE WHERE price = (SELECT MAX(price) FROM items)
-    let stmt = vibesql_ast::UpdateStmt { with_clause: None,
+    let stmt = vibesql_ast::UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -446,7 +450,8 @@ fn test_update_where_and_set_both_use_subqueries() {
 
     // UPDATE employees SET salary = (SELECT target FROM salary_targets) WHERE dept_id IN (SELECT
     // dept_id FROM active_depts)
-    let stmt = vibesql_ast::UpdateStmt { with_clause: None,
+    let stmt = vibesql_ast::UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,

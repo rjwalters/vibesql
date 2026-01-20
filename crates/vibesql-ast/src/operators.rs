@@ -38,14 +38,14 @@ pub enum BinaryOperator {
     L2Distance,           // <=> (Euclidean distance)
 
     // JSON operators (SQLite/PostgreSQL compatible)
-    JsonExtract,     // -> (extract JSON value)
+    JsonExtract, // -> (extract JSON value)
     JsonExtractText, // ->> (extract as text)
 
-                          /* Note: LIKE and IN are not simple binary operators. They are
-                           * implemented as Expression variants in
-                           * expression.rs due to their complex structure:
-                           * - LIKE: Pattern matching with wildcards (%, _)
-                           * - IN: Subquery or value list support */
+                 /* Note: LIKE and IN are not simple binary operators. They are
+                  * implemented as Expression variants in
+                  * expression.rs due to their complex structure:
+                  * - LIKE: Pattern matching with wildcards (%, _)
+                  * - IN: Subquery or value list support */
 }
 
 impl BinaryOperator {

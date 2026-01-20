@@ -110,10 +110,10 @@ fn qualify_outer_column_refs(expr: &Expression, outer_tables: &[String]) -> Expr
                 // Create a new qualified column identifier using the outer table
                 // Use display form for column name to preserve user's casing
                 let qualified_col = ColumnIdentifier::qualified(
-                    outer_table,                  // table
-                    false,                        // table_quoted (outer tables from FROM are unquoted)
-                    col_id.column_display(),      // column
-                    false,                        // column_quoted (assume unquoted for simplicity)
+                    outer_table,             // table
+                    false,                   // table_quoted (outer tables from FROM are unquoted)
+                    col_id.column_display(), // column
+                    false,                   // column_quoted (assume unquoted for simplicity)
                 );
                 Expression::ColumnRef(qualified_col)
             } else {

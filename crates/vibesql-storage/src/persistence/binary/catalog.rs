@@ -12,9 +12,13 @@ use crate::{persistence::save, Database, StorageError};
 pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), StorageError> {
     // Write schemas
     // Skip built-in schemas (main and all temp schemas) - they are recreated on load
-    let schemas: Vec<String> = db.catalog.list_schemas()
+    let schemas: Vec<String> = db
+        .catalog
+        .list_schemas()
         .into_iter()
-        .filter(|s| s != vibesql_catalog::DEFAULT_SCHEMA && !vibesql_catalog::Catalog::is_temp_schema(s))
+        .filter(|s| {
+            s != vibesql_catalog::DEFAULT_SCHEMA && !vibesql_catalog::Catalog::is_temp_schema(s)
+        })
         .collect();
 
     write_u32(writer, schemas.len() as u32)?;
@@ -121,14 +125,16 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                 match col {
                     IndexColumn::Column { column_name, .. } => {
                         // Type 0 = column reference
-                        writer.write_all(&[0u8])
-                            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                        writer.write_all(&[0u8]).map_err(|e| {
+                            StorageError::NotImplemented(format!("Write error: {}", e))
+                        })?;
                         write_string(writer, column_name)?;
                     }
                     IndexColumn::Expression { expr, .. } => {
                         // Type 1 = expression (stored as SQL text)
-                        writer.write_all(&[1u8])
-                            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                        writer.write_all(&[1u8]).map_err(|e| {
+                            StorageError::NotImplemented(format!("Write error: {}", e))
+                        })?;
                         use vibesql_ast::pretty_print::ToSql;
                         write_string(writer, &expr.to_sql())?;
                     }
@@ -427,15 +433,15 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
                     }
                     1 => {
                         // Expression index - parse the SQL expression
-                        let expr = vibesql_parser::arena_parser::parse_expression_to_owned(&content)
-                            .map_err(|e| StorageError::NotImplemented(format!(
-                                "Failed to parse expression index '{}': {}",
-                                content, e
-                            )))?;
-                        vibesql_ast::IndexColumn::Expression {
-                            expr: Box::new(expr),
-                            direction,
-                        }
+                        let expr =
+                            vibesql_parser::arena_parser::parse_expression_to_owned(&content)
+                                .map_err(|e| {
+                                    StorageError::NotImplemented(format!(
+                                        "Failed to parse expression index '{}': {}",
+                                        content, e
+                                    ))
+                                })?;
+                        vibesql_ast::IndexColumn::Expression { expr: Box::new(expr), direction }
                     }
                     _ => {
                         return Err(StorageError::NotImplemented(format!(
@@ -458,11 +464,7 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
                         )))
                     }
                 };
-                vibesql_ast::IndexColumn::Column {
-                    column_name,
-                    direction,
-                    prefix_length: None,
-                }
+                vibesql_ast::IndexColumn::Column { column_name, direction, prefix_length: None }
             };
 
             columns.push(index_column);

@@ -52,6 +52,16 @@ pub(crate) fn is_correlated(subquery: &SelectStmt) -> bool {
         }
     }
 
+    // Check FROM clause for derived tables that reference external columns
+    // This is critical for nested subqueries like:
+    // SELECT a FROM t1 WHERE b IN (SELECT x+1 FROM (SELECT f/(a*a) AS x FROM t3))
+    // The inner derived table references 'a' from outer query t1
+    if let Some(from) = &subquery.from {
+        if from_clause_has_external_refs(from, subquery) {
+            return true;
+        }
+    }
+
     false
 }
 
@@ -271,6 +281,38 @@ fn extract_table_prefixes(from: &vibesql_ast::FromClause) -> Vec<char> {
     let mut prefixes = Vec::new();
     collect(from, &mut prefixes);
     prefixes
+}
+
+/// Check if a FROM clause contains derived tables that reference external columns
+///
+/// This recursively checks subqueries in FROM clauses (derived tables) and
+/// join conditions for any external column references. This is essential for
+/// detecting correlation in queries like:
+///
+/// ```sql
+/// SELECT a FROM t1 WHERE b IN (
+///   SELECT x+1 FROM (SELECT f/(a*a) AS x FROM t3)  -- 'a' is from outer t1
+/// )
+/// ```
+fn from_clause_has_external_refs(from: &vibesql_ast::FromClause, subquery: &SelectStmt) -> bool {
+    match from {
+        vibesql_ast::FromClause::Table { .. } => false,
+        vibesql_ast::FromClause::Subquery { query, .. } => {
+            // Recursively check if the derived table is correlated
+            // This is the key fix: nested subqueries in FROM may reference outer columns
+            is_correlated(query)
+        }
+        vibesql_ast::FromClause::Join { left, right, condition, .. } => {
+            // Check both sides of the join
+            from_clause_has_external_refs(left, subquery)
+                || from_clause_has_external_refs(right, subquery)
+                || condition.as_ref().is_some_and(|cond| has_external_column_refs(cond, subquery))
+        }
+        vibesql_ast::FromClause::Values { rows, .. } => {
+            // Check if any expression in VALUES references external columns
+            rows.iter().any(|row| row.iter().any(|expr| has_external_column_refs(expr, subquery)))
+        }
+    }
 }
 
 /// Recursively check if FROM clause contains a table reference

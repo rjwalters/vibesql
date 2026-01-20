@@ -17,7 +17,8 @@ fn test_update_check_constraint_passes() {
     db.insert_row("products", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(50)])).unwrap();
 
     // Update to valid price (should succeed)
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -43,7 +44,8 @@ fn test_update_check_constraint_violation() {
     db.insert_row("products", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(50)])).unwrap();
 
     // Try to update to negative price (should fail)
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -77,7 +79,8 @@ fn test_update_check_constraint_with_null() {
     db.insert_row("products", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(50)])).unwrap();
 
     // Update to NULL (should succeed - NULL is treated as UNKNOWN which passes CHECK)
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -107,7 +110,8 @@ fn test_update_check_constraint_with_expression() {
     .unwrap();
 
     // Update bonus to still be less than salary (should succeed)
-    let stmt1 = UpdateStmt { with_clause: None,
+    let stmt1 = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -123,7 +127,8 @@ fn test_update_check_constraint_with_expression() {
     assert_eq!(count, 1);
 
     // Try to update bonus to be >= salary (should fail)
-    let stmt2 = UpdateStmt { with_clause: None,
+    let stmt2 = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,

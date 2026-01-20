@@ -392,7 +392,9 @@ pub(super) fn evaluate(
     if name.to_uppercase() == "COUNT" && args.len() > 1 {
         if !distinct {
             // SQLite-compatible error message - preserve original case
-            return Err(ExecutorError::WrongNumberOfArguments { function_name: name.display().to_string() });
+            return Err(ExecutorError::WrongNumberOfArguments {
+                function_name: name.display().to_string(),
+            });
         }
 
         // Evaluate all arguments for each row and accumulate as tuples
@@ -533,11 +535,14 @@ pub(super) fn evaluate(
         // Issue #4930: Check if aggregate argument references only outer columns
         // If so, iterate over outer_rows instead of group_rows
         let has_outer_context = evaluator.get_outer_schema().is_some();
-        let is_outer_only = expression_refs_only_outer_columns(&args[0], evaluator.get_schema(), has_outer_context);
+        let is_outer_only =
+            expression_refs_only_outer_columns(&args[0], evaluator.get_schema(), has_outer_context);
 
         if is_outer_only {
             // Outer-correlated aggregate: iterate over all outer rows
-            if let (Some(outer_rows), Some(outer_schema)) = (evaluator.get_outer_rows(), evaluator.get_outer_schema()) {
+            if let (Some(outer_rows), Some(outer_schema)) =
+                (evaluator.get_outer_rows(), evaluator.get_outer_schema())
+            {
                 // Create a temporary evaluator with outer_schema as the main schema
                 // This allows us to evaluate the expression against each outer row
                 for outer_row in outer_rows.iter() {
@@ -573,7 +578,9 @@ pub(super) fn evaluate(
     // Handle JSON_GROUP_ARRAY with optional ORDER BY
     if name_upper == "JSON_GROUP_ARRAY" {
         if args.len() != 1 {
-            return Err(ExecutorError::WrongNumberOfArguments { function_name: name.display().to_string() });
+            return Err(ExecutorError::WrongNumberOfArguments {
+                function_name: name.display().to_string(),
+            });
         }
 
         // Handle ORDER BY clause within the aggregate

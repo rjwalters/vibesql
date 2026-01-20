@@ -21,9 +21,9 @@ fn try_evaluate_constant_predicate(expr: &vibesql_ast::Expression) -> Option<boo
 
     // Use the existing constant expression evaluator
     match is_constant_false_where(expr) {
-        Some(true) => Some(false),  // Expression is always FALSE
-        Some(false) => Some(true),  // Expression is always TRUE
-        None => None,               // Not a constant or couldn't evaluate
+        Some(true) => Some(false), // Expression is always FALSE
+        Some(false) => Some(true), // Expression is always TRUE
+        None => None,              // Not a constant or couldn't evaluate
     }
 }
 

@@ -276,9 +276,7 @@ impl SqlExecutor {
                                 .map(|s| s.to_string())
                                 .collect();
                             for row in vm_output.to_rows() {
-                                result
-                                    .rows
-                                    .push(row.into_iter().map(Some).collect());
+                                result.rows.push(row.into_iter().map(Some).collect());
                             }
                         }
                         result.row_count = result.rows.len();

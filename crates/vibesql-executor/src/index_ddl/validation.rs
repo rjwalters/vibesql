@@ -12,8 +12,7 @@ use vibesql_catalog::TableSchema;
 use vibesql_storage::Database;
 
 use crate::{
-    errors::ExecutorError,
-    privilege_checker::PrivilegeChecker,
+    errors::ExecutorError, privilege_checker::PrivilegeChecker,
     sqlite_schema::is_sqlite_schema_table,
 };
 
@@ -106,9 +105,7 @@ fn validate_no_window_functions_in_index(stmt: &CreateIndexStmt) -> Result<(), E
     // Check index column expressions for window functions
     for index_col in &stmt.columns {
         if let Some(expr) = index_col.get_expression() {
-            if let Some(window_name) =
-                crate::select::find_window_function_in_expression(expr)
-            {
+            if let Some(window_name) = crate::select::find_window_function_in_expression(expr) {
                 return Err(ExecutorError::MisuseOfWindowFunction { function_name: window_name });
             }
         }

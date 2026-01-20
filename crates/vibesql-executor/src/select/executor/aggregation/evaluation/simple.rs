@@ -210,11 +210,14 @@ pub(super) fn evaluate(
 
             // Evaluate the escape character if provided
             let escape_char = if let Some(escape_expr) = escape {
-                let escape_val =
-                    executor.evaluate_with_aggregates(escape_expr, group_rows, group_key, evaluator)?;
+                let escape_val = executor.evaluate_with_aggregates(
+                    escape_expr,
+                    group_rows,
+                    group_key,
+                    evaluator,
+                )?;
                 match escape_val {
-                    vibesql_types::SqlValue::Varchar(s)
-                    | vibesql_types::SqlValue::Character(s) => {
+                    vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
                         let mut chars = s.chars();
                         match (chars.next(), chars.next()) {
                             (Some(c), None) => Some(c), // Exactly one character
@@ -222,7 +225,7 @@ pub(super) fn evaluate(
                                 // Empty string or multi-character string: error per SQLite
                                 return Err(ExecutorError::SqliteCompatError(
                                     "ESCAPE expression must be a single character".to_string(),
-                                ))
+                                ));
                             }
                         }
                     }

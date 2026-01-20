@@ -183,7 +183,14 @@ impl CombinedExpressionEvaluator<'_> {
 
             if let Some(entry) = hashset_entry {
                 // Fast path: use HashSet for O(1) lookup
-                return eval_in_with_hashset(&expr_val, &entry, negated, sql_mode, left_affinity, subquery_affinity);
+                return eval_in_with_hashset(
+                    &expr_val,
+                    &entry,
+                    negated,
+                    sql_mode,
+                    left_affinity,
+                    subquery_affinity,
+                );
             }
 
             // HashSet not cached yet - need to execute the subquery first
@@ -228,7 +235,14 @@ impl CombinedExpressionEvaluator<'_> {
             });
 
             // Use the HashSet for evaluation
-            return eval_in_with_hashset(&expr_val, &entry, negated, sql_mode, left_affinity, subquery_affinity);
+            return eval_in_with_hashset(
+                &expr_val,
+                &entry,
+                negated,
+                sql_mode,
+                left_affinity,
+                subquery_affinity,
+            );
         }
 
         // Correlated subquery - execute with outer context (can't cache, use linear search)
@@ -719,32 +733,20 @@ fn apply_in_subquery_affinity_coercion(
     // If right has TEXT affinity and left is numeric, convert numeric to TEXT
     if matches!(right_affinity, Some(TypeAffinity::Text)) {
         if let SqlValue::Integer(n) = &left_val {
-            return (
-                SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
-                right_val,
-            );
+            return (SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())), right_val);
         }
         if let SqlValue::Real(n) | SqlValue::Double(n) = &left_val {
-            return (
-                SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*n))),
-                right_val,
-            );
+            return (SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*n))), right_val);
         }
     }
 
     // If left has TEXT affinity and right is numeric, convert numeric to TEXT
     if matches!(left_affinity, Some(TypeAffinity::Text)) {
         if let SqlValue::Integer(n) = &right_val {
-            return (
-                left_val,
-                SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
-            );
+            return (left_val, SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())));
         }
         if let SqlValue::Real(n) | SqlValue::Double(n) = &right_val {
-            return (
-                left_val,
-                SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*n))),
-            );
+            return (left_val, SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text(*n))));
         }
     }
 

@@ -72,8 +72,7 @@ pub(crate) fn execute_index_scan(
     let first_indexed_column = index_metadata.columns.first();
 
     // Check if this is an expression index (first column is an expression, not a column name)
-    let is_expression_index =
-        first_indexed_column.map(|col| col.is_expression()).unwrap_or(false);
+    let is_expression_index = first_indexed_column.map(|col| col.is_expression()).unwrap_or(false);
 
     // Get column names for the index (in order) - only for column-based indexes
     // For expression indexes, we cannot use composite key lookups (requires column names)
@@ -81,11 +80,7 @@ pub(crate) fn execute_index_scan(
         // Expression indexes don't have simple column names for composite lookups
         vec![]
     } else {
-        index_metadata
-            .columns
-            .iter()
-            .filter_map(|col| col.column_name())
-            .collect()
+        index_metadata.columns.iter().filter_map(|col| col.column_name()).collect()
     };
 
     // Try composite key lookup first (for multi-column indexes with full predicates)
@@ -145,8 +140,9 @@ pub(crate) fn execute_index_scan(
         None // Don't need single-column predicate - using composite/prefix key
     } else {
         // Use the unified function that handles both column and expression indexes
-        first_indexed_column
-            .and_then(|idx_col| where_clause.and_then(|expr| extract_index_predicate_for_indexed_column(expr, idx_col)))
+        first_indexed_column.and_then(|idx_col| {
+            where_clause.and_then(|expr| extract_index_predicate_for_indexed_column(expr, idx_col))
+        })
     };
 
     // Build residual WHERE clause for prefix lookups
@@ -211,7 +207,7 @@ pub(crate) fn execute_index_scan(
             }
             (Some(where_expr), None, _) => (true, Some((*where_expr).clone())), /* WHERE present but no index predicate extracted */
             (Some(where_expr), Some(_), None) => (true, Some((*where_expr).clone())), /* No indexed column found */
-            (None, _, _) => (false, None),                                      // No WHERE clause
+            (None, _, _) => (false, None), // No WHERE clause
         }
     };
 
@@ -257,15 +253,15 @@ pub(crate) fn execute_index_scan(
                 // SQL semantics: NULL < X returns NULL (not true), so NULLs shouldn't match
                 // Note: For expression indexes, we can't easily determine the column to filter
                 let null_filter_col_idx = if range.exclude_nulls {
-                    first_indexed_column
-                        .and_then(|idx_col| idx_col.column_name())
-                        .and_then(|col_name| {
+                    first_indexed_column.and_then(|idx_col| idx_col.column_name()).and_then(
+                        |col_name| {
                             table
                                 .schema
                                 .columns
                                 .iter()
                                 .position(|c| c.name.eq_ignore_ascii_case(col_name))
-                        })
+                        },
+                    )
                 } else {
                     None
                 };
@@ -540,15 +536,9 @@ pub(crate) fn execute_index_scan(
     // Note: For expression indexes, we can't easily determine the column to filter
     let null_filter_col_idx = if let Some(IndexPredicate::Range(ref range)) = index_predicate {
         if range.exclude_nulls {
-            first_indexed_column
-                .and_then(|idx_col| idx_col.column_name())
-                .and_then(|col_name| {
-                    table
-                        .schema
-                        .columns
-                        .iter()
-                        .position(|c| c.name.eq_ignore_ascii_case(col_name))
-                })
+            first_indexed_column.and_then(|idx_col| idx_col.column_name()).and_then(|col_name| {
+                table.schema.columns.iter().position(|c| c.name.eq_ignore_ascii_case(col_name))
+            })
         } else {
             None
         }
@@ -578,10 +568,8 @@ pub(crate) fn execute_index_scan(
 
     // Create mapping from row pointer address to row index for rowid preservation
     // This allows us to recover the row index after WHERE filtering
-    let row_ptr_to_idx: std::collections::HashMap<usize, usize> = indexed_row_refs
-        .iter()
-        .map(|(idx, row)| (*row as *const Row as usize, *idx))
-        .collect();
+    let row_ptr_to_idx: std::collections::HashMap<usize, usize> =
+        indexed_row_refs.iter().map(|(idx, row)| (*row as *const Row as usize, *idx)).collect();
 
     // Extract just the row references for filtering (preserving indices via the mapping)
     let row_refs: Vec<&Row> = indexed_row_refs.into_iter().map(|(_, row)| row).collect();

@@ -258,10 +258,7 @@ pub(crate) fn build_residual_where_clause(
 }
 
 /// Recursively filter an expression, removing covered equality predicates
-fn filter_expression(
-    expr: &Expression,
-    covered_columns: &HashSet<String>,
-) -> Option<Expression> {
+fn filter_expression(expr: &Expression, covered_columns: &HashSet<String>) -> Option<Expression> {
     match expr {
         // Check if this is a covered equality predicate: col = literal or literal = col
         Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {

@@ -67,10 +67,10 @@ pub fn is_constant_false_where(expr: &Expression) -> Option<bool> {
 
     // Try to optimize (fold constants)
     match optimize_expression(expr, &evaluator) {
-        Ok(Expression::Literal(SqlValue::Boolean(false))) => Some(true),  // Always FALSE
-        Ok(Expression::Literal(SqlValue::Null)) => Some(true),             // NULL is falsy in WHERE
-        Ok(Expression::Literal(SqlValue::Boolean(true))) => Some(false),  // Always TRUE
-        _ => None, // Couldn't determine
+        Ok(Expression::Literal(SqlValue::Boolean(false))) => Some(true), // Always FALSE
+        Ok(Expression::Literal(SqlValue::Null)) => Some(true),           // NULL is falsy in WHERE
+        Ok(Expression::Literal(SqlValue::Boolean(true))) => Some(false), // Always TRUE
+        _ => None,                                                       // Couldn't determine
     }
 }
 

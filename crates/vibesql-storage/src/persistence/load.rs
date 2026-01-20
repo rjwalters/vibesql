@@ -267,11 +267,8 @@ mod tests {
 
         // Test 1: Complete dump file should succeed
         let mut complete_file = NamedTempFile::new().unwrap();
-        writeln!(
-            complete_file,
-            "-- VibeSQL Database Dump\nCREATE TABLE t(x INT);\n-- End of dump"
-        )
-        .unwrap();
+        writeln!(complete_file, "-- VibeSQL Database Dump\nCREATE TABLE t(x INT);\n-- End of dump")
+            .unwrap();
         assert!(read_sql_dump(complete_file.path()).is_ok());
 
         // Test 2: Truncated dump file should fail

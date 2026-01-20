@@ -3,8 +3,11 @@
 use ahash::AHashMap;
 
 use super::{
-    combine_rows, hash_join::build_existence_hash_table_parallel,
-    hash_semi_join::{partition_filter_predicates, get_column_affinity, normalize_for_affinity_hash},
+    combine_rows,
+    hash_join::build_existence_hash_table_parallel,
+    hash_semi_join::{
+        get_column_affinity, normalize_for_affinity_hash, partition_filter_predicates,
+    },
     FromResult,
 };
 use crate::{
@@ -52,8 +55,14 @@ pub(super) fn hash_anti_join(
 
     // Determine if we need affinity-aware hashing
     let needs_affinity_aware = match (left_affinity, right_affinity) {
-        (Some(TypeAffinity::Text), Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric)) => true,
-        (Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric), Some(TypeAffinity::Text)) => true,
+        (
+            Some(TypeAffinity::Text),
+            Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric),
+        ) => true,
+        (
+            Some(TypeAffinity::Integer | TypeAffinity::Real | TypeAffinity::Numeric),
+            Some(TypeAffinity::Text),
+        ) => true,
         (Some(TypeAffinity::Integer), Some(TypeAffinity::Real)) => true,
         (Some(TypeAffinity::Real), Some(TypeAffinity::Integer)) => true,
         _ => false,
@@ -76,7 +85,8 @@ pub(super) fn hash_anti_join(
         )
     } else {
         // Build phase: Create hash table from right side (using parallel algorithm)
-        let hash_table = build_existence_hash_table_parallel(right_slice, right_col_idx, &timeout_ctx)?;
+        let hash_table =
+            build_existence_hash_table_parallel(right_slice, right_col_idx, &timeout_ctx)?;
 
         // Probe phase: Check each left row for absence of a match
         let estimated_capacity = left_slice.len().min(100_000);

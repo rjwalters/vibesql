@@ -136,10 +136,7 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
         let mut using_coalesce_indices = left_schema.using_coalesce_indices.clone();
         for (col_name, indices) in &right_schema.using_coalesce_indices {
             let adjusted_indices: Vec<usize> = indices.iter().map(|idx| left_total + idx).collect();
-            using_coalesce_indices
-                .entry(col_name.clone())
-                .or_default()
-                .extend(adjusted_indices);
+            using_coalesce_indices.entry(col_name.clone()).or_default().extend(adjusted_indices);
         }
 
         // Merge column_replacement_map, adjusting right side indices
@@ -156,7 +153,8 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
 
         // Merge shadowed_tables from both sides
         let mut shadowed_tables = left_schema.shadowed_tables.clone();
-        shadowed_tables.extend(right_schema.shadowed_tables.iter().map(|(k, v)| (k.clone(), v.clone())));
+        shadowed_tables
+            .extend(right_schema.shadowed_tables.iter().map(|(k, v)| (k.clone(), v.clone())));
 
         let combined_schema = CombinedSchema {
             table_schemas,

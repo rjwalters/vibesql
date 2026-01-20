@@ -25,7 +25,9 @@ pub(super) fn evaluate_binary(
 
     // Use the static binary op evaluation
     let sql_mode = executor.database.sql_mode();
-    crate::evaluator::ExpressionEvaluator::eval_binary_op_static(&left_val, op, &right_val, sql_mode)
+    crate::evaluator::ExpressionEvaluator::eval_binary_op_static(
+        &left_val, op, &right_val, sql_mode,
+    )
 }
 
 /// Evaluate unary operations in aggregate context

@@ -164,11 +164,13 @@ mod tests {
     #[test]
     fn test_right_shift() {
         // 16 >> 4 = 1
-        let result = BitwiseOps::right_shift(&SqlValue::Integer(16), &SqlValue::Integer(4)).unwrap();
+        let result =
+            BitwiseOps::right_shift(&SqlValue::Integer(16), &SqlValue::Integer(4)).unwrap();
         assert_eq!(result, SqlValue::Integer(1));
 
         // 20 >> 2 = 5
-        let result = BitwiseOps::right_shift(&SqlValue::Integer(20), &SqlValue::Integer(2)).unwrap();
+        let result =
+            BitwiseOps::right_shift(&SqlValue::Integer(20), &SqlValue::Integer(2)).unwrap();
         assert_eq!(result, SqlValue::Integer(5));
     }
 
@@ -176,12 +178,14 @@ mod tests {
     fn test_negative_shift() {
         // Left shift by negative = right shift
         // 16 << -2 = 16 >> 2 = 4
-        let result = BitwiseOps::left_shift(&SqlValue::Integer(16), &SqlValue::Integer(-2)).unwrap();
+        let result =
+            BitwiseOps::left_shift(&SqlValue::Integer(16), &SqlValue::Integer(-2)).unwrap();
         assert_eq!(result, SqlValue::Integer(4));
 
         // Right shift by negative = left shift
         // 4 >> -2 = 4 << 2 = 16
-        let result = BitwiseOps::right_shift(&SqlValue::Integer(4), &SqlValue::Integer(-2)).unwrap();
+        let result =
+            BitwiseOps::right_shift(&SqlValue::Integer(4), &SqlValue::Integer(-2)).unwrap();
         assert_eq!(result, SqlValue::Integer(16));
     }
 
@@ -191,7 +195,8 @@ mod tests {
         let result = BitwiseOps::left_shift(&SqlValue::Integer(1), &SqlValue::Integer(64)).unwrap();
         assert_eq!(result, SqlValue::Integer(0));
 
-        let result = BitwiseOps::right_shift(&SqlValue::Integer(1), &SqlValue::Integer(64)).unwrap();
+        let result =
+            BitwiseOps::right_shift(&SqlValue::Integer(1), &SqlValue::Integer(64)).unwrap();
         assert_eq!(result, SqlValue::Integer(0));
 
         // Negative number right shift by large amount

@@ -60,10 +60,22 @@ pub fn create_btree_index(
     // Create the B-tree index
     if has_expression {
         // Expression index: pre-compute keys using ExpressionEvaluator
-        create_expression_index(database, table_name, index_name, table_schema, &stmt.columns, unique)?;
+        create_expression_index(
+            database,
+            table_name,
+            index_name,
+            table_schema,
+            &stmt.columns,
+            unique,
+        )?;
     } else {
         // Column-only index: use existing storage API
-        database.create_index(index_name.clone(), table_name.to_string(), unique, stmt.columns.clone())?;
+        database.create_index(
+            index_name.clone(),
+            table_name.to_string(),
+            unique,
+            stmt.columns.clone(),
+        )?;
     }
 
     // Emit WAL entry for persistence

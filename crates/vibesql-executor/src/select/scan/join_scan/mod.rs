@@ -301,6 +301,8 @@ where
     // Issue #3562: Pass CTE context so post-join filters with IN subqueries can resolve CTEs
     // Note: We pass None for using_columns here because USING clause deduplication is handled
     // as post-processing below. The join condition was already built from the USING columns.
+    // Issue #4994: Pass outer context so JOIN conditions in correlated derived tables can
+    // resolve columns from outer queries.
     let mut result = nested_loop_join(
         left_result,
         right_result,
@@ -312,6 +314,8 @@ where
         &equijoin_predicates,
         &timeout_ctx,
         cte_results,
+        outer_row,
+        outer_schema,
     )?;
 
     // For USING clause joins, remove duplicate columns from the result
@@ -744,12 +748,18 @@ fn generate_natural_join_condition(
                         right_idx_to_col.get(&idx).map(|(table, col)| {
                             let table_ref = if is_self_join {
                                 let adjusted_start = left_schema.total_columns + idx;
-                                format!("__selfjoin_right_{}_{}", table.to_lowercase(), adjusted_start)
+                                format!(
+                                    "__selfjoin_right_{}_{}",
+                                    table.to_lowercase(),
+                                    adjusted_start
+                                )
                             } else {
                                 table.clone()
                             };
                             vibesql_ast::Expression::ColumnRef(
-                                vibesql_ast::ColumnIdentifier::qualified(&table_ref, false, col, false),
+                                vibesql_ast::ColumnIdentifier::qualified(
+                                    &table_ref, false, col, false,
+                                ),
                             )
                         })
                     })
@@ -1082,12 +1092,18 @@ fn generate_using_join_condition(
                         right_idx_to_col.get(&idx).map(|(table, col)| {
                             let table_ref = if is_self_join {
                                 let adjusted_start = left_schema.total_columns + idx;
-                                format!("__selfjoin_right_{}_{}", table.to_lowercase(), adjusted_start)
+                                format!(
+                                    "__selfjoin_right_{}_{}",
+                                    table.to_lowercase(),
+                                    adjusted_start
+                                )
                             } else {
                                 table.clone()
                             };
                             vibesql_ast::Expression::ColumnRef(
-                                vibesql_ast::ColumnIdentifier::qualified(&table_ref, false, col, false),
+                                vibesql_ast::ColumnIdentifier::qualified(
+                                    &table_ref, false, col, false,
+                                ),
                             )
                         })
                     })

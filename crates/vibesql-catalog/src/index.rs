@@ -89,7 +89,11 @@ impl IndexedColumn {
     }
 
     /// Create a new column index with prefix length
-    pub fn new_column_with_prefix(column_name: String, order: SortOrder, prefix_length: u64) -> Self {
+    pub fn new_column_with_prefix(
+        column_name: String,
+        order: SortOrder,
+        prefix_length: u64,
+    ) -> Self {
         IndexedColumn::Column { column_name, order, prefix_length: Some(prefix_length) }
     }
 

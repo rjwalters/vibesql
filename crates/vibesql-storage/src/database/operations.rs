@@ -167,7 +167,8 @@ impl Operations {
         };
 
         // Resolve "temp" schema to session's temp schema for storage lookup
-        let resolved_name = if let Some((schema_part, table_part)) = normalized_name.split_once('.') {
+        let resolved_name = if let Some((schema_part, table_part)) = normalized_name.split_once('.')
+        {
             if schema_part.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA) {
                 format!("{}.{}", catalog.temp_schema_name(), table_part)
             } else {

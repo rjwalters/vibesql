@@ -67,10 +67,8 @@ impl AnalyzeExecutor {
                 // This is used in SQLite to rebuild sqlite_stat tables
                 // For VibeSQL, it's a no-op since sqlite_stat1 is virtual
                 if is_sqlite_schema_table(table_name) {
-                    return Ok(
-                        "ANALYZE sqlite_master completed - sqlite_stat1 ready for queries"
-                            .to_string(),
-                    );
+                    return Ok("ANALYZE sqlite_master completed - sqlite_stat1 ready for queries"
+                        .to_string());
                 }
 
                 // ANALYZE with specific table
@@ -111,11 +109,7 @@ impl AnalyzeExecutor {
             let row_count = stats.row_count;
 
             // Insert table-level statistics (idx = NULL means table stats)
-            database.insert_sqlite_stat1(
-                table_name.to_string(),
-                None,
-                row_count.to_string(),
-            );
+            database.insert_sqlite_stat1(table_name.to_string(), None, row_count.to_string());
         }
     }
 }
@@ -129,7 +123,8 @@ mod tests {
     use crate::CreateTableExecutor;
 
     fn create_test_table(db: &mut Database, table_name: &str) {
-        let stmt = CreateTableStmt { temporary: false,
+        let stmt = CreateTableStmt {
+            temporary: false,
             if_not_exists: false,
             table_name: table_name.to_string(),
             columns: vec![
@@ -140,7 +135,8 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None, is_exact_integer_type: false,
+                    generated_expr: None,
+                    is_exact_integer_type: false,
                 },
                 ColumnDef {
                     name: "name".to_string(),
@@ -149,7 +145,8 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None, is_exact_integer_type: false,
+                    generated_expr: None,
+                    is_exact_integer_type: false,
                 },
                 ColumnDef {
                     name: "age".to_string(),
@@ -158,13 +155,15 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
-                    generated_expr: None, is_exact_integer_type: false,
+                    generated_expr: None,
+                    is_exact_integer_type: false,
                 },
             ],
             table_constraints: vec![],
             table_options: vec![],
             quoted: false,
-            as_query: None, without_rowid: false,
+            as_query: None,
+            without_rowid: false,
         };
 
         CreateTableExecutor::execute(&stmt, db).unwrap();

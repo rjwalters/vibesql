@@ -162,11 +162,7 @@ impl Database {
     }
 
     /// Get a sqlite_stat1 entry
-    pub fn get_sqlite_stat1(
-        &self,
-        table_name: &str,
-        index_name: Option<&str>,
-    ) -> Option<&String> {
+    pub fn get_sqlite_stat1(&self, table_name: &str, index_name: Option<&str>) -> Option<&String> {
         self.metadata.get_sqlite_stat1(table_name, index_name)
     }
 

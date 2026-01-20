@@ -20,7 +20,8 @@ pub struct ExpressionEvaluator<'a> {
     /// Procedural context for stored procedure/function variable resolution
     pub(super) procedural_context: Option<&'a crate::procedural::ExecutionContext>,
     /// CTE context for WITH clause support in UPDATE/DELETE subqueries
-    pub(super) cte_context: Option<&'a std::collections::HashMap<String, crate::select::cte::CteResult>>,
+    pub(super) cte_context:
+        Option<&'a std::collections::HashMap<String, crate::select::cte::CteResult>>,
     /// Current depth in expression tree (for preventing stack overflow)
     pub(super) depth: usize,
     /// CSE cache for common sub-expression elimination with LRU eviction (shared via Rc across

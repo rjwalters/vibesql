@@ -136,10 +136,8 @@ impl SelectExecutor<'_> {
         }
 
         // Finalize and return single row
-        let result_values: Vec<SqlValue> = accumulators
-            .iter()
-            .map(|(acc, _)| acc.finalize())
-            .collect::<Result<Vec<_>, _>>()?;
+        let result_values: Vec<SqlValue> =
+            accumulators.iter().map(|(acc, _)| acc.finalize()).collect::<Result<Vec<_>, _>>()?;
 
         Ok(vec![Row::from_vec(result_values)])
     }

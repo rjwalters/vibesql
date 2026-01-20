@@ -104,9 +104,7 @@ fn test_parse_varying_character() {
 #[test]
 fn test_sqlite_type_affinity_blob() {
     // LARGE BLOB should have BLOB/NONE affinity because it contains "BLOB"
-    let user_defined = vibesql_types::DataType::UserDefined {
-        type_name: "large blob".to_string(),
-    };
+    let user_defined = vibesql_types::DataType::UserDefined { type_name: "large blob".to_string() };
     assert_eq!(
         user_defined.sqlite_affinity(),
         vibesql_types::TypeAffinity::None,
@@ -117,9 +115,8 @@ fn test_sqlite_type_affinity_blob() {
 #[test]
 fn test_sqlite_type_affinity_character() {
     // NATIVE CHARACTER should have TEXT affinity because it contains "CHAR"
-    let user_defined = vibesql_types::DataType::UserDefined {
-        type_name: "native character".to_string(),
-    };
+    let user_defined =
+        vibesql_types::DataType::UserDefined { type_name: "native character".to_string() };
     assert_eq!(
         user_defined.sqlite_affinity(),
         vibesql_types::TypeAffinity::Text,
@@ -130,9 +127,8 @@ fn test_sqlite_type_affinity_character() {
 #[test]
 fn test_sqlite_type_affinity_integer() {
     // UNSIGNED BIG INT should have INTEGER affinity because it contains "INT"
-    let user_defined = vibesql_types::DataType::UserDefined {
-        type_name: "unsigned big int".to_string(),
-    };
+    let user_defined =
+        vibesql_types::DataType::UserDefined { type_name: "unsigned big int".to_string() };
     assert_eq!(
         user_defined.sqlite_affinity(),
         vibesql_types::TypeAffinity::Integer,
@@ -143,9 +139,7 @@ fn test_sqlite_type_affinity_integer() {
 #[test]
 fn test_sqlite_type_affinity_clob() {
     // CLOB types should have TEXT affinity
-    let user_defined = vibesql_types::DataType::UserDefined {
-        type_name: "large clob".to_string(),
-    };
+    let user_defined = vibesql_types::DataType::UserDefined { type_name: "large clob".to_string() };
     assert_eq!(
         user_defined.sqlite_affinity(),
         vibesql_types::TypeAffinity::Text,
@@ -156,9 +150,8 @@ fn test_sqlite_type_affinity_clob() {
 #[test]
 fn test_sqlite_type_affinity_real() {
     // DOUBLE types should have REAL affinity
-    let user_defined = vibesql_types::DataType::UserDefined {
-        type_name: "my double type".to_string(),
-    };
+    let user_defined =
+        vibesql_types::DataType::UserDefined { type_name: "my double type".to_string() };
     assert_eq!(
         user_defined.sqlite_affinity(),
         vibesql_types::TypeAffinity::Real,
@@ -169,9 +162,8 @@ fn test_sqlite_type_affinity_real() {
 #[test]
 fn test_sqlite_type_affinity_numeric_fallback() {
     // Unknown types without affinity keywords should have NUMERIC affinity
-    let user_defined = vibesql_types::DataType::UserDefined {
-        type_name: "custom_type".to_string(),
-    };
+    let user_defined =
+        vibesql_types::DataType::UserDefined { type_name: "custom_type".to_string() };
     assert_eq!(
         user_defined.sqlite_affinity(),
         vibesql_types::TypeAffinity::Numeric,

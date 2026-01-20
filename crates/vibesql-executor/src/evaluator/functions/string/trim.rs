@@ -34,9 +34,7 @@ pub(in crate::evaluator::functions) fn trim(
 
     if args.len() == 1 {
         // Single argument: trim whitespace
-        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-            s.trim().to_string(),
-        )))
+        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.trim().to_string())))
     } else {
         // Two arguments: trim specified characters
         let chars_to_remove = match coerce_to_string(&args[1]) {
@@ -46,9 +44,7 @@ pub(in crate::evaluator::functions) fn trim(
 
         let char_set: std::collections::HashSet<char> = chars_to_remove.chars().collect();
         let result = s.trim_matches(|c| char_set.contains(&c)).to_string();
-        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-            result,
-        )))
+        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(result)))
     }
 }
 
@@ -80,9 +76,7 @@ pub(in crate::evaluator::functions) fn ltrim(
 
     if args.len() == 1 {
         // Single argument: trim leading whitespace
-        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-            s.trim_start().to_string(),
-        )))
+        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.trim_start().to_string())))
     } else {
         // Two arguments: trim specified characters from left
         let chars_to_remove = match coerce_to_string(&args[1]) {
@@ -92,9 +86,7 @@ pub(in crate::evaluator::functions) fn ltrim(
 
         let char_set: std::collections::HashSet<char> = chars_to_remove.chars().collect();
         let result = s.trim_start_matches(|c| char_set.contains(&c)).to_string();
-        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-            result,
-        )))
+        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(result)))
     }
 }
 
@@ -126,9 +118,7 @@ pub(in crate::evaluator::functions) fn rtrim(
 
     if args.len() == 1 {
         // Single argument: trim trailing whitespace
-        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-            s.trim_end().to_string(),
-        )))
+        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end().to_string())))
     } else {
         // Two arguments: trim specified characters from right
         let chars_to_remove = match coerce_to_string(&args[1]) {
@@ -138,9 +128,7 @@ pub(in crate::evaluator::functions) fn rtrim(
 
         let char_set: std::collections::HashSet<char> = chars_to_remove.chars().collect();
         let result = s.trim_end_matches(|c| char_set.contains(&c)).to_string();
-        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-            result,
-        )))
+        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(result)))
     }
 }
 
@@ -192,9 +180,7 @@ pub(crate) fn trim_advanced(
         vibesql_ast::TrimPosition::Trailing => s.trim_end_matches(char_to_remove).to_string(),
     };
 
-    Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-        result,
-    )))
+    Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(result)))
 }
 
 #[cfg(test)]
@@ -272,10 +258,7 @@ mod tests {
 
     #[test]
     fn test_trim_null_chars() {
-        let args = vec![
-            SqlValue::Varchar(arcstr::ArcStr::from("hello")),
-            SqlValue::Null,
-        ];
+        let args = vec![SqlValue::Varchar(arcstr::ArcStr::from("hello")), SqlValue::Null];
         let result = trim(&args).unwrap();
         assert_eq!(result, SqlValue::Null);
     }

@@ -170,17 +170,13 @@ pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
 
     // Check if data already exists with correct scale factor
     // Skip loading if warehouse count matches (data loading is slow)
-    let existing_warehouses: Option<i64> = conn
-        .query_first("SELECT COUNT(*) FROM warehouse")
-        .ok()
-        .flatten();
+    let existing_warehouses: Option<i64> =
+        conn.query_first("SELECT COUNT(*) FROM warehouse").ok().flatten();
 
     if existing_warehouses == Some(expected_warehouses as i64) {
         // Data already loaded, verify other tables have data
-        let customer_count: Option<i64> = conn
-            .query_first("SELECT COUNT(*) FROM customer")
-            .ok()
-            .flatten();
+        let customer_count: Option<i64> =
+            conn.query_first("SELECT COUNT(*) FROM customer").ok().flatten();
         let expected_customers =
             expected_warehouses as i64 * data.districts_per_warehouse() as i64 * 3000;
         if customer_count.unwrap_or(0) >= expected_customers {
@@ -192,10 +188,7 @@ pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
         }
     }
 
-    eprintln!(
-        "Loading TPC-C data into MySQL ({} warehouses)...",
-        expected_warehouses
-    );
+    eprintln!("Loading TPC-C data into MySQL ({} warehouses)...", expected_warehouses);
 
     // Create schema (drops and recreates tables)
     create_tpcc_schema_mysql(&mut conn);

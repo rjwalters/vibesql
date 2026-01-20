@@ -99,10 +99,7 @@ pub fn batch_string_ne(
 /// Returns true if strings match ignoring ASCII case differences
 #[inline]
 fn ascii_eq_ignore_case(a: &str, b: &str) -> bool {
-    a.len() == b.len()
-        && a.bytes()
-            .zip(b.bytes())
-            .all(|(ac, bc)| ac.eq_ignore_ascii_case(&bc))
+    a.len() == b.len() && a.bytes().zip(b.bytes()).all(|(ac, bc)| ac.eq_ignore_ascii_case(&bc))
 }
 
 /// Case-insensitive ASCII starts_with check

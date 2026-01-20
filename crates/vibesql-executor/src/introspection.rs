@@ -288,19 +288,19 @@ impl<'a> IntrospectionExecutor<'a> {
                     SqlValue::Varchar(arcstr::ArcStr::from(stmt.table_name.clone())), // Table
                     SqlValue::Integer(non_unique),                                    // Non_unique
                     SqlValue::Varchar(arcstr::ArcStr::from(index.name.clone())),      // Key_name
-                    SqlValue::Integer((seq + 1) as i64),                              // Seq_in_index
-                    SqlValue::Varchar(arcstr::ArcStr::from(column_name)),             // Column_name
-                    SqlValue::Varchar(collation.into()),                              // Collation
-                    SqlValue::Null,                                                   // Cardinality
+                    SqlValue::Integer((seq + 1) as i64), // Seq_in_index
+                    SqlValue::Varchar(arcstr::ArcStr::from(column_name)), // Column_name
+                    SqlValue::Varchar(collation.into()), // Collation
+                    SqlValue::Null,                      // Cardinality
                     col.prefix_length()
                         .map(|l| SqlValue::Integer(l as i64))
                         .unwrap_or(SqlValue::Null), // Sub_part
-                    SqlValue::Null,                                                   // Packed
-                    SqlValue::Varchar("".into()),                                     // Null
-                    SqlValue::Varchar(index_type.into()),                             // Index_type
-                    SqlValue::Varchar("".into()),                                     // Comment
-                    SqlValue::Varchar("".into()),                                     // Index_comment
-                    SqlValue::Varchar("YES".into()),                                  // Visible
+                    SqlValue::Null,                      // Packed
+                    SqlValue::Varchar("".into()),        // Null
+                    SqlValue::Varchar(index_type.into()), // Index_type
+                    SqlValue::Varchar("".into()),        // Comment
+                    SqlValue::Varchar("".into()),        // Index_comment
+                    SqlValue::Varchar("YES".into()),     // Visible
                 ]));
             }
         }

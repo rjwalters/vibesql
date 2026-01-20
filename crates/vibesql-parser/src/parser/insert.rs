@@ -230,8 +230,7 @@ impl Parser {
         };
 
         // Parse optional ON CONFLICT or ON DUPLICATE KEY UPDATE clause
-        let (on_conflict, on_duplicate_key_update) =
-            self.parse_on_clause_for_insert()?;
+        let (on_conflict, on_duplicate_key_update) = self.parse_on_clause_for_insert()?;
 
         // Expect semicolon or EOF
         if matches!(self.peek(), Token::Semicolon) {
@@ -324,8 +323,7 @@ impl Parser {
         };
 
         // Parse optional ON CONFLICT or ON DUPLICATE KEY UPDATE clause
-        let (on_conflict, on_duplicate_key_update) =
-            self.parse_on_clause_for_insert()?;
+        let (on_conflict, on_duplicate_key_update) = self.parse_on_clause_for_insert()?;
 
         // Expect semicolon or EOF
         if matches!(self.peek(), Token::Semicolon) {
@@ -409,10 +407,7 @@ impl Parser {
                 });
             };
 
-            Ok((
-                Some(vibesql_ast::OnConflictClause { conflict_target, action }),
-                None,
-            ))
+            Ok((Some(vibesql_ast::OnConflictClause { conflict_target, action }), None))
         } else if self.peek_keyword(Keyword::Duplicate) {
             // MySQL: ON DUPLICATE KEY UPDATE ...
             self.advance(); // consume DUPLICATE
@@ -430,8 +425,7 @@ impl Parser {
                     }
                     _ => {
                         return Err(ParseError {
-                            message: "Expected column name in ON DUPLICATE KEY UPDATE"
-                                .to_string(),
+                            message: "Expected column name in ON DUPLICATE KEY UPDATE".to_string(),
                         })
                     }
                 };
@@ -449,14 +443,14 @@ impl Parser {
             }
             Ok((None, Some(assignments)))
         } else {
-            Err(ParseError {
-                message: "Expected CONFLICT or DUPLICATE after ON".to_string(),
-            })
+            Err(ParseError { message: "Expected CONFLICT or DUPLICATE after ON".to_string() })
         }
     }
 
     /// Parse assignments for ON CONFLICT ... DO UPDATE SET
-    fn parse_on_conflict_assignments(&mut self) -> Result<Vec<vibesql_ast::Assignment>, ParseError> {
+    fn parse_on_conflict_assignments(
+        &mut self,
+    ) -> Result<Vec<vibesql_ast::Assignment>, ParseError> {
         let mut assignments = Vec::new();
         loop {
             let column = match self.peek() {

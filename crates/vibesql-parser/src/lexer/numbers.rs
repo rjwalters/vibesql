@@ -115,10 +115,7 @@ impl<'a> Lexer<'a> {
                         Ok(Token::Number((value as i64).to_string()))
                     }
                     Err(_) => Err(LexerError {
-                        message: format!(
-                            "Hexadecimal literal '0x{}' is too large",
-                            hex_str
-                        ),
+                        message: format!("Hexadecimal literal '0x{}' is too large", hex_str),
                         position: self.position(),
                         near_token: Some(format!("0x{}", hex_str)),
                     }),
@@ -205,10 +202,10 @@ mod tests {
         let test_cases = vec![
             ("0x10", "16"),
             ("0xFF", "255"),
-            ("0xff", "255"),         // lowercase hex digits
-            ("0X10", "16"),          // uppercase X
+            ("0xff", "255"), // lowercase hex digits
+            ("0X10", "16"),  // uppercase X
             ("0x0", "0"),
-            ("0x7FFFFFFF", "2147483647"),        // max i32
+            ("0x7FFFFFFF", "2147483647"),                  // max i32
             ("0x7FFFFFFFFFFFFFFF", "9223372036854775807"), // max i64
         ];
 
@@ -252,8 +249,8 @@ mod tests {
     fn test_invalid_hex_literals() {
         // Test invalid hex literals should fail
         let invalid_cases = vec![
-            "0x",   // No hex digits after 0x
-            "0X",   // No hex digits after 0X
+            "0x", // No hex digits after 0x
+            "0X", // No hex digits after 0X
         ];
 
         for input in invalid_cases {

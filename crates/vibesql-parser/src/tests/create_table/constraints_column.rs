@@ -287,8 +287,7 @@ fn test_parse_create_table_references_without_column() {
 /// Test DEFERRABLE constraint on column-level REFERENCES
 #[test]
 fn test_parse_references_deferrable() {
-    let result =
-        Parser::parse_sql("CREATE TABLE t(a INTEGER REFERENCES p(x) DEFERRABLE)");
+    let result = Parser::parse_sql("CREATE TABLE t(a INTEGER REFERENCES p(x) DEFERRABLE)");
     assert!(result.is_ok(), "Should parse REFERENCES with DEFERRABLE: {:?}", result.err());
     let stmt = result.unwrap();
 
@@ -296,7 +295,9 @@ fn test_parse_references_deferrable() {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.columns[0].constraints.len(), 1);
             match &create.columns[0].constraints[0].kind {
-                vibesql_ast::ColumnConstraintKind::References { table, column, deferral, .. } => {
+                vibesql_ast::ColumnConstraintKind::References {
+                    table, column, deferral, ..
+                } => {
                     assert_eq!(table, "p");
                     assert_eq!(column, &Some("x".to_string()));
                     let deferral = deferral.expect("Should have deferral");
@@ -313,8 +314,7 @@ fn test_parse_references_deferrable() {
 /// Test NOT DEFERRABLE constraint on column-level REFERENCES
 #[test]
 fn test_parse_references_not_deferrable() {
-    let result =
-        Parser::parse_sql("CREATE TABLE t(a INTEGER REFERENCES p(x) NOT DEFERRABLE)");
+    let result = Parser::parse_sql("CREATE TABLE t(a INTEGER REFERENCES p(x) NOT DEFERRABLE)");
     assert!(result.is_ok(), "Should parse REFERENCES with NOT DEFERRABLE: {:?}", result.err());
     let stmt = result.unwrap();
 
@@ -337,7 +337,7 @@ fn test_parse_references_not_deferrable() {
 #[test]
 fn test_parse_references_deferrable_initially_deferred() {
     let result = Parser::parse_sql(
-        "CREATE TABLE t(a INTEGER REFERENCES p(x) DEFERRABLE INITIALLY DEFERRED)"
+        "CREATE TABLE t(a INTEGER REFERENCES p(x) DEFERRABLE INITIALLY DEFERRED)",
     );
     assert!(result.is_ok(), "Should parse DEFERRABLE INITIALLY DEFERRED: {:?}", result.err());
     let stmt = result.unwrap();
@@ -361,7 +361,7 @@ fn test_parse_references_deferrable_initially_deferred() {
 #[test]
 fn test_parse_references_deferrable_initially_immediate() {
     let result = Parser::parse_sql(
-        "CREATE TABLE t(a INTEGER REFERENCES p(x) DEFERRABLE INITIALLY IMMEDIATE)"
+        "CREATE TABLE t(a INTEGER REFERENCES p(x) DEFERRABLE INITIALLY IMMEDIATE)",
     );
     assert!(result.is_ok(), "Should parse DEFERRABLE INITIALLY IMMEDIATE: {:?}", result.err());
     let stmt = result.unwrap();
@@ -385,7 +385,7 @@ fn test_parse_references_deferrable_initially_immediate() {
 #[test]
 fn test_parse_references_deferrable_with_actions() {
     let result = Parser::parse_sql(
-        "CREATE TABLE t(a INTEGER REFERENCES p(x) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED)"
+        "CREATE TABLE t(a INTEGER REFERENCES p(x) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED)",
     );
     assert!(result.is_ok(), "Should parse with ON DELETE and DEFERRABLE: {:?}", result.err());
     let stmt = result.unwrap();
@@ -393,9 +393,7 @@ fn test_parse_references_deferrable_with_actions() {
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
             match &create.columns[0].constraints[0].kind {
-                vibesql_ast::ColumnConstraintKind::References {
-                    on_delete, deferral, ..
-                } => {
+                vibesql_ast::ColumnConstraintKind::References { on_delete, deferral, .. } => {
                     assert_eq!(on_delete, &Some(vibesql_ast::ReferentialAction::Cascade));
                     let deferral = deferral.expect("Should have deferral");
                     assert!(deferral.is_deferrable);
@@ -412,9 +410,7 @@ fn test_parse_references_deferrable_with_actions() {
 /// The INITIALLY keyword is only valid after DEFERRABLE/NOT DEFERRABLE
 #[test]
 fn test_parse_references_initially_without_deferrable_fails() {
-    let result = Parser::parse_sql(
-        "CREATE TABLE t(a INTEGER REFERENCES p(x) INITIALLY DEFERRED)"
-    );
+    let result = Parser::parse_sql("CREATE TABLE t(a INTEGER REFERENCES p(x) INITIALLY DEFERRED)");
     assert!(result.is_err(), "Should reject INITIALLY without DEFERRABLE");
 }
 

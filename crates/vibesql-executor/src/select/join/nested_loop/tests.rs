@@ -84,6 +84,8 @@ fn test_nested_loop_classic_simple_condition() {
         &timeout_ctx,
         &["users".to_string()],
         &["orders".to_string()],
+        None, // outer_row - not used in this test
+        None, // outer_schema - not used in this test
     )
     .unwrap();
 
@@ -134,6 +136,8 @@ fn test_nested_loop_classic_no_condition() {
         &timeout_ctx,
         &["left".to_string()],
         &["right".to_string()],
+        None, // outer_row - not used in this test
+        None, // outer_schema - not used in this test
     )
     .unwrap();
 
@@ -165,6 +169,8 @@ fn test_nested_loop_classic_empty_input() {
         &timeout_ctx,
         &["left".to_string()],
         &["right".to_string()],
+        None, // outer_row - not used in this test
+        None, // outer_schema - not used in this test
     )
     .unwrap();
 

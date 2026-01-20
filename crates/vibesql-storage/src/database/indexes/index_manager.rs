@@ -218,7 +218,9 @@ impl IndexManager {
                         let columns_str = metadata
                             .columns
                             .iter()
-                            .map(|col| format!("{}.{}", metadata.table_name, col.expect_column_name()))
+                            .map(|col| {
+                                format!("{}.{}", metadata.table_name, col.expect_column_name())
+                            })
                             .collect::<Vec<_>>()
                             .join(", ");
 
@@ -238,10 +240,9 @@ impl IndexManager {
                                 if let Ok(row_ids) = guard.lookup(&key_values) {
                                     if !row_ids.is_empty() {
                                         // SQLite format: "UNIQUE constraint failed: table.col1, table.col2"
-                                        return Err(StorageError::UniqueConstraintViolation(format!(
-                                            "UNIQUE constraint failed: {}",
-                                            columns_str
-                                        )));
+                                        return Err(StorageError::UniqueConstraintViolation(
+                                            format!("UNIQUE constraint failed: {}", columns_str),
+                                        ));
                                     }
                                 }
                             }

@@ -13,7 +13,8 @@ fn test_auto_increment_basic_inserts() {
     let mut db = Database::new();
 
     // Create table with AUTO_INCREMENT
-    let stmt = CreateTableStmt { temporary: false,
+    let stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
@@ -30,7 +31,8 @@ fn test_auto_increment_basic_inserts() {
                 ],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "username".to_string(),
@@ -39,13 +41,15 @@ fn test_auto_increment_basic_inserts() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -103,7 +107,8 @@ fn test_multiple_auto_increment_error() {
     let mut db = Database::new();
 
     // Should fail - multiple AUTO_INCREMENT columns not allowed
-    let stmt = CreateTableStmt { temporary: false,
+    let stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "bad".to_string(),
         columns: vec![
@@ -117,7 +122,8 @@ fn test_multiple_auto_increment_error() {
                 }],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "id2".to_string(),
@@ -129,13 +135,15 @@ fn test_multiple_auto_increment_error() {
                 }],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -149,7 +157,8 @@ fn test_last_insert_rowid_basic() {
     let mut db = Database::new();
 
     // Create table with AUTO_INCREMENT
-    let stmt = CreateTableStmt { temporary: false,
+    let stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
@@ -166,7 +175,8 @@ fn test_last_insert_rowid_basic() {
                 ],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "username".to_string(),
@@ -175,13 +185,15 @@ fn test_last_insert_rowid_basic() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -238,7 +250,8 @@ fn test_last_insert_rowid_multi_row_insert() {
     let mut db = Database::new();
 
     // Create table with AUTO_INCREMENT
-    let stmt = CreateTableStmt { temporary: false,
+    let stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "items".to_string(),
         columns: vec![
@@ -255,7 +268,8 @@ fn test_last_insert_rowid_multi_row_insert() {
                 ],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -264,13 +278,15 @@ fn test_last_insert_rowid_multi_row_insert() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -319,7 +335,8 @@ fn test_last_insert_rowid_no_auto_increment() {
     let mut db = Database::new();
 
     // Create table WITHOUT AUTO_INCREMENT
-    let stmt = CreateTableStmt { temporary: false,
+    let stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "manual".to_string(),
         columns: vec![
@@ -333,7 +350,8 @@ fn test_last_insert_rowid_no_auto_increment() {
                 }],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -342,13 +360,15 @@ fn test_last_insert_rowid_no_auto_increment() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -386,7 +406,8 @@ fn test_last_insert_rowid_via_select() {
     let mut db = Database::new();
 
     // Create table with AUTO_INCREMENT
-    let stmt = CreateTableStmt { temporary: false,
+    let stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
@@ -403,7 +424,8 @@ fn test_last_insert_rowid_via_select() {
                 ],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -412,13 +434,15 @@ fn test_last_insert_rowid_via_select() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);

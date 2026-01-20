@@ -7,7 +7,8 @@ fn test_select_into_single_row() {
     let mut db = vibesql_storage::Database::new();
 
     // Create source table
-    let create_stmt = vibesql_ast::CreateTableStmt { temporary: false,
+    let create_stmt = vibesql_ast::CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "source".to_string(),
         columns: vec![
@@ -18,7 +19,8 @@ fn test_select_into_single_row() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             vibesql_ast::ColumnDef {
                 name: "name".to_string(),
@@ -27,13 +29,15 @@ fn test_select_into_single_row() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -125,7 +129,8 @@ fn test_select_into_no_rows_error() {
     let mut db = vibesql_storage::Database::new();
 
     // Create source table
-    let create_stmt = vibesql_ast::CreateTableStmt { temporary: false,
+    let create_stmt = vibesql_ast::CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "source".to_string(),
         columns: vec![vibesql_ast::ColumnDef {
@@ -135,12 +140,14 @@ fn test_select_into_no_rows_error() {
             constraints: vec![],
             default_value: None,
             comment: None,
-            generated_expr: None, is_exact_integer_type: false,
+            generated_expr: None,
+            is_exact_integer_type: false,
         }],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -190,7 +197,8 @@ fn test_select_into_multiple_rows_error() {
     let mut db = vibesql_storage::Database::new();
 
     // Create source table
-    let create_stmt = vibesql_ast::CreateTableStmt { temporary: false,
+    let create_stmt = vibesql_ast::CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "source".to_string(),
         columns: vec![vibesql_ast::ColumnDef {
@@ -200,12 +208,14 @@ fn test_select_into_multiple_rows_error() {
             constraints: vec![],
             default_value: None,
             comment: None,
-            generated_expr: None, is_exact_integer_type: false,
+            generated_expr: None,
+            is_exact_integer_type: false,
         }],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -265,7 +275,8 @@ fn test_select_into_with_expressions() {
     let mut db = vibesql_storage::Database::new();
 
     // Create source table
-    let create_stmt = vibesql_ast::CreateTableStmt { temporary: false,
+    let create_stmt = vibesql_ast::CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "source".to_string(),
         columns: vec![vibesql_ast::ColumnDef {
@@ -275,12 +286,14 @@ fn test_select_into_with_expressions() {
             constraints: vec![],
             default_value: None,
             comment: None,
-            generated_expr: None, is_exact_integer_type: false,
+            generated_expr: None,
+            is_exact_integer_type: false,
         }],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 

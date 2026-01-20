@@ -123,13 +123,8 @@ impl Metadata {
     }
 
     /// Get a sqlite_stat1 entry
-    pub fn get_sqlite_stat1(
-        &self,
-        table_name: &str,
-        index_name: Option<&str>,
-    ) -> Option<&String> {
-        self.sqlite_stat1
-            .get(&(table_name.to_string(), index_name.map(|s| s.to_string())))
+    pub fn get_sqlite_stat1(&self, table_name: &str, index_name: Option<&str>) -> Option<&String> {
+        self.sqlite_stat1.get(&(table_name.to_string(), index_name.map(|s| s.to_string())))
     }
 
     /// Get all sqlite_stat1 entries

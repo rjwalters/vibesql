@@ -22,7 +22,9 @@ pub fn coerce_to_string(value: &SqlValue) -> Option<String> {
         SqlValue::Integer(n) | SqlValue::Bigint(n) => Some(n.to_string()),
         SqlValue::Smallint(n) => Some(n.to_string()),
         SqlValue::Unsigned(n) => Some(n.to_string()),
-        SqlValue::Double(n) | SqlValue::Numeric(n) | SqlValue::Real(n) => Some(format_sqlite_float(*n)),
+        SqlValue::Double(n) | SqlValue::Numeric(n) | SqlValue::Real(n) => {
+            Some(format_sqlite_float(*n))
+        }
         SqlValue::Float(n) => Some(format_sqlite_float(*n as f64)),
         SqlValue::Boolean(b) => Some(if *b { "1" } else { "0" }.to_string()),
         SqlValue::Vector(v) => {

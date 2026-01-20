@@ -52,7 +52,8 @@ impl TableSchema {
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
             storage_format: StorageFormat::default(),
-            rowid_alias_column: None, without_rowid: false,
+            rowid_alias_column: None,
+            without_rowid: false,
         }
     }
 
@@ -74,7 +75,8 @@ impl TableSchema {
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
             storage_format: StorageFormat::default(),
-            rowid_alias_column: None, without_rowid: false,
+            rowid_alias_column: None,
+            without_rowid: false,
         }
     }
 
@@ -96,7 +98,8 @@ impl TableSchema {
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
             storage_format: StorageFormat::default(),
-            rowid_alias_column: None, without_rowid: false,
+            rowid_alias_column: None,
+            without_rowid: false,
         }
     }
 
@@ -118,7 +121,8 @@ impl TableSchema {
             check_constraints: Vec::new(),
             foreign_keys,
             storage_format: StorageFormat::default(),
-            rowid_alias_column: None, without_rowid: false,
+            rowid_alias_column: None,
+            without_rowid: false,
         }
     }
 
@@ -141,7 +145,8 @@ impl TableSchema {
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
             storage_format: StorageFormat::default(),
-            rowid_alias_column: None, without_rowid: false,
+            rowid_alias_column: None,
+            without_rowid: false,
         }
     }
 
@@ -166,7 +171,8 @@ impl TableSchema {
             check_constraints,
             foreign_keys,
             storage_format: StorageFormat::default(),
-            rowid_alias_column: None, without_rowid: false,
+            rowid_alias_column: None,
+            without_rowid: false,
         }
     }
 
@@ -188,7 +194,8 @@ impl TableSchema {
             check_constraints: Vec::new(),
             foreign_keys: Vec::new(),
             storage_format,
-            rowid_alias_column: None, without_rowid: false,
+            rowid_alias_column: None,
+            without_rowid: false,
         }
     }
 

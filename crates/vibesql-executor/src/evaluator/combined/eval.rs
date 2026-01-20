@@ -20,11 +20,7 @@ fn format_float_for_text_comparison(n: f64) -> String {
         return "NaN".to_string();
     }
     if n.is_infinite() {
-        return if n > 0.0 {
-            "Inf".to_string()
-        } else {
-            "-Inf".to_string()
-        };
+        return if n > 0.0 { "Inf".to_string() } else { "-Inf".to_string() };
     }
 
     // Use Rust's default formatting
@@ -45,7 +41,10 @@ impl CombinedExpressionEvaluator<'_> {
     /// Returns Some(affinity) if the expression is a column reference and we can
     /// determine its declared type from the schema. Returns None for literals,
     /// function calls, and other non-column expressions.
-    pub(in crate::evaluator) fn get_expression_affinity(&self, expr: &vibesql_ast::Expression) -> Option<TypeAffinity> {
+    pub(in crate::evaluator) fn get_expression_affinity(
+        &self,
+        expr: &vibesql_ast::Expression,
+    ) -> Option<TypeAffinity> {
         match expr {
             vibesql_ast::Expression::ColumnRef(col_id) => {
                 let table = col_id.table_canonical();
@@ -206,15 +205,15 @@ impl CombinedExpressionEvaluator<'_> {
                 SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(
                     format_float_for_text_comparison(*n as f64),
                 )),
-                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
+                SqlValue::Real(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Double(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Numeric(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
                 _ => right_val,
             };
             return (left_val, right_as_text);
@@ -231,15 +230,15 @@ impl CombinedExpressionEvaluator<'_> {
                 SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(
                     format_float_for_text_comparison(*n as f64),
                 )),
-                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
+                SqlValue::Real(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Double(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Numeric(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
                 _ => left_val,
             };
             return (left_as_text, right_val);
@@ -272,10 +271,8 @@ impl CombinedExpressionEvaluator<'_> {
         // Per SQLite: when one operand has NUMERIC affinity and the other has TEXT or NONE affinity,
         // try to convert the TEXT value to a number for comparison.
         // This handles column-to-column comparisons like: NUMERIC_col = NONE_col
-        let is_right_non_numeric_affinity = matches!(
-            right_affinity,
-            Some(TypeAffinity::None) | Some(TypeAffinity::Text) | None
-        );
+        let is_right_non_numeric_affinity =
+            matches!(right_affinity, Some(TypeAffinity::None) | Some(TypeAffinity::Text) | None);
         if is_left_numeric_affinity
             && is_right_non_numeric_affinity
             && matches!(right_val, SqlValue::Varchar(_) | SqlValue::Character(_))
@@ -286,10 +283,8 @@ impl CombinedExpressionEvaluator<'_> {
 
         // Case 6: Right is NUMERIC/INTEGER/REAL column, left is NONE/TEXT column with TEXT value
         // Symmetric case of Case 5
-        let is_left_non_numeric_affinity = matches!(
-            left_affinity,
-            Some(TypeAffinity::None) | Some(TypeAffinity::Text) | None
-        );
+        let is_left_non_numeric_affinity =
+            matches!(left_affinity, Some(TypeAffinity::None) | Some(TypeAffinity::Text) | None);
         if is_right_numeric_affinity
             && is_left_non_numeric_affinity
             && matches!(left_val, SqlValue::Varchar(_) | SqlValue::Character(_))
@@ -333,15 +328,15 @@ impl CombinedExpressionEvaluator<'_> {
                 SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(
                     format_float_for_text_comparison(*n as f64),
                 )),
-                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
+                SqlValue::Real(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Double(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Numeric(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
                 _ => right_val,
             };
             return (left_val, right_as_text);
@@ -357,15 +352,15 @@ impl CombinedExpressionEvaluator<'_> {
                 SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(
                     format_float_for_text_comparison(*n as f64),
                 )),
-                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
+                SqlValue::Real(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Double(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Numeric(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
                 _ => left_val,
             };
             return (left_as_text, right_val);
@@ -520,8 +515,7 @@ impl CombinedExpressionEvaluator<'_> {
                         // Check if the table is WITHOUT ROWID - if so, error
                         let table_id = table.map(vibesql_catalog::TableIdentifier::from);
                         if let Some(ref table_id) = table_id {
-                            if let Some((_, table_schema)) =
-                                self.schema.table_schemas.get(table_id)
+                            if let Some((_, table_schema)) = self.schema.table_schemas.get(table_id)
                             {
                                 if table_schema.without_rowid {
                                     return Err(ExecutorError::ColumnNotFound {
@@ -676,37 +670,29 @@ impl CombinedExpressionEvaluator<'_> {
 
                 // If still not found, try chaining through outer_context for grandparent and beyond
                 // This implements SQLite-style NameContext chaining for arbitrary nesting depth
-                if let Some(outer_context) = self.outer_context {
-                    // Recursively resolve through the context chain
-                    // The outer_context will search its own schema, then its outer schema, etc.
-                    if let (Some(outer_row), Some(_)) =
-                        (outer_context.outer_row, outer_context.outer_schema)
-                    {
-                        if let Some(col_index) =
-                            outer_context.schema.get_column_index(table, column)
-                        {
+                // FIX for issue #4994: Use loop-based traversal to support unlimited nesting depth
+                // instead of the previous manual 2-level check
+                let mut current_context = self.outer_context;
+                while let Some(ctx) = current_context {
+                    // Check this context's schema (which represents the parent evaluator's inner schema)
+                    if let Some(outer_row) = ctx.outer_row {
+                        if let Some(col_index) = ctx.schema.get_column_index(table, column) {
                             return outer_row
                                 .get(col_index)
                                 .cloned()
                                 .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: col_index });
                         }
-                        // Continue chaining recursively
-                        if let Some(grandparent_context) = outer_context.outer_context {
-                            // TODO: This should be a recursive call, but we need to restructure
-                            // For now, this provides 3-level nesting support
-                            if let (Some(grandparent_row), Some(_)) =
-                                (grandparent_context.outer_row, grandparent_context.outer_schema)
-                            {
-                                if let Some(col_index) =
-                                    grandparent_context.schema.get_column_index(table, column)
-                                {
-                                    return grandparent_row.get(col_index).cloned().ok_or(
-                                        ExecutorError::ColumnIndexOutOfBounds { index: col_index },
-                                    );
-                                }
+                        // Also check this context's outer_schema (grandparent's schema)
+                        if let Some(outer_schema) = ctx.outer_schema {
+                            if let Some(col_index) = outer_schema.get_column_index(table, column) {
+                                return outer_row.get(col_index).cloned().ok_or(
+                                    ExecutorError::ColumnIndexOutOfBounds { index: col_index },
+                                );
                             }
                         }
                     }
+                    // Move to the next level in the context chain
+                    current_context = ctx.outer_context;
                 }
 
                 // Column not found in either schema - collect diagnostic info
@@ -815,7 +801,12 @@ impl CombinedExpressionEvaluator<'_> {
                                 vibesql_ast::Expression::RowValueConstructor(right_values),
                             ) = (left.as_ref(), right.as_ref())
                             {
-                                return self.eval_row_value_comparison(left_values, op, right_values, row);
+                                return self.eval_row_value_comparison(
+                                    left_values,
+                                    op,
+                                    right_values,
+                                    row,
+                                );
                             }
                         }
 
@@ -1272,7 +1263,10 @@ impl CombinedExpressionEvaluator<'_> {
                 let mut has_null = false;
                 for (left_val, right_val) in left_values.iter().zip(right_values.iter()) {
                     let cmp_result = ExpressionEvaluator::eval_binary_op_static(
-                        left_val, op, right_val, sql_mode.clone(),
+                        left_val,
+                        op,
+                        right_val,
+                        sql_mode.clone(),
                     )?;
                     match cmp_result {
                         SqlValue::Boolean(false) => return Ok(SqlValue::Boolean(false)),
@@ -1368,14 +1362,20 @@ impl CombinedExpressionEvaluator<'_> {
             let right_val = &right_values[i];
 
             let strict_result = ExpressionEvaluator::eval_binary_op_static(
-                left_val, &strict_op, right_val, sql_mode.clone(),
+                left_val,
+                &strict_op,
+                right_val,
+                sql_mode.clone(),
             )?;
             match strict_result {
                 SqlValue::Boolean(true) => return Ok(SqlValue::Boolean(true)),
                 SqlValue::Null => has_null = true,
                 SqlValue::Boolean(false) => {
                     let eq_result = ExpressionEvaluator::eval_binary_op_static(
-                        left_val, &eq_op, right_val, sql_mode.clone(),
+                        left_val,
+                        &eq_op,
+                        right_val,
+                        sql_mode.clone(),
                     )?;
                     match eq_result {
                         SqlValue::Boolean(true) => {}

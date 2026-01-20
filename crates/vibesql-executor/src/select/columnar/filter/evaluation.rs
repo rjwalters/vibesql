@@ -59,12 +59,16 @@ fn strict_type_equal(a: &SqlValue, b: &SqlValue) -> bool {
         (Bigint(x), Smallint(y)) | (Smallint(y), Bigint(x)) => *x == *y as i64,
 
         // Float types with integer
-        (Float(x), Integer(y)) | (Integer(y), Float(x)) => (*x as f64 - *y as f64).abs() < f64::EPSILON,
+        (Float(x), Integer(y)) | (Integer(y), Float(x)) => {
+            (*x as f64 - *y as f64).abs() < f64::EPSILON
+        }
         (Double(x), Integer(y)) | (Integer(y), Double(x)) => (*x - *y as f64).abs() < f64::EPSILON,
         (Real(x), Integer(y)) | (Integer(y), Real(x)) => (*x - *y as f64).abs() < f64::EPSILON,
 
         // Float with Bigint
-        (Float(x), Bigint(y)) | (Bigint(y), Float(x)) => (*x as f64 - *y as f64).abs() < f64::EPSILON,
+        (Float(x), Bigint(y)) | (Bigint(y), Float(x)) => {
+            (*x as f64 - *y as f64).abs() < f64::EPSILON
+        }
         (Double(x), Bigint(y)) | (Bigint(y), Double(x)) => (*x - *y as f64).abs() < f64::EPSILON,
         (Real(x), Bigint(y)) | (Bigint(y), Real(x)) => (*x - *y as f64).abs() < f64::EPSILON,
 
@@ -74,9 +78,13 @@ fn strict_type_equal(a: &SqlValue, b: &SqlValue) -> bool {
         (Double(x), Real(y)) | (Real(y), Double(x)) => (*x - *y).abs() < f64::EPSILON,
 
         // Numeric type (f64) with integer types
-        (Numeric(x), Integer(y)) | (Integer(y), Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+        (Numeric(x), Integer(y)) | (Integer(y), Numeric(x)) => {
+            (*x - *y as f64).abs() < f64::EPSILON
+        }
         (Numeric(x), Bigint(y)) | (Bigint(y), Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
-        (Numeric(x), Smallint(y)) | (Smallint(y), Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
+        (Numeric(x), Smallint(y)) | (Smallint(y), Numeric(x)) => {
+            (*x - *y as f64).abs() < f64::EPSILON
+        }
 
         // Numeric with float types
         (Numeric(x), Float(y)) | (Float(y), Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
@@ -279,7 +287,9 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
                 matches
             }
         }
-        ColumnPredicate::InList { values: list_values, negated, use_strict_type_ordering, .. } => {
+        ColumnPredicate::InList {
+            values: list_values, negated, use_strict_type_ordering, ..
+        } => {
             use std::cmp::Ordering;
             use vibesql_types::SqlValue;
 

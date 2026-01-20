@@ -606,9 +606,10 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     /// Convert an arena InsertStmt to an owned InsertStmt.
     pub fn convert_insert(&self, stmt: &arena_dml::InsertStmt<'arena>) -> InsertStmt {
         InsertStmt {
-            with_clause: stmt.with_clause.as_ref().map(|ctes| {
-                ctes.iter().map(|cte| self.convert_cte(cte)).collect()
-            }),
+            with_clause: stmt
+                .with_clause
+                .as_ref()
+                .map(|ctes| ctes.iter().map(|cte| self.convert_cte(cte)).collect()),
             schema_name: stmt.schema_name.map(|s| self.resolve(s)),
             schema_quoted: stmt.schema_quoted,
             table_name: self.resolve(stmt.table_name),
@@ -668,16 +669,18 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     /// Convert an arena UpdateStmt to an owned UpdateStmt.
     pub fn convert_update(&self, stmt: &arena_dml::UpdateStmt<'arena>) -> UpdateStmt {
         UpdateStmt {
-            with_clause: stmt.with_clause.as_ref().map(|ctes| {
-                ctes.iter().map(|cte| self.convert_cte(cte)).collect()
-            }),
+            with_clause: stmt
+                .with_clause
+                .as_ref()
+                .map(|ctes| ctes.iter().map(|cte| self.convert_cte(cte)).collect()),
             table_name: self.resolve(stmt.table_name),
             quoted: stmt.quoted,
             alias: stmt.alias.map(|a| self.resolve(a)),
             assignments: stmt.assignments.iter().map(|a| self.convert_assignment(a)).collect(),
-            from_clause: stmt.from_clause.as_ref().map(|froms| {
-                froms.iter().map(|f| self.convert_from_clause(f)).collect()
-            }),
+            from_clause: stmt
+                .from_clause
+                .as_ref()
+                .map(|froms| froms.iter().map(|f| self.convert_from_clause(f)).collect()),
             where_clause: stmt.where_clause.as_ref().map(|wc| self.convert_where_clause(wc)),
             conflict_clause: stmt.conflict_clause.map(ConflictClause::from),
         }
@@ -697,9 +700,10 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     /// Convert an arena DeleteStmt to an owned DeleteStmt.
     pub fn convert_delete(&self, stmt: &arena_dml::DeleteStmt<'arena>) -> DeleteStmt {
         DeleteStmt {
-            with_clause: stmt.with_clause.as_ref().map(|ctes| {
-                ctes.iter().map(|cte| self.convert_cte(cte)).collect()
-            }),
+            with_clause: stmt
+                .with_clause
+                .as_ref()
+                .map(|ctes| ctes.iter().map(|cte| self.convert_cte(cte)).collect()),
             only: stmt.only,
             table_name: self.resolve(stmt.table_name),
             quoted: stmt.quoted,

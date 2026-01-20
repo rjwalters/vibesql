@@ -188,10 +188,8 @@ pub fn parallel_group_aggregate<'a>(
     // Phase 3: Finalize - Extract final values
     let mut results: Vec<(Vec<SqlValue>, Vec<SqlValue>)> = Vec::with_capacity(global_groups.len());
     for (key, accumulators) in global_groups {
-        let values: Vec<SqlValue> = accumulators
-            .iter()
-            .map(|acc| acc.finalize())
-            .collect::<Result<Vec<_>, _>>()?;
+        let values: Vec<SqlValue> =
+            accumulators.iter().map(|acc| acc.finalize()).collect::<Result<Vec<_>, _>>()?;
         results.push((key, values));
     }
 
@@ -243,10 +241,8 @@ fn sequential_group_aggregate<'a>(
     // Finalize
     let mut results: Vec<(Vec<SqlValue>, Vec<SqlValue>)> = Vec::with_capacity(groups.len());
     for (key, accumulators) in groups {
-        let values: Vec<SqlValue> = accumulators
-            .iter()
-            .map(|acc| acc.finalize())
-            .collect::<Result<Vec<_>, _>>()?;
+        let values: Vec<SqlValue> =
+            accumulators.iter().map(|acc| acc.finalize()).collect::<Result<Vec<_>, _>>()?;
         results.push((key, values));
     }
 

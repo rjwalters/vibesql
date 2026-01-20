@@ -73,9 +73,7 @@ impl ExpressionEvaluator<'_> {
                 }
             } else if collation_name.eq_ignore_ascii_case("rtrim") {
                 match val {
-                    SqlValue::Varchar(s) => {
-                        SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end()))
-                    }
+                    SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end())),
                     SqlValue::Character(s) => {
                         SqlValue::Character(arcstr::ArcStr::from(s.trim_end()))
                     }
@@ -527,7 +525,8 @@ impl ExpressionEvaluator<'_> {
         let escape_char = if let Some(escape_expr) = escape {
             let escape_val = self.eval(escape_expr, row)?;
             match escape_val {
-                vibesql_types::SqlValue::Varchar(ref s) | vibesql_types::SqlValue::Character(ref s) => {
+                vibesql_types::SqlValue::Varchar(ref s)
+                | vibesql_types::SqlValue::Character(ref s) => {
                     let mut chars = s.chars();
                     match (chars.next(), chars.next()) {
                         (Some(c), None) => Some(c), // Exactly one character
@@ -535,7 +534,7 @@ impl ExpressionEvaluator<'_> {
                             // Empty string or multi-character string: error per SQLite
                             return Err(ExecutorError::SqliteCompatError(
                                 "ESCAPE expression must be a single character".to_string(),
-                            ))
+                            ));
                         }
                     }
                 }
@@ -679,8 +678,12 @@ impl ExpressionEvaluator<'_> {
 
                 // Apply SQLite type affinity rules for IN comparisons
                 // Note: IN expressions have different affinity rules than regular comparisons
-                let (expr_coerced, value_coerced) =
-                    self.apply_affinity_for_in_comparison(expr, expr_val.clone(), value_expr, value);
+                let (expr_coerced, value_coerced) = self.apply_affinity_for_in_comparison(
+                    expr,
+                    expr_val.clone(),
+                    value_expr,
+                    value,
+                );
 
                 let eq_result = self.eval_binary_op(
                     &expr_coerced,
@@ -779,8 +782,7 @@ impl ExpressionEvaluator<'_> {
         // Determine effective bounds (swap if symmetric and low > high)
         let (effective_low, effective_high) = if symmetric {
             let gt_op = vibesql_ast::BinaryOperator::GreaterThan;
-            let low_gt_high =
-                self.eval_row_value_comparison(low_exprs, &gt_op, high_exprs, row)?;
+            let low_gt_high = self.eval_row_value_comparison(low_exprs, &gt_op, high_exprs, row)?;
 
             if matches!(low_gt_high, SqlValue::Boolean(true)) {
                 (high_exprs, low_exprs) // Swap
@@ -796,8 +798,7 @@ impl ExpressionEvaluator<'_> {
             let lt_op = vibesql_ast::BinaryOperator::LessThan;
             let gt_op = vibesql_ast::BinaryOperator::GreaterThan;
 
-            let lt_low =
-                self.eval_row_value_comparison(expr_exprs, &lt_op, effective_low, row)?;
+            let lt_low = self.eval_row_value_comparison(expr_exprs, &lt_op, effective_low, row)?;
             let gt_high =
                 self.eval_row_value_comparison(expr_exprs, &gt_op, effective_high, row)?;
 
@@ -806,7 +807,9 @@ impl ExpressionEvaluator<'_> {
                 (SqlValue::Boolean(true), _) | (_, SqlValue::Boolean(true)) => {
                     Ok(SqlValue::Boolean(true))
                 }
-                (SqlValue::Boolean(false), SqlValue::Boolean(false)) => Ok(SqlValue::Boolean(false)),
+                (SqlValue::Boolean(false), SqlValue::Boolean(false)) => {
+                    Ok(SqlValue::Boolean(false))
+                }
                 _ => Ok(SqlValue::Null),
             }
         } else {
@@ -814,8 +817,7 @@ impl ExpressionEvaluator<'_> {
             let ge_op = vibesql_ast::BinaryOperator::GreaterThanOrEqual;
             let le_op = vibesql_ast::BinaryOperator::LessThanOrEqual;
 
-            let ge_low =
-                self.eval_row_value_comparison(expr_exprs, &ge_op, effective_low, row)?;
+            let ge_low = self.eval_row_value_comparison(expr_exprs, &ge_op, effective_low, row)?;
             let le_high =
                 self.eval_row_value_comparison(expr_exprs, &le_op, effective_high, row)?;
 

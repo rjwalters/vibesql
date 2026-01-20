@@ -15,11 +15,7 @@ fn format_float_for_text_comparison(n: f64) -> String {
         return "NaN".to_string();
     }
     if n.is_infinite() {
-        return if n > 0.0 {
-            "Inf".to_string()
-        } else {
-            "-Inf".to_string()
-        };
+        return if n > 0.0 { "Inf".to_string() } else { "-Inf".to_string() };
     }
 
     // Use Rust's default formatting
@@ -182,15 +178,15 @@ impl ExpressionEvaluator<'_> {
                 SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(
                     format_float_for_text_comparison(*n as f64),
                 )),
-                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
+                SqlValue::Real(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Double(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Numeric(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
                 _ => right_val,
             };
             return (left_val, right_as_text);
@@ -207,15 +203,15 @@ impl ExpressionEvaluator<'_> {
                 SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(
                     format_float_for_text_comparison(*n as f64),
                 )),
-                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
+                SqlValue::Real(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Double(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Numeric(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
                 _ => left_val,
             };
             return (left_as_text, right_val);
@@ -248,10 +244,8 @@ impl ExpressionEvaluator<'_> {
         // Per SQLite: when one operand has NUMERIC affinity and the other has TEXT or NONE affinity,
         // try to convert the TEXT value to a number for comparison.
         // This handles column-to-column comparisons like: NUMERIC_col = NONE_col
-        let is_right_non_numeric_affinity = matches!(
-            right_affinity,
-            Some(TypeAffinity::None) | Some(TypeAffinity::Text) | None
-        );
+        let is_right_non_numeric_affinity =
+            matches!(right_affinity, Some(TypeAffinity::None) | Some(TypeAffinity::Text) | None);
         if is_left_numeric_affinity
             && is_right_non_numeric_affinity
             && matches!(right_val, SqlValue::Varchar(_) | SqlValue::Character(_))
@@ -262,10 +256,8 @@ impl ExpressionEvaluator<'_> {
 
         // Case 6: Right is NUMERIC/INTEGER/REAL column, left is NONE/TEXT column with TEXT value
         // Symmetric case of Case 5
-        let is_left_non_numeric_affinity = matches!(
-            left_affinity,
-            Some(TypeAffinity::None) | Some(TypeAffinity::Text) | None
-        );
+        let is_left_non_numeric_affinity =
+            matches!(left_affinity, Some(TypeAffinity::None) | Some(TypeAffinity::Text) | None);
         if is_right_numeric_affinity
             && is_left_non_numeric_affinity
             && matches!(left_val, SqlValue::Varchar(_) | SqlValue::Character(_))
@@ -309,15 +301,15 @@ impl ExpressionEvaluator<'_> {
                 SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(
                     format_float_for_text_comparison(*n as f64),
                 )),
-                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
+                SqlValue::Real(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Double(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Numeric(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
                 _ => right_val,
             };
             return (left_val, right_as_text);
@@ -333,15 +325,15 @@ impl ExpressionEvaluator<'_> {
                 SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(
                     format_float_for_text_comparison(*n as f64),
                 )),
-                SqlValue::Real(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Double(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
-                SqlValue::Numeric(n) => SqlValue::Varchar(arcstr::ArcStr::from(
-                    format_float_for_text_comparison(*n),
-                )),
+                SqlValue::Real(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Double(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
+                SqlValue::Numeric(n) => {
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(*n)))
+                }
                 _ => left_val,
             };
             return (left_as_text, right_val);
@@ -1252,8 +1244,11 @@ impl ExpressionEvaluator<'_> {
                 // If any comparison is NULL and no TRUE found, result is NULL
                 let mut has_null = false;
                 for (left_val, right_val) in left_values.iter().zip(right_values.iter()) {
-                    let eq_result =
-                        self.eval_binary_op(left_val, &vibesql_ast::BinaryOperator::Equal, right_val)?;
+                    let eq_result = self.eval_binary_op(
+                        left_val,
+                        &vibesql_ast::BinaryOperator::Equal,
+                        right_val,
+                    )?;
                     match eq_result {
                         SqlValue::Boolean(false) => return Ok(SqlValue::Boolean(true)), // Not equal found
                         SqlValue::Null => has_null = true,

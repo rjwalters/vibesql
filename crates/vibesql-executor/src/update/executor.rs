@@ -12,11 +12,8 @@ use vibesql_storage::{statistics::CostEstimator, Database, Row};
 use vibesql_types::SqlValue;
 
 use crate::{
-    dml_cost::DmlOptimizer,
-    errors::ExecutorError,
-    evaluator::ExpressionEvaluator,
-    expression_index_maintenance,
-    privilege_checker::PrivilegeChecker,
+    dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
+    expression_index_maintenance, privilege_checker::PrivilegeChecker,
     sqlite_schema::is_sqlite_schema_table,
 };
 
@@ -266,8 +263,9 @@ pub(super) fn execute_internal(
             stmt.assignments.iter().any(|a| {
                 // Check if this is a rowid assignment
                 let col_name_lower = a.column.to_lowercase();
-                let is_rowid =
-                    col_name_lower == "rowid" || col_name_lower == "_rowid_" || col_name_lower == "oid";
+                let is_rowid = col_name_lower == "rowid"
+                    || col_name_lower == "_rowid_"
+                    || col_name_lower == "oid";
 
                 if is_rowid {
                     // For INTEGER PRIMARY KEY tables, rowid IS the PK
@@ -313,8 +311,11 @@ pub(super) fn execute_internal(
 
             // Validate foreign key constraints
             if !schema.foreign_keys.is_empty() {
-                let fk_result =
-                    ForeignKeyValidator::validate_constraints(database, table_name, &new_row.values);
+                let fk_result = ForeignKeyValidator::validate_constraints(
+                    database,
+                    table_name,
+                    &new_row.values,
+                );
                 if fk_result.is_err() {
                     continue; // Skip this row
                 }
@@ -367,8 +368,7 @@ pub(super) fn execute_internal(
         rows_to_delete_for_replace.dedup();
 
         // Filter out any rows that we're going to update (shouldn't delete our own rows)
-        let update_indices: HashSet<usize> =
-            updates.iter().map(|(idx, _, _, _, _)| *idx).collect();
+        let update_indices: HashSet<usize> = updates.iter().map(|(idx, _, _, _, _)| *idx).collect();
         rows_to_delete_for_replace.retain(|idx| !update_indices.contains(idx));
 
         if !rows_to_delete_for_replace.is_empty() {
@@ -386,10 +386,7 @@ pub(super) fn execute_internal(
             // Maintain expression indexes for each deleted row
             for (row_index, row) in &rows_for_index {
                 expression_index_maintenance::maintain_expression_indexes_for_delete(
-                    database,
-                    table_name,
-                    row,
-                    *row_index,
+                    database, table_name, row, *row_index,
                 );
             }
 
@@ -517,11 +514,7 @@ pub(super) fn execute_internal(
 
         // Maintain expression indexes for this update
         expression_index_maintenance::maintain_expression_indexes_for_update(
-            database,
-            table_name,
-            &old_row,
-            &new_row,
-            index,
+            database, table_name, &old_row, &new_row, index,
         );
     }
 
@@ -1174,11 +1167,7 @@ fn execute_update_from(
         );
 
         expression_index_maintenance::maintain_expression_indexes_for_update(
-            database,
-            table_name,
-            &old_row,
-            &new_row,
-            index,
+            database, table_name, &old_row, &new_row, index,
         );
     }
 

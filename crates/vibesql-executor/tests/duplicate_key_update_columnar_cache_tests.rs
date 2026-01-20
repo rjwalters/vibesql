@@ -213,7 +213,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
     // Insert users
     let insert = |db: &mut Database, id: i64, name: &str, score: i64| {
         let stmt = vibesql_ast::InsertStmt {
-        with_clause: None,
+            with_clause: None,
             schema_name: None,
             schema_quoted: false,
             table_quoted: false,
@@ -226,7 +226,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
             ]]),
             conflict_clause: None,
             on_conflict: None,
-        on_duplicate_key_update: None,
+            on_duplicate_key_update: None,
         };
         InsertExecutor::execute(db, &stmt).unwrap();
     };

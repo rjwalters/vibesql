@@ -11,7 +11,8 @@ fn test_truncate_single_table() {
     let mut db = Database::new();
 
     // Create a table
-    let create_stmt = CreateTableStmt { temporary: false,
+    let create_stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "USERS".to_string(),
         columns: vec![
@@ -22,7 +23,8 @@ fn test_truncate_single_table() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "NAME".to_string(),
@@ -31,13 +33,15 @@ fn test_truncate_single_table() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -77,7 +81,8 @@ fn test_truncate_multiple_tables() {
     let mut db = Database::new();
 
     // Create first table
-    let create_stmt1 = CreateTableStmt { temporary: false,
+    let create_stmt1 = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "ORDERS".to_string(),
         columns: vec![ColumnDef {
@@ -87,17 +92,20 @@ fn test_truncate_multiple_tables() {
             constraints: vec![],
             default_value: None,
             comment: None,
-            generated_expr: None, is_exact_integer_type: false,
+            generated_expr: None,
+            is_exact_integer_type: false,
         }],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt1, &mut db).unwrap();
 
     // Create second table
-    let create_stmt2 = CreateTableStmt { temporary: false,
+    let create_stmt2 = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "ORDER_ITEMS".to_string(),
         columns: vec![ColumnDef {
@@ -107,17 +115,20 @@ fn test_truncate_multiple_tables() {
             constraints: vec![],
             default_value: None,
             comment: None,
-            generated_expr: None, is_exact_integer_type: false,
+            generated_expr: None,
+            is_exact_integer_type: false,
         }],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt2, &mut db).unwrap();
 
     // Create third table
-    let create_stmt3 = CreateTableStmt { temporary: false,
+    let create_stmt3 = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "ORDER_HISTORY".to_string(),
         columns: vec![ColumnDef {
@@ -127,12 +138,14 @@ fn test_truncate_multiple_tables() {
             constraints: vec![],
             default_value: None,
             comment: None,
-            generated_expr: None, is_exact_integer_type: false,
+            generated_expr: None,
+            is_exact_integer_type: false,
         }],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt3, &mut db).unwrap();
 
@@ -203,7 +216,8 @@ fn test_truncate_multiple_tables_if_exists_mixed() {
     let mut db = Database::new();
 
     // Create one table
-    let create_stmt = CreateTableStmt { temporary: false,
+    let create_stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "EXISTING".to_string(),
         columns: vec![ColumnDef {
@@ -213,12 +227,14 @@ fn test_truncate_multiple_tables_if_exists_mixed() {
             constraints: vec![],
             default_value: None,
             comment: None,
-            generated_expr: None, is_exact_integer_type: false,
+            generated_expr: None,
+            is_exact_integer_type: false,
         }],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -247,7 +263,8 @@ fn test_truncate_multiple_tables_all_or_nothing_validation() {
     let mut db = Database::new();
 
     // Create one table
-    let create_stmt = CreateTableStmt { temporary: false,
+    let create_stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "EXISTING".to_string(),
         columns: vec![ColumnDef {
@@ -257,12 +274,14 @@ fn test_truncate_multiple_tables_all_or_nothing_validation() {
             constraints: vec![],
             default_value: None,
             comment: None,
-            generated_expr: None, is_exact_integer_type: false,
+            generated_expr: None,
+            is_exact_integer_type: false,
         }],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -289,7 +308,8 @@ fn test_truncate_empty_table() {
     let mut db = Database::new();
 
     // Create a table
-    let create_stmt = CreateTableStmt { temporary: false,
+    let create_stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "EMPTY".to_string(),
         columns: vec![ColumnDef {
@@ -299,12 +319,14 @@ fn test_truncate_empty_table() {
             constraints: vec![],
             default_value: None,
             comment: None,
-            generated_expr: None, is_exact_integer_type: false,
+            generated_expr: None,
+            is_exact_integer_type: false,
         }],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -335,7 +357,8 @@ fn test_truncate_resets_auto_increment() {
     let mut db = Database::new();
 
     // Create table with AUTO_INCREMENT
-    let stmt = CreateTableStmt { temporary: false,
+    let stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "auto_inc_test".to_string(),
         columns: vec![
@@ -352,7 +375,8 @@ fn test_truncate_resets_auto_increment() {
                 ],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "data".to_string(),
@@ -361,20 +385,22 @@ fn test_truncate_resets_auto_increment() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&stmt, &mut db).unwrap();
 
     // Insert 3 rows (ids should be 1, 2, 3)
     for val in ["a", "b", "c"] {
         let insert = InsertStmt {
-        with_clause: None,
+            with_clause: None,
             schema_name: None,
             schema_quoted: false,
             table_quoted: false,
@@ -385,7 +411,7 @@ fn test_truncate_resets_auto_increment() {
             ))]]),
             conflict_clause: None,
             on_conflict: None,
-        on_duplicate_key_update: None,
+            on_duplicate_key_update: None,
         };
         InsertExecutor::execute(&mut db, &insert).unwrap();
     }
@@ -443,7 +469,8 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
     let mut db = Database::new();
 
     // Create table with AUTO_INCREMENT
-    let stmt = CreateTableStmt { temporary: false,
+    let stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "multi_test".to_string(),
         columns: vec![
@@ -460,7 +487,8 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
                 ],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "value".to_string(),
@@ -469,20 +497,22 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&stmt, &mut db).unwrap();
 
     // Insert 10 rows to get counter up to 10
     for i in 1..=10 {
         let insert = InsertStmt {
-        with_clause: None,
+            with_clause: None,
             schema_name: None,
             schema_quoted: false,
             table_quoted: false,
@@ -493,7 +523,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
             ))]]),
             conflict_clause: None,
             on_conflict: None,
-        on_duplicate_key_update: None,
+            on_duplicate_key_update: None,
         };
         InsertExecutor::execute(&mut db, &insert).unwrap();
     }
@@ -541,7 +571,8 @@ fn test_truncate_without_auto_increment() {
     // Verify that TRUNCATE still works on tables without AUTO_INCREMENT
     let mut db = Database::new();
 
-    let create_stmt = CreateTableStmt { temporary: false,
+    let create_stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "no_auto_inc".to_string(),
         columns: vec![
@@ -552,7 +583,8 @@ fn test_truncate_without_auto_increment() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             ColumnDef {
                 name: "data".to_string(),
@@ -561,13 +593,15 @@ fn test_truncate_without_auto_increment() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 

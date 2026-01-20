@@ -57,9 +57,7 @@ impl CombinedExpressionEvaluator<'_> {
                 }
             } else if collation_name.eq_ignore_ascii_case("rtrim") {
                 match val {
-                    SqlValue::Varchar(s) => {
-                        SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end()))
-                    }
+                    SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end())),
                     SqlValue::Character(s) => {
                         SqlValue::Character(arcstr::ArcStr::from(s.trim_end()))
                     }
@@ -240,7 +238,7 @@ impl CombinedExpressionEvaluator<'_> {
                             // Empty string or multi-character string: error per SQLite
                             return Err(ExecutorError::SqliteCompatError(
                                 "ESCAPE expression must be a single character".to_string(),
-                            ))
+                            ));
                         }
                     }
                 }
@@ -489,8 +487,12 @@ impl CombinedExpressionEvaluator<'_> {
 
                 // Apply SQLite type affinity rules for IN comparisons
                 // Note: IN expressions have different affinity rules than regular comparisons
-                let (expr_coerced, value_coerced) =
-                    self.apply_affinity_for_in_comparison(expr, expr_val.clone(), value_expr, value);
+                let (expr_coerced, value_coerced) = self.apply_affinity_for_in_comparison(
+                    expr,
+                    expr_val.clone(),
+                    value_expr,
+                    value,
+                );
 
                 // Compare using equality
                 let eq_result = ExpressionEvaluator::eval_binary_op_static(

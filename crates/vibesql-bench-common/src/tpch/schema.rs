@@ -29,7 +29,7 @@ use vibesql_types::Date;
 
 // Use data generators from this crate
 #[cfg(any(feature = "vibesql", feature = "sqlite", feature = "duckdb", feature = "mysql"))]
-use super::{NATIONS, PRIORITIES, REGIONS, SEGMENTS, SHIP_MODES, TPCHData};
+use super::{TPCHData, NATIONS, PRIORITIES, REGIONS, SEGMENTS, SHIP_MODES};
 
 /// Batch size for bulk inserts - matches TPC-DS for consistency
 #[cfg(feature = "vibesql")]
@@ -195,24 +195,20 @@ pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
 
     // Disable ONLY_FULL_GROUP_BY to allow TPC-H queries that have non-aggregated
     // columns in SELECT that are functionally dependent on GROUP BY columns
-    let _ = conn.query_drop("SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))");
+    let _ = conn
+        .query_drop("SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))");
 
     let data = TPCHData::new(scale_factor);
 
     // Check if data already exists with correct scale factor
     // Skip loading if lineitem count is reasonable (data loading is slow)
-    let existing_lineitem: Option<i64> = conn
-        .query_first("SELECT COUNT(*) FROM lineitem")
-        .ok()
-        .flatten();
+    let existing_lineitem: Option<i64> =
+        conn.query_first("SELECT COUNT(*) FROM lineitem").ok().flatten();
 
     // Expected lineitem count is approximately 6000 * scale_factor
     let expected_lineitem = (6000.0 * scale_factor) as i64;
     if existing_lineitem.unwrap_or(0) >= expected_lineitem {
-        eprintln!(
-            "MySQL TPC-H data already loaded (SF={}), skipping reload",
-            scale_factor
-        );
+        eprintln!("MySQL TPC-H data already loaded (SF={}), skipping reload", scale_factor);
         return Some(conn);
     }
 

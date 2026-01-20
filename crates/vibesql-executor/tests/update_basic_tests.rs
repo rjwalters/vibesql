@@ -11,7 +11,8 @@ fn test_update_all_rows() {
     let mut db = Database::new();
     setup_test_table(&mut db);
 
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -39,7 +40,8 @@ fn test_update_with_where_clause() {
     let mut db = Database::new();
     setup_test_table(&mut db);
 
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -81,7 +83,8 @@ fn test_update_multiple_columns() {
     let mut db = Database::new();
     setup_test_table(&mut db);
 
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -122,7 +125,8 @@ fn test_update_with_expression() {
     setup_test_table(&mut db);
 
     // Give everyone a 10% raise: salary = salary * 110 DIV 100
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -161,7 +165,8 @@ fn test_update_with_expression() {
 fn test_update_table_not_found() {
     let mut db = Database::new();
 
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -181,7 +186,8 @@ fn test_update_column_not_found() {
     let mut db = Database::new();
     setup_test_table(&mut db);
 
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,
@@ -204,7 +210,8 @@ fn test_update_no_matching_rows() {
     let mut db = Database::new();
     setup_test_table(&mut db);
 
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         quoted: false,
         alias: None,

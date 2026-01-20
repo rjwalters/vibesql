@@ -360,7 +360,7 @@ fn test_transaction_nested_operations() {
     // Insert multiple rows
     for i in 1..=5 {
         let insert_stmt = InsertStmt {
-        with_clause: None,
+            with_clause: None,
             schema_name: None,
             schema_quoted: false,
             table_quoted: false,
@@ -375,7 +375,7 @@ fn test_transaction_nested_operations() {
             ]]),
             conflict_clause: None,
             on_conflict: None,
-        on_duplicate_key_update: None,
+            on_duplicate_key_update: None,
         };
         InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
     }

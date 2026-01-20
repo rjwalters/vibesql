@@ -161,8 +161,10 @@ impl SelectExecutor<'_> {
 
                                     // For hidden columns, check if they have a replacement or coalesce
                                     if from_res.schema.is_column_hidden(abs_idx) {
-                                        let has_replacement =
-                                            from_res.schema.get_column_replacement(abs_idx).is_some();
+                                        let has_replacement = from_res
+                                            .schema
+                                            .get_column_replacement(abs_idx)
+                                            .is_some();
                                         let has_coalesce = from_res
                                             .schema
                                             .get_using_coalesce_right_for_left(abs_idx)

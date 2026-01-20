@@ -84,9 +84,10 @@ pub fn can_eliminate_distinct(stmt: &SelectStmt, database: &Database) -> bool {
     // Check UNIQUE constraints from CREATE TABLE
     for unique_cols in &schema.unique_constraints {
         if covers_columns(unique_cols, &select_columns, &stmt.where_clause, schema)
-            && all_columns_not_null(unique_cols, schema) {
-                return true;
-            }
+            && all_columns_not_null(unique_cols, schema)
+        {
+            return true;
+        }
     }
 
     // Check user-defined UNIQUE indexes
@@ -110,9 +111,10 @@ pub fn can_eliminate_distinct(stmt: &SelectStmt, database: &Database) -> bool {
         }
 
         if covers_columns(&index_cols, &select_columns, &stmt.where_clause, schema)
-            && all_columns_not_null(&index_cols, schema) {
-                return true;
-            }
+            && all_columns_not_null(&index_cols, schema)
+        {
+            return true;
+        }
     }
 
     false

@@ -117,9 +117,7 @@ pub fn evaluate_default_expression(
                         vibesql_types::SqlValue::Smallint(i) => {
                             Ok(vibesql_types::SqlValue::Smallint(-i))
                         }
-                        vibesql_types::SqlValue::Float(f) => {
-                            Ok(vibesql_types::SqlValue::Float(-f))
-                        }
+                        vibesql_types::SqlValue::Float(f) => Ok(vibesql_types::SqlValue::Float(-f)),
                         vibesql_types::SqlValue::Real(f) => Ok(vibesql_types::SqlValue::Real(-f)),
                         vibesql_types::SqlValue::Double(f) => {
                             Ok(vibesql_types::SqlValue::Double(-f))
@@ -154,9 +152,7 @@ pub fn evaluate_default_expression(
         {
             // Convert the column name to a string literal
             let col_name = col_id.column_canonical();
-            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
-                col_name,
-            )))
+            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(col_name)))
         }
         vibesql_ast::Expression::Function { name, .. } => {
             // Evaluate special SQL functions that can be used in DEFAULT

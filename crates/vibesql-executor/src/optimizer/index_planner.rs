@@ -490,10 +490,7 @@ impl<'a> IndexPlanner<'a> {
         // Supports both column indexes and expression indexes
         let can_use_for_where = where_clause
             .map(|expr| {
-                crate::select::scan::index_scan::selection::index_column_can_filter(
-                    expr,
-                    first_col,
-                )
+                crate::select::scan::index_scan::selection::index_column_can_filter(expr, first_col)
             })
             .unwrap_or(false);
 

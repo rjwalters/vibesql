@@ -86,14 +86,16 @@ pub(super) fn evaluate_window_functions(
     // If we have row reordering (from PARTITION BY), reorder rows and values together
     if let Some(ref order) = row_reordering {
         // Reorder rows according to partition order
-        let reordered_rows: Vec<Row> = order.iter().map(|&orig_idx| rows[orig_idx].clone()).collect();
+        let reordered_rows: Vec<Row> =
+            order.iter().map(|&orig_idx| rows[orig_idx].clone()).collect();
         rows = reordered_rows;
 
         // Reorder window results to match the new row order
         // partition_order[i] = original_idx means position i in partition order came from original_idx
         // window_results are in original order, so we need: new[i] = old[partition_order[i]]
         for results in &mut window_results {
-            let reordered: Vec<_> = order.iter().map(|&orig_idx| results[orig_idx].clone()).collect();
+            let reordered: Vec<_> =
+                order.iter().map(|&orig_idx| results[orig_idx].clone()).collect();
             *results = reordered;
         }
     }

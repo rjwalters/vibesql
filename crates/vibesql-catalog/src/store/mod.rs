@@ -9,9 +9,9 @@
 //! - `session` - Session configuration (SQL:1999)
 //! - `advanced` - Advanced SQL objects (types, domains, sequences, views, triggers, etc.)
 
+use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use indexmap::IndexMap;
 
 use crate::{
     advanced_objects::{
@@ -134,10 +134,7 @@ impl Catalog {
         // Create the session-specific temp schema for temporary tables
         // Each session gets its own temp schema (e.g., "temp_1", "temp_2", etc.)
         // This provides session isolation for temp tables, matching SQLite semantics
-        catalog.schemas.insert(
-            temp_schema_name.clone(),
-            Schema::new(temp_schema_name),
-        );
+        catalog.schemas.insert(temp_schema_name.clone(), Schema::new(temp_schema_name));
 
         catalog
     }
@@ -164,7 +161,8 @@ impl Catalog {
     /// This is used to identify temp schemas for special handling (e.g., not persisting them).
     #[inline]
     pub fn is_temp_schema(schema_name: &str) -> bool {
-        schema_name.starts_with(crate::TEMP_SCHEMA) && schema_name.len() > crate::TEMP_SCHEMA.len()
+        schema_name.starts_with(crate::TEMP_SCHEMA)
+            && schema_name.len() > crate::TEMP_SCHEMA.len()
             && schema_name.as_bytes().get(crate::TEMP_SCHEMA.len()) == Some(&b'_')
     }
 

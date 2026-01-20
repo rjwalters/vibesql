@@ -155,24 +155,21 @@ fn extract_range_predicate_for_expression(
                     match (left_range, right_range) {
                         (Some(l), Some(r)) => {
                             // Merge the bounds by taking the tighter constraint
-                            let (merged_start, merged_inclusive_start) =
-                                match (&l.start, &r.start) {
-                                    (None, None) => (None, false),
-                                    (Some(v), None) => (Some(v.clone()), l.inclusive_start),
-                                    (None, Some(v)) => (Some(v.clone()), r.inclusive_start),
-                                    (Some(lv), Some(rv)) => {
-                                        if lv > rv {
-                                            (Some(lv.clone()), l.inclusive_start)
-                                        } else if rv > lv {
-                                            (Some(rv.clone()), r.inclusive_start)
-                                        } else {
-                                            (
-                                                Some(lv.clone()),
-                                                l.inclusive_start && r.inclusive_start,
-                                            )
-                                        }
+                            let (merged_start, merged_inclusive_start) = match (&l.start, &r.start)
+                            {
+                                (None, None) => (None, false),
+                                (Some(v), None) => (Some(v.clone()), l.inclusive_start),
+                                (None, Some(v)) => (Some(v.clone()), r.inclusive_start),
+                                (Some(lv), Some(rv)) => {
+                                    if lv > rv {
+                                        (Some(lv.clone()), l.inclusive_start)
+                                    } else if rv > lv {
+                                        (Some(rv.clone()), r.inclusive_start)
+                                    } else {
+                                        (Some(lv.clone()), l.inclusive_start && r.inclusive_start)
                                     }
-                                };
+                                }
+                            };
 
                             let (merged_end, merged_inclusive_end) = match (&l.end, &r.end) {
                                 (None, None) => (None, false),
@@ -322,30 +319,28 @@ pub(crate) fn where_clause_fully_satisfied_by_expression_index(
     index_expr: &Expression,
 ) -> bool {
     match where_expr {
-        Expression::BinaryOp { left, op, right } => {
-            match op {
-                BinaryOperator::Equal
-                | BinaryOperator::GreaterThan
-                | BinaryOperator::GreaterThanOrEqual
-                | BinaryOperator::LessThan
-                | BinaryOperator::LessThanOrEqual => {
-                    let left_is_expr = is_expression_match(left, index_expr);
-                    let right_is_expr = is_expression_match(right, index_expr);
-                    let left_is_literal = matches!(left.as_ref(), Expression::Literal(_));
-                    let right_is_literal = matches!(right.as_ref(), Expression::Literal(_));
+        Expression::BinaryOp { left, op, right } => match op {
+            BinaryOperator::Equal
+            | BinaryOperator::GreaterThan
+            | BinaryOperator::GreaterThanOrEqual
+            | BinaryOperator::LessThan
+            | BinaryOperator::LessThanOrEqual => {
+                let left_is_expr = is_expression_match(left, index_expr);
+                let right_is_expr = is_expression_match(right, index_expr);
+                let left_is_literal = matches!(left.as_ref(), Expression::Literal(_));
+                let right_is_literal = matches!(right.as_ref(), Expression::Literal(_));
 
-                    (left_is_expr && right_is_literal) || (left_is_literal && right_is_expr)
-                }
-                BinaryOperator::And => {
-                    let left_satisfied =
-                        where_clause_fully_satisfied_by_expression_index(left, index_expr);
-                    let right_satisfied =
-                        where_clause_fully_satisfied_by_expression_index(right, index_expr);
-                    left_satisfied && right_satisfied
-                }
-                _ => false,
+                (left_is_expr && right_is_literal) || (left_is_literal && right_is_expr)
             }
-        }
+            BinaryOperator::And => {
+                let left_satisfied =
+                    where_clause_fully_satisfied_by_expression_index(left, index_expr);
+                let right_satisfied =
+                    where_clause_fully_satisfied_by_expression_index(right, index_expr);
+                left_satisfied && right_satisfied
+            }
+            _ => false,
+        },
         Expression::Between { expr: col_expr, low, high, negated, symmetric } => {
             !negated
                 && !symmetric

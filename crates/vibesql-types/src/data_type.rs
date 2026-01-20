@@ -484,9 +484,7 @@ impl DataType {
                     TypeAffinity::Text
                 } else if upper.contains("BLOB") {
                     TypeAffinity::None
-                } else if upper.contains("REAL")
-                    || upper.contains("FLOA")
-                    || upper.contains("DOUB")
+                } else if upper.contains("REAL") || upper.contains("FLOA") || upper.contains("DOUB")
                 {
                     TypeAffinity::Real
                 } else {

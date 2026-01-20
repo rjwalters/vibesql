@@ -1349,9 +1349,9 @@ pub fn transform_update<V: ExpressionMutVisitor>(visitor: &mut V, stmt: UpdateSt
             .into_iter()
             .map(|a| Assignment { column: a.column, value: transform_expression(visitor, a.value) })
             .collect(),
-        from_clause: stmt.from_clause.map(|froms| {
-            froms.into_iter().map(|f| transform_from_clause(visitor, f)).collect()
-        }),
+        from_clause: stmt
+            .from_clause
+            .map(|froms| froms.into_iter().map(|f| transform_from_clause(visitor, f)).collect()),
         where_clause: stmt.where_clause.map(|w| match w {
             WhereClause::Condition(expr) => {
                 WhereClause::Condition(transform_expression(visitor, expr))

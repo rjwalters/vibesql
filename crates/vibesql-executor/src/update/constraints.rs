@@ -76,10 +76,8 @@ impl<'a> ConstraintValidator<'a> {
                             break;
                         }
                     };
-                    let col_idx = self
-                        .schema
-                        .get_column_index(col_name)
-                        .ok_or_else(|| ExecutorError::ColumnNotFound {
+                    let col_idx = self.schema.get_column_index(col_name).ok_or_else(|| {
+                        ExecutorError::ColumnNotFound {
                             column_name: col_name.to_string(),
                             table_name: table_name.to_string(),
                             searched_tables: vec![table_name.to_string()],
@@ -89,7 +87,8 @@ impl<'a> ConstraintValidator<'a> {
                                 .iter()
                                 .map(|c| c.name.clone())
                                 .collect(),
-                        })?;
+                        }
+                    })?;
                     new_key_values.push(new_row.values[col_idx].clone());
                 }
                 // Skip expression indexes - their uniqueness is handled by expression index maintenance

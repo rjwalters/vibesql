@@ -428,11 +428,7 @@ fn format_hex_with_spec(val: &SqlValue, uppercase: bool, spec: &FormatSpec) -> S
     // SQLite's %x format uses 32-bit representation
     let i = i64_val as u32;
 
-    let hex = if uppercase {
-        format!("{:X}", i)
-    } else {
-        format!("{:x}", i)
-    };
+    let hex = if uppercase { format!("{:X}", i) } else { format!("{:x}", i) };
 
     // Per C standard: # flag adds 0x/0X prefix, but NOT for zero values
     if spec.alternate && i != 0 {
@@ -538,7 +534,7 @@ fn process_unistr(s: &str) -> String {
         match chars.peek() {
             Some('u') => {
                 chars.next(); // consume 'u'
-                // Try to parse 4 hex digits
+                              // Try to parse 4 hex digits
                 let hex: String = chars.by_ref().take(4).collect();
                 if hex.len() == 4 {
                     if let Ok(code_point) = u32::from_str_radix(&hex, 16) {
@@ -555,7 +551,7 @@ fn process_unistr(s: &str) -> String {
             }
             Some('U') => {
                 chars.next(); // consume 'U'
-                // Try to parse 8 hex digits (for surrogate pairs or extended Unicode)
+                              // Try to parse 8 hex digits (for surrogate pairs or extended Unicode)
                 let hex: String = chars.by_ref().take(8).collect();
                 if hex.len() == 8 {
                     if let Ok(code_point) = u32::from_str_radix(&hex, 16) {
@@ -572,7 +568,7 @@ fn process_unistr(s: &str) -> String {
             }
             Some('+') => {
                 chars.next(); // consume '+'
-                // Try to parse up to 6 hex digits (Unicode code point format \+XXXXXX)
+                              // Try to parse up to 6 hex digits (Unicode code point format \+XXXXXX)
                 let mut hex = String::new();
                 while hex.len() < 6 {
                     if let Some(&c) = chars.peek() {
@@ -692,9 +688,7 @@ mod tests {
         );
 
         // No strings (just separator) - SQLite requires at least 2 args
-        assert!(
-            concat_ws(&[SqlValue::Varchar(",".into())]).is_err()
-        );
+        assert!(concat_ws(&[SqlValue::Varchar(",".into())]).is_err());
 
         // Integers are converted to strings
         assert_eq!(
@@ -791,7 +785,7 @@ mod tests {
             printf(&[
                 SqlValue::Varchar("%.*c".into()),
                 SqlValue::Integer(1),
-                SqlValue::Integer(66)  // 'B'
+                SqlValue::Integer(66) // 'B'
             ])
             .unwrap(),
             SqlValue::Varchar("B".into())
@@ -802,7 +796,7 @@ mod tests {
             printf(&[
                 SqlValue::Varchar("%.*c".into()),
                 SqlValue::Integer(3),
-                SqlValue::Integer(42)  // '*'
+                SqlValue::Integer(42) // '*'
             ])
             .unwrap(),
             SqlValue::Varchar("***".into())
@@ -827,7 +821,7 @@ mod tests {
             printf(&[
                 SqlValue::Varchar("%10.*c".into()),
                 SqlValue::Integer(3),
-                SqlValue::Integer(42)  // '*'
+                SqlValue::Integer(42) // '*'
             ])
             .unwrap(),
             SqlValue::Varchar("       ***".into())
@@ -838,7 +832,7 @@ mod tests {
             printf(&[
                 SqlValue::Varchar("%-10.*c".into()),
                 SqlValue::Integer(3),
-                SqlValue::Integer(42)  // '*'
+                SqlValue::Integer(42) // '*'
             ])
             .unwrap(),
             SqlValue::Varchar("***       ".into())
@@ -858,7 +852,7 @@ mod tests {
             printf(&[
                 SqlValue::Varchar("%.*c".into()),
                 SqlValue::Integer(5),
-                SqlValue::Varchar("m".into())  // 'm' as string
+                SqlValue::Varchar("m".into()) // 'm' as string
             ])
             .unwrap(),
             SqlValue::Varchar("mmmmm".into())
@@ -869,7 +863,7 @@ mod tests {
             printf(&[
                 SqlValue::Varchar("%.*c".into()),
                 SqlValue::Integer(3),
-                SqlValue::Varchar("hello".into())  // only 'h' is used
+                SqlValue::Varchar("hello".into()) // only 'h' is used
             ])
             .unwrap(),
             SqlValue::Varchar("hhh".into())

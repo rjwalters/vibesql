@@ -8,7 +8,8 @@ fn test_index_ordering() {
     let mut db = Database::new();
 
     // Create table
-    let create_table_stmt = CreateTableStmt { temporary: false,
+    let create_table_stmt = CreateTableStmt {
+        temporary: false,
         if_not_exists: false,
         table_name: "users".to_string(),
         columns: vec![
@@ -19,7 +20,8 @@ fn test_index_ordering() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
             vibesql_ast::ColumnDef {
                 name: "name".to_string(),
@@ -28,13 +30,15 @@ fn test_index_ordering() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
-                generated_expr: None, is_exact_integer_type: false,
+                generated_expr: None,
+                is_exact_integer_type: false,
             },
         ],
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
-        as_query: None, without_rowid: false,
+        as_query: None,
+        without_rowid: false,
     };
 
     vibesql_executor::CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();

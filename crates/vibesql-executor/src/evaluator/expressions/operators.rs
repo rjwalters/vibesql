@@ -84,8 +84,8 @@ pub(crate) fn eval_unary_op(
         (Not, SqlValue::Character(s)) | (Not, SqlValue::Varchar(s)) => {
             Ok(SqlValue::Boolean(!is_truthy_string(s)))
         }
-        (Not, SqlValue::Date(_)) => Ok(SqlValue::Boolean(false)),    // Date values are truthy
-        (Not, SqlValue::Time(_)) => Ok(SqlValue::Boolean(false)),    // Time values are truthy
+        (Not, SqlValue::Date(_)) => Ok(SqlValue::Boolean(false)), // Date values are truthy
+        (Not, SqlValue::Time(_)) => Ok(SqlValue::Boolean(false)), // Time values are truthy
         (Not, SqlValue::Timestamp(_)) => Ok(SqlValue::Boolean(false)), /* Timestamp values are */
         // truthy
         (Not, SqlValue::Interval(_)) => Ok(SqlValue::Boolean(false)), // Interval values are truthy
@@ -311,8 +311,9 @@ mod tests {
         );
 
         // Float strings
-        let result = eval_unary_op(&UnaryOperator::Minus, &SqlValue::Varchar(arcstr::ArcStr::from("3.14")))
-            .unwrap();
+        let result =
+            eval_unary_op(&UnaryOperator::Minus, &SqlValue::Varchar(arcstr::ArcStr::from("3.14")))
+                .unwrap();
         match result {
             SqlValue::Real(v) => assert!((v - (-3.14)).abs() < 0.001, "Expected -3.14, got {}", v),
             other => panic!("Expected Real, got {:?}", other),

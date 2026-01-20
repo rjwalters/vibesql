@@ -424,7 +424,9 @@ fn estimate_value_size(value: &SqlValue) -> usize {
         SqlValue::Null => 1,
         SqlValue::Integer(_) | SqlValue::Bigint(_) => 1 + 8,
         SqlValue::Smallint(_) => 1 + 2,
-        SqlValue::Unsigned(_) | SqlValue::Numeric(_) | SqlValue::Double(_) | SqlValue::Real(_) => 1 + 8,  // Real is now f64
+        SqlValue::Unsigned(_) | SqlValue::Numeric(_) | SqlValue::Double(_) | SqlValue::Real(_) => {
+            1 + 8
+        } // Real is now f64
         SqlValue::Float(_) => 1 + 4,
         SqlValue::Boolean(_) => 1,
         SqlValue::Character(s) | SqlValue::Varchar(s) => 1 + 4 + s.len(),

@@ -163,17 +163,9 @@ fn try_extract_scalar_comparisons_only(
         }
 
         // AND with potential scalar comparison
-        Expression::BinaryOp {
-            op: BinaryOperator::And,
-            left,
-            right,
-        } => {
+        Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
             // Try left side
-            if let Expression::BinaryOp {
-                op,
-                left: inner_left,
-                right: inner_right,
-            } = left.as_ref()
+            if let Expression::BinaryOp { op, left: inner_left, right: inner_right } = left.as_ref()
             {
                 if matches!(inner_right.as_ref(), Expression::ScalarSubquery(_)) {
                     if let Some(result) =
@@ -190,11 +182,8 @@ fn try_extract_scalar_comparisons_only(
             }
 
             // Try right side
-            if let Expression::BinaryOp {
-                op,
-                left: inner_left,
-                right: inner_right,
-            } = right.as_ref()
+            if let Expression::BinaryOp { op, left: inner_left, right: inner_right } =
+                right.as_ref()
             {
                 if matches!(inner_right.as_ref(), Expression::ScalarSubquery(_)) {
                     if let Some(result) =
@@ -271,10 +260,7 @@ fn transform_subqueries_in_expression(expr: &Expression) -> Expression {
         Expression::Exists { subquery, negated } => {
             // Only apply scalar comparison decorrelation, NOT IN/EXISTS transformation
             let transformed_subquery = transform_scalar_subqueries_in_stmt(subquery);
-            Expression::Exists {
-                subquery: Box::new(transformed_subquery),
-                negated: *negated,
-            }
+            Expression::Exists { subquery: Box::new(transformed_subquery), negated: *negated }
         }
         Expression::ScalarSubquery(subquery) => {
             let transformed_subquery = transform_subqueries_to_joins(subquery);
@@ -285,12 +271,12 @@ fn transform_subqueries_in_expression(expr: &Expression) -> Expression {
             left: Box::new(transform_subqueries_in_expression(left)),
             right: Box::new(transform_subqueries_in_expression(right)),
         },
-        Expression::Conjunction(children) => {
-            Expression::Conjunction(children.iter().map(transform_subqueries_in_expression).collect())
-        }
-        Expression::Disjunction(children) => {
-            Expression::Disjunction(children.iter().map(transform_subqueries_in_expression).collect())
-        }
+        Expression::Conjunction(children) => Expression::Conjunction(
+            children.iter().map(transform_subqueries_in_expression).collect(),
+        ),
+        Expression::Disjunction(children) => Expression::Disjunction(
+            children.iter().map(transform_subqueries_in_expression).collect(),
+        ),
         Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
             op: op.clone(),
             expr: Box::new(transform_subqueries_in_expression(inner)),
@@ -311,11 +297,17 @@ fn transform_subqueries_in_expression(expr: &Expression) -> Expression {
             when_clauses: when_clauses
                 .iter()
                 .map(|w| vibesql_ast::CaseWhen {
-                    conditions: w.conditions.iter().map(transform_subqueries_in_expression).collect(),
+                    conditions: w
+                        .conditions
+                        .iter()
+                        .map(transform_subqueries_in_expression)
+                        .collect(),
                     result: transform_subqueries_in_expression(&w.result),
                 })
                 .collect(),
-            else_result: else_result.as_ref().map(|e| Box::new(transform_subqueries_in_expression(e))),
+            else_result: else_result
+                .as_ref()
+                .map(|e| Box::new(transform_subqueries_in_expression(e))),
         },
         // For other expression types, just return as-is
         _ => expr.clone(),
@@ -452,7 +444,9 @@ fn try_extract_subqueries_to_joins(
         }
 
         // Scalar comparison with subquery (e.g., ps_availqty > (SELECT SUM(...) ...))
-        Expression::BinaryOp { op, left, right } if matches!(right.as_ref(), Expression::ScalarSubquery(_)) => {
+        Expression::BinaryOp { op, left, right }
+            if matches!(right.as_ref(), Expression::ScalarSubquery(_)) =>
+        {
             if let Some(result) = try_convert_scalar_comparison_to_join(from, op, left, right) {
                 return Some((result.from, Some(result.replacement_expr)));
             }

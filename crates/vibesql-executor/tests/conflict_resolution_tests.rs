@@ -222,7 +222,8 @@ fn test_update_or_ignore_primary_key_conflict() {
     insert_user(&mut db, 2, "bob@test.com", "Bob");
 
     // Try UPDATE OR IGNORE to change Alice's id to 2 (conflicts with Bob)
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         table_name: "users".to_string(),
         quoted: false,
@@ -268,7 +269,8 @@ fn test_update_or_ignore_unique_constraint_conflict() {
     insert_user(&mut db, 2, "bob@test.com", "Bob");
 
     // Try UPDATE OR IGNORE to change Alice's email to Bob's (conflicts with UNIQUE)
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         table_name: "users".to_string(),
         quoted: false,
@@ -304,7 +306,8 @@ fn test_update_or_ignore_no_conflict() {
     insert_user(&mut db, 1, "alice@test.com", "Alice");
 
     // UPDATE OR IGNORE with no conflicts should work normally
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         table_name: "users".to_string(),
         quoted: false,
@@ -346,7 +349,8 @@ fn test_update_or_replace_primary_key_conflict() {
     insert_user(&mut db, 2, "bob@test.com", "Bob");
 
     // UPDATE OR REPLACE to change Alice's id to 2 (should delete Bob first)
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         table_name: "users".to_string(),
         quoted: false,
@@ -389,7 +393,8 @@ fn test_update_or_replace_unique_constraint_conflict() {
     insert_user(&mut db, 2, "bob@test.com", "Bob");
 
     // UPDATE OR REPLACE to change Alice's email to Bob's (should delete Bob first)
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         table_name: "users".to_string(),
         quoted: false,
@@ -433,7 +438,8 @@ fn test_update_or_replace_no_conflict() {
     insert_user(&mut db, 2, "bob@test.com", "Bob");
 
     // UPDATE OR REPLACE with no conflicts should work normally without deleting anyone
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         table_name: "users".to_string(),
         quoted: false,
@@ -502,7 +508,8 @@ fn test_update_or_ignore_not_null_violation() {
     insert_user(&mut db, 1, "alice@test.com", "Alice");
 
     // Try UPDATE OR IGNORE to set email to NULL (NOT NULL violation)
-    let stmt = UpdateStmt { with_clause: None,
+    let stmt = UpdateStmt {
+        with_clause: None,
         from_clause: None,
         table_name: "users".to_string(),
         quoted: false,

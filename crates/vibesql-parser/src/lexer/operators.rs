@@ -114,7 +114,7 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 if !self.is_eof() && self.current_char() == '>' {
                     self.advance(); // consume '>'
-                    // Check for ->> (extract as text)
+                                    // Check for ->> (extract as text)
                     if !self.is_eof() && self.current_char() == '>' {
                         self.advance(); // consume second '>'
                         Ok(Token::Operator(MultiCharOperator::JsonExtractText))

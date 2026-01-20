@@ -12,7 +12,8 @@ use crate::{errors::ExecutorError, DeleteExecutor};
 fn test_delete_table_not_found() {
     let mut db = Database::new();
 
-    let stmt = DeleteStmt { with_clause: None,
+    let stmt = DeleteStmt {
+        with_clause: None,
         only: false,
         table_name: "nonexistent".to_string(),
         quoted: false,
@@ -33,7 +34,8 @@ fn test_delete_no_matching_rows() {
     setup_test_table(&mut db);
 
     // DELETE FROM users WHERE id = 999;
-    let stmt = DeleteStmt { with_clause: None,
+    let stmt = DeleteStmt {
+        with_clause: None,
         quoted: false,
         only: false,
         table_name: "users".to_string(),
@@ -69,7 +71,8 @@ fn test_delete_from_empty_table() {
     db.create_table(schema).unwrap();
 
     // DELETE FROM empty_users;
-    let stmt = DeleteStmt { with_clause: None,
+    let stmt = DeleteStmt {
+        with_clause: None,
         only: false,
         table_name: "empty_users".to_string(),
         quoted: false,
@@ -89,7 +92,8 @@ fn test_delete_column_not_found() {
     setup_test_table(&mut db);
 
     // DELETE FROM users WHERE nonexistent_column = 1;
-    let stmt = DeleteStmt { with_clause: None,
+    let stmt = DeleteStmt {
+        with_clause: None,
         quoted: false,
         only: false,
         table_name: "users".to_string(),

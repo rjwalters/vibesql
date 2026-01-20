@@ -84,7 +84,10 @@ impl SelectExecutor<'_> {
                             )
                         } else {
                             // Fallback: use legacy resolution without schema
-                            crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+                            crate::select::order::resolve_where_aliases(
+                                where_expr,
+                                &stmt.select_list,
+                            )
                         }
                     })
                 } else {
@@ -386,8 +389,11 @@ impl SelectExecutor<'_> {
 
                     // Find the representative row for aggregate-context subquery evaluation (issue #4683)
                     // SQLite uses the row corresponding to MAX/MIN aggregate for correlated subqueries
-                    let representative_row_idx =
-                        self.find_representative_row_index(&expanded_select_list, &group_rows, &evaluator);
+                    let representative_row_idx = self.find_representative_row_index(
+                        &expanded_select_list,
+                        &group_rows,
+                        &evaluator,
+                    );
                     self.set_aggregate_representative_row(representative_row_idx);
 
                     // Compute aggregates for this group
@@ -521,8 +527,11 @@ impl SelectExecutor<'_> {
 
                 // Find the representative row for aggregate-context subquery evaluation (issue #4683)
                 // SQLite uses the row corresponding to MAX/MIN aggregate for correlated subqueries
-                let representative_row_idx =
-                    self.find_representative_row_index(&expanded_select_list, &group_rows, &evaluator);
+                let representative_row_idx = self.find_representative_row_index(
+                    &expanded_select_list,
+                    &group_rows,
+                    &evaluator,
+                );
                 self.set_aggregate_representative_row(representative_row_idx);
 
                 // Compute aggregates for this group

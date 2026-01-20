@@ -167,20 +167,12 @@ mod tests {
         // '10' = 10 should be FALSE (different storage classes, no coercion)
         // This matches SQLite's whereB.test behavior
         assert_eq!(
-            equal(
-                &SqlValue::Varchar(arcstr::ArcStr::from("10")),
-                &SqlValue::Integer(10)
-            )
-            .unwrap(),
+            equal(&SqlValue::Varchar(arcstr::ArcStr::from("10")), &SqlValue::Integer(10)).unwrap(),
             SqlValue::Boolean(false)
         );
         // Symmetric: 10 = '10' should also be FALSE
         assert_eq!(
-            equal(
-                &SqlValue::Integer(10),
-                &SqlValue::Varchar(arcstr::ArcStr::from("10"))
-            )
-            .unwrap(),
+            equal(&SqlValue::Integer(10), &SqlValue::Varchar(arcstr::ArcStr::from("10"))).unwrap(),
             SqlValue::Boolean(false)
         );
     }
@@ -189,20 +181,12 @@ mod tests {
     fn test_text_real_type_ordering() {
         // '10' = 10.0 should be FALSE (different storage classes)
         assert_eq!(
-            equal(
-                &SqlValue::Varchar(arcstr::ArcStr::from("10")),
-                &SqlValue::Double(10.0)
-            )
-            .unwrap(),
+            equal(&SqlValue::Varchar(arcstr::ArcStr::from("10")), &SqlValue::Double(10.0)).unwrap(),
             SqlValue::Boolean(false)
         );
         // Symmetric: 10.0 = '10' should also be FALSE
         assert_eq!(
-            equal(
-                &SqlValue::Double(10.0),
-                &SqlValue::Varchar(arcstr::ArcStr::from("10"))
-            )
-            .unwrap(),
+            equal(&SqlValue::Double(10.0), &SqlValue::Varchar(arcstr::ArcStr::from("10"))).unwrap(),
             SqlValue::Boolean(false)
         );
     }
@@ -212,53 +196,26 @@ mod tests {
         let text_10 = SqlValue::Varchar(arcstr::ArcStr::from("10"));
 
         // TEXT vs any numeric type should be NOT equal (type ordering)
-        assert_eq!(
-            equal(&text_10, &SqlValue::Integer(10)).unwrap(),
-            SqlValue::Boolean(false)
-        );
-        assert_eq!(
-            equal(&text_10, &SqlValue::Smallint(10)).unwrap(),
-            SqlValue::Boolean(false)
-        );
-        assert_eq!(
-            equal(&text_10, &SqlValue::Bigint(10)).unwrap(),
-            SqlValue::Boolean(false)
-        );
-        assert_eq!(
-            equal(&text_10, &SqlValue::Float(10.0)).unwrap(),
-            SqlValue::Boolean(false)
-        );
-        assert_eq!(
-            equal(&text_10, &SqlValue::Real(10.0)).unwrap(),
-            SqlValue::Boolean(false)
-        );
-        assert_eq!(
-            equal(&text_10, &SqlValue::Double(10.0)).unwrap(),
-            SqlValue::Boolean(false)
-        );
-        assert_eq!(
-            equal(&text_10, &SqlValue::Numeric(10.0)).unwrap(),
-            SqlValue::Boolean(false)
-        );
+        assert_eq!(equal(&text_10, &SqlValue::Integer(10)).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(equal(&text_10, &SqlValue::Smallint(10)).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(equal(&text_10, &SqlValue::Bigint(10)).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(equal(&text_10, &SqlValue::Float(10.0)).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(equal(&text_10, &SqlValue::Real(10.0)).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(equal(&text_10, &SqlValue::Double(10.0)).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(equal(&text_10, &SqlValue::Numeric(10.0)).unwrap(), SqlValue::Boolean(false));
     }
 
     #[test]
     fn test_text_numeric_type_ordering_character_type() {
         // Character type should behave the same as Varchar (TEXT storage class)
         assert_eq!(
-            equal(
-                &SqlValue::Character(arcstr::ArcStr::from("10")),
-                &SqlValue::Integer(10)
-            )
-            .unwrap(),
+            equal(&SqlValue::Character(arcstr::ArcStr::from("10")), &SqlValue::Integer(10))
+                .unwrap(),
             SqlValue::Boolean(false)
         );
         assert_eq!(
-            equal(
-                &SqlValue::Integer(10),
-                &SqlValue::Character(arcstr::ArcStr::from("10"))
-            )
-            .unwrap(),
+            equal(&SqlValue::Integer(10), &SqlValue::Character(arcstr::ArcStr::from("10")))
+                .unwrap(),
             SqlValue::Boolean(false)
         );
     }
@@ -267,19 +224,13 @@ mod tests {
     fn test_non_numeric_text_not_equal() {
         // Non-numeric strings should also not equal numbers (type ordering)
         assert_eq!(
-            equal(
-                &SqlValue::Varchar(arcstr::ArcStr::from("hello")),
-                &SqlValue::Integer(10)
-            )
-            .unwrap(),
+            equal(&SqlValue::Varchar(arcstr::ArcStr::from("hello")), &SqlValue::Integer(10))
+                .unwrap(),
             SqlValue::Boolean(false)
         );
         assert_eq!(
-            equal(
-                &SqlValue::Integer(10),
-                &SqlValue::Varchar(arcstr::ArcStr::from("hello"))
-            )
-            .unwrap(),
+            equal(&SqlValue::Integer(10), &SqlValue::Varchar(arcstr::ArcStr::from("hello")))
+                .unwrap(),
             SqlValue::Boolean(false)
         );
     }

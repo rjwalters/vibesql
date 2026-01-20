@@ -126,6 +126,15 @@ fn collect_correlation_refs(
         }
     }
 
+    // FIX for issue #4994: Check FROM clause for derived tables that reference outer columns
+    // This is critical for queries like:
+    //   SELECT x+1 FROM (SELECT f/d AS x FROM t2 JOIN t3 ON d*a=f)
+    // where 'a' in the JOIN condition references an outer table t1.
+    // Without this check, the correlation values would be empty, causing incorrect caching.
+    if let Some(from) = &subquery.from {
+        collect_correlation_refs_from_from_clause(from, outer_schema, subquery_tables, refs);
+    }
+
     // FIX for issue #4749: Also check set operations (INTERSECT, UNION, EXCEPT)
     // When a subquery contains a set operation, the right side may reference
     // outer columns that need to be included in correlation detection.
@@ -141,8 +150,58 @@ fn collect_correlation_refs(
     }
 }
 
+/// Recursively collect correlation column references from a FROM clause
+///
+/// This handles derived tables (subqueries in FROM) and JOIN conditions
+/// that may reference columns from outer queries.
+fn collect_correlation_refs_from_from_clause(
+    from: &vibesql_ast::FromClause,
+    outer_schema: &crate::schema::CombinedSchema,
+    subquery_tables: &[String],
+    refs: &mut std::collections::BTreeSet<(Option<String>, String)>,
+) {
+    match from {
+        vibesql_ast::FromClause::Table { .. } => {
+            // Simple table reference, no correlation refs
+        }
+        vibesql_ast::FromClause::Subquery { query, alias, .. } => {
+            // For derived tables, we need to:
+            // 1. Extract the tables defined within this derived table
+            // 2. Recursively check for correlation refs, passing through the outer schema
+            let mut nested_tables = subquery_tables.to_vec();
+            nested_tables.push(alias.clone());
+            // Also add tables from within the derived table's FROM clause
+            if let Some(nested_from) = &query.from {
+                extract_table_names_recursive(nested_from, &mut nested_tables);
+            }
+            // Recursively collect correlation refs from the derived table
+            collect_correlation_refs(query, outer_schema, &nested_tables, refs);
+        }
+        vibesql_ast::FromClause::Join { left, right, condition, .. } => {
+            // Check both sides of the join
+            collect_correlation_refs_from_from_clause(left, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_from_clause(right, outer_schema, subquery_tables, refs);
+            // Check the join condition for correlation refs
+            if let Some(cond) = condition {
+                collect_correlation_refs_from_expr(cond, outer_schema, subquery_tables, refs);
+            }
+        }
+        vibesql_ast::FromClause::Values { rows, .. } => {
+            // Check VALUES expressions for correlation refs
+            for row in rows {
+                for expr in row {
+                    collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+                }
+            }
+        }
+    }
+}
+
 /// Helper to extract table names from a SelectStmt's FROM clause
-fn extract_table_names_recursive_from_select(stmt: &vibesql_ast::SelectStmt, tables: &mut Vec<String>) {
+fn extract_table_names_recursive_from_select(
+    stmt: &vibesql_ast::SelectStmt,
+    tables: &mut Vec<String>,
+) {
     if let Some(from_clause) = &stmt.from {
         extract_table_names_recursive(from_clause, tables);
     }

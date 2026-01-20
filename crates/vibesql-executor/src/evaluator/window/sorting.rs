@@ -31,8 +31,10 @@ pub fn sort_partition(partition: &mut Partition, order_by: &Option<Vec<OrderByIt
     let column_map = &partition.column_map;
     indices.sort_by(|&a, &b| {
         for order_item in order_items {
-            let val_a = evaluate_expression_with_map(&order_item.expr, &rows[a], column_map).unwrap_or(SqlValue::Null);
-            let val_b = evaluate_expression_with_map(&order_item.expr, &rows[b], column_map).unwrap_or(SqlValue::Null);
+            let val_a = evaluate_expression_with_map(&order_item.expr, &rows[a], column_map)
+                .unwrap_or(SqlValue::Null);
+            let val_b = evaluate_expression_with_map(&order_item.expr, &rows[b], column_map)
+                .unwrap_or(SqlValue::Null);
 
             let cmp = compare_values(&val_a, &val_b);
 
@@ -108,12 +110,8 @@ pub fn compare_values(a: &SqlValue, b: &SqlValue) -> Ordering {
             (*a as f64).partial_cmp(b).unwrap_or(Ordering::Equal)
         }
         // Numeric coercion with Real
-        (SqlValue::Numeric(a), SqlValue::Real(b)) => {
-            a.partial_cmp(b).unwrap_or(Ordering::Equal)
-        }
-        (SqlValue::Real(a), SqlValue::Numeric(b)) => {
-            a.partial_cmp(b).unwrap_or(Ordering::Equal)
-        }
+        (SqlValue::Numeric(a), SqlValue::Real(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+        (SqlValue::Real(a), SqlValue::Numeric(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
 
         // Other type combinations: compare as strings
         _ => format!("{:?}", a).cmp(&format!("{:?}", b)),

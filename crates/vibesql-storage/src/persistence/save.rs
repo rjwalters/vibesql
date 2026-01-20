@@ -55,9 +55,7 @@ impl Database {
         // (rename across filesystems would fail)
         let temp_path = {
             let parent = path_ref.parent().unwrap_or(Path::new("."));
-            let file_name = path_ref
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string());
+            let file_name = path_ref.file_name().map(|s| s.to_string_lossy().to_string());
             let temp_name = format!(
                 ".{}.tmp.{}",
                 file_name.unwrap_or_else(|| "database".to_string()),
@@ -233,10 +231,9 @@ impl Database {
                                 StorageError::NotImplemented(format!("Write error: {}", e))
                             })?;
                     } else {
-                        write!(writer, ", CHECK ({})", expr_text)
-                            .map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
+                        write!(writer, ", CHECK ({})", expr_text).map_err(|e| {
+                            StorageError::NotImplemented(format!("Write error: {}", e))
+                        })?;
                     }
                 }
 
@@ -343,13 +340,15 @@ impl Database {
                 use vibesql_ast::IndexColumn;
                 match col {
                     IndexColumn::Column { column_name, .. } => {
-                        write!(writer, "{}", column_name)
-                            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                        write!(writer, "{}", column_name).map_err(|e| {
+                            StorageError::NotImplemented(format!("Write error: {}", e))
+                        })?;
                     }
                     IndexColumn::Expression { expr, .. } => {
                         use vibesql_ast::pretty_print::ToSql;
-                        write!(writer, "{}", expr.to_sql())
-                            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                        write!(writer, "{}", expr.to_sql()).map_err(|e| {
+                            StorageError::NotImplemented(format!("Write error: {}", e))
+                        })?;
                     }
                 }
                 write!(writer, " {:?}", col.direction())

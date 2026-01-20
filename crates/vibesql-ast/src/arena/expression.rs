@@ -188,10 +188,20 @@ pub enum ExtendedExpr<'arena> {
     Extract { field: IntervalUnit, expr: ExprRef<'arena> },
 
     /// LIKE pattern matching
-    Like { expr: ExprRef<'arena>, pattern: ExprRef<'arena>, negated: bool, escape: Option<ExprRef<'arena>> },
+    Like {
+        expr: ExprRef<'arena>,
+        pattern: ExprRef<'arena>,
+        negated: bool,
+        escape: Option<ExprRef<'arena>>,
+    },
 
     /// GLOB pattern matching (SQLite)
-    Glob { expr: ExprRef<'arena>, pattern: ExprRef<'arena>, negated: bool, escape: Option<ExprRef<'arena>> },
+    Glob {
+        expr: ExprRef<'arena>,
+        pattern: ExprRef<'arena>,
+        negated: bool,
+        escape: Option<ExprRef<'arena>>,
+    },
 
     /// EXISTS predicate
     Exists { subquery: &'arena SelectStmt<'arena>, negated: bool },

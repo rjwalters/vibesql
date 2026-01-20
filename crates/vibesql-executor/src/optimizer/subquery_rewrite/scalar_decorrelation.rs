@@ -67,7 +67,6 @@ struct DecorrelationResult {
     replacement_expr: Expression,
 }
 
-
 /// Check if an operator is a comparison operator
 fn is_comparison_op(op: &BinaryOperator) -> bool {
     matches!(
@@ -80,7 +79,6 @@ fn is_comparison_op(op: &BinaryOperator) -> bool {
             | BinaryOperator::NotEqual
     )
 }
-
 
 /// Check if an expression is a constant (literal or expression with no column refs)
 fn is_constant(expr: &Expression) -> bool {
@@ -130,10 +128,7 @@ fn try_decorrelate_subquery(
     let (inner_table, inner_alias) = match &subquery.from {
         Some(FromClause::Table { name, alias, .. }) => {
             if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
-                eprintln!(
-                    "[SCALAR_DECORRELATION] Inner table: {}, alias: {:?}",
-                    name, alias
-                );
+                eprintln!("[SCALAR_DECORRELATION] Inner table: {}, alias: {:?}", name, alias);
             }
             (name.clone(), alias.clone().unwrap_or_else(|| name.clone()))
         }
@@ -289,12 +284,7 @@ fn try_decorrelate_subquery(
         false,
     ));
 
-    Some(DecorrelationResult {
-        cte,
-        join_on,
-        cte_table,
-        replacement_expr,
-    })
+    Some(DecorrelationResult { cte, join_on, cte_table, replacement_expr })
 }
 
 /// Extract a single aggregate function from the SELECT list
@@ -441,12 +431,9 @@ pub fn apply_scalar_decorrelation(stmt: &SelectStmt) -> SelectStmt {
         let mut result = stmt.clone();
 
         // Add CTEs to WITH clause
-        let new_ctes: Vec<CommonTableExpr> =
-            decorrelations.iter().map(|d| d.cte.clone()).collect();
+        let new_ctes: Vec<CommonTableExpr> = decorrelations.iter().map(|d| d.cte.clone()).collect();
         result.with_clause = match &stmt.with_clause {
-            Some(existing_ctes) => {
-                Some(existing_ctes.iter().cloned().chain(new_ctes).collect())
-            }
+            Some(existing_ctes) => Some(existing_ctes.iter().cloned().chain(new_ctes).collect()),
             None => Some(new_ctes),
         };
 
@@ -461,7 +448,7 @@ pub fn apply_scalar_decorrelation(stmt: &SelectStmt) -> SelectStmt {
                     condition: Some(decorrelation.join_on.clone()),
                     using_columns: None,
                     natural: false,
-                alias: None,
+                    alias: None,
                 };
             }
             result.from = Some(new_from);
@@ -524,14 +511,13 @@ fn rewrite_expr_with_decorrelation(
                 );
             }
             // Try to decorrelate right side
-            if let Some((original_subq, multiplier)) = extract_scalar_subquery_with_multiplier(right)
+            if let Some((original_subq, multiplier)) =
+                extract_scalar_subquery_with_multiplier(right)
             {
                 if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
                     eprintln!("[SCALAR_DECORRELATION] Found scalar subquery on right side");
                 }
-                if let Some(decorrelation) =
-                    try_decorrelate_subquery(original_subq, outer_tables)
-                {
+                if let Some(decorrelation) = try_decorrelate_subquery(original_subq, outer_tables) {
                     // Build replacement expression with multiplier if present
                     let replacement = if let Some(mult) = multiplier {
                         Expression::BinaryOp {
@@ -556,9 +542,7 @@ fn rewrite_expr_with_decorrelation(
             // Try to decorrelate left side
             if let Some((original_subq, multiplier)) = extract_scalar_subquery_with_multiplier(left)
             {
-                if let Some(decorrelation) =
-                    try_decorrelate_subquery(original_subq, outer_tables)
-                {
+                if let Some(decorrelation) = try_decorrelate_subquery(original_subq, outer_tables) {
                     let replacement = if let Some(mult) = multiplier {
                         Expression::BinaryOp {
                             op: BinaryOperator::Multiply,

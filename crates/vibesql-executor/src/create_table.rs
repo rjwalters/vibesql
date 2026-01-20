@@ -77,12 +77,7 @@ impl CreateTableExecutor {
             // Each session gets its own temp schema (e.g., "temp_1", "temp_2")
             // for isolation between database connections
             let temp_schema = database.catalog.temp_schema_name();
-            let id = TableIdentifier::qualified(
-                temp_schema,
-                false,
-                &stmt.table_name,
-                stmt.quoted,
-            );
+            let id = TableIdentifier::qualified(temp_schema, false, &stmt.table_name, stmt.quoted);
             (temp_schema.to_string(), stmt.table_name.clone(), id)
         } else if let Some((schema_part, table_part)) = stmt.table_name.split_once('.') {
             // Schema-qualified table name - use qualified identifier
@@ -540,7 +535,7 @@ impl CreateTableExecutor {
                     nullable: true, // Default to nullable for CTAS
                     default_value: None,
                     generated_expr: None,
-                    collation: None, // CTAS doesn't preserve collation
+                    collation: None,              // CTAS doesn't preserve collation
                     is_exact_integer_type: false, // CTAS doesn't preserve exact type
                 }
             })
