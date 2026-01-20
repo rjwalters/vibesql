@@ -78,6 +78,12 @@ impl Parser {
                     self.advance();
                     "rowid".to_string()
                 }
+                // Allow unreserved keywords as column names
+                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                    let col_name = format!("{}", kw).to_lowercase();
+                    self.advance();
+                    col_name
+                }
                 _ => {
                     return Err(ParseError {
                         message: "Expected column name in SET clause".to_string(),
@@ -221,6 +227,12 @@ impl Parser {
                 Token::Keyword { keyword: Keyword::Rowid, .. } => {
                     self.advance();
                     "rowid".to_string()
+                }
+                // Allow unreserved keywords as column names
+                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                    let col_name = format!("{}", kw).to_lowercase();
+                    self.advance();
+                    col_name
                 }
                 _ => {
                     return Err(ParseError {

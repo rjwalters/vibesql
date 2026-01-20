@@ -456,8 +456,14 @@ impl Parser {
 
             // Parse comma-separated list of column identifiers
             let cols = self.parse_comma_separated_list(|p| match p.peek() {
-                Token::Identifier(col) => {
+                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
                     let name = col.clone();
+                    p.advance();
+                    Ok(name)
+                }
+                // Allow unreserved keywords as column names
+                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                    let name = format!("{}", kw).to_lowercase();
                     p.advance();
                     Ok(name)
                 }

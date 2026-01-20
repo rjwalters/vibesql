@@ -547,15 +547,25 @@ impl<'arena> ArenaParser<'arena> {
                         self.expect_token(Token::LParen)?;
                         let mut columns = BumpVec::new_in(self.arena);
                         loop {
-                            if let Token::Identifier(name) = self.peek() {
-                                let name = name.clone();
-                                self.advance();
-                                columns.push(self.intern(&name));
-                            } else {
-                                return Err(ParseError {
-                                    message: "Expected column name in USING clause".to_string(),
-                                });
-                            }
+                            let name = match self.peek() {
+                                Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                                    let n = name.clone();
+                                    self.advance();
+                                    n
+                                }
+                                // Allow unreserved keywords as column names
+                                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                                    let n = format!("{}", kw).to_lowercase();
+                                    self.advance();
+                                    n
+                                }
+                                _ => {
+                                    return Err(ParseError {
+                                        message: "Expected column name in USING clause".to_string(),
+                                    });
+                                }
+                            };
+                            columns.push(self.intern(&name));
                             if !self.try_consume(&Token::Comma) {
                                 break;
                             }

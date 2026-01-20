@@ -149,6 +149,12 @@ impl<'arena> ArenaParser<'arena> {
                     self.advance();
                     self.intern("rowid")
                 }
+                // Allow unreserved keywords as column names
+                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                    let col_name = format!("{}", kw).to_lowercase();
+                    self.advance();
+                    self.intern(&col_name)
+                }
                 _ => {
                     return Err(ParseError {
                         message: "Expected column name in SET clause".to_string(),

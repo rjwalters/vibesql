@@ -1277,6 +1277,7 @@ impl<'arena> ArenaParser<'arena> {
             Token::Keyword { keyword: Keyword::Interval, .. } => "INTERVAL".to_string(),
             Token::Keyword { keyword: Keyword::Character, .. } => "CHARACTER".to_string(),
             Token::Keyword { keyword: Keyword::Boolean, .. } => "BOOLEAN".to_string(),
+            Token::Keyword { keyword: Keyword::Any, .. } => "ANY".to_string(),
             _ => return Err(ParseError { message: self.peek().syntax_error() }),
         };
         self.advance();
@@ -1362,7 +1363,7 @@ impl<'arena> ArenaParser<'arena> {
             }
             "UNSIGNED" => Ok(vibesql_types::DataType::Unsigned),
             "SIGNED" => Ok(vibesql_types::DataType::Integer),
-            "BLOB" => Ok(vibesql_types::DataType::BinaryLargeObject),
+            "BLOB" | "ANY" => Ok(vibesql_types::DataType::BinaryLargeObject),
             "CHAR" => {
                 // Parse optional length
                 let length = if self.try_consume(&Token::LParen) {
