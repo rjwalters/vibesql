@@ -36,6 +36,8 @@ impl Parser {
             Token::Keyword { keyword: Keyword::Fixed, .. } => "fixed".to_string(),
             // SQLite type aliases - VARYING can start multi-word types like VARYING CHARACTER
             Token::Keyword { keyword: Keyword::Varying, .. } => "varying".to_string(),
+            // SQLite ANY type - represents any type, stored with no affinity
+            Token::Keyword { keyword: Keyword::Any, .. } => "any".to_string(),
             _ => return Err(ParseError { message: "Expected data type".to_string() }),
         };
         self.advance();
@@ -681,6 +683,9 @@ impl Parser {
                 Ok((vibesql_types::DataType::BinaryLargeObject, false))
             }
             "CLOB" => Ok((vibesql_types::DataType::CharacterLargeObject, false)),
+            // SQLite ANY type - represents any type, stored with BLOB affinity (no type affinity)
+            // This allows expressions like CAST(x AS ANY) to return the original type
+            "ANY" => Ok((vibesql_types::DataType::BinaryLargeObject, false)),
             _ => {
                 // SQLite compatibility: Accept ANY string as a type name.
                 // SQLite uses type affinity rules to determine storage, but accepts

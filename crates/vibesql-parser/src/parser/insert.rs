@@ -57,6 +57,12 @@ impl Parser {
                     p.advance();
                     Ok("rowid".to_string())
                 }
+                // Allow unreserved keywords as column names
+                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                    let name = format!("{}", kw).to_lowercase();
+                    p.advance();
+                    Ok(name)
+                }
                 _ => Err(ParseError { message: "Expected column name".to_string() }),
             })?;
             self.expect_token(Token::RParen)?;
@@ -185,6 +191,12 @@ impl Parser {
                     p.advance();
                     Ok("rowid".to_string())
                 }
+                // Allow unreserved keywords as column names
+                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                    let name = format!("{}", kw).to_lowercase();
+                    p.advance();
+                    Ok(name)
+                }
                 _ => Err(ParseError { message: "Expected column name".to_string() }),
             })?;
             self.expect_token(Token::RParen)?;
@@ -280,6 +292,12 @@ impl Parser {
                 Token::Keyword { keyword: Keyword::Rowid, .. } => {
                     p.advance();
                     Ok("rowid".to_string())
+                }
+                // Allow unreserved keywords as column names
+                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                    let name = format!("{}", kw).to_lowercase();
+                    p.advance();
+                    Ok(name)
                 }
                 _ => Err(ParseError { message: "Expected column name".to_string() }),
             })?;

@@ -396,7 +396,14 @@ impl Keyword {
             // Join keywords: SQLite allows these as identifiers (table/column/function names)
             // when not in a join context. SQLite TCL tests (func8.test) use these extensively.
             Keyword::Cross | Keyword::Full | Keyword::Inner | Keyword::Left |
-            Keyword::Natural | Keyword::Outer | Keyword::Right
+            Keyword::Natural | Keyword::Outer | Keyword::Right |
+            // Window function keywords: These are contextual in window frame specifications
+            // but can be used as identifiers elsewhere. SQLite TCL tests (window1.test)
+            // create tables with these as column names.
+            Keyword::Current | Keyword::Exclude | Keyword::Filter | Keyword::Following |
+            Keyword::Groups | Keyword::No | Keyword::Others | Keyword::Over |
+            Keyword::Partition | Keyword::Preceding | Keyword::Range | Keyword::Ties |
+            Keyword::Unbounded | Keyword::First | Keyword::Last
         )
     }
 }

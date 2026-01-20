@@ -62,6 +62,11 @@ impl Parser {
                         cols.push(name.clone());
                         self.advance();
                     }
+                    // Allow unreserved keywords as column names
+                    Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                        cols.push(format!("{}", kw).to_lowercase());
+                        self.advance();
+                    }
                     _ => {
                         return Err(ParseError {
                             message: "Expected column name in view column list".to_string(),
