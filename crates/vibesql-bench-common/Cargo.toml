@@ -27,7 +27,7 @@ mysql = ["dep:mysql"]
 [dependencies]
 # Random number generation for Sysbench data
 rand = "0.9"
-rand_chacha = "0.9"
+rand_chacha = "0.10"
 
 # VibeSQL dependencies (optional, for schema loading)
 vibesql-types = { version = "0.1.4", path = "../vibesql-types", optional = true }
