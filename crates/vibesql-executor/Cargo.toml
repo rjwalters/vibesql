@@ -31,7 +31,7 @@ ahash = "0.8"
 arcstr = "1.2"
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["sync"] }
-rand = "0.9"
+rand = "0.10"
 md-5 = "0.10"
 
 # Arrow dependencies for vectorized execution
@@ -57,11 +57,11 @@ vibesql-bench-common = { version = "0.1.4", path = "../vibesql-bench-common", fe
 # Server benchmarks (sysbench_server, tpcc_server, tpch_server) are now in vibesql-server crate.
 criterion = { version = "0.8", features = ["html_reports"] }
 parking_lot = "0.12"  # For concurrent_throughput benchmark
-rand = "0.9"
-rand_chacha = "0.9"
+rand = "0.10"
+rand_chacha = "0.10"
 env_logger = "0.11"
 libc = "0.2"
-sysinfo = "0.37"
+sysinfo = "0.38"
 tokio = { version = "1.0", features = ["full", "rt-multi-thread"] }
 tempfile = "3.19"
 num_cpus = "1.16"

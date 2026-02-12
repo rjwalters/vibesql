@@ -54,7 +54,7 @@ argon2 = { version = "0.5", features = ["std"] }
 md-5 = "0.10"
 
 # Configuration and error handling
-toml = "0.9"
+toml = "1.0"
 anyhow = "1.0"
 thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -74,7 +74,7 @@ tracing-opentelemetry = "0.32"
 bytes = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0"
-rand = "0.9"
+rand = "0.10"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # Concurrent data structures (for subscription manager)
@@ -96,7 +96,7 @@ reqwest = { version = "0.13", features = ["stream", "query"] }
 # Shared benchmark infrastructure
 vibesql-bench-common = { version = "0.1.4", path = "../vibesql-bench-common", features = ["vibesql", "sqlite"] }
 # Additional dependencies for server benchmarks (moved from vibesql-executor)
-rand_chacha = "0.9"
+rand_chacha = "0.10"
 rusqlite = { version = "0.38", features = ["bundled"] }
 
 [[bench]]
