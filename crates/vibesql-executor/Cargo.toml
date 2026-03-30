@@ -32,14 +32,14 @@ arcstr = "1.2"
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["sync"] }
 rand = "0.9"
-md-5 = "0.10"
+md-5 = "0.11"
 
 # Arrow dependencies for vectorized execution
 # Using 53.0+ for chrono 0.4.42 compatibility (fixes quarter() method ambiguity)
 arrow = "57.1"
 
 # Optional comparison engine dependencies
-rusqlite = { version = "0.38", features = ["bundled"], optional = true }
+rusqlite = { version = "0.39", features = ["bundled"], optional = true }
 duckdb = { version = "1.1", features = ["bundled"], optional = true }
 mysql = { version = "27.0", optional = true }
 
