@@ -17,6 +17,7 @@ fn test_create_select_statement() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,
