@@ -51,7 +51,7 @@ tower = "0.5"
 
 # Authentication
 argon2 = { version = "0.5", features = ["std"] }
-md-5 = "0.10"
+md-5 = "0.11"
 
 # Configuration and error handling
 toml = "0.9"
@@ -97,7 +97,7 @@ reqwest = { version = "0.13", features = ["stream", "query"] }
 vibesql-bench-common = { version = "0.1.4", path = "../vibesql-bench-common", features = ["vibesql", "sqlite"] }
 # Additional dependencies for server benchmarks (moved from vibesql-executor)
 rand_chacha = "0.9"
-rusqlite = { version = "0.38", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 
 [[bench]]
 name = "subscription_fanout"
