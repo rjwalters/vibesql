@@ -453,7 +453,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                             md5.update(b"\n");
                         }
                     }
-                    let hash = format!("{:x}", md5.finalize());
+                    let digest = md5.finalize();
+                    let hash = digest.iter().map(|b| format!("{:02x}", b)).collect::<String>();
                     rows = vec![vec![format!(
                         "{} values hashing to {}",
                         rows.len() * rows[0].len(),

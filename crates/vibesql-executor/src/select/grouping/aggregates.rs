@@ -482,7 +482,7 @@ impl AggregateAccumulator {
                 let mut hasher = Md5::new();
                 hasher.update(concatenated.as_bytes());
                 let result = hasher.finalize();
-                let hash = format!("{:x}", result);
+                let hash = result.iter().map(|b| format!("{:02x}", b)).collect::<String>();
                 Ok(vibesql_types::SqlValue::Varchar(hash.into()))
             }
         }

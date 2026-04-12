@@ -173,7 +173,7 @@ pub fn compute_md5_password(password: &str, username: &str, salt: &[u8; 4]) -> S
     hasher.update(password.as_bytes());
     hasher.update(username.as_bytes());
     let inner_hash = hasher.finalize();
-    let inner_hex = format!("{:x}", inner_hash);
+    let inner_hex = inner_hash.iter().map(|b| format!("{:02x}", b)).collect::<String>();
 
     // Step 2: md5(inner_hex + salt)
     let mut hasher = Md5::new();
@@ -181,7 +181,7 @@ pub fn compute_md5_password(password: &str, username: &str, salt: &[u8; 4]) -> S
     hasher.update(salt);
     let outer_hash = hasher.finalize();
 
-    format!("{:x}", outer_hash)
+    outer_hash.iter().map(|b| format!("{:02x}", b)).collect::<String>()
 }
 
 #[cfg(test)]
