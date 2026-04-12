@@ -678,6 +678,12 @@ def load_conformance_data() -> Dict[str, Any]:
                         tests_passing = summary.get("passed", 0)
                         actual_tests = summary.get("total_available_files", 0)
 
+                    total_files = actual_files or summary.get("total_available_files", 0)
+                    if actual_files > 0 and pass_rate > 0:
+                        files_passing = int(actual_files * (pass_rate / 100.0))
+                    else:
+                        files_passing = summary.get("passed", 0)
+
                     sqllogictest_data = {
                         "summary": {
                             "total_tests": actual_tests,
@@ -686,8 +692,8 @@ def load_conformance_data() -> Dict[str, Any]:
                             "pass_rate": round(pass_rate, 2)
                         },
                         "files": {
-                            "total": actual_files or summary.get("total_available_files", 0),
-                            "passing": summary.get("passed", 0),
+                            "total": total_files,
+                            "passing": files_passing,
                             "pass_rate": round(pass_rate, 2)
                         }
                     }

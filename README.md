@@ -1,16 +1,16 @@
 # VibeSQL
 
 [![CI](https://github.com/rjwalters/vibesql/actions/workflows/ci-and-deploy.yml/badge.svg)](https://github.com/rjwalters/vibesql/actions/workflows/ci-and-deploy.yml)
-[![Demo](https://img.shields.io/badge/demo-live-success)](https://rjwalters.github.io/vibesql/)
-[![sqltest](https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/sql1999-conformance.json)](https://rjwalters.github.io/vibesql/conformance.html)
-[![SQLLogicTest](https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/sqllogictest.json)](https://rjwalters.github.io/vibesql/conformance.html#SQLlogicTest)
-[![TCL Tests](https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/tcl-tests.json)](https://rjwalters.github.io/vibesql/conformance.html#tcl-tests)
-[![PostgreSQL](https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/pgsql-regress.json)](https://rjwalters.github.io/vibesql/conformance.html#postgresql)
+[![Demo](https://img.shields.io/badge/demo-live-success)](https://vibesql.org/)
+[![sqltest](https://img.shields.io/endpoint?url=https://vibesql.org/badges/sql1999-conformance.json)](https://vibesql.org/conformance.html)
+[![SQLLogicTest](https://img.shields.io/endpoint?url=https://vibesql.org/badges/sqllogictest.json)](https://vibesql.org/conformance.html#SQLlogicTest)
+[![TCL Tests](https://img.shields.io/endpoint?url=https://vibesql.org/badges/tcl-tests.json)](https://vibesql.org/conformance.html#tcl-tests)
+[![PostgreSQL](https://img.shields.io/endpoint?url=https://vibesql.org/badges/pgsql-regress.json)](https://vibesql.org/conformance.html#postgresql)
 [![i18n](https://img.shields.io/badge/i18n-19%20languages-blue)](docs/CONTRIBUTING_TRANSLATIONS.md)
 
 **SQL:1999 compliant database in Rust, 100% AI-generated**
 
-[Live Demo](https://rjwalters.github.io/vibesql/) | [CLI Guide](docs/CLI_GUIDE.md) | [Python Bindings](docs/PYTHON_BINDINGS.md) | [Conformance Report](https://rjwalters.github.io/vibesql/conformance.html)
+[Live Demo](https://vibesql.org/) | [CLI Guide](docs/CLI_GUIDE.md) | [Python Bindings](docs/PYTHON_BINDINGS.md) | [Conformance Report](https://vibesql.org/conformance.html)
 
 ## Highlights
 
@@ -271,7 +271,7 @@ The VibeSQL Challenge: pass all 622 SQLLogicTest files using AI tools. Our bench
 | C++ | [challenge-seed-cpp](https://github.com/vibesql-challenge/challenge-seed-cpp) |
 | Go | [challenge-seed-go](https://github.com/vibesql-challenge/challenge-seed-go) |
 
-See the [challenge page](https://rjwalters.github.io/vibesql/#challenge) for full details.
+See the [challenge page](https://vibesql.org/#challenge) for full details.
 
 ## License
 
@@ -283,4 +283,4 @@ See [CLAUDE.md](CLAUDE.md) for development workflow with Loom AI orchestration.
 
 ---
 
-**[Try the Live Demo →](https://rjwalters.github.io/vibesql/)**
+**[Try the Live Demo →](https://vibesql.org/)**
