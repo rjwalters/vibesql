@@ -3,10 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title data-i18n="challenge-page-title">SQL Vibe Coding Challenge - VibeSQL</title>
+  <title>VibeSQL - A Pure-Rust SQL Database Built for Speed</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <!-- Prevent flash of unstyled content by applying theme before page renders -->
   <script>
     (function() {
       const savedTheme = localStorage.getItem('theme');
@@ -23,539 +21,254 @@
     <!-- Header -->
     <header class="bg-white dark:bg-gray-800 shadow-md border-b border-gray-300 dark:border-gray-600">
       <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center flex-wrap gap-4">
-        <h1 class="text-3xl font-bold text-primary-light dark:text-primary-dark" data-i18n="challenge-header">
-          SQL Vibe Coding Challenge
+        <h1 class="text-3xl font-bold text-primary-light dark:text-primary-dark">
+          VibeSQL
         </h1>
         <div id="nav-container"></div>
       </div>
     </header>
 
     <!-- Hero Section -->
-    <section class="bg-gradient-to-b from-blue-50 to-white dark:from-gray-900 dark:to-gray-800 py-16">
-      <div class="max-w-6xl mx-auto px-4">
-        <div class="grid md:grid-cols-2 gap-12 items-center">
-          <!-- Left: Text -->
-          <div class="text-center md:text-left">
-            <h2 class="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-6" data-i18n="challenge-hero-title">
-              The SQL Vibe Coding Challenge
-            </h2>
-            <p class="text-xl text-gray-600 dark:text-gray-300 mb-8" data-i18n="challenge-hero-subtitle">
-              An objective benchmark for multi-agent software development.
-              Build a SQL database from scratch. Pass 6 million tests. Win the trophy.
-            </p>
-            <div class="flex flex-wrap justify-center md:justify-start gap-4">
-              <a href="#get-started" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors" data-i18n="challenge-btn-start">
-                Start Building
-              </a>
-              <a href="https://github.com/vibesql-challenge/submissions" target="_blank" rel="noopener" class="px-6 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-semibold rounded-lg transition-colors" data-i18n="challenge-btn-leaderboard">
-                Leaderboard
-              </a>
-            </div>
-          </div>
-          <!-- Right: Hero Video/Image -->
-          <div class="flex justify-center">
-            <video
-              autoplay
-              loop
-              muted
-              playsinline
-              poster="/hero.webp"
-              class="w-full max-w-lg drop-shadow-2xl rounded-lg"
-            >
-              <source src="/hero-motion.mp4" type="video/mp4" />
-              <img src="/hero.webp" alt="SQL Vibe Coding Challenge" class="w-full max-w-lg drop-shadow-2xl rounded-lg" />
-            </video>
-          </div>
+    <section class="bg-gradient-to-b from-blue-50 to-white dark:from-gray-900 dark:to-gray-800 py-20">
+      <div class="max-w-5xl mx-auto px-4 text-center">
+        <h2 class="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-6">
+          A pure-Rust SQL database<br>built for speed
+        </h2>
+        <p class="text-xl text-gray-600 dark:text-gray-300 mb-4 max-w-3xl mx-auto">
+          VibeSQL trades storage efficiency for performance. Hybrid row + columnar storage,
+          vectorized execution, and zero unsafe code. Optimized for datasets that fit in memory.
+        </p>
+        <p class="text-lg text-gray-500 dark:text-gray-400 mb-10 max-w-2xl mx-auto">
+          SQL:1999 compliant. Runs natively, in WebAssembly, and as an embedded library.
+        </p>
+        <div class="flex flex-wrap justify-center gap-4">
+          <a href="demo.html" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors">
+            Try in Browser
+          </a>
+          <a href="https://github.com/rjwalters/vibesql" target="_blank" rel="noopener" class="px-6 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-semibold rounded-lg transition-colors">
+            GitHub
+          </a>
+          <a href="https://crates.io/crates/vibesql" target="_blank" rel="noopener" class="px-6 py-3 border border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 text-gray-700 dark:text-gray-300 font-semibold rounded-lg transition-colors">
+            crates.io
+          </a>
         </div>
       </div>
     </section>
 
     <!-- Main Content -->
-    <main class="max-w-7xl mx-auto px-4 py-12 space-y-16">
+    <main class="max-w-7xl mx-auto px-4 py-16 space-y-20">
 
-      <!-- Key Insight -->
-      <section class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-6">
-        <div class="flex items-start gap-4">
-          <div class="flex-shrink-0 text-amber-600 dark:text-amber-400">
-            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-          </div>
-          <div>
-            <h3 class="text-lg font-semibold text-amber-800 dark:text-amber-200 mb-2" data-i18n="challenge-insight-title">
-              The Only Metric That Matters: Calendar Time
-            </h3>
-            <p class="text-amber-700 dark:text-amber-300" data-i18n-html="challenge-insight-text">
-              Commits and lines of code are proxies. What matters is <strong>days to completion</strong>.
-              Can 1,000 agents working in parallel beat 100 agents? Does your orchestration framework
-              maintain productivity as you scale? This benchmark will tell you.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <!-- The Challenge -->
-      <section id="the-challenge" class="scroll-mt-8">
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8" data-i18n="challenge-section-title">The Challenge</h2>
-
-        <div class="grid md:grid-cols-2 gap-8">
-          <!-- Objective -->
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
-            <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-              <svg class="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-              </svg>
-              <span data-i18n="challenge-objective-title">Objective</span>
-            </h3>
-            <p class="text-gray-600 dark:text-gray-300" data-i18n-html="challenge-objective-text">
-              Build a SQL database engine from scratch that passes the
-              <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest suite</a>.
-              This is the same test suite used to validate SQLite, DuckDB, and other production databases.
-            </p>
-          </div>
-
-          <!-- Success Criteria -->
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
-            <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-              <svg class="w-6 h-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-              </svg>
-              <span data-i18n="challenge-success-title">Success Criteria</span>
-            </h3>
-            <ul class="text-gray-600 dark:text-gray-300 space-y-2">
-              <li class="flex items-center gap-2">
-                <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                <span data-i18n="challenge-success-pass-rate">100% pass rate on SQLLogicTest suite</span>
-              </li>
-              <li class="flex items-center gap-2">
-                <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                <span data-i18n="challenge-success-assertions">~6 million individual test assertions</span>
-              </li>
-              <li class="flex items-center gap-2">
-                <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                <span data-i18n="challenge-success-files">All 622 test files passing</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- The Rule: Execution Boundary -->
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border-2 border-amber-300 dark:border-amber-600 md:col-span-2">
-            <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-              <svg class="w-6 h-6 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-              </svg>
-              <span data-i18n="challenge-rule-boundary-title">The Rule: Execution Boundary</span>
-            </h3>
-            <p class="text-lg text-gray-700 dark:text-gray-200 mb-4 font-medium" data-i18n="challenge-rule-boundary-text">
-              Existing database systems may be studied, benchmarked, and used for external analysis, but they must never cross the execution boundary of your submitted system.
-            </p>
-            <div class="grid md:grid-cols-2 gap-6">
-              <div>
-                <h4 class="font-semibold text-green-700 dark:text-green-400 mb-2 flex items-center gap-2">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                  </svg>
-                  <span data-i18n="challenge-rule-outside-title">Outside the Boundary (Allowed)</span>
-                </h4>
-                <ul class="text-gray-600 dark:text-gray-300 space-y-1 text-sm">
-                  <li class="flex items-center gap-2">
-                    <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                    <span data-i18n="challenge-rule-study">Study source code and algorithms</span>
-                  </li>
-                  <li class="flex items-center gap-2">
-                    <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                    <span data-i18n="challenge-rule-benchmark">Benchmark to identify slow query classes</span>
-                  </li>
-                  <li class="flex items-center gap-2">
-                    <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                    <span data-i18n="challenge-rule-compare">Compare query plans and behaviors</span>
-                  </li>
-                  <li class="flex items-center gap-2">
-                    <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                    <span data-i18n="challenge-rule-guide">Use to guide design decisions</span>
-                  </li>
-                </ul>
-              </div>
-              <div>
-                <h4 class="font-semibold text-red-700 dark:text-red-400 mb-2 flex items-center gap-2">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                  </svg>
-                  <span data-i18n="challenge-rule-inside-title">Inside the Boundary (Disqualified)</span>
-                </h4>
-                <ul class="text-gray-600 dark:text-gray-300 space-y-1 text-sm">
-                  <li class="flex items-center gap-2">
-                    <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
-                    <span data-i18n="challenge-rule-execute">Execute queries via existing engines</span>
-                  </li>
-                  <li class="flex items-center gap-2">
-                    <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
-                    <span data-i18n="challenge-rule-fallback">Use as fallback for unsupported features</span>
-                  </li>
-                  <li class="flex items-center gap-2">
-                    <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
-                    <span data-i18n="challenge-rule-oracle">Use as correctness oracle during tests</span>
-                  </li>
-                  <li class="flex items-center gap-2">
-                    <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
-                    <span data-i18n="challenge-rule-link">Link, embed, or invoke at runtime</span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-4 italic" data-i18n="challenge-rule-test">
-              Key test: Removing SQLite must not change whether your engine builds, runs, or passes tests.
-            </p>
-          </div>
-        </div>
-
-        <!-- Collapsible Examples Section -->
-        <details class="mt-8 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
-          <summary class="cursor-pointer px-6 py-4 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
-            <span class="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-              <svg class="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-              </svg>
-              <span data-i18n="challenge-examples-title">Do / Don't Examples</span>
-            </span>
-            <svg class="w-5 h-5 text-gray-500 dark:text-gray-400 transform transition-transform details-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-            </svg>
-          </summary>
-          <div class="px-6 pb-6 pt-2">
-            <div class="grid md:grid-cols-2 gap-6">
-              <!-- DO Examples -->
-              <div class="space-y-4">
-                <h4 class="font-bold text-green-700 dark:text-green-400 flex items-center gap-2 border-b border-green-200 dark:border-green-800 pb-2">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                  </svg>
-                  <span data-i18n="challenge-examples-do">DO (Allowed)</span>
-                </h4>
-                <div class="space-y-3 text-sm">
-                  <div class="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
-                    <p class="font-medium text-green-800 dark:text-green-200" data-i18n="challenge-do-1-title">Read SQLite source code to understand B-tree implementation</p>
-                    <p class="text-green-700 dark:text-green-300 text-xs mt-1" data-i18n="challenge-do-1-why">Study and learn from existing implementations</p>
-                  </div>
-                  <div class="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
-                    <p class="font-medium text-green-800 dark:text-green-200" data-i18n="challenge-do-2-title">Run DuckDB to benchmark JOIN performance and identify optimization targets</p>
-                    <p class="text-green-700 dark:text-green-300 text-xs mt-1" data-i18n="challenge-do-2-why">External analysis to guide your implementation</p>
-                  </div>
-                  <div class="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
-                    <p class="font-medium text-green-800 dark:text-green-200" data-i18n="challenge-do-3-title">Compare your query plan output against PostgreSQL's EXPLAIN</p>
-                    <p class="text-green-700 dark:text-green-300 text-xs mt-1" data-i18n="challenge-do-3-why">Learning tool that doesn't affect your execution</p>
-                  </div>
-                  <div class="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
-                    <p class="font-medium text-green-800 dark:text-green-200" data-i18n="challenge-do-4-title">Use scripts that call SQLite to pre-compute expected test outputs</p>
-                    <p class="text-green-700 dark:text-green-300 text-xs mt-1" data-i18n="challenge-do-4-why">Offline reference data, not runtime dependency</p>
-                  </div>
-                </div>
-              </div>
-
-              <!-- DON'T Examples -->
-              <div class="space-y-4">
-                <h4 class="font-bold text-red-700 dark:text-red-400 flex items-center gap-2 border-b border-red-200 dark:border-red-800 pb-2">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                  </svg>
-                  <span data-i18n="challenge-examples-dont">DON'T (Disqualified)</span>
-                </h4>
-                <div class="space-y-3 text-sm">
-                  <div class="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 border border-red-200 dark:border-red-800">
-                    <p class="font-medium text-red-800 dark:text-red-200" data-i18n="challenge-dont-1-title">Fall back to SQLite for window functions "temporarily"</p>
-                    <p class="text-red-700 dark:text-red-300 text-xs mt-1" data-i18n="challenge-dont-1-why">Crosses execution boundary, even if planned for removal</p>
-                  </div>
-                  <div class="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 border border-red-200 dark:border-red-800">
-                    <p class="font-medium text-red-800 dark:text-red-200" data-i18n="challenge-dont-2-title">Run queries through SQLite to verify correctness during tests</p>
-                    <p class="text-red-700 dark:text-red-300 text-xs mt-1" data-i18n="challenge-dont-2-why">Using as oracle means tests depend on external engine</p>
-                  </div>
-                  <div class="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 border border-red-200 dark:border-red-800">
-                    <p class="font-medium text-red-800 dark:text-red-200" data-i18n="challenge-dont-3-title">Link against libsqlite3 for "just the parser"</p>
-                    <p class="text-red-700 dark:text-red-300 text-xs mt-1" data-i18n="challenge-dont-3-why">Embedded dependency violates clean-room implementation</p>
-                  </div>
-                  <div class="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 border border-red-200 dark:border-red-800">
-                    <p class="font-medium text-red-800 dark:text-red-200" data-i18n="challenge-dont-4-title">Shell out to DuckDB for complex aggregation queries</p>
-                    <p class="text-red-700 dark:text-red-300 text-xs mt-1" data-i18n="challenge-dont-4-why">Delegation of execution, regardless of method</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- FAQ -->
-            <div class="mt-6 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
-              <h4 class="font-semibold text-blue-800 dark:text-blue-200 mb-2" data-i18n="challenge-faq-title">Common Question</h4>
-              <p class="text-blue-700 dark:text-blue-300 text-sm">
-                <strong data-i18n="challenge-faq-q">Q: Can I use SQLite during development?</strong>
-              </p>
-              <p class="text-blue-700 dark:text-blue-300 text-sm mt-1" data-i18n="challenge-faq-a">
-                A: Yes — for reading code, benchmarking, and analysis. No — for executing queries, validating correctness, or acting as part of your system.
-              </p>
-            </div>
-          </div>
-        </details>
-      </section>
-
-      <!-- The Trophy -->
-      <section id="trophy" class="scroll-mt-8">
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8" data-i18n="challenge-trophy-title">The Trophy</h2>
-
-        <div class="grid md:grid-cols-2 gap-8 items-center">
-          <!-- Trophy Image -->
-          <div class="flex justify-center">
-            <img src="/trophy.webp" alt="VibeSQL Challenge Trophy" class="w-72 md:w-96 drop-shadow-2xl rounded-lg" />
-          </div>
-
-          <!-- Trophy Info -->
-          <div class="space-y-6">
-            <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-6">
-              <h3 class="text-xl font-semibold text-amber-800 dark:text-amber-200 mb-3" data-i18n="challenge-trophy-name">
-                The Vibe Coding Trophy
-              </h3>
-              <p class="text-amber-700 dark:text-amber-300 mb-4" data-i18n="challenge-trophy-desc">
-                A physical trophy will be awarded to each record holder. The design reflects the
-                spirit of "vibe coding" — a gold-plated wand mounted on walnut with brass nameplates.
-              </p>
-              <p class="text-amber-700 dark:text-amber-300" data-i18n-html="challenge-trophy-claim">
-                <strong>Your name goes on the trophy</strong> when you beat the current record by at least 5%.
-              </p>
-            </div>
-
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
-              <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4" data-i18n="challenge-rules-title">Award Rules</h3>
-              <ul class="space-y-3 text-gray-600 dark:text-gray-300">
-                <li class="flex items-start gap-3">
-                  <svg class="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                  </svg>
-                  <span data-i18n-html="challenge-rule-improve"><strong>5% improvement required</strong> — beat the previous record by at least 5% (in calendar days) to claim the trophy</span>
-                </li>
-                <li class="flex items-start gap-3">
-                  <svg class="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                  </svg>
-                  <span data-i18n-html="challenge-rule-public"><strong>Public repository</strong> — your code must be publicly available for verification</span>
-                </li>
-                <li class="flex items-start gap-3">
-                  <svg class="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                  </svg>
-                  <span data-i18n-html="challenge-rule-pass"><strong>100% pass rate</strong> — all 622 SQLLogicTest files must pass</span>
-                </li>
-                <li class="flex items-start gap-3">
-                  <svg class="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                  </svg>
-                  <span data-i18n-html="challenge-rule-git"><strong>Verifiable git history</strong> — first commit date to 100% pass rate determines your time</span>
-                </li>
-              </ul>
-            </div>
-
-            <!-- Current Record Holder -->
-            <div class="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-lg p-6 border border-blue-200 dark:border-blue-800">
-              <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2" data-i18n="challenge-record-title">Current Record Holder</h3>
-              <div class="flex items-center gap-4">
-                <div class="text-4xl font-bold text-blue-600 dark:text-blue-400">25 days</div>
-                <div class="text-gray-600 dark:text-gray-300">
-                  <p class="font-semibold" data-i18n="challenge-record-name">VibeSQL (Baseline)</p>
-                  <p class="text-sm" data-i18n="challenge-record-date">October - November 2025</p>
-                  <p class="text-xs mt-1">
-                    <a href="https://github.com/rjwalters/vibesql/commit/275fb9253eca4c985ef76912d178bb361e5b25d8"
-                       target="_blank"
-                       rel="noopener noreferrer"
-                       class="text-gray-400 dark:text-gray-500 hover:text-blue-500 dark:hover:text-blue-400 font-mono">
-                      275fb925
-                    </a>
-                  </p>
-                </div>
-              </div>
-              <p class="text-sm text-gray-500 dark:text-gray-400 mt-3" data-i18n-html="challenge-record-beat">
-                Beat this by 5%? That's <strong>24 days or less</strong> to claim the trophy.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Why This Challenge -->
+      <!-- The Niche -->
       <section>
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8" data-i18n="challenge-why-title">Why This Challenge?</h2>
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8 text-center">Why VibeSQL?</h2>
 
-        <div class="grid md:grid-cols-3 gap-6">
+        <div class="grid md:grid-cols-3 gap-8">
           <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
             <div class="w-12 h-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center mb-4">
               <svg class="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2" data-i18n="challenge-why-objective-title">
-              Objective Measurement
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+              Hybrid Storage
             </h3>
-            <p class="text-gray-600 dark:text-gray-300" data-i18n="challenge-why-objective-text">
-              No subjective code reviews. Either the tests pass or they don't.
-              6 million assertions leave no room for ambiguity.
-            </p>
-          </div>
-
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
-            <div class="w-12 h-12 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center mb-4">
-              <svg class="w-6 h-6 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>
-              </svg>
-            </div>
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2" data-i18n="challenge-why-complexity-title">
-              Real Complexity
-            </h3>
-            <p class="text-gray-600 dark:text-gray-300" data-i18n="challenge-why-complexity-text">
-              SQL databases require parsers, optimizers, and execution engines.
-              This isn't a toy problem—it's production-grade engineering.
+            <p class="text-gray-600 dark:text-gray-300">
+              Both row and columnar storage in one engine. Row format for fast point lookups and OLTP.
+              Columnar format for analytical scans with vectorized execution. No need to choose.
             </p>
           </div>
 
           <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
             <div class="w-12 h-12 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center mb-4">
               <svg class="w-6 h-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2" data-i18n="challenge-why-time-title">
-              Time Is Truth
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+              Speed Over Storage
             </h3>
-            <p class="text-gray-600 dark:text-gray-300" data-i18n="challenge-why-time-text">
-              Calendar days to completion is the ultimate metric.
-              Does parallelizing to 1,000 agents help? Now you can find out.
+            <p class="text-gray-600 dark:text-gray-300">
+              Deliberately trades disk space for query performance. Redundant storage layouts,
+              aggressive caching, and precomputed indexes mean smaller databases run as fast as possible.
+            </p>
+          </div>
+
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
+            <div class="w-12 h-12 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center mb-4">
+              <svg class="w-6 h-6 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+              Pure Rust, Zero Unsafe
+            </h3>
+            <p class="text-gray-600 dark:text-gray-300">
+              Written entirely in safe Rust. No C dependencies, no FFI, no unsafe blocks.
+              Compiles to native binaries and WebAssembly from the same codebase.
             </p>
           </div>
         </div>
       </section>
 
-      <!-- Getting Started -->
-      <section id="get-started" class="scroll-mt-8">
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6" data-i18n="challenge-start-title">Get Started</h2>
-
-        <p class="text-lg text-gray-600 dark:text-gray-300 mb-8 max-w-3xl" data-i18n="challenge-start-intro">
-          Start from scratch in any language, or use one of our seed repos for convenience.
-          Each seed includes the SQLLogicTest suite, a test runner, and CI workflow.
-        </p>
-
-        <!-- Language Cards -->
-        <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-4"><span data-i18n="challenge-seed-title">Seed Repos</span> <span class="text-sm font-normal text-gray-500 dark:text-gray-400" data-i18n="challenge-seed-optional">(optional)</span></h3>
-        <div class="grid md:grid-cols-3 gap-6 mb-10">
-          <a href="https://github.com/vibesql-challenge/challenge-seed-rust" target="_blank" rel="noopener"
-             class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border-2 border-orange-200 dark:border-orange-800 hover:border-orange-500 dark:hover:border-orange-400 transition-colors">
-            <div class="flex items-center gap-3 mb-3">
-              <svg class="w-8 h-8 text-orange-600 dark:text-orange-400" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M23.687 11.709l-.995-.616a13.559 13.559 0 0 0-.028-.29l.855-.797a.344.344 0 0 0-.114-.571l-1.093-.409a8.392 8.392 0 0 0-.086-.282l.682-.947a.342.342 0 0 0-.205-.535l-1.149-.198a6.682 6.682 0 0 0-.14-.261l.483-1.063a.344.344 0 0 0-.287-.478l-1.17.018a4.267 4.267 0 0 0-.187-.227l.265-1.138a.343.343 0 0 0-.358-.411l-1.15.216a3.922 3.922 0 0 0-.227-.182l.034-1.17a.343.343 0 0 0-.416-.333l-1.097.399c-.084-.05-.169-.098-.256-.144l-.197-1.155a.344.344 0 0 0-.46-.248l-1.019.562a6.072 6.072 0 0 0-.278-.097l-.415-1.093a.344.344 0 0 0-.491-.157l-.912.703a8.474 8.474 0 0 0-.29-.043l-.614-.995a.344.344 0 0 0-.506-.064l-.782.818c-.1-.006-.199-.01-.3-.013l-.792-.87a.344.344 0 0 0-.505.024l-.633.909a8.26 8.26 0 0 0-.298.03l-.945-.724a.344.344 0 0 0-.489.104l-.466.985c-.096.027-.19.056-.283.087l-1.065-.55a.344.344 0 0 0-.458.21l-.285 1.04a6.578 6.578 0 0 0-.26.136l-1.15-.353a.344.344 0 0 0-.41.303l-.096 1.065a5.102 5.102 0 0 0-.228.18l-1.2-.14a.344.344 0 0 0-.348.381l.1 1.053c-.066.072-.13.145-.192.22l-1.21.088a.343.343 0 0 0-.272.443l.285 1.006a5.55 5.55 0 0 0-.148.254l-1.182.305a.344.344 0 0 0-.185.488l.458.93c-.04.09-.077.18-.113.272l-1.12.508a.344.344 0 0 0-.09.514l.61.827c-.024.092-.046.185-.066.278l-1.02.692a.343.343 0 0 0 .01.52l.744.7c-.008.093-.013.186-.017.28l-.89.85a.343.343 0 0 0 .113.516l.855.546c.009.093.019.186.03.278l-.727.98a.344.344 0 0 0 .21.492l.94.372c.027.088.055.175.085.262l-.54 1.08a.344.344 0 0 0 .3.448l.997.18c.046.083.093.165.142.246l-.332 1.143a.344.344 0 0 0 .38.392l1.02-.028c.062.076.127.15.193.223l-.108 1.17a.343.343 0 0 0 .448.326l1.006-.224c.077.065.156.128.237.188l.13 1.157a.344.344 0 0 0 .496.249l.962-.407c.086.05.174.097.263.142l.362 1.104a.344.344 0 0 0 .528.166l.887-.57c.092.033.185.063.28.09l.578 1.01a.344.344 0 0 0 .538.077l.785-.71c.096.016.193.03.29.04l.775.877a.343.343 0 0 0 .53-.016l.66-.822c.097-.002.194-.006.29-.013l.948.707a.344.344 0 0 0 .505-.113l.514-.9c.093-.02.186-.043.278-.067l1.095.502a.343.343 0 0 0 .463-.21l.353-.948c.088-.038.175-.077.261-.118l1.21.264a.344.344 0 0 0 .403-.3l.178-.968c.08-.054.16-.11.238-.168l1.288.006a.343.343 0 0 0 .33-.377l-.007-.952c.07-.07.14-.14.207-.213l1.327-.267a.344.344 0 0 0 .244-.44l-.19-.896c.057-.083.111-.167.163-.253l1.326-.546a.343.343 0 0 0 .148-.477l-.36-.804c.04-.092.078-.186.113-.28l1.281-.816a.344.344 0 0 0 .047-.492l-.515-.68c.023-.096.043-.193.06-.29l1.196-1.066a.344.344 0 0 0-.054-.488l-.65-.529c.006-.097.01-.194.011-.291l1.074-1.29a.345.345 0 0 0-.153-.462zM12 19.295a7.294 7.294 0 1 1 0-14.59 7.294 7.294 0 0 1 0 14.59z"/>
-              </svg>
-              <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 group-hover:text-orange-600 dark:group-hover:text-orange-400">Rust</h3>
-            </div>
-            <p class="text-gray-600 dark:text-gray-300 text-sm mb-3" data-i18n="challenge-seed-rust-desc">
-              Cargo build system, zero-cost abstractions, memory safety without GC.
-            </p>
-            <span class="text-orange-600 dark:text-orange-400 text-sm font-medium group-hover:underline" data-i18n="challenge-seed-fork">
-              Fork on GitHub →
-            </span>
-          </a>
-
-          <a href="https://github.com/vibesql-challenge/challenge-seed-cpp" target="_blank" rel="noopener"
-             class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border-2 border-blue-200 dark:border-blue-800 hover:border-blue-500 dark:hover:border-blue-400 transition-colors">
-            <div class="flex items-center gap-3 mb-3">
-              <svg class="w-8 h-8 text-blue-600 dark:text-blue-400" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M22.394 6c-.167-.29-.398-.543-.652-.69L12.926.22c-.509-.294-1.34-.294-1.848 0L2.26 5.31c-.508.293-.923 1.013-.923 1.6v10.18c0 .294.104.62.271.91.167.29.398.543.652.69l8.816 5.09c.508.293 1.34.293 1.848 0l8.816-5.09c.254-.147.485-.4.652-.69.167-.29.27-.616.27-.91V6.91c.003-.294-.1-.62-.268-.91zM12 19.11c-3.92 0-7.109-3.19-7.109-7.11 0-3.92 3.19-7.11 7.11-7.11a7.133 7.133 0 0 1 6.156 3.553l-3.076 1.78a3.567 3.567 0 0 0-3.08-1.78A3.56 3.56 0 0 0 8.444 12 3.56 3.56 0 0 0 12 15.555a3.57 3.57 0 0 0 3.08-1.778l3.078 1.78A7.135 7.135 0 0 1 12 19.11zm7.11-6.715h-.79v.79h-.79v-.79h-.79v-.79h.79v-.79h.79v.79h.79zm2.962 0h-.79v.79h-.79v-.79h-.79v-.79h.79v-.79h.79v.79h.79z"/>
-              </svg>
-              <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400">C++</h3>
-            </div>
-            <p class="text-gray-600 dark:text-gray-300 text-sm mb-3" data-i18n="challenge-seed-cpp-desc">
-              CMake build system, maximum performance, full control over memory.
-            </p>
-            <span class="text-blue-600 dark:text-blue-400 text-sm font-medium group-hover:underline" data-i18n="challenge-seed-fork">
-              Fork on GitHub →
-            </span>
-          </a>
-
-          <a href="https://github.com/vibesql-challenge/challenge-seed-go" target="_blank" rel="noopener"
-             class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border-2 border-cyan-200 dark:border-cyan-800 hover:border-cyan-500 dark:hover:border-cyan-400 transition-colors">
-            <div class="flex items-center gap-3 mb-3">
-              <svg class="w-8 h-8 text-cyan-600 dark:text-cyan-400" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M1.811 10.231c-.047 0-.058-.023-.035-.059l.246-.315c.023-.035.081-.058.128-.058h4.172c.046 0 .058.035.035.07l-.199.303c-.023.036-.082.07-.117.07zM.047 11.306c-.047 0-.059-.023-.035-.058l.245-.316c.023-.035.082-.058.129-.058h5.328c.047 0 .07.035.058.07l-.093.28c-.012.047-.058.07-.105.07zm2.828 1.075c-.047 0-.059-.035-.035-.07l.163-.292c.023-.035.07-.07.117-.07h2.337c.047 0 .07.035.07.082l-.023.28c0 .047-.047.082-.082.082zm12.129-2.36c-.736.187-1.239.327-1.963.514-.176.046-.187.058-.34-.117-.174-.199-.303-.327-.548-.444-.737-.362-1.45-.257-2.115.175-.795.514-1.204 1.274-1.192 2.22.011.935.654 1.706 1.577 1.835.795.105 1.46-.175 1.987-.771.105-.13.198-.27.315-.434H10.47c-.245 0-.304-.152-.222-.35.152-.362.432-.97.596-1.274a.315.315 0 0 1 .292-.187h4.253c-.023.316-.023.631-.07.947a4.983 4.983 0 0 1-.958 2.29c-.841 1.11-1.94 1.8-3.33 1.986-1.145.152-2.209-.07-3.143-.77-.865-.655-1.356-1.52-1.484-2.595-.152-1.274.222-2.419.993-3.424.83-1.086 1.928-1.776 3.272-2.02 1.098-.2 2.15-.07 3.096.571.62.41 1.063.97 1.356 1.648.07.105.023.164-.117.2z"/>
-              </svg>
-              <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 group-hover:text-cyan-600 dark:group-hover:text-cyan-400">Go</h3>
-            </div>
-            <p class="text-gray-600 dark:text-gray-300 text-sm mb-3" data-i18n="challenge-seed-go-desc">
-              Simple toolchain, fast compilation, excellent concurrency primitives.
-            </p>
-            <span class="text-cyan-600 dark:text-cyan-400 text-sm font-medium group-hover:underline" data-i18n="challenge-seed-fork">
-              Fork on GitHub →
-            </span>
-          </a>
-        </div>
-
-        <!-- Steps -->
-        <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-8">
-          <div class="space-y-6">
-            <div class="flex items-start gap-4">
-              <span class="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">1</span>
-              <div>
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100" data-i18n="challenge-step1-title">Start Your Project</h3>
-                <p class="text-gray-600 dark:text-gray-300 mt-1" data-i18n-html="challenge-step1-text">
-                  Create a new repo from scratch, or fork a seed above for a head start.
-                  Get the <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest suite</a>.
-                  Your first commit starts the clock.
-                </p>
-              </div>
-            </div>
-
-            <div class="flex items-start gap-4">
-              <span class="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">2</span>
-              <div>
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100" data-i18n="challenge-step2-title">Build Your Database</h3>
-                <p class="text-gray-600 dark:text-gray-300 mt-1" data-i18n-html="challenge-step2-text">
-                  Implement a SQL parser, query executor, and storage engine. Use any AI tools—Claude,
-                  Copilot, or your own agents. Run <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> to track progress.
-                </p>
-              </div>
-            </div>
-
-            <div class="flex items-start gap-4">
-              <span class="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">3</span>
-              <div>
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100" data-i18n="challenge-step3-title">Hit 100% and Submit</h3>
-                <p class="text-gray-600 dark:text-gray-300 mt-1" data-i18n-html="challenge-step3-text">
-                  When all 622 test files pass, open an issue at
-                  <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a>
-                  with your repo link and commit hashes. Beat 25 days to join the leaderboard.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- VibeSQL Links -->
+      <!-- Architecture at a Glance -->
       <section>
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6" data-i18n="challenge-explore-title">Explore the VibeSQL baseline implementation</h2>
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8 text-center">Architecture</h2>
+
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
+          <div class="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-gray-200 dark:divide-gray-700">
+            <div class="p-8">
+              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Query Pipeline</h3>
+              <div class="space-y-3 text-gray-600 dark:text-gray-300">
+                <div class="flex items-center gap-3">
+                  <span class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center text-sm font-bold flex-shrink-0">1</span>
+                  <span><strong>Parser</strong> &mdash; Full SQL:1999 grammar, arena-allocated AST</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center text-sm font-bold flex-shrink-0">2</span>
+                  <span><strong>Planner</strong> &mdash; Cost-based optimizer with join reordering</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center text-sm font-bold flex-shrink-0">3</span>
+                  <span><strong>Executor</strong> &mdash; Vectorized execution with batch processing</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center text-sm font-bold flex-shrink-0">4</span>
+                  <span><strong>Storage</strong> &mdash; Hybrid row/columnar with B-tree indexes</span>
+                </div>
+              </div>
+            </div>
+            <div class="p-8">
+              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Key Features</h3>
+              <ul class="space-y-2 text-gray-600 dark:text-gray-300">
+                <li class="flex items-start gap-2">
+                  <span class="text-green-500 mt-1 flex-shrink-0">&#10003;</span>
+                  Window functions (ROW_NUMBER, RANK, LEAD/LAG, NTILE, ...)
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="text-green-500 mt-1 flex-shrink-0">&#10003;</span>
+                  Common Table Expressions (WITH, recursive CTEs)
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="text-green-500 mt-1 flex-shrink-0">&#10003;</span>
+                  Subqueries (correlated, EXISTS, IN, scalar)
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="text-green-500 mt-1 flex-shrink-0">&#10003;</span>
+                  Full JOIN support (INNER, LEFT, RIGHT, FULL, CROSS, NATURAL)
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="text-green-500 mt-1 flex-shrink-0">&#10003;</span>
+                  Triggers, views, foreign keys, CHECK constraints
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="text-green-500 mt-1 flex-shrink-0">&#10003;</span>
+                  WASM target with OPFS persistent storage
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Benchmark Highlights -->
+      <section>
+        <div class="flex items-center justify-between mb-8">
+          <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100">Performance</h2>
+          <a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">
+            Full benchmarks &rarr;
+          </a>
+        </div>
+
         <div class="grid md:grid-cols-3 gap-6">
-          <a href="./" class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 transition-colors">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2" data-i18n="challenge-explore-demo-title">
-              Try the Demo
-            </h3>
-            <p class="text-gray-600 dark:text-gray-300" data-i18n="challenge-explore-demo-text">
-              Run SQL queries in your browser using the WebAssembly build.
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 text-center">
+            <div class="text-4xl font-bold text-blue-600 dark:text-blue-400 mb-2" id="stat-tpch">--</div>
+            <div class="text-gray-600 dark:text-gray-300 text-sm">TPC-H Queries Passing</div>
+            <div class="text-gray-400 dark:text-gray-500 text-xs mt-1">Decision support benchmark</div>
+          </div>
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 text-center">
+            <div class="text-4xl font-bold text-green-600 dark:text-green-400 mb-2" id="stat-conformance">--</div>
+            <div class="text-gray-600 dark:text-gray-300 text-sm">SQLLogicTest Pass Rate</div>
+            <div class="text-gray-400 dark:text-gray-500 text-xs mt-1">6M+ test assertions</div>
+          </div>
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 text-center">
+            <div class="text-4xl font-bold text-purple-600 dark:text-purple-400 mb-2" id="stat-tpcds">--</div>
+            <div class="text-gray-600 dark:text-gray-300 text-sm">TPC-DS Queries Passing</div>
+            <div class="text-gray-400 dark:text-gray-500 text-xs mt-1">Complex analytics benchmark</div>
+          </div>
+        </div>
+
+        <p class="text-center text-gray-500 dark:text-gray-400 text-sm mt-4">
+          Benchmarked against SQLite, DuckDB, and MySQL on equivalent workloads.
+          <a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline">See full results.</a>
+        </p>
+      </section>
+
+      <!-- Try It / Quick Start -->
+      <section>
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8 text-center">Get Started</h2>
+
+        <div class="grid md:grid-cols-2 gap-8">
+          <!-- Try in Browser -->
+          <a href="demo.html" class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 border border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 transition-colors block">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                </svg>
+              </div>
+              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                Interactive Demo
+              </h3>
+            </div>
+            <p class="text-gray-600 dark:text-gray-300">
+              Run SQL queries in your browser. Full database engine compiled to WebAssembly
+              with persistent storage via OPFS. No installation required.
             </p>
           </a>
+
+          <!-- Install -->
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 border border-gray-300 dark:border-gray-600">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                </svg>
+              </div>
+              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                Install
+              </h3>
+            </div>
+            <div class="space-y-3">
+              <div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Cargo</div>
+                <code class="block bg-gray-100 dark:bg-gray-900 rounded px-3 py-2 text-sm font-mono text-gray-800 dark:text-gray-200">cargo install vibesql-cli</code>
+              </div>
+              <div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">As a library</div>
+                <code class="block bg-gray-100 dark:bg-gray-900 rounded px-3 py-2 text-sm font-mono text-gray-800 dark:text-gray-200">cargo add vibesql</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Explore -->
+      <section>
+        <div class="grid md:grid-cols-2 gap-6">
           <a href="conformance.html" class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 transition-colors">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2" data-i18n="challenge-explore-conformance-title">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2">
               Conformance Report
             </h3>
-            <p class="text-gray-600 dark:text-gray-300" data-i18n="challenge-explore-conformance-text">
-              Detailed breakdown of SQL:1999 standards compliance.
+            <p class="text-gray-600 dark:text-gray-300">
+              Detailed breakdown of SQL:1999 standards compliance across 622 test files.
             </p>
           </a>
           <a href="benchmarks.html" class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 transition-colors">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2" data-i18n="challenge-explore-benchmarks-title">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2">
               Performance Benchmarks
             </h3>
-            <p class="text-gray-600 dark:text-gray-300" data-i18n="challenge-explore-benchmarks-text">
-              TPC-H, TPC-C, and other benchmarks vs SQLite and DuckDB.
+            <p class="text-gray-600 dark:text-gray-300">
+              TPC-H, TPC-DS, TPC-C, and Sysbench results vs SQLite, DuckDB, and MySQL.
             </p>
           </a>
         </div>
@@ -565,11 +278,11 @@
 
     <!-- Footer -->
     <footer class="mt-12 text-center text-sm text-gray-500 dark:text-gray-400 pb-6 space-y-1">
-      <p data-i18n="footer-tagline">VibeSQL - SQL:1999 Database in WebAssembly</p>
+      <p>VibeSQL &mdash; A pure-Rust SQL database built for speed</p>
       <p id="build-timestamp" class="text-xs text-gray-400 dark:text-gray-500"></p>
     </footer>
   </div>
 
-  <script type="module" src="/src/challenge.ts"></script>
+  <script type="module" src="/src/homepage.ts"></script>
 </body>
 </html>

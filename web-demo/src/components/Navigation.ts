@@ -38,10 +38,10 @@ export class NavigationComponent extends Component<NavigationState> {
 
     const links: NavigationLink[] = [
       {
-        id: 'challenge',
-        label: t('nav-challenge'),
+        id: 'home',
+        label: t('nav-home'),
         href: './',
-        icon: this.getChallengeIcon(),
+        icon: this.getHomeIcon(),
       },
       {
         id: 'terminal',
@@ -170,13 +170,10 @@ export class NavigationComponent extends Component<NavigationState> {
     `
   }
 
-  private getChallengeIcon(): string {
+  private getHomeIcon(): string {
     return `
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4h10v7a5 5 0 01-10 0V4z"></path>
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7H4a1 1 0 00-1 1v1a3 3 0 003 3h1"></path>
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 7h3a1 1 0 011 1v1a3 3 0 01-3 3h-1"></path>
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 16v4m-4 0h8"></path>
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
       </svg>
     `
   }

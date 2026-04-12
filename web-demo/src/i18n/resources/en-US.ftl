@@ -80,7 +80,6 @@ loading-conformance-report = Loading conformance report...
 editor-placeholder = Enter SQL query here... (Ctrl+Enter or Cmd+Enter to execute)
 
 # Navigation links
-nav-challenge = SQL Vibe Coding Challenge
 nav-terminal = SQL Terminal Demo
 nav-compliance = SQL Test Compliance Report
 nav-benchmarks = Performance Benchmarks
