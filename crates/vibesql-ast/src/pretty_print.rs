@@ -1255,6 +1255,7 @@ mod tests {
             where_clause: None,
             group_by: None,
             having: None,
+            window_definitions: None,
             order_by: None,
             limit: None,
             offset: None,
@@ -1296,6 +1297,7 @@ mod tests {
             }),
             group_by: None,
             having: None,
+            window_definitions: None,
             order_by: None,
             limit: None,
             offset: None,
@@ -1327,6 +1329,7 @@ mod tests {
             where_clause: None,
             group_by: None,
             having: None,
+            window_definitions: None,
             order_by: Some(vec![OrderByItem {
                 expr: Expression::ColumnRef(ColumnIdentifier::simple("name", false)),
                 direction: OrderDirection::Asc,
