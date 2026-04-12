@@ -1,6 +1,6 @@
 # VibeSQL
 
-[![CI](https://github.com/rjwalters/vibesql/actions/workflows/ci-and-deploy.yml/badge.svg)](https://github.com/rjwalters/vibesql/actions/workflows/ci-and-deploy.yml)
+[![CI](https://github.com/rjwalters/vibesql/actions/workflows/ci.yml/badge.svg)](https://github.com/rjwalters/vibesql/actions/workflows/ci.yml)
 [![Demo](https://img.shields.io/badge/demo-live-success)](https://vibesql.org/)
 [![sqltest](https://img.shields.io/endpoint?url=https://vibesql.org/badges/sql1999-conformance.json)](https://vibesql.org/conformance.html)
 [![SQLLogicTest](https://img.shields.io/endpoint?url=https://vibesql.org/badges/sqllogictest.json)](https://vibesql.org/conformance.html#SQLlogicTest)
@@ -270,8 +270,6 @@ The VibeSQL Challenge: pass all 622 SQLLogicTest files using AI tools. Our bench
 | Rust | [challenge-seed-rust](https://github.com/vibesql-challenge/challenge-seed-rust) |
 | C++ | [challenge-seed-cpp](https://github.com/vibesql-challenge/challenge-seed-cpp) |
 | Go | [challenge-seed-go](https://github.com/vibesql-challenge/challenge-seed-go) |
-
-See the [challenge page](https://vibesql.org/#challenge) for full details.
 
 ## License
 
