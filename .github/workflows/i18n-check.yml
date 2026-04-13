@@ -58,7 +58,7 @@ jobs:
           uv run --no-project --python 3.11 scripts/check-translations.py --badge badges/i18n-coverage.json
 
       - name: Upload CLI badge artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: cli-i18n-badge
           path: badges/i18n-coverage.json
@@ -86,7 +86,7 @@ jobs:
           uv run --no-project --python 3.11 scripts/check-web-translations.py --badge badges/web-i18n-coverage.json
 
       - name: Upload Web Demo badge artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: web-i18n-badge
           path: badges/web-i18n-coverage.json
