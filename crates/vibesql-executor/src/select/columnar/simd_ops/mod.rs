@@ -49,6 +49,7 @@
 
 mod aggregate;
 mod comparison;
+pub mod intrinsics;
 mod logical;
 
 pub use aggregate::*;
