@@ -469,20 +469,23 @@ fn evaluate_window_function_for_partition(
 
             let value_expr = &args[0];
 
-            // Create closure that evaluates expressions using the evaluator
-            let eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
-                evaluator.clear_cse_cache();
-                evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
-            };
-
-            // FIRST_VALUE returns the same value for all rows in the partition
-            // (the value from the first row)
-            let value =
-                crate::evaluator::window::evaluate_first_value(partition, value_expr, eval_fn)
-                    .map_err(ExecutorError::UnsupportedExpression)?;
-
-            // Return the same value for all rows
-            vec![value; partition.len()]
+            // FIRST_VALUE respects frame boundaries - evaluate per-row
+            let mut results = Vec::with_capacity(partition.len());
+            for row_idx in 0..partition.len() {
+                let frame_result = calculate_frame_with_exclusion(
+                    partition, row_idx, order_by, frame_spec, &eval_fn,
+                );
+                let value = if let Some(first_idx) =
+                    frame_result.included_indices(partition, order_by, &eval_fn).next()
+                {
+                    eval_fn(value_expr, &partition.rows[first_idx])
+                        .unwrap_or(SqlValue::Null)
+                } else {
+                    SqlValue::Null
+                };
+                results.push(value);
+            }
+            results
         }
         "LAST_VALUE" => {
             // LAST_VALUE(expr)
@@ -494,20 +497,23 @@ fn evaluate_window_function_for_partition(
 
             let value_expr = &args[0];
 
-            // Create closure that evaluates expressions using the evaluator
-            let eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
-                evaluator.clear_cse_cache();
-                evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
-            };
-
-            // LAST_VALUE returns the same value for all rows in the partition
-            // (the value from the last row)
-            let value =
-                crate::evaluator::window::evaluate_last_value(partition, value_expr, eval_fn)
-                    .map_err(ExecutorError::UnsupportedExpression)?;
-
-            // Return the same value for all rows
-            vec![value; partition.len()]
+            // LAST_VALUE respects frame boundaries - evaluate per-row
+            let mut results = Vec::with_capacity(partition.len());
+            for row_idx in 0..partition.len() {
+                let frame_result = calculate_frame_with_exclusion(
+                    partition, row_idx, order_by, frame_spec, &eval_fn,
+                );
+                let value = frame_result
+                    .included_indices(partition, order_by, &eval_fn)
+                    .last()
+                    .map(|last_idx| {
+                        eval_fn(value_expr, &partition.rows[last_idx])
+                            .unwrap_or(SqlValue::Null)
+                    })
+                    .unwrap_or(SqlValue::Null);
+                results.push(value);
+            }
+            results
         }
         "NTH_VALUE" => {
             // NTH_VALUE(expr, n)
@@ -534,19 +540,30 @@ fn evaluate_window_function_for_partition(
                 }
             };
 
-            // Create closure that evaluates expressions using the evaluator
-            let eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
-                evaluator.clear_cse_cache();
-                evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
-            };
+            if n < 1 {
+                return Err(ExecutorError::UnsupportedExpression(
+                    format!("NTH_VALUE n must be a positive integer, got {}", n),
+                ));
+            }
 
-            // NTH_VALUE returns the value from the Nth row for all rows in the partition
-            let value =
-                crate::evaluator::window::evaluate_nth_value(partition, n, value_expr, eval_fn)
-                    .map_err(ExecutorError::UnsupportedExpression)?;
-
-            // Return the same value for all rows
-            vec![value; partition.len()]
+            // NTH_VALUE respects frame boundaries - evaluate per-row
+            let nth_zero_based = (n - 1) as usize;
+            let mut results = Vec::with_capacity(partition.len());
+            for row_idx in 0..partition.len() {
+                let frame_result = calculate_frame_with_exclusion(
+                    partition, row_idx, order_by, frame_spec, &eval_fn,
+                );
+                let value = frame_result
+                    .included_indices(partition, order_by, &eval_fn)
+                    .nth(nth_zero_based)
+                    .map(|nth_idx| {
+                        eval_fn(value_expr, &partition.rows[nth_idx])
+                            .unwrap_or(SqlValue::Null)
+                    })
+                    .unwrap_or(SqlValue::Null); // NULL if frame has fewer than N rows
+                results.push(value);
+            }
+            results
         }
         _ => {
             // Handle aggregate functions that use frames
