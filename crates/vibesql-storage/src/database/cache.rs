@@ -36,7 +36,16 @@ impl Database {
         &self,
         table_name: &str,
     ) -> Result<Option<Arc<crate::ColumnarTable>>, StorageError> {
-        // Check cache first
+        // For native columnar tables, return data directly from the table
+        // (no cache needed -- data is always hot and maintained incrementally)
+        if let Some(table) = self.get_table(table_name) {
+            if table.is_native_columnar() {
+                let columnar = table.scan_columnar()?;
+                return Ok(Some(Arc::new(columnar)));
+            }
+        }
+
+        // Check cache first (for row-oriented tables)
         if let Some(cached) = self.columnar_cache.get(table_name) {
             return Ok(Some(cached));
         }
@@ -59,7 +68,17 @@ impl Database {
     ///
     /// Called automatically when a table is modified (INSERT/UPDATE/DELETE)
     /// to ensure the cache doesn't serve stale data.
+    ///
+    /// For native columnar tables, this is a no-op since the columnar data
+    /// is maintained incrementally by the Table itself during DML operations.
     pub fn invalidate_columnar_cache(&self, table_name: &str) {
+        // For native columnar tables, skip invalidation -- they maintain
+        // their own columnar data incrementally during INSERT/UPDATE/DELETE
+        if let Some(table) = self.get_table(table_name) {
+            if table.is_native_columnar() {
+                return;
+            }
+        }
         self.columnar_cache.invalidate(table_name);
     }
 

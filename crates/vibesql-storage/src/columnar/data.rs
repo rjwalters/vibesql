@@ -253,4 +253,476 @@ impl ColumnData {
             _ => None,
         }
     }
+
+    /// Append a SQL value to this column, mutating the underlying vectors in place.
+    ///
+    /// Uses `Arc::make_mut` to get mutable access to the underlying vectors.
+    /// If there are no other references (strong count == 1), this is zero-copy.
+    /// If there are outstanding read snapshots, the vectors are cloned on first write
+    /// (copy-on-write semantics), preserving snapshot isolation.
+    ///
+    /// # Arguments
+    /// * `value` - The SQL value to append
+    ///
+    /// # Returns
+    /// * `Ok(())` on success
+    /// * `Err(String)` if the value type doesn't match the column type
+    pub fn push_value(&mut self, value: &SqlValue) -> Result<(), String> {
+        match self {
+            ColumnData::Int64 { values, nulls } => match value {
+                SqlValue::Integer(v) => {
+                    Arc::make_mut(values).push(*v);
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Bigint(v) => {
+                    Arc::make_mut(values).push(*v);
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Smallint(v) => {
+                    Arc::make_mut(values).push(*v as i64);
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values).push(0);
+                    Arc::make_mut(nulls).push(true);
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Int64, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Float64 { values, nulls } => match value {
+                SqlValue::Float(v) => {
+                    Arc::make_mut(values).push(*v as f64);
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Double(v) => {
+                    Arc::make_mut(values).push(*v);
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Real(v) => {
+                    Arc::make_mut(values).push(*v as f64);
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Numeric(v) => {
+                    Arc::make_mut(values).push(*v);
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Unsigned(v) => {
+                    Arc::make_mut(values).push(*v as f64);
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values).push(0.0);
+                    Arc::make_mut(nulls).push(true);
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Float64, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::String { values, nulls } => match value {
+                SqlValue::Varchar(v) => {
+                    Arc::make_mut(values).push(Arc::from(v.as_str()));
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Character(v) => {
+                    Arc::make_mut(values).push(Arc::from(v.as_str()));
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values).push(Arc::from(""));
+                    Arc::make_mut(nulls).push(true);
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected String, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Bool { values, nulls } => match value {
+                SqlValue::Boolean(v) => {
+                    Arc::make_mut(values).push(*v);
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values).push(false);
+                    Arc::make_mut(nulls).push(true);
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Bool, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Date { values, nulls } => match value {
+                SqlValue::Date(v) => {
+                    Arc::make_mut(values).push(*v);
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values).push(Date::new(1970, 1, 1).unwrap());
+                    Arc::make_mut(nulls).push(true);
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Date, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Time { values, nulls } => match value {
+                SqlValue::Time(v) => {
+                    Arc::make_mut(values).push(*v);
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values).push(Time::new(0, 0, 0, 0).unwrap());
+                    Arc::make_mut(nulls).push(true);
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Time, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Timestamp { values, nulls } => match value {
+                SqlValue::Timestamp(v) => {
+                    Arc::make_mut(values).push(*v);
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Null => {
+                    let date = Date::new(1970, 1, 1).unwrap();
+                    let time = Time::new(0, 0, 0, 0).unwrap();
+                    Arc::make_mut(values).push(Timestamp::new(date, time));
+                    Arc::make_mut(nulls).push(true);
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Timestamp, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Interval { values, nulls } => match value {
+                SqlValue::Interval(v) => {
+                    Arc::make_mut(values).push(v.clone());
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values).push(Interval::new("0".to_string()));
+                    Arc::make_mut(nulls).push(true);
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Interval, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Vector { values, nulls } => match value {
+                SqlValue::Vector(v) => {
+                    Arc::make_mut(values).push(v.clone());
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values).push(Vec::new());
+                    Arc::make_mut(nulls).push(true);
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Vector, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Blob { values, nulls } => match value {
+                SqlValue::Blob(v) => {
+                    Arc::make_mut(values).push(v.clone());
+                    Arc::make_mut(nulls).push(false);
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values).push(Vec::new());
+                    Arc::make_mut(nulls).push(true);
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Blob, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+        }
+        Ok(())
+    }
+
+    /// Remove the value at the given index from this column.
+    ///
+    /// Uses swap-remove semantics for O(1) removal when order doesn't matter,
+    /// but this method preserves order using regular remove (O(n)).
+    /// For deletion-heavy workloads, consider using a deletion bitmap instead.
+    ///
+    /// # Arguments
+    /// * `index` - The index of the value to remove
+    ///
+    /// # Panics
+    /// Panics if `index` is out of bounds
+    pub fn remove_at(&mut self, index: usize) {
+        match self {
+            ColumnData::Int64 { values, nulls } => {
+                Arc::make_mut(values).remove(index);
+                Arc::make_mut(nulls).remove(index);
+            }
+            ColumnData::Float64 { values, nulls } => {
+                Arc::make_mut(values).remove(index);
+                Arc::make_mut(nulls).remove(index);
+            }
+            ColumnData::String { values, nulls } => {
+                Arc::make_mut(values).remove(index);
+                Arc::make_mut(nulls).remove(index);
+            }
+            ColumnData::Bool { values, nulls } => {
+                Arc::make_mut(values).remove(index);
+                Arc::make_mut(nulls).remove(index);
+            }
+            ColumnData::Date { values, nulls } => {
+                Arc::make_mut(values).remove(index);
+                Arc::make_mut(nulls).remove(index);
+            }
+            ColumnData::Time { values, nulls } => {
+                Arc::make_mut(values).remove(index);
+                Arc::make_mut(nulls).remove(index);
+            }
+            ColumnData::Timestamp { values, nulls } => {
+                Arc::make_mut(values).remove(index);
+                Arc::make_mut(nulls).remove(index);
+            }
+            ColumnData::Interval { values, nulls } => {
+                Arc::make_mut(values).remove(index);
+                Arc::make_mut(nulls).remove(index);
+            }
+            ColumnData::Vector { values, nulls } => {
+                Arc::make_mut(values).remove(index);
+                Arc::make_mut(nulls).remove(index);
+            }
+            ColumnData::Blob { values, nulls } => {
+                Arc::make_mut(values).remove(index);
+                Arc::make_mut(nulls).remove(index);
+            }
+        }
+    }
+
+    /// Update the value at the given index in this column.
+    ///
+    /// Uses `Arc::make_mut` for copy-on-write semantics.
+    ///
+    /// # Arguments
+    /// * `index` - The index of the value to update
+    /// * `value` - The new SQL value
+    ///
+    /// # Returns
+    /// * `Ok(())` on success
+    /// * `Err(String)` if the value type doesn't match the column type
+    pub fn set_value(&mut self, index: usize, value: &SqlValue) -> Result<(), String> {
+        match self {
+            ColumnData::Int64 { values, nulls } => match value {
+                SqlValue::Integer(v) => {
+                    Arc::make_mut(values)[index] = *v;
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Bigint(v) => {
+                    Arc::make_mut(values)[index] = *v;
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Smallint(v) => {
+                    Arc::make_mut(values)[index] = *v as i64;
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values)[index] = 0;
+                    Arc::make_mut(nulls)[index] = true;
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Int64, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Float64 { values, nulls } => match value {
+                SqlValue::Float(v) => {
+                    Arc::make_mut(values)[index] = *v as f64;
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Double(v) => {
+                    Arc::make_mut(values)[index] = *v;
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Real(v) => {
+                    Arc::make_mut(values)[index] = *v as f64;
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Numeric(v) => {
+                    Arc::make_mut(values)[index] = *v;
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Unsigned(v) => {
+                    Arc::make_mut(values)[index] = *v as f64;
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values)[index] = 0.0;
+                    Arc::make_mut(nulls)[index] = true;
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Float64, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::String { values, nulls } => match value {
+                SqlValue::Varchar(v) => {
+                    Arc::make_mut(values)[index] = Arc::from(v.as_str());
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Character(v) => {
+                    Arc::make_mut(values)[index] = Arc::from(v.as_str());
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values)[index] = Arc::from("");
+                    Arc::make_mut(nulls)[index] = true;
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected String, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Bool { values, nulls } => match value {
+                SqlValue::Boolean(v) => {
+                    Arc::make_mut(values)[index] = *v;
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values)[index] = false;
+                    Arc::make_mut(nulls)[index] = true;
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Bool, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Date { values, nulls } => match value {
+                SqlValue::Date(v) => {
+                    Arc::make_mut(values)[index] = *v;
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values)[index] = Date::new(1970, 1, 1).unwrap();
+                    Arc::make_mut(nulls)[index] = true;
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Date, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Time { values, nulls } => match value {
+                SqlValue::Time(v) => {
+                    Arc::make_mut(values)[index] = *v;
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values)[index] = Time::new(0, 0, 0, 0).unwrap();
+                    Arc::make_mut(nulls)[index] = true;
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Time, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Timestamp { values, nulls } => match value {
+                SqlValue::Timestamp(v) => {
+                    Arc::make_mut(values)[index] = *v;
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Null => {
+                    let date = Date::new(1970, 1, 1).unwrap();
+                    let time = Time::new(0, 0, 0, 0).unwrap();
+                    Arc::make_mut(values)[index] = Timestamp::new(date, time);
+                    Arc::make_mut(nulls)[index] = true;
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Timestamp, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Interval { values, nulls } => match value {
+                SqlValue::Interval(v) => {
+                    Arc::make_mut(values)[index] = v.clone();
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values)[index] = Interval::new("0".to_string());
+                    Arc::make_mut(nulls)[index] = true;
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Interval, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Vector { values, nulls } => match value {
+                SqlValue::Vector(v) => {
+                    Arc::make_mut(values)[index] = v.clone();
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values)[index] = Vec::new();
+                    Arc::make_mut(nulls)[index] = true;
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Vector, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+            ColumnData::Blob { values, nulls } => match value {
+                SqlValue::Blob(v) => {
+                    Arc::make_mut(values)[index] = v.clone();
+                    Arc::make_mut(nulls)[index] = false;
+                }
+                SqlValue::Null => {
+                    Arc::make_mut(values)[index] = Vec::new();
+                    Arc::make_mut(nulls)[index] = true;
+                }
+                other => {
+                    return Err(format!(
+                        "Type mismatch: expected Blob, got {}",
+                        other.type_name()
+                    ));
+                }
+            },
+        }
+        Ok(())
+    }
 }

@@ -74,9 +74,9 @@ pub enum StorageFormat {
     /// Optimized for OLAP workloads: fast scans, aggregations.
     /// Eliminates row-to-columnar conversion overhead for analytical queries.
     ///
-    /// **Warning**: Each write operation (INSERT/UPDATE/DELETE) triggers a
-    /// full rebuild of the columnar representation. Only use for tables that
-    /// are bulk-loaded and rarely modified.
+    /// INSERT and UPDATE operations maintain the columnar representation
+    /// incrementally (O(m) per row where m = columns). DELETE triggers a
+    /// full rebuild. Suitable for analytical tables with moderate writes.
     Columnar,
 }
 
