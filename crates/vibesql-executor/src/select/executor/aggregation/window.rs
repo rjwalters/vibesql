@@ -8,7 +8,9 @@
 //! After GROUP BY processing computes the inner values, this module applies the
 //! window function over the aggregated rows.
 
-use vibesql_ast::{Expression, SelectItem, WindowFunctionSpec, WindowSpec};
+use std::collections::HashMap;
+
+use vibesql_ast::{Expression, SelectItem, WindowDefinition, WindowFunctionSpec, WindowSpec};
 use vibesql_catalog::ColumnSchema;
 use vibesql_storage::Row;
 use vibesql_types::{DataType, SqlValue};
@@ -70,8 +72,85 @@ fn is_window_function(expr: &Expression) -> bool {
     matches!(expr, Expression::WindowFunction { .. })
 }
 
-/// Collect all window functions from the SELECT list
-fn collect_window_functions(select_list: &[SelectItem]) -> Vec<PostAggregateWindowFunction> {
+/// Build a map of window names to their resolved definitions
+/// This handles window inheritance (e.g., WINDOW win AS (...), win2 AS (win ORDER BY x))
+fn build_window_map(
+    window_definitions: Option<&Vec<WindowDefinition>>,
+) -> Result<HashMap<String, WindowSpec>, ExecutorError> {
+    let mut resolved_map: HashMap<String, WindowSpec> = HashMap::new();
+
+    if let Some(defs) = window_definitions {
+        let raw_map: HashMap<String, &WindowSpec> = defs
+            .iter()
+            .map(|def| (def.name.to_lowercase(), &def.spec))
+            .collect();
+
+        for def in defs {
+            let resolved =
+                resolve_window_spec_recursive(&def.spec, &raw_map, &resolved_map)?;
+            resolved_map.insert(def.name.to_lowercase(), resolved);
+        }
+    }
+
+    Ok(resolved_map)
+}
+
+/// Recursively resolve a window spec, handling inheritance chains
+fn resolve_window_spec_recursive(
+    spec: &WindowSpec,
+    raw_map: &HashMap<String, &WindowSpec>,
+    resolved_map: &HashMap<String, WindowSpec>,
+) -> Result<WindowSpec, ExecutorError> {
+    match &spec.base_window_name {
+        Some(base_name) => {
+            let base_name_lower = base_name.to_lowercase();
+            let base_spec = if let Some(resolved) = resolved_map.get(&base_name_lower) {
+                resolved.clone()
+            } else if let Some(raw) = raw_map.get(&base_name_lower) {
+                resolve_window_spec_recursive(raw, raw_map, resolved_map)?
+            } else {
+                return Err(ExecutorError::Other(format!("no such window: {}", base_name)));
+            };
+
+            Ok(WindowSpec {
+                base_window_name: None,
+                partition_by: spec.partition_by.clone().or(base_spec.partition_by),
+                order_by: spec.order_by.clone().or(base_spec.order_by),
+                frame: spec.frame.clone().or(base_spec.frame),
+            })
+        }
+        None => Ok(spec.clone()),
+    }
+}
+
+/// Resolve a window spec by looking up a named window from the resolved map
+fn resolve_window_spec(
+    spec: &WindowSpec,
+    window_map: &HashMap<String, WindowSpec>,
+) -> Result<WindowSpec, ExecutorError> {
+    match &spec.base_window_name {
+        Some(base_name) => {
+            let base_spec = window_map.get(&base_name.to_lowercase()).ok_or_else(|| {
+                ExecutorError::Other(format!("no such window: {}", base_name))
+            })?;
+
+            Ok(WindowSpec {
+                base_window_name: None,
+                partition_by: spec.partition_by.clone().or_else(|| base_spec.partition_by.clone()),
+                order_by: spec.order_by.clone().or_else(|| base_spec.order_by.clone()),
+                frame: spec.frame.clone().or_else(|| base_spec.frame.clone()),
+            })
+        }
+        None => Ok(spec.clone()),
+    }
+}
+
+/// Collect all window functions from the SELECT list, resolving named window references
+fn collect_window_functions(
+    select_list: &[SelectItem],
+    window_definitions: Option<&Vec<WindowDefinition>>,
+) -> Result<Vec<PostAggregateWindowFunction>, ExecutorError> {
+    let window_map = build_window_map(window_definitions)?;
     let mut result = Vec::new();
 
     for (idx, item) in select_list.iter().enumerate() {
@@ -92,17 +171,20 @@ fn collect_window_functions(select_list: &[SelectItem]) -> Vec<PostAggregateWind
                 }
             };
 
+            // Resolve named window references
+            let resolved_spec = resolve_window_spec(over, &window_map)?;
+
             result.push(PostAggregateWindowFunction {
                 select_index: idx,
                 func_name,
                 func_type,
                 args,
-                window_spec: over.clone(),
+                window_spec: resolved_spec,
             });
         }
     }
 
-    result
+    Ok(result)
 }
 
 /// Apply window functions to aggregated rows
@@ -114,8 +196,9 @@ pub(super) fn apply_window_functions_to_aggregates(
     mut rows: Vec<Row>,
     select_list: &[SelectItem],
     database: &vibesql_storage::Database,
+    window_definitions: Option<&Vec<WindowDefinition>>,
 ) -> Result<Vec<Row>, ExecutorError> {
-    let window_funcs = collect_window_functions(select_list);
+    let window_funcs = collect_window_functions(select_list, window_definitions)?;
 
     if window_funcs.is_empty() {
         return Ok(rows);
@@ -478,15 +561,23 @@ fn build_aggregate_result_schema(select_list: &[SelectItem]) -> CombinedSchema {
 /// For expressions that appear in the SELECT list, we create a ColumnRef
 /// that references the computed value. For others, we return the expression as-is.
 fn map_expr_to_result_column(expr: &Expression, select_list: &[SelectItem]) -> Expression {
+    // Helper to create a column ref for the synthetic result schema.
+    // The schema uses col0, col1, col2, ... naming, so we always use that format.
+    let make_result_col_ref = |idx: usize| -> Expression {
+        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+            "result",
+            false,
+            &format!("col{}", idx),
+            false,
+        ))
+    };
+
     // Try to find this expression in the SELECT list
     for (idx, item) in select_list.iter().enumerate() {
         if let SelectItem::Expression { expr: select_expr, alias, .. } = item {
-            // Check if expressions match
+            // Check if expressions match structurally
             if expressions_match(expr, select_expr) {
-                let col_name = alias.clone().unwrap_or_else(|| format!("col{}", idx));
-                return Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
-                    "result", false, &col_name, false,
-                ));
+                return make_result_col_ref(idx);
             }
 
             // Also check if expr matches an alias
@@ -495,9 +586,61 @@ fn map_expr_to_result_column(expr: &Expression, select_list: &[SelectItem]) -> E
                     if col_id.table_canonical().is_none()
                         && col_id.column_canonical().eq_ignore_ascii_case(alias)
                     {
-                        return Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
-                            "result", false, alias, false,
-                        ));
+                        return make_result_col_ref(idx);
+                    }
+                }
+            }
+
+            // Check if expr is a column reference that matches a column reference in the
+            // SELECT list by column name (ignoring table qualifier differences).
+            // This handles named window PARTITION BY expressions where the column reference
+            // from the window definition may not have the same table qualifier as the
+            // SELECT list expression.
+            if let Expression::ColumnRef(col_id) = expr {
+                if let Expression::ColumnRef(select_col_id) = select_expr {
+                    if col_id.column_canonical().eq_ignore_ascii_case(
+                        select_col_id.column_canonical(),
+                    ) {
+                        return make_result_col_ref(idx);
+                    }
+                }
+                // Also check if the column ref matches the expression's column name
+                // when the select expr is an aggregate or window function
+                // E.g., partition by column `x` matching `SELECT x, sum(x) OVER win`
+                if let Expression::WindowFunction { .. } | Expression::AggregateFunction { .. } =
+                    select_expr
+                {
+                    // Skip - window/aggregate functions won't match a simple column ref
+                } else {
+                    // For non-window, non-aggregate expressions, try extracting a column name
+                    if let Some(select_col_name) = extract_column_name(select_expr) {
+                        if col_id.column_canonical().eq_ignore_ascii_case(&select_col_name) {
+                            return make_result_col_ref(idx);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // If the expression is a column reference that wasn't found in the SELECT list,
+    // try to find it by scanning SELECT list column names in the synthetic result schema.
+    // This is a fallback for cases where PARTITION BY references a column that appears
+    // in the SELECT list under a different form.
+    if let Expression::ColumnRef(col_id) = expr {
+        let col_name = col_id.column_canonical();
+        for (idx, item) in select_list.iter().enumerate() {
+            if let SelectItem::Expression { expr: select_expr, alias, .. } = item {
+                // Match against alias
+                if let Some(alias) = alias {
+                    if col_name.eq_ignore_ascii_case(alias) {
+                        return make_result_col_ref(idx);
+                    }
+                }
+                // Match against column name extracted from expression
+                if let Some(select_col_name) = extract_column_name(select_expr) {
+                    if col_name.eq_ignore_ascii_case(&select_col_name) {
+                        return make_result_col_ref(idx);
                     }
                 }
             }
@@ -509,8 +652,69 @@ fn map_expr_to_result_column(expr: &Expression, select_list: &[SelectItem]) -> E
     expr.clone()
 }
 
-/// Check if two expressions are equivalent
+/// Extract the column name from an expression if it's a simple column reference
+fn extract_column_name(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::ColumnRef(col_id) => Some(col_id.column_canonical().to_string()),
+        _ => None,
+    }
+}
+
+/// Check if two expressions are semantically equivalent
 fn expressions_match(expr1: &Expression, expr2: &Expression) -> bool {
-    // Simple structural comparison
-    format!("{:?}", expr1) == format!("{:?}", expr2)
+    match (expr1, expr2) {
+        // Column references: compare by canonical column name (ignoring table qualifier)
+        (Expression::ColumnRef(a), Expression::ColumnRef(b)) => {
+            // If both have table qualifiers, compare fully
+            if a.table_canonical().is_some() && b.table_canonical().is_some() {
+                a.canonical().eq_ignore_ascii_case(b.canonical())
+            } else {
+                // If either lacks a table qualifier, just compare column names
+                a.column_canonical()
+                    .eq_ignore_ascii_case(b.column_canonical())
+            }
+        }
+        // Literals: compare by value
+        (Expression::Literal(a), Expression::Literal(b)) => a == b,
+        // Binary operations: compare recursively
+        (
+            Expression::BinaryOp { left: l1, op: op1, right: r1 },
+            Expression::BinaryOp { left: l2, op: op2, right: r2 },
+        ) => op1 == op2 && expressions_match(l1, l2) && expressions_match(r1, r2),
+        // Unary operations: compare recursively
+        (
+            Expression::UnaryOp { op: op1, expr: e1 },
+            Expression::UnaryOp { op: op2, expr: e2 },
+        ) => op1 == op2 && expressions_match(e1, e2),
+        // Functions: compare by name and arguments
+        (
+            Expression::Function { name: n1, args: a1, .. },
+            Expression::Function { name: n2, args: a2, .. },
+        ) => {
+            n1.canonical() == n2.canonical()
+                && a1.len() == a2.len()
+                && a1.iter().zip(a2.iter()).all(|(x, y)| expressions_match(x, y))
+        }
+        // Aggregate functions: compare by name and arguments
+        (
+            Expression::AggregateFunction {
+                name: n1, args: a1, distinct: d1, ..
+            },
+            Expression::AggregateFunction {
+                name: n2, args: a2, distinct: d2, ..
+            },
+        ) => {
+            n1.canonical() == n2.canonical()
+                && d1 == d2
+                && a1.len() == a2.len()
+                && a1.iter().zip(a2.iter()).all(|(x, y)| expressions_match(x, y))
+        }
+        // Cast: compare type and inner expression
+        (
+            Expression::Cast { expr: e1, data_type: dt1 },
+            Expression::Cast { expr: e2, data_type: dt2 },
+        ) => format!("{:?}", dt1) == format!("{:?}", dt2) && expressions_match(e1, e2),
+        // For everything else, fall back to Debug comparison
+        _ => format!("{:?}", expr1) == format!("{:?}", expr2),
+    }
 }
