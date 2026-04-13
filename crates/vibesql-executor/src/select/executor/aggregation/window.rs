@@ -20,11 +20,10 @@ use crate::{
     evaluator::{
         window::{
             calculate_frame_with_exclusion, evaluate_avg_window, evaluate_count_window,
-            evaluate_cume_dist, evaluate_dense_rank, evaluate_first_value, evaluate_lag,
-            evaluate_last_value, evaluate_lead, evaluate_max_window, evaluate_min_window,
-            evaluate_nth_value, evaluate_ntile, evaluate_percent_rank, evaluate_rank,
-            evaluate_row_number, evaluate_sum_window, partition_rows, sort_partition,
-            validate_frame,
+            evaluate_cume_dist, evaluate_dense_rank, evaluate_lag, evaluate_lead,
+            evaluate_max_window, evaluate_min_window, evaluate_ntile, evaluate_percent_rank,
+            evaluate_rank, evaluate_row_number, evaluate_sum_window, partition_rows,
+            sort_partition, validate_frame,
         },
         CombinedExpressionEvaluator,
     },
@@ -458,21 +457,48 @@ pub(super) fn apply_window_functions_to_aggregates(
                         "FIRST_VALUE" => {
                             let value_expr =
                                 if !mapped_args.is_empty() { &mapped_args[0] } else { &arg_expr };
-                            let value = evaluate_first_value(partition, value_expr, eval_fn)
-                                .map_err(ExecutorError::UnsupportedExpression)?;
                             for row_idx in 0..partition.len() {
+                                let frame_result = calculate_frame_with_exclusion(
+                                    partition,
+                                    row_idx,
+                                    &order_by_ref,
+                                    &win_func.window_spec.frame,
+                                    &eval_fn,
+                                );
+                                let value = if let Some(first_idx) = frame_result
+                                    .included_indices(partition, &order_by_ref, &eval_fn)
+                                    .next()
+                                {
+                                    eval_fn(value_expr, &partition.rows[first_idx])
+                                        .unwrap_or(SqlValue::Null)
+                                } else {
+                                    SqlValue::Null
+                                };
                                 results_with_indices
-                                    .push((partition.original_indices[row_idx], value.clone()));
+                                    .push((partition.original_indices[row_idx], value));
                             }
                         }
                         "LAST_VALUE" => {
                             let value_expr =
                                 if !mapped_args.is_empty() { &mapped_args[0] } else { &arg_expr };
-                            let value = evaluate_last_value(partition, value_expr, eval_fn)
-                                .map_err(ExecutorError::UnsupportedExpression)?;
                             for row_idx in 0..partition.len() {
+                                let frame_result = calculate_frame_with_exclusion(
+                                    partition,
+                                    row_idx,
+                                    &order_by_ref,
+                                    &win_func.window_spec.frame,
+                                    &eval_fn,
+                                );
+                                let value = frame_result
+                                    .included_indices(partition, &order_by_ref, &eval_fn)
+                                    .last()
+                                    .map(|last_idx| {
+                                        eval_fn(value_expr, &partition.rows[last_idx])
+                                            .unwrap_or(SqlValue::Null)
+                                    })
+                                    .unwrap_or(SqlValue::Null);
                                 results_with_indices
-                                    .push((partition.original_indices[row_idx], value.clone()));
+                                    .push((partition.original_indices[row_idx], value));
                             }
                         }
                         "NTH_VALUE" => {
@@ -489,11 +515,25 @@ pub(super) fn apply_window_functions_to_aggregates(
                             } else {
                                 1
                             };
-                            let value = evaluate_nth_value(partition, n, value_expr, eval_fn)
-                                .map_err(ExecutorError::UnsupportedExpression)?;
+                            let nth_zero_based = (n - 1).max(0) as usize;
                             for row_idx in 0..partition.len() {
+                                let frame_result = calculate_frame_with_exclusion(
+                                    partition,
+                                    row_idx,
+                                    &order_by_ref,
+                                    &win_func.window_spec.frame,
+                                    &eval_fn,
+                                );
+                                let value = frame_result
+                                    .included_indices(partition, &order_by_ref, &eval_fn)
+                                    .nth(nth_zero_based)
+                                    .map(|nth_idx| {
+                                        eval_fn(value_expr, &partition.rows[nth_idx])
+                                            .unwrap_or(SqlValue::Null)
+                                    })
+                                    .unwrap_or(SqlValue::Null);
                                 results_with_indices
-                                    .push((partition.original_indices[row_idx], value.clone()));
+                                    .push((partition.original_indices[row_idx], value));
                             }
                         }
                         other => {

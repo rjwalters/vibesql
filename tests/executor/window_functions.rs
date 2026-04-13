@@ -564,14 +564,15 @@ fn test_window_last_value() {
         // Should have 4 rows
         assert_eq!(result.len(), 4);
 
-        // Engineering rows should have lowest_salary = 95000 (Bob is last in DESC order)
-        assert_eq!(result[0].values[3], SqlValue::Integer(95000));
-        assert_eq!(result[1].values[3], SqlValue::Integer(95000));
+        // With default frame (ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW),
+        // LAST_VALUE returns the current row's value (last in the frame so far)
+        // Engineering: Alice (120000) then Bob (95000) in DESC order
+        assert_eq!(result[0].values[3], SqlValue::Integer(120000)); // frame: [Alice] → 120000
+        assert_eq!(result[1].values[3], SqlValue::Integer(95000));  // frame: [Alice, Bob] → 95000
 
-        // Sales rows should have lowest_salary = 85000 (Carol is last in DESC order)
-        // When sorted by salary DESC: Dave (90000) comes before Carol (85000)
-        assert_eq!(result[2].values[3], SqlValue::Integer(85000));
-        assert_eq!(result[3].values[3], SqlValue::Integer(85000));
+        // Sales: Dave (90000) then Carol (85000) in DESC order
+        assert_eq!(result[2].values[3], SqlValue::Integer(90000));  // frame: [Dave] → 90000
+        assert_eq!(result[3].values[3], SqlValue::Integer(85000));  // frame: [Dave, Carol] → 85000
 
         println!("✅ LAST_VALUE test works!");
     } else {

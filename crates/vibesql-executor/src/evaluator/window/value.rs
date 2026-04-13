@@ -1,7 +1,8 @@
 //! Value window functions
 //!
-//! Implements LAG, LEAD, FIRST_VALUE, and LAST_VALUE for accessing values from other rows in the
-//! partition.
+//! Implements LAG and LEAD for accessing values from other rows in the partition.
+//! FIRST_VALUE, LAST_VALUE, and NTH_VALUE are evaluated inline at the dispatch sites
+//! with frame-aware logic (see evaluation.rs and aggregation/window.rs).
 
 use vibesql_ast::Expression;
 use vibesql_types::SqlValue;
@@ -108,108 +109,7 @@ where
     }
 }
 
-/// Evaluate FIRST_VALUE() value window function
-///
-/// Returns the value of the expression evaluated on the first row of the partition.
-/// Useful for getting the initial value in an ordered partition.
-///
-/// Signature: FIRST_VALUE(expr)
-/// - expr: Expression to evaluate on the first row
-///
-/// Example: FIRST_VALUE(price) OVER (PARTITION BY product ORDER BY date)
-/// Example: FIRST_VALUE(salary) OVER (PARTITION BY department ORDER BY hire_date)
-///
-/// Note: Typically used with ORDER BY to get the "earliest" value according to ordering.
-pub fn evaluate_first_value<F>(
-    partition: &Partition,
-    value_expr: &Expression,
-    eval_fn: F,
-) -> Result<SqlValue, String>
-where
-    F: Fn(&Expression, &vibesql_storage::Row) -> Result<SqlValue, String>,
-{
-    // Get the first row in the partition
-    if let Some(first_row) = partition.rows.first() {
-        eval_fn(value_expr, first_row)
-    } else {
-        // Empty partition - return NULL
-        Ok(SqlValue::Null)
-    }
-}
-
-/// Evaluate LAST_VALUE() value window function
-///
-/// Returns the value of the expression evaluated on the last row of the partition.
-/// Useful for getting the final value in an ordered partition.
-///
-/// Signature: LAST_VALUE(expr)
-/// - expr: Expression to evaluate on the last row
-///
-/// Example: LAST_VALUE(price) OVER (PARTITION BY product ORDER BY date)
-/// Example: LAST_VALUE(status) OVER (PARTITION BY order_id ORDER BY timestamp)
-///
-/// Note: With default frame (RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW),
-/// LAST_VALUE returns the current row's value. To get the actual last value in the
-/// partition, use frame: RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING.
-/// This implementation always returns the last row in the partition.
-pub fn evaluate_last_value<F>(
-    partition: &Partition,
-    value_expr: &Expression,
-    eval_fn: F,
-) -> Result<SqlValue, String>
-where
-    F: Fn(&Expression, &vibesql_storage::Row) -> Result<SqlValue, String>,
-{
-    // Get the last row in the partition
-    if let Some(last_row) = partition.rows.last() {
-        eval_fn(value_expr, last_row)
-    } else {
-        // Empty partition - return NULL
-        Ok(SqlValue::Null)
-    }
-}
-
-/// Evaluate NTH_VALUE() value window function
-///
-/// Returns the value of the expression from the Nth row in the window frame.
-/// N is 1-based (NTH_VALUE(expr, 1) returns the first row's value).
-///
-/// Signature: NTH_VALUE(expr, n)
-/// - expr: Expression to evaluate on the Nth row
-/// - n: 1-based row position (must be positive integer)
-///
-/// Example: NTH_VALUE(price, 2) OVER (ORDER BY date) -- returns 2nd row's price
-/// Example: NTH_VALUE(name, 1) OVER (PARTITION BY dept ORDER BY salary DESC)
-///
-/// Returns NULL if N is out of bounds or if the partition has fewer than N rows.
-pub fn evaluate_nth_value<F>(
-    partition: &Partition,
-    n: i64,
-    value_expr: &Expression,
-    eval_fn: F,
-) -> Result<SqlValue, String>
-where
-    F: Fn(&Expression, &vibesql_storage::Row) -> Result<SqlValue, String>,
-{
-    // N must be positive (1-based indexing)
-    if n < 1 {
-        return Err(format!("NTH_VALUE n must be a positive integer, got {}", n));
-    }
-
-    // Convert to 0-based index
-    let idx = (n - 1) as usize;
-
-    // Check if index is within partition bounds
-    if idx >= partition.len() {
-        // Out of bounds - return NULL
-        return Ok(SqlValue::Null);
-    }
-
-    // Get value from the Nth row
-    if let Some(row) = partition.rows.get(idx) {
-        eval_fn(value_expr, row)
-    } else {
-        // Should not happen if bounds check is correct
-        Ok(SqlValue::Null)
-    }
-}
+// Note: FIRST_VALUE, LAST_VALUE, and NTH_VALUE are now evaluated inline at the
+// dispatch sites (evaluation.rs and aggregation/window.rs) using frame-aware logic
+// via calculate_frame_with_exclusion + included_indices. The previous implementations
+// here operated on the entire partition without respecting frame boundaries.
