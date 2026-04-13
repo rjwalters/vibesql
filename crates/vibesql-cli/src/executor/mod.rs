@@ -747,6 +747,18 @@ impl SqlExecutor {
     fn execute_pragma(&mut self, stmt: &vibesql_ast::PragmaStmt) -> anyhow::Result<QueryResult> {
         let pragma_name = stmt.name.to_uppercase();
 
+        // Handle PRAGMAs that take table name arguments (not boolean set/query)
+        // These use function-style syntax: PRAGMA name(table_name)
+        match pragma_name.as_str() {
+            "FOREIGN_KEY_LIST" => {
+                return self.execute_pragma_foreign_key_list(stmt);
+            }
+            "FOREIGN_KEY_CHECK" => {
+                return self.execute_pragma_foreign_key_check(stmt);
+            }
+            _ => {}
+        }
+
         // Handle setting vs querying
         if let Some(value) = &stmt.value {
             // SET operation
@@ -785,6 +797,16 @@ impl SqlExecutor {
                 }
                 "REVERSE_UNORDERED_SELECTS" => {
                     self.db.set_reverse_unordered_selects(bool_value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "FOREIGN_KEYS" => {
+                    self.db.set_foreign_keys_enabled(bool_value);
                     Ok(QueryResult {
                         rows: Vec::new(),
                         columns: Vec::new(),
@@ -859,6 +881,16 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "FOREIGN_KEYS" => {
+                    let value = if self.db.foreign_keys_enabled() { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["foreign_keys".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 _ => {
                     // Unknown pragma - return empty result for compatibility
                     Ok(QueryResult {
@@ -871,6 +903,225 @@ impl SqlExecutor {
                 }
             }
         }
+    }
+
+    /// PRAGMA foreign_key_list(table_name)
+    /// Returns FK metadata: id, seq, table, from, to, on_update, on_delete, match
+    fn execute_pragma_foreign_key_list(
+        &self,
+        stmt: &vibesql_ast::PragmaStmt,
+    ) -> anyhow::Result<QueryResult> {
+        let table_name = match &stmt.value {
+            Some(vibesql_ast::PragmaValue::Identifier(name)) => name.clone(),
+            Some(vibesql_ast::PragmaValue::String(name)) => name.clone(),
+            _ => {
+                return Ok(QueryResult {
+                    columns: vec![
+                        "id".to_string(),
+                        "seq".to_string(),
+                        "table".to_string(),
+                        "from".to_string(),
+                        "to".to_string(),
+                        "on_update".to_string(),
+                        "on_delete".to_string(),
+                        "match".to_string(),
+                    ],
+                    rows: Vec::new(),
+                    row_count: 0,
+                    execution_time_ms: None,
+                    message: None,
+                });
+            }
+        };
+
+        let columns = vec![
+            "id".to_string(),
+            "seq".to_string(),
+            "table".to_string(),
+            "from".to_string(),
+            "to".to_string(),
+            "on_update".to_string(),
+            "on_delete".to_string(),
+            "match".to_string(),
+        ];
+
+        let mut rows = Vec::new();
+        if let Some(schema) = self.db.catalog.get_table(&table_name) {
+            for (fk_id, fk) in schema.foreign_keys.iter().enumerate() {
+                for (seq, (col_name, parent_col_name)) in fk
+                    .column_names
+                    .iter()
+                    .zip(fk.parent_column_names.iter())
+                    .enumerate()
+                {
+                    let on_update = match &fk.on_update {
+                        vibesql_catalog::ReferentialAction::NoAction => "NO ACTION",
+                        vibesql_catalog::ReferentialAction::Restrict => "RESTRICT",
+                        vibesql_catalog::ReferentialAction::Cascade => "CASCADE",
+                        vibesql_catalog::ReferentialAction::SetNull => "SET NULL",
+                        vibesql_catalog::ReferentialAction::SetDefault => "SET DEFAULT",
+                    };
+                    let on_delete = match &fk.on_delete {
+                        vibesql_catalog::ReferentialAction::NoAction => "NO ACTION",
+                        vibesql_catalog::ReferentialAction::Restrict => "RESTRICT",
+                        vibesql_catalog::ReferentialAction::Cascade => "CASCADE",
+                        vibesql_catalog::ReferentialAction::SetNull => "SET NULL",
+                        vibesql_catalog::ReferentialAction::SetDefault => "SET DEFAULT",
+                    };
+                    rows.push(vec![
+                        Some(fk_id.to_string()),
+                        Some(seq.to_string()),
+                        Some(fk.parent_table.clone()),
+                        Some(col_name.clone()),
+                        Some(parent_col_name.clone()),
+                        Some(on_update.to_string()),
+                        Some(on_delete.to_string()),
+                        Some("NONE".to_string()),
+                    ]);
+                }
+            }
+        }
+
+        let row_count = rows.len();
+        Ok(QueryResult { columns, rows, row_count, execution_time_ms: None, message: None })
+    }
+
+    /// PRAGMA foreign_key_check or PRAGMA foreign_key_check(table_name)
+    /// Returns rows for any FK violations: table, rowid, parent, fkid
+    fn execute_pragma_foreign_key_check(
+        &self,
+        stmt: &vibesql_ast::PragmaStmt,
+    ) -> anyhow::Result<QueryResult> {
+        let columns = vec![
+            "table".to_string(),
+            "rowid".to_string(),
+            "parent".to_string(),
+            "fkid".to_string(),
+        ];
+
+        let mut rows = Vec::new();
+        let table_name = match &stmt.value {
+            Some(vibesql_ast::PragmaValue::Identifier(name)) => Some(name.clone()),
+            Some(vibesql_ast::PragmaValue::String(name)) => Some(name.clone()),
+            _ => None,
+        };
+
+        // Collect tables to check
+        let tables_to_check: Vec<String> = if let Some(ref name) = table_name {
+            vec![name.clone()]
+        } else {
+            self.db.catalog.list_tables()
+        };
+
+        for tbl_name in &tables_to_check {
+            let fk_constraints =
+                if let Some(schema) = self.db.catalog.get_table(tbl_name) {
+                    schema.foreign_keys.clone()
+                } else {
+                    continue;
+                };
+
+            if fk_constraints.is_empty() {
+                continue;
+            }
+
+            // Get all rows from the child table
+            // Note: tables are stored with qualified names (schema.table)
+            let qualified_name = format!(
+                "{}.{}",
+                self.db.catalog.get_current_schema(),
+                tbl_name
+            );
+            let child_rows: Vec<_> = if let Some(table) = self.db.tables.get(&qualified_name) {
+                table.scan_live().map(|(id, row)| (id, row.clone())).collect()
+            } else if let Some(table) = self.db.tables.get(tbl_name.as_str()) {
+                table.scan_live().map(|(id, row)| (id, row.clone())).collect()
+            } else {
+                continue;
+            };
+
+            for (fk_id, fk) in fk_constraints.iter().enumerate() {
+                // Get parent table data
+                let parent_qualified = format!(
+                    "{}.{}",
+                    self.db.catalog.get_current_schema(),
+                    &fk.parent_table
+                );
+                let parent_rows: Vec<_> =
+                    if let Some(parent_table) = self.db.tables.get(&parent_qualified) {
+                        parent_table
+                            .scan_live()
+                            .map(|(_, row)| row.clone())
+                            .collect()
+                    } else if let Some(parent_table) =
+                        self.db.tables.get(&fk.parent_table)
+                    {
+                        parent_table
+                            .scan_live()
+                            .map(|(_, row)| row.clone())
+                            .collect()
+                    } else {
+                        // Parent table doesn't exist - all rows are violations
+                        for (row_id, _) in &child_rows {
+                            rows.push(vec![
+                                Some(tbl_name.clone()),
+                                Some(row_id.to_string()),
+                                Some(fk.parent_table.clone()),
+                                Some(fk_id.to_string()),
+                            ]);
+                        }
+                        continue;
+                    };
+
+                // Check each child row against parent rows
+                for (row_id, child_row) in &child_rows {
+                    let child_values: Vec<_> = fk
+                        .column_indices
+                        .iter()
+                        .map(|&idx| {
+                            if idx < child_row.values.len() {
+                                &child_row.values[idx]
+                            } else {
+                                &vibesql_types::SqlValue::Null
+                            }
+                        })
+                        .collect();
+
+                    // Skip if any FK value is NULL (NULL doesn't violate FK)
+                    if child_values
+                        .iter()
+                        .any(|v| matches!(v, vibesql_types::SqlValue::Null))
+                    {
+                        continue;
+                    }
+
+                    // Check if matching parent row exists
+                    let found = parent_rows.iter().any(|parent_row| {
+                        fk.parent_column_indices.iter().zip(child_values.iter()).all(
+                            |(&parent_idx, child_val)| {
+                                if parent_idx < parent_row.values.len() {
+                                    &parent_row.values[parent_idx] == *child_val
+                                } else {
+                                    false
+                                }
+                            },
+                        )
+                    });
+
+                    if !found {
+                        rows.push(vec![
+                            Some(tbl_name.clone()),
+                            Some(row_id.to_string()),
+                            Some(fk.parent_table.clone()),
+                            Some(fk_id.to_string()),
+                        ]);
+                    }
+                }
+            }
+        }
+
+        let row_count = rows.len();
+        Ok(QueryResult { columns, rows, row_count, execution_time_ms: None, message: None })
     }
 }
 

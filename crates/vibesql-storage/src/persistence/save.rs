@@ -161,7 +161,8 @@ impl Database {
                 };
                 // CREATE TABLE statement
                 let schema = &table.schema;
-                write!(writer, "CREATE TABLE {} (", &output_name)
+                let quoted_output_name = quote_identifier(&output_name);
+                write!(writer, "CREATE TABLE {} (", &quoted_output_name)
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
                 for (i, col) in schema.columns.iter().enumerate() {
@@ -172,7 +173,7 @@ impl Database {
                     }
                     // Format column type, preserving INT vs INTEGER distinction for rowid alias behavior
                     let type_str = format_column_type(&col.data_type, col.is_exact_integer_type);
-                    write!(writer, "{} {}", col.name, type_str)
+                    write!(writer, "{} {}", quote_identifier(&col.name), type_str)
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
                     // Handle generated columns (AS expression syntax)
@@ -206,13 +207,17 @@ impl Database {
 
                 // Add PRIMARY KEY constraint if present
                 if let Some(pk_cols) = &schema.primary_key {
-                    write!(writer, ", PRIMARY KEY ({})", pk_cols.join(", "))
+                    let quoted_pk: Vec<String> =
+                        pk_cols.iter().map(|c| quote_identifier(c)).collect();
+                    write!(writer, ", PRIMARY KEY ({})", quoted_pk.join(", "))
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
                 }
 
                 // Add UNIQUE constraints
                 for unique_cols in &schema.unique_constraints {
-                    write!(writer, ", UNIQUE ({})", unique_cols.join(", "))
+                    let quoted_uniq: Vec<String> =
+                        unique_cols.iter().map(|c| quote_identifier(c)).collect();
+                    write!(writer, ", UNIQUE ({})", quoted_uniq.join(", "))
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
                 }
 
@@ -234,6 +239,90 @@ impl Database {
                         write!(writer, ", CHECK ({})", expr_text).map_err(|e| {
                             StorageError::NotImplemented(format!("Write error: {}", e))
                         })?;
+                    }
+                }
+
+                // Add FOREIGN KEY constraints
+                for fk in &schema.foreign_keys {
+                    let fk_cols: Vec<String> =
+                        fk.column_names.iter().map(|c| quote_identifier(c)).collect();
+
+                    // Filter out empty parent column names (unresolved references)
+                    let non_empty_parent_cols: Vec<String> = fk
+                        .parent_column_names
+                        .iter()
+                        .filter(|c| !c.is_empty())
+                        .map(|c| quote_identifier(c))
+                        .collect();
+
+                    if non_empty_parent_cols.is_empty() {
+                        // No resolved parent columns - omit column list (defaults to PK)
+                        write!(
+                            writer,
+                            ", FOREIGN KEY ({}) REFERENCES {}",
+                            fk_cols.join(", "),
+                            quote_identifier(&fk.parent_table)
+                        )
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                    } else {
+                        write!(
+                            writer,
+                            ", FOREIGN KEY ({}) REFERENCES {} ({})",
+                            fk_cols.join(", "),
+                            quote_identifier(&fk.parent_table),
+                            non_empty_parent_cols.join(", ")
+                        )
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                    }
+
+                    // Add ON DELETE clause if not NO ACTION
+                    match &fk.on_delete {
+                        vibesql_catalog::ReferentialAction::NoAction => {}
+                        vibesql_catalog::ReferentialAction::Cascade => {
+                            write!(writer, " ON DELETE CASCADE").map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                        }
+                        vibesql_catalog::ReferentialAction::SetNull => {
+                            write!(writer, " ON DELETE SET NULL").map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                        }
+                        vibesql_catalog::ReferentialAction::SetDefault => {
+                            write!(writer, " ON DELETE SET DEFAULT").map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                        }
+                        vibesql_catalog::ReferentialAction::Restrict => {
+                            write!(writer, " ON DELETE RESTRICT").map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                        }
+                    }
+
+                    // Add ON UPDATE clause if not NO ACTION
+                    match &fk.on_update {
+                        vibesql_catalog::ReferentialAction::NoAction => {}
+                        vibesql_catalog::ReferentialAction::Cascade => {
+                            write!(writer, " ON UPDATE CASCADE").map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                        }
+                        vibesql_catalog::ReferentialAction::SetNull => {
+                            write!(writer, " ON UPDATE SET NULL").map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                        }
+                        vibesql_catalog::ReferentialAction::SetDefault => {
+                            write!(writer, " ON UPDATE SET DEFAULT").map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                        }
+                        vibesql_catalog::ReferentialAction::Restrict => {
+                            write!(writer, " ON UPDATE RESTRICT").map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                        }
                     }
                 }
 
@@ -279,7 +368,7 @@ impl Database {
                     };
 
                     for (_idx, row) in table.scan_live() {
-                        write!(writer, "INSERT INTO {}{} VALUES (", &output_name, column_list)
+                        write!(writer, "INSERT INTO {}{} VALUES (", &quoted_output_name, column_list)
                             .map_err(|e| {
                                 StorageError::NotImplemented(format!("Write error: {}", e))
                             })?;
@@ -401,6 +490,25 @@ impl Database {
             .map_err(|e| StorageError::NotImplemented(format!("Failed to sync file: {}", e)))?;
 
         Ok(())
+    }
+}
+
+/// Quote an identifier if it contains special characters or starts with a digit.
+/// Uses double-quote style quoting (SQL standard / SQLite).
+fn quote_identifier(name: &str) -> String {
+    // Check if the identifier needs quoting:
+    // - starts with a digit
+    // - contains non-alphanumeric characters (except underscore)
+    // - is empty
+    let needs_quoting = name.is_empty()
+        || name.starts_with(|c: char| c.is_ascii_digit())
+        || !name.chars().all(|c| c.is_alphanumeric() || c == '_');
+
+    if needs_quoting {
+        // Escape any embedded double-quotes by doubling them
+        format!("\"{}\"", name.replace('"', "\"\""))
+    } else {
+        name.to_string()
     }
 }
 

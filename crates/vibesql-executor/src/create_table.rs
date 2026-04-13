@@ -263,28 +263,20 @@ impl CreateTableExecutor {
                     .collect::<Result<Vec<_>, _>>()?;
 
                 // Lookup parent table to get parent column indices
-                let parent_schema = database
-                    .catalog
-                    .get_table(references_table)
-                    .ok_or_else(|| ExecutorError::TableNotFound(references_table.clone()))?;
+                // If the parent table doesn't exist yet, use placeholder indices.
+                // SQLite stores FK metadata at CREATE TABLE time even if the
+                // referenced table doesn't exist yet.
+                let parent_schema = database.catalog.get_table(references_table);
 
                 let parent_column_indices: Vec<usize> = references_columns
                     .iter()
                     .map(|col_name| {
-                        parent_schema.get_column_index(col_name).ok_or_else(|| {
-                            ExecutorError::ColumnNotFound {
-                                column_name: col_name.to_string(),
-                                table_name: references_table.clone(),
-                                searched_tables: vec![references_table.clone()],
-                                available_columns: parent_schema
-                                    .columns
-                                    .iter()
-                                    .map(|c| c.name.clone())
-                                    .collect(),
-                            }
-                        })
+                        parent_schema
+                            .as_ref()
+                            .and_then(|s| s.get_column_index(col_name))
+                            .unwrap_or(0)
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect();
 
                 // Convert ReferentialAction from AST to catalog type
                 let convert_action = |action: &Option<vibesql_ast::ReferentialAction>| match action
@@ -308,19 +300,127 @@ impl CreateTableExecutor {
                     }
                 };
 
+                // If no parent columns specified, pad with empty strings to match
+                // the FK column count. SQLite stores empty "to" in PRAGMA foreign_key_list
+                // when no column list is given after REFERENCES.
+                let effective_parent_names = if references_columns.is_empty() {
+                    vec![String::new(); fk_columns.len()]
+                } else {
+                    references_columns.clone()
+                };
+                let effective_parent_indices = if parent_column_indices.is_empty() {
+                    vec![0; fk_columns.len()]
+                } else {
+                    parent_column_indices
+                };
+
                 let fk = vibesql_catalog::ForeignKeyConstraint {
                     name: constraint.name.clone(),
                     column_names: fk_columns.clone(),
                     column_indices,
                     parent_table: references_table.clone(),
-                    parent_column_names: references_columns.clone(),
-                    parent_column_indices,
+                    parent_column_names: effective_parent_names,
+                    parent_column_indices: effective_parent_indices,
                     on_delete: convert_action(on_delete),
                     on_update: convert_action(on_update),
                 };
 
                 table_schema.add_foreign_key(fk)?;
             }
+        }
+
+        // Process column-level REFERENCES constraints
+        // These are parsed as ColumnConstraintKind::References but need to be
+        // converted into ForeignKeyConstraint entries in the schema.
+        // Note: In SQLite, FK constraints are stored as metadata at CREATE TABLE time
+        // even if the referenced table doesn't exist yet. Validation only happens
+        // at INSERT/UPDATE/DELETE time when PRAGMA foreign_keys=ON.
+        // SQLite assigns FK IDs in reverse column order for column-level constraints,
+        // so we collect them first and then add in reverse order.
+        let mut column_level_fks = Vec::new();
+        for col_def in &stmt.columns {
+            for constraint in &col_def.constraints {
+                if let vibesql_ast::ColumnConstraintKind::References {
+                    table: ref_table,
+                    column: ref_column,
+                    on_delete,
+                    on_update,
+                    ..
+                } = &constraint.kind
+                {
+                    let col_idx =
+                        table_schema.get_column_index(&col_def.name).ok_or_else(|| {
+                            ExecutorError::ColumnNotFound {
+                                column_name: col_def.name.clone(),
+                                table_name: table_name.clone(),
+                                searched_tables: vec![table_name.clone()],
+                                available_columns: table_schema
+                                    .columns
+                                    .iter()
+                                    .map(|c| c.name.clone())
+                                    .collect(),
+                            }
+                        })?;
+
+                    // Try to lookup parent table to resolve column references.
+                    // If the parent table doesn't exist yet, store the FK with
+                    // the column name but use placeholder index 0.
+                    let parent_schema = database.catalog.get_table(ref_table);
+
+                    let (parent_col_name, parent_col_idx) = if let Some(col) = ref_column {
+                        // Explicit column reference
+                        let idx = parent_schema
+                            .as_ref()
+                            .and_then(|s| s.get_column_index(col))
+                            .unwrap_or(0);
+                        (col.clone(), idx)
+                    } else {
+                        // No column specified - store empty string to match SQLite behavior.
+                        // PRAGMA foreign_key_list shows empty "to" column for implicit PK refs.
+                        // The actual PK column is resolved at enforcement time.
+                        (String::new(), 0)
+                    };
+
+                    let convert_action =
+                        |action: &Option<vibesql_ast::ReferentialAction>| match action
+                            .as_ref()
+                            .unwrap_or(&vibesql_ast::ReferentialAction::NoAction)
+                        {
+                            vibesql_ast::ReferentialAction::Cascade => {
+                                vibesql_catalog::ReferentialAction::Cascade
+                            }
+                            vibesql_ast::ReferentialAction::SetNull => {
+                                vibesql_catalog::ReferentialAction::SetNull
+                            }
+                            vibesql_ast::ReferentialAction::SetDefault => {
+                                vibesql_catalog::ReferentialAction::SetDefault
+                            }
+                            vibesql_ast::ReferentialAction::Restrict => {
+                                vibesql_catalog::ReferentialAction::Restrict
+                            }
+                            vibesql_ast::ReferentialAction::NoAction => {
+                                vibesql_catalog::ReferentialAction::NoAction
+                            }
+                        };
+
+                    let fk = vibesql_catalog::ForeignKeyConstraint {
+                        name: constraint.name.clone(),
+                        column_names: vec![col_def.name.clone()],
+                        column_indices: vec![col_idx],
+                        parent_table: ref_table.clone(),
+                        parent_column_names: vec![parent_col_name],
+                        parent_column_indices: vec![parent_col_idx],
+                        on_delete: convert_action(on_delete),
+                        on_update: convert_action(on_update),
+                    };
+
+                    column_level_fks.push(fk);
+                }
+            }
+        }
+        // Add column-level FKs in reverse order to match SQLite's FK ID assignment
+        for fk in column_level_fks.into_iter().rev() {
+            table_schema.add_foreign_key(fk)?;
         }
 
         // If creating in a non-current schema, temporarily switch to it

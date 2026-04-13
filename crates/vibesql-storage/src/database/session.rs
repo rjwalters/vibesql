@@ -145,6 +145,29 @@ impl Database {
     }
 
     // ============================================================================
+    // Foreign Key Enforcement (SQLite Compatibility)
+    // ============================================================================
+
+    /// Get the foreign_keys PRAGMA setting
+    ///
+    /// When OFF, foreign key constraints are not enforced.
+    /// SQLite defaults to OFF; VibeSQL defaults to OFF for compatibility.
+    pub fn foreign_keys_enabled(&self) -> bool {
+        match self.get_session_variable("FOREIGN_KEYS") {
+            Some(vibesql_types::SqlValue::Integer(n)) => *n != 0,
+            _ => false, // Default: OFF (SQLite compatibility)
+        }
+    }
+
+    /// Set the foreign_keys PRAGMA setting
+    pub fn set_foreign_keys_enabled(&mut self, value: bool) {
+        self.set_session_variable(
+            "FOREIGN_KEYS",
+            vibesql_types::SqlValue::Integer(if value { 1 } else { 0 }),
+        );
+    }
+
+    // ============================================================================
     // SQLite stat1 Storage (SQLite Compatibility)
     // ============================================================================
 
