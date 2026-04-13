@@ -7,7 +7,7 @@
 //! - Reservoir sampling: Single-pass streaming sample
 //! - Adaptive sampling: Choose sample size based on table size
 
-use rand::{prelude::IndexedRandom, Rng};
+use rand::{prelude::IndexedRandom, Rng, RngExt};
 
 /// Configuration for statistical sampling
 #[derive(Debug, Clone)]

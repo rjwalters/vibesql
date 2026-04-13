@@ -75,7 +75,7 @@ pub async fn authenticate(
             debug!("Requesting MD5 password for user '{}'", user);
 
             // Generate random salt
-            use rand::Rng;
+            use rand::{Rng, RngExt};
             let salt: [u8; 4] = rand::rng().random();
 
             send_md5_password_request(write_half, write_buf, &salt).await?;

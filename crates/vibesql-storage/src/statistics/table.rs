@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use instant::SystemTime;
-use rand::SeedableRng;
+use rand::RngExt;
 
 use super::{histogram::BucketStrategy, ColumnStatistics, SampleMetadata, SamplingConfig};
 
@@ -169,7 +169,7 @@ impl TableStatistics {
         let (sample_size, should_sample) = config.determine_sample_size(total_rows);
 
         // Sample rows if needed (Phase 5.2)
-        let mut rng = rand::rngs::StdRng::from_os_rng();
+        let mut rng = rand::rng();
         let sampled_rows =
             if should_sample { sample_rows(rows, &config, &mut rng) } else { rows.to_vec() };
 

@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 use crate::{
     executor::Runner,
