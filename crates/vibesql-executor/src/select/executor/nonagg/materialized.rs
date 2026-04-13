@@ -61,6 +61,13 @@ impl SelectExecutor<'_> {
             self.outer_schema,
         )?;
 
+        // Validate ORDER BY for misuse of aliased window functions (#5036)
+        // e.g., ORDER BY (SELECT m) where m is an alias for count(*) OVER()
+        super::super::validation::validate_order_by_aliased_window_functions(
+            stmt.order_by.as_deref(),
+            &stmt.select_list,
+        )?;
+
         // Phase D: Use iterator-based execution for simple queries
         // This provides memory efficiency and early termination for LIMIT queries
         if Self::can_use_iterator_execution(stmt) {

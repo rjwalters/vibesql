@@ -166,6 +166,70 @@ where
     }
 }
 
+/// Evaluate TOTAL aggregate window function over a frame
+///
+/// Like SUM but returns 0.0 instead of NULL for empty sets (SQLite compatible).
+/// Always returns a real (float) value.
+/// Supports FILTER clause for conditional aggregation.
+/// Supports EXCLUDE clause via frame_indices iterator.
+pub fn evaluate_total_window<F, I>(
+    partition: &Partition,
+    frame_indices: I,
+    arg_expr: &Expression,
+    filter: Option<&Expression>,
+    eval_fn: F,
+) -> SqlValue
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+    I: IntoIterator<Item = usize>,
+{
+    let mut sum = 0.0f64;
+
+    for idx in frame_indices {
+        if idx >= partition.len() {
+            continue;
+        }
+
+        let row = &partition.rows[idx];
+
+        // Check FILTER condition first
+        if !passes_filter(filter, row, &eval_fn) {
+            continue;
+        }
+
+        if let Ok(val) = eval_fn(arg_expr, row) {
+            match val {
+                SqlValue::Integer(n) => {
+                    sum += n as f64;
+                }
+                SqlValue::Smallint(n) => {
+                    sum += n as f64;
+                }
+                SqlValue::Bigint(n) => {
+                    sum += n as f64;
+                }
+                SqlValue::Numeric(n) => {
+                    sum += n;
+                }
+                SqlValue::Float(n) => {
+                    sum += n as f64;
+                }
+                SqlValue::Real(n) => {
+                    sum += n as f64;
+                }
+                SqlValue::Double(n) => {
+                    sum += n;
+                }
+                SqlValue::Null => {} // Ignore NULL
+                _ => {}              // Ignore non-numeric values
+            }
+        }
+    }
+
+    // TOTAL always returns a real value, 0.0 for empty sets (never NULL)
+    SqlValue::Numeric(sum)
+}
+
 /// Evaluate AVG aggregate window function over a frame
 ///
 /// Computes average of numeric values in the frame, ignoring NULLs.

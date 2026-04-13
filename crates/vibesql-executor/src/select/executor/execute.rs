@@ -747,13 +747,76 @@ impl SelectExecutor<'_> {
         // Handle standalone VALUES statements (Issue #4546)
         // VALUES(1,2), (3,4) returns rows directly without a SELECT list
         if let Some(values_rows) = &stmt.values {
-            let from_result = crate::select::scan::values::execute_values(
-                values_rows,
-                "_values_",
-                None,
-                Some(self.database),
-            )?;
-            let mut results = from_result.into_rows();
+            // Issue #5036: Check if any VALUES row contains window functions
+            // If so, evaluate those rows via SELECT-without-FROM path which supports
+            // window function evaluation, rather than the plain VALUES evaluator
+            let has_windows = values_rows.iter().any(|row| {
+                row.iter().any(crate::select::window::expression_has_window_function)
+            });
+
+            let mut results = if has_windows {
+                let mut all_rows = Vec::with_capacity(values_rows.len());
+                for row_exprs in values_rows {
+                    let row_has_window = row_exprs
+                        .iter()
+                        .any(crate::select::window::expression_has_window_function);
+                    if row_has_window {
+                        // Construct a SELECT <expr1>, <expr2>, ... statement
+                        // and execute via the window-aware path
+                        let select_list: Vec<vibesql_ast::SelectItem> = row_exprs
+                            .iter()
+                            .enumerate()
+                            .map(|(i, expr)| vibesql_ast::SelectItem::Expression {
+                                expr: expr.clone(),
+                                alias: Some(format!("column{}", i + 1)),
+                                source_text: None,
+                            })
+                            .collect();
+                        let temp_stmt = vibesql_ast::SelectStmt {
+                            with_clause: None,
+                            distinct: false,
+                            select_list,
+                            into_table: None,
+                            into_variables: None,
+                            from: None,
+                            where_clause: None,
+                            group_by: None,
+                            having: None,
+                            window_definitions: None,
+                            order_by: None,
+                            limit: None,
+                            offset: None,
+                            set_operation: None,
+                            values: None,
+                        };
+                        let row_results = self.execute_select_without_from(&temp_stmt)?;
+                        all_rows.extend(row_results);
+                    } else {
+                        // No window functions - evaluate normally
+                        let schema = crate::schema::CombinedSchema::empty();
+                        let empty_row = vibesql_storage::Row::new(vec![]);
+                        let evaluator = crate::evaluator::CombinedExpressionEvaluator::with_database(
+                            &schema,
+                            self.database,
+                        );
+                        let mut values = Vec::with_capacity(row_exprs.len());
+                        for expr in row_exprs {
+                            let value = evaluator.eval(expr, &empty_row)?;
+                            values.push(value);
+                        }
+                        all_rows.push(vibesql_storage::Row::new(values));
+                    }
+                }
+                all_rows
+            } else {
+                let from_result = crate::select::scan::values::execute_values(
+                    values_rows,
+                    "_values_",
+                    None,
+                    Some(self.database),
+                )?;
+                from_result.into_rows()
+            };
 
             // Issue #4696: If there's a set_operation, don't apply ORDER BY or LIMIT/OFFSET here
             // Let the caller handle them after set operations are processed
