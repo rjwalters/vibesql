@@ -26,8 +26,8 @@ mysql = ["dep:mysql"]
 
 [dependencies]
 # Random number generation for Sysbench data
-rand = "0.9"
-rand_chacha = "0.9"
+rand = "0.10"
+rand_chacha = "0.10"
 
 # VibeSQL dependencies (optional, for schema loading)
 vibesql-types = { version = "0.1.4", path = "../vibesql-types", optional = true }
@@ -39,4 +39,4 @@ arcstr = { version = "1.2", optional = true }
 # Comparison engine dependencies (optional)
 rusqlite = { version = "0.39", features = ["bundled"], optional = true }
 duckdb = { version = "1.1", features = ["bundled"], optional = true }
-mysql = { version = "27.0", optional = true }
+mysql = { version = "28.0", optional = true }
