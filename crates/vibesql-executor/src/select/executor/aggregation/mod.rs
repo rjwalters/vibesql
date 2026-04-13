@@ -155,6 +155,13 @@ impl SelectExecutor<'_> {
             }
         }
 
+        // Validate ORDER BY for misuse of aliased window functions (#5036)
+        // e.g., ORDER BY (SELECT m) where m is an alias for count(*) OVER()
+        crate::select::executor::validation::validate_order_by_aliased_window_functions(
+            stmt.order_by.as_deref(),
+            &stmt.select_list,
+        )?;
+
         // Validate GROUP BY clause for misuse of window functions (#4985)
         // Window functions are not allowed in GROUP BY expressions
         if let Some(ref group_by_clause) = stmt.group_by {

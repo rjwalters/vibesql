@@ -81,6 +81,12 @@ pub enum ExecutorError {
     MisuseOfWindowFunction {
         function_name: String,
     },
+    /// Misuse of aliased window function (SQLite-compatible error)
+    /// e.g., ORDER BY (SELECT m) where m is an alias for a window function like count() OVER()
+    /// Format: "misuse of aliased window function X"
+    MisuseOfAliasedWindowFunction {
+        alias_name: String,
+    },
     UnsupportedExpression(String),
     UnsupportedFeature(String),
     /// SQLite-compatible error message (output as-is without prefix)
@@ -605,6 +611,10 @@ impl std::fmt::Display for ExecutorError {
             ExecutorError::MisuseOfWindowFunction { function_name } => {
                 // SQLite-compatible error message format
                 write!(f, "misuse of window function {}()", function_name)
+            }
+            ExecutorError::MisuseOfAliasedWindowFunction { alias_name } => {
+                // SQLite-compatible error message format
+                write!(f, "misuse of aliased window function {}", alias_name)
             }
             ExecutorError::UnsupportedExpression(msg) => {
                 write!(

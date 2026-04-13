@@ -23,7 +23,7 @@ use std::collections::HashSet;
 pub use aggregates::{
     check_aggregate_arg_count, find_aggregate_in_expression, find_window_function_in_expression,
     validate_aggregate_arguments, validate_having_aliased_aggregates,
-    validate_no_nested_aggregates,
+    validate_no_nested_aggregates, validate_order_by_aliased_window_functions,
 };
 pub use column_refs::{extract_column_refs, validate_column_ref};
 pub use join_limits::validate_join_table_limit;

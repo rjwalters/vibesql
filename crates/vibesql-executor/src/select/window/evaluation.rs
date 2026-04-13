@@ -17,7 +17,8 @@ use crate::{
         window::{
             calculate_frame_with_exclusion, evaluate_avg_window, evaluate_count_window,
             evaluate_group_concat_window, evaluate_max_window, evaluate_min_window,
-            evaluate_sum_window, partition_rows, sort_partition, validate_frame, Partition,
+            evaluate_sum_window, evaluate_total_window, partition_rows, sort_partition,
+            validate_frame, Partition,
         },
         CombinedExpressionEvaluator,
     },
@@ -338,22 +339,34 @@ fn evaluate_window_function_for_partition(
                     function_name: "ntile".to_string(),
                 });
             }
-            // Handle empty partition
-            if partition.is_empty() {
-                return Ok(vec![]);
-            }
-            // Evaluate the NTILE argument (should be a constant)
-            let n_value = evaluator.eval(&args[0], &partition.rows[0])?;
+            // Evaluate the NTILE argument first (even for empty partitions)
+            // to ensure validation errors like ntile(0) are always reported
+            let eval_row = if partition.is_empty() {
+                &vibesql_storage::Row::new(vec![])
+            } else {
+                &partition.rows[0]
+            };
+            let n_value = evaluator.eval(&args[0], eval_row)?;
             let n = match n_value {
                 vibesql_types::SqlValue::Integer(n) => n,
                 _ => {
-                    return Err(ExecutorError::UnsupportedExpression(
-                        "NTILE argument must be an integer".to_string(),
+                    return Err(ExecutorError::SqliteCompatError(
+                        "argument of ntile must be a positive integer".to_string(),
                     ))
                 }
             };
+            // Validate ntile argument is positive (even for empty partitions)
+            if n <= 0 {
+                return Err(ExecutorError::SqliteCompatError(
+                    "argument of ntile must be a positive integer".to_string(),
+                ));
+            }
+            // Handle empty partition after validation
+            if partition.is_empty() {
+                return Ok(vec![]);
+            }
             crate::evaluator::window::evaluate_ntile(partition, n)
-                .map_err(ExecutorError::UnsupportedExpression)?
+                .map_err(ExecutorError::SqliteCompatError)?
         }
         "LAG" => {
             // LAG(expr [, offset [, default]])
@@ -615,6 +628,14 @@ fn evaluate_window_function_for_partition(
                             ));
                         }
                         evaluate_max_window(partition, frame_indices, &args[0], filter, agg_eval_fn)
+                    }
+                    "TOTAL" => {
+                        if args.is_empty() {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                "TOTAL requires an argument".to_string(),
+                            ));
+                        }
+                        evaluate_total_window(partition, frame_indices, &args[0], filter, agg_eval_fn)
                     }
                     "GROUP_CONCAT" | "STRING_AGG" => {
                         if args.is_empty() {

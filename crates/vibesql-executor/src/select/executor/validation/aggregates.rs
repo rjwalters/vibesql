@@ -977,6 +977,122 @@ pub fn validate_having_aliased_aggregates(
     Ok(())
 }
 
+/// Build a set of window function alias names from the SELECT list
+///
+/// A "window alias" is an alias that refers to an expression containing
+/// a window function, e.g., `count(*) OVER() AS m` makes `m` a window alias.
+pub fn build_window_aliases(select_list: &[SelectItem]) -> HashSet<String> {
+    let mut aliases = HashSet::new();
+
+    for item in select_list {
+        if let SelectItem::Expression { expr, alias: Some(alias_name), .. } = item {
+            if expression_contains_window_function(expr) {
+                // Store alias in lowercase for case-insensitive matching
+                aliases.insert(alias_name.to_lowercase());
+            }
+        }
+    }
+
+    aliases
+}
+
+/// Check if an expression contains a window function
+fn expression_contains_window_function(expr: &Expression) -> bool {
+    match expr {
+        Expression::WindowFunction { .. } => true,
+        Expression::BinaryOp { left, right, .. } => {
+            expression_contains_window_function(left)
+                || expression_contains_window_function(right)
+        }
+        Expression::UnaryOp { expr, .. } => expression_contains_window_function(expr),
+        Expression::Cast { expr, .. } => expression_contains_window_function(expr),
+        Expression::Function { args, .. } => {
+            args.iter().any(expression_contains_window_function)
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|e| expression_contains_window_function(e))
+                || when_clauses.iter().any(|w| {
+                    w.conditions.iter().any(expression_contains_window_function)
+                        || expression_contains_window_function(&w.result)
+                })
+                || else_result.as_ref().is_some_and(|e| expression_contains_window_function(e))
+        }
+        // Subqueries have their own scope
+        Expression::ScalarSubquery(_) | Expression::Exists { .. } => false,
+        _ => false,
+    }
+}
+
+/// Validate ORDER BY clause for misuse of aliased window functions
+///
+/// In SQLite, `ORDER BY (SELECT alias)` where alias refers to a window function is an error:
+/// "misuse of aliased window function <alias>"
+///
+/// This happens when ORDER BY contains a scalar subquery like `(SELECT m)` and `m` is
+/// an alias for a window function expression in the SELECT list.
+pub fn validate_order_by_aliased_window_functions(
+    order_by: Option<&[vibesql_ast::OrderByItem]>,
+    select_list: &[SelectItem],
+) -> Result<(), ExecutorError> {
+    let Some(order_items) = order_by else {
+        return Ok(());
+    };
+
+    let window_aliases = build_window_aliases(select_list);
+    if window_aliases.is_empty() {
+        return Ok(());
+    }
+
+    for item in order_items {
+        if let Some(alias_name) =
+            find_aliased_window_misuse_in_order_by(&item.expr, &window_aliases)
+        {
+            return Err(ExecutorError::MisuseOfAliasedWindowFunction { alias_name });
+        }
+    }
+
+    Ok(())
+}
+
+/// Find misuse of aliased window functions in ORDER BY expressions
+///
+/// Detects scalar subqueries like `(SELECT m)` where `m` matches a window function alias.
+fn find_aliased_window_misuse_in_order_by(
+    expr: &Expression,
+    window_aliases: &HashSet<String>,
+) -> Option<String> {
+    match expr {
+        Expression::ScalarSubquery(select_stmt) => {
+            // Check if the scalar subquery is a simple `(SELECT alias)` pattern
+            if select_stmt.select_list.len() == 1
+                && select_stmt.from.is_none()
+                && select_stmt.where_clause.is_none()
+            {
+                if let SelectItem::Expression {
+                    expr: Expression::ColumnRef(col_id), ..
+                } = &select_stmt.select_list[0]
+                {
+                    if col_id.table_canonical().is_none() {
+                        let col_name = col_id.column_canonical().to_lowercase();
+                        if window_aliases.contains(&col_name) {
+                            return Some(col_name);
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            find_aliased_window_misuse_in_order_by(left, window_aliases)
+                .or_else(|| find_aliased_window_misuse_in_order_by(right, window_aliases))
+        }
+        Expression::UnaryOp { expr, .. } => {
+            find_aliased_window_misuse_in_order_by(expr, window_aliases)
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use vibesql_ast::{BinaryOperator, ColumnIdentifier, FunctionIdentifier, UnaryOperator};
