@@ -66,6 +66,19 @@ use vibesql_types::SqlValue;
 
 use crate::{Row, StorageError};
 
+/// Compute the columnar index for a given physical row index.
+///
+/// The columnar table only stores live (non-deleted) rows, so the columnar
+/// index is the physical index minus the count of deleted rows before it.
+///
+/// This is a free function to avoid borrow conflicts when both `self.deleted`
+/// and `self.native_columnar` need to be accessed simultaneously.
+#[inline]
+fn columnar_index_in(deleted: &[bool], physical_index: usize) -> usize {
+    let deleted_before = deleted[..physical_index].iter().filter(|&&d| d).count();
+    physical_index - deleted_before
+}
+
 /// Result of a delete operation, indicating how many rows were deleted
 /// and whether table compaction occurred.
 ///
@@ -109,14 +122,17 @@ impl DeleteResult {
 /// - **Row-oriented (default)**: Traditional row storage, optimized for OLTP
 /// - **Columnar**: Native column storage, optimized for OLAP with zero conversion overhead
 ///
-/// ## Columnar Storage Limitations
+/// ## Columnar Storage
 ///
-/// **IMPORTANT**: Columnar tables are optimized for read-heavy analytical workloads.
-/// Each INSERT/UPDATE/DELETE operation triggers a full rebuild of the columnar
-/// representation (O(n) cost). This makes columnar tables unsuitable for:
-/// - High-frequency INSERT workloads
-/// - OLTP use cases with frequent writes
-/// - Streaming inserts
+/// Columnar tables maintain their columnar representation incrementally:
+/// - **INSERT**: O(m) append per row where m = number of columns (no full rebuild)
+/// - **UPDATE**: O(m) in-place column update (no full rebuild)
+/// - **DELETE**: Full rebuild (O(n * m)) since deletion requires row compaction
+/// - **TRUNCATE**: O(1) clear
+///
+/// This makes columnar tables viable for moderate write workloads, not just
+/// bulk-loaded analytical data. The row store is maintained alongside the
+/// columnar store for indexing and constraint validation.
 ///
 /// **Recommended use cases for columnar tables**:
 /// - Bulk-loaded analytical data (load once, query many times)
@@ -251,7 +267,8 @@ impl Table {
     /// Insert a row into the table
     ///
     /// For row-oriented tables, rows are stored directly in a Vec.
-    /// For columnar tables, rows are buffered and the columnar data is rebuilt.
+    /// For columnar tables, the row is appended to the columnar data incrementally
+    /// (O(m) where m = columns, instead of O(n * m) full rebuild).
     pub fn insert(&mut self, row: Row) -> Result<(), StorageError> {
         // Normalize and validate row (column count, type checking, NULL checking, value
         // normalization)
@@ -283,10 +300,12 @@ impl Table {
             }
         }
 
-        // For native columnar tables, rebuild columnar data
-        // Note: Database-level columnar cache invalidation is handled by the executor
-        if self.native_columnar.is_some() {
-            self.rebuild_native_columnar()?;
+        // For native columnar tables, incrementally append to columnar data
+        // This is O(m) per row instead of O(n*m) full rebuild
+        if let Some(ref mut columnar) = self.native_columnar {
+            columnar.append_row(&normalized_row).map_err(|e| {
+                StorageError::Other(format!("Columnar append failed: {}", e))
+            })?;
         }
 
         Ok(())
@@ -321,7 +340,7 @@ impl Table {
     /// - **Pre-allocation**: Vector capacity is reserved upfront
     /// - **Batch normalization**: Rows are validated/normalized together
     /// - **Deferred index updates**: Indexes are rebuilt once after all inserts
-    /// - **Single cache invalidation**: Columnar cache invalidated once at end
+    /// - **Incremental columnar**: For native columnar tables, appends O(batch * m) instead of O(n * m) rebuild
     /// - **Statistics update once**: Stats marked stale only at completion
     ///
     /// # Arguments
@@ -406,10 +425,14 @@ impl Table {
         }
 
         // Phase 7: Handle columnar storage
-        // For native columnar tables, rebuild columnar data
-        // Note: Database-level columnar cache invalidation is handled by the executor
-        if self.native_columnar.is_some() {
-            self.rebuild_native_columnar()?;
+        // For native columnar tables, incrementally append new rows to columnar data
+        // This is O(batch_size * m) instead of O(n * m) full rebuild
+        if let Some(ref mut columnar) = self.native_columnar {
+            for row in &self.rows[start_index..] {
+                columnar.append_row(row).map_err(|e| {
+                    StorageError::Other(format!("Columnar append failed: {}", e))
+                })?;
+            }
         }
 
         Ok(row_count)
@@ -723,10 +746,12 @@ impl Table {
         // Update indexes (delegate to IndexManager)
         self.indexes.update_for_update(&self.schema, &old_row, &normalized_row, index);
 
-        // For native columnar tables, rebuild columnar data
-        // Note: Database-level columnar cache invalidation is handled by the executor
-        if self.native_columnar.is_some() {
-            self.rebuild_native_columnar()?;
+        // For native columnar tables, incrementally update the columnar row
+        if let Some(ref mut columnar) = self.native_columnar {
+            let columnar_idx = columnar_index_in(&self.deleted, index);
+            columnar.update_row_at(columnar_idx, &normalized_row).map_err(|e| {
+                StorageError::Other(format!("Columnar update failed: {}", e))
+            })?;
         }
 
         Ok(())
@@ -779,13 +804,15 @@ impl Table {
             &affected_indexes,
         );
 
-        // Update the row (move ownership, no clone needed)
+        // Update the row
         self.rows[index] = normalized_row;
 
-        // For native columnar tables, rebuild columnar data
-        // Note: Database-level columnar cache invalidation is handled by the executor
-        if self.native_columnar.is_some() {
-            self.rebuild_native_columnar()?;
+        // For native columnar tables, incrementally update the columnar row
+        if let Some(ref mut columnar) = self.native_columnar {
+            let columnar_idx = columnar_index_in(&self.deleted, index);
+            columnar.update_row_at(columnar_idx, &self.rows[index]).map_err(|e| {
+                StorageError::Other(format!("Columnar update failed: {}", e))
+            })?;
         }
 
         Ok(())
@@ -822,7 +849,13 @@ impl Table {
         // Update the row (direct move, no validation)
         self.rows[index] = new_row;
 
-        // Note: Database-level columnar cache invalidation is handled by the executor
+        // For native columnar tables, incrementally update the columnar row
+        // (Row-oriented tables rely on Database::invalidate_columnar_cache from the executor)
+        if let Some(ref mut columnar) = self.native_columnar {
+            let columnar_idx = columnar_index_in(&self.deleted, index);
+            // Ignore errors in unchecked path (matching the no-validation contract)
+            let _ = columnar.update_row_at(columnar_idx, &self.rows[index]);
+        }
     }
 
     /// Update a single column value in-place without cloning the row
@@ -852,7 +885,15 @@ impl Table {
     ) {
         self.rows[row_index].values[col_index] = new_value;
 
-        // Note: Database-level columnar cache invalidation is handled by the executor
+        // For native columnar tables, update the specific column value incrementally
+        // (Row-oriented tables rely on Database::invalidate_columnar_cache from the executor)
+        if let Some(ref mut columnar) = self.native_columnar {
+            let columnar_idx = columnar_index_in(&self.deleted, row_index);
+            let col_name = &self.schema.columns[col_index].name;
+            if let Some(column) = columnar.get_column_mut(col_name) {
+                let _ = column.set_value(columnar_idx, &self.rows[row_index].values[col_index]);
+            }
+        }
     }
 
     /// Delete rows matching a predicate

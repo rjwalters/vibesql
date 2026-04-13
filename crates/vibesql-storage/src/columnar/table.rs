@@ -229,9 +229,175 @@ impl ColumnarTable {
         self.columns.get(name)
     }
 
+    /// Get mutable column data by name
+    pub fn get_column_mut(&mut self, name: &str) -> Option<&mut ColumnData> {
+        self.columns.get_mut(name)
+    }
+
     /// Get all column names
     pub fn column_names(&self) -> &[String] {
         &self.column_names
+    }
+
+    /// Append a single row to the columnar table incrementally.
+    ///
+    /// This is O(m) where m = number of columns, compared to O(n * m) for a full rebuild.
+    /// Uses `Arc::make_mut` on each column for copy-on-write semantics, so outstanding
+    /// read snapshots (via `Arc<ColumnarTable>`) remain valid and unmodified.
+    ///
+    /// # Arguments
+    /// * `row` - The row to append
+    /// * `column_names` - Column names corresponding to the row values
+    ///
+    /// # Returns
+    /// * `Ok(())` on success
+    /// * `Err(String)` if column count mismatch or type mismatch
+    pub fn append_row(&mut self, row: &crate::Row) -> Result<(), String> {
+        if row.len() != self.column_names.len() {
+            return Err(format!(
+                "Row has {} columns, expected {}",
+                row.len(),
+                self.column_names.len()
+            ));
+        }
+
+        // Handle empty table: need to initialize columns from the row
+        if self.columns.is_empty() && !self.column_names.is_empty() {
+            // Infer column types from row values
+            let col_types: Vec<_> = row
+                .values
+                .iter()
+                .map(|v| ColumnTypeClass::from_sql_value(v))
+                .collect();
+
+            // Create columns using ColumnBuilder for initial row
+            for (col_idx, col_name) in self.column_names.iter().enumerate() {
+                let mut builder = ColumnBuilder::new(col_types[col_idx], 1);
+                builder.push(&row.values[col_idx])?;
+                self.columns.insert(col_name.clone(), builder.build());
+            }
+
+            self.row_count = 1;
+            return Ok(());
+        }
+
+        // Append to existing columns
+        for (col_idx, col_name) in self.column_names.iter().enumerate() {
+            let column = self.columns.get_mut(col_name).ok_or_else(|| {
+                format!("Column '{}' not found in columnar table", col_name)
+            })?;
+            column.push_value(&row.values[col_idx])?;
+        }
+
+        self.row_count += 1;
+        Ok(())
+    }
+
+    /// Append multiple rows to the columnar table incrementally.
+    ///
+    /// This is O(batch_size * m) where m = number of columns, compared to
+    /// O(n * m) for a full rebuild from all rows.
+    ///
+    /// # Arguments
+    /// * `rows` - Slice of rows to append
+    ///
+    /// # Returns
+    /// * `Ok(())` on success
+    /// * `Err(String)` if column count mismatch or type mismatch
+    pub fn append_rows(&mut self, rows: &[crate::Row]) -> Result<(), String> {
+        for row in rows {
+            self.append_row(row)?;
+        }
+        Ok(())
+    }
+
+    /// Update a row at the given index in the columnar table.
+    ///
+    /// This is O(m) where m = number of columns.
+    ///
+    /// # Arguments
+    /// * `index` - Row index to update
+    /// * `row` - New row values
+    ///
+    /// # Returns
+    /// * `Ok(())` on success
+    /// * `Err(String)` if index out of bounds or type mismatch
+    pub fn update_row_at(&mut self, index: usize, row: &crate::Row) -> Result<(), String> {
+        if index >= self.row_count {
+            return Err(format!(
+                "Row index {} out of bounds (row_count: {})",
+                index, self.row_count
+            ));
+        }
+        if row.len() != self.column_names.len() {
+            return Err(format!(
+                "Row has {} columns, expected {}",
+                row.len(),
+                self.column_names.len()
+            ));
+        }
+
+        for (col_idx, col_name) in self.column_names.iter().enumerate() {
+            let column = self.columns.get_mut(col_name).ok_or_else(|| {
+                format!("Column '{}' not found in columnar table", col_name)
+            })?;
+            column.set_value(index, &row.values[col_idx])?;
+        }
+
+        Ok(())
+    }
+
+    /// Remove a row at the given index from the columnar table.
+    ///
+    /// This shifts all subsequent rows down by one. For bulk deletions,
+    /// consider using `remove_rows_sorted` instead.
+    ///
+    /// # Arguments
+    /// * `index` - Row index to remove
+    ///
+    /// # Returns
+    /// * `Ok(())` on success
+    /// * `Err(String)` if index out of bounds
+    pub fn remove_row_at(&mut self, index: usize) -> Result<(), String> {
+        if index >= self.row_count {
+            return Err(format!(
+                "Row index {} out of bounds (row_count: {})",
+                index, self.row_count
+            ));
+        }
+
+        for col_name in self.column_names.clone() {
+            if let Some(column) = self.columns.get_mut(&col_name) {
+                column.remove_at(index);
+            }
+        }
+
+        self.row_count -= 1;
+        Ok(())
+    }
+
+    /// Remove multiple rows by sorted indices (must be sorted in ascending order).
+    ///
+    /// Removes from the end first to avoid index shifting issues.
+    ///
+    /// # Arguments
+    /// * `indices` - Row indices to remove, sorted in ascending order
+    ///
+    /// # Returns
+    /// * `Ok(())` on success
+    /// * `Err(String)` if any index is out of bounds
+    pub fn remove_rows_sorted(&mut self, indices: &[usize]) -> Result<(), String> {
+        // Remove from the end first to avoid index invalidation
+        for &index in indices.iter().rev() {
+            self.remove_row_at(index)?;
+        }
+        Ok(())
+    }
+
+    /// Clear all data from the columnar table, keeping column names.
+    pub fn clear(&mut self) {
+        self.columns.clear();
+        self.row_count = 0;
     }
 
     /// Estimate the memory size of this columnar table in bytes
