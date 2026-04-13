@@ -5,12 +5,13 @@
 
 use std::collections::HashMap;
 
-use vibesql_ast::{FromClause, SelectItem};
+use vibesql_ast::{FromClause, JoinType, SelectItem};
 
 use super::join_helpers::{
-    build_combined_schema, extract_equijoin_conditions, extract_join_conditions,
-    extract_non_join_predicates, flatten_join_tree_simple, has_cross_join_with_on_condition,
-    is_column_in_table, is_column_in_tables, is_inner_or_cross_join_only,
+    build_combined_schema, expression_has_is_null, extract_equijoin_conditions,
+    extract_join_conditions, extract_non_join_predicates, flatten_join_tree_simple,
+    flatten_join_tree_with_types, has_cross_join_with_on_condition, has_outer_join,
+    is_columnar_supported_join, is_column_in_table, is_column_in_tables,
     resolve_join_column_indices, EquiJoinCondition,
 };
 use crate::{
@@ -20,7 +21,9 @@ use crate::{
     schema::CombinedSchema,
     select::{
         columnar, cte::CteResult, executor::builder::SelectExecutor, helpers::apply_distinct,
-        join::hash_join::columnar as columnar_join, projection::project_row_combined,
+        join::hash_join::columnar as columnar_join,
+        order::{apply_order_by, RowWithSortKeys},
+        projection::project_row_combined,
     },
 };
 
@@ -79,20 +82,6 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
-        // LIMIT/OFFSET queries need special handling - fall back to row-oriented
-        // TODO: Add LIMIT support to columnar join path
-        if stmt.limit.is_some() || stmt.offset.is_some() {
-            log::debug!("Columnar join: skipping - LIMIT/OFFSET not supported");
-            return Ok(None);
-        }
-
-        // ORDER BY requires sorting after projection - fall back to row-oriented (#4552)
-        // The row-oriented path handles ORDER BY correctly via apply_sorting()
-        if stmt.order_by.is_some() {
-            log::debug!("Columnar join: skipping - ORDER BY not supported");
-            return Ok(None);
-        }
-
         // ROWID pseudo-column references require row-oriented execution (#4370)
         // Columnar batches don't track per-row ROWIDs, so we fall back when ROWID is referenced
         if select_list_has_rowid(&stmt.select_list) {
@@ -113,10 +102,11 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
-        // Only handle INNER and CROSS joins - LEFT, RIGHT, FULL need special handling
+        // Only handle supported join types (INNER, CROSS, LEFT OUTER, RIGHT OUTER)
+        // FULL OUTER, SEMI, and ANTI joins fall back to row-oriented execution
         // CROSS joins are included because comma-separated tables (FROM a, b) parse as CROSS JOIN
-        if !is_inner_or_cross_join_only(from_clause) {
-            log::debug!("Columnar join: only INNER/CROSS joins are supported, falling back");
+        if !is_columnar_supported_join(from_clause) {
+            log::debug!("Columnar join: unsupported join type (FULL/SEMI/ANTI), falling back");
             return Ok(None);
         }
 
@@ -127,7 +117,27 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
-        // Flatten the join tree to get all tables
+        // Outer joins with IS NULL / IS NOT NULL in WHERE clause need row-oriented execution.
+        // The columnar SIMD filter does not support null-testing predicates (IS NULL / IS NOT NULL),
+        // so they are silently dropped during predicate extraction. For outer joins this causes
+        // incorrect results — e.g., anti-join pattern `LEFT JOIN ... WHERE t2.col IS NULL` would
+        // return all rows instead of only unmatched rows.
+        if has_outer_join(from_clause) {
+            if let Some(ref where_clause) = stmt.where_clause {
+                if expression_has_is_null(where_clause) {
+                    log::debug!(
+                        "Columnar join: outer join with IS NULL/IS NOT NULL in WHERE, falling back"
+                    );
+                    return Ok(None);
+                }
+            }
+        }
+
+        // Flatten the join tree to get all tables with their join types
+        let mut table_refs_with_types = Vec::new();
+        flatten_join_tree_with_types(from_clause, &mut table_refs_with_types);
+
+        // Also flatten without types for backward compatibility with condition extraction
         let mut table_refs = Vec::new();
         flatten_join_tree_simple(from_clause, &mut table_refs);
 
@@ -142,6 +152,10 @@ impl SelectExecutor<'_> {
             log::debug!("Columnar join: skipping - contains subqueries");
             return Ok(None);
         }
+
+        // Extract join types for the chain (first table has no join type)
+        let join_types: Vec<Option<JoinType>> =
+            table_refs_with_types.iter().map(|(_, jt)| jt.clone()).collect();
 
         log::info!(
             "Columnar join: attempting {} table join ({:?})",
@@ -211,7 +225,7 @@ impl SelectExecutor<'_> {
 
         // Execute joins in sequence, building up the result batch
         let joined_batch =
-            match self.execute_columnar_join_chain(&batches, &join_conditions, &combined_schema) {
+            match self.execute_columnar_join_chain(&batches, &join_conditions, &combined_schema, &join_types) {
                 Ok(Some(batch)) => batch,
                 Ok(None) => {
                     log::debug!("Columnar join: join chain execution returned None");
@@ -271,7 +285,19 @@ impl SelectExecutor<'_> {
 
         if has_group_by {
             // Execute GROUP BY aggregation
-            self.execute_columnar_join_group_by(stmt, &filtered_batch, &combined_schema)
+            let result = self.execute_columnar_join_group_by(stmt, &filtered_batch, &combined_schema);
+
+            // Apply ORDER BY to GROUP BY results if needed (#5033)
+            if let Ok(Some(rows)) = result {
+                if let Some(order_by) = &stmt.order_by {
+                    let sorted = self.apply_columnar_join_order_by(rows, order_by, &stmt.select_list, &combined_schema)?;
+                    Ok(Some(sorted))
+                } else {
+                    Ok(Some(rows))
+                }
+            } else {
+                result
+            }
         } else {
             // No GROUP BY - convert to rows and apply projection
 
@@ -292,7 +318,15 @@ impl SelectExecutor<'_> {
                     filtered_batch
                 };
                 let rows = final_batch.to_rows()?;
-                Ok(Some(rows))
+
+                // Apply ORDER BY if present (#5033)
+                let final_rows = if let Some(order_by) = &stmt.order_by {
+                    self.apply_columnar_join_order_by(rows, order_by, &stmt.select_list, &combined_schema)?
+                } else {
+                    rows
+                };
+
+                Ok(Some(final_rows))
             } else {
                 // Check if SELECT list contains aggregate functions
                 // Aggregates without GROUP BY need special handling (fall back to row-oriented)
@@ -338,12 +372,23 @@ impl SelectExecutor<'_> {
                 let final_rows =
                     if stmt.distinct { apply_distinct(projected_rows) } else { projected_rows };
 
-                Ok(Some(final_rows))
+                // Apply ORDER BY if present (#5033)
+                let sorted_rows = if let Some(order_by) = &stmt.order_by {
+                    self.apply_columnar_join_order_by(final_rows, order_by, &stmt.select_list, &combined_schema)?
+                } else {
+                    final_rows
+                };
+
+                Ok(Some(sorted_rows))
             }
         }
     }
 
     /// Execute a chain of hash joins on columnar batches
+    ///
+    /// The `join_types` parameter contains the join type for each table in the chain.
+    /// The first entry is always `None` (the leftmost table has no join type).
+    /// Each subsequent entry specifies how that table joins to the already-joined tables.
     pub(super) fn execute_columnar_join_chain(
         &self,
         batches: &[(
@@ -354,6 +399,7 @@ impl SelectExecutor<'_> {
         )],
         join_conditions: &[EquiJoinCondition],
         combined_schema: &CombinedSchema,
+        join_types: &[Option<JoinType>],
     ) -> Result<Option<columnar::ColumnarBatch>, ExecutorError> {
         if batches.is_empty() {
             return Ok(None);
@@ -370,8 +416,14 @@ impl SelectExecutor<'_> {
         let mut joined_tables: Vec<&str> = vec![batches[0].1.as_deref().unwrap_or(&batches[0].0)];
 
         // Join subsequent tables
-        for (table_name, alias, batch, schema) in batches.iter().skip(1) {
+        for (i, (table_name, alias, batch, schema)) in batches.iter().enumerate().skip(1) {
             let table_ref = alias.as_deref().unwrap_or(table_name.as_str());
+
+            // Get the join type for this table (default to Inner for backward compatibility)
+            let jt = join_types
+                .get(i)
+                .and_then(|jt| jt.clone())
+                .unwrap_or(JoinType::Inner);
 
             // Find a join condition that connects this table to already-joined tables
             let join_cond = join_conditions.iter().find(|cond| {
@@ -406,6 +458,17 @@ impl SelectExecutor<'_> {
             let join_cond = match join_cond {
                 Some(cond) => cond,
                 None => {
+                    // CROSS JOIN doesn't need a join condition
+                    if matches!(jt, JoinType::Cross) {
+                        log::debug!(
+                            "Columnar join: CROSS JOIN '{}' with {:?} (no condition needed)",
+                            table_ref,
+                            joined_tables
+                        );
+                        // For cross join without condition, fall back to row-oriented
+                        // since columnar cross join is not implemented
+                        return Ok(None);
+                    }
                     log::debug!(
                         "Columnar join: no join condition found connecting '{}' to {:?}",
                         table_ref,
@@ -425,26 +488,94 @@ impl SelectExecutor<'_> {
             )?;
 
             log::debug!(
-                "Columnar join: joining '{}' (col {}) with '{}' (col {})",
+                "Columnar join: {:?} joining '{}' (col {}) with '{}' (col {})",
+                jt,
                 joined_tables.join(", "),
                 left_col_idx,
                 table_ref,
                 right_col_idx
             );
 
-            // Execute the hash join
-            current_batch = columnar_join::columnar_hash_join_inner(
-                &current_batch,
-                batch,
-                left_col_idx,
-                right_col_idx,
-            )?;
+            // Execute the hash join based on join type
+            current_batch = match jt {
+                JoinType::Inner | JoinType::Cross => {
+                    columnar_join::columnar_hash_join_inner(
+                        &current_batch,
+                        batch,
+                        left_col_idx,
+                        right_col_idx,
+                    )?
+                }
+                JoinType::LeftOuter => {
+                    columnar_join::columnar_hash_join_left_outer(
+                        &current_batch,
+                        batch,
+                        left_col_idx,
+                        right_col_idx,
+                    )?
+                }
+                JoinType::RightOuter => {
+                    columnar_join::columnar_hash_join_right_outer(
+                        &current_batch,
+                        batch,
+                        left_col_idx,
+                        right_col_idx,
+                    )?
+                }
+                _ => {
+                    // FullOuter, Semi, Anti - not supported, fall back
+                    log::debug!(
+                        "Columnar join: unsupported join type {:?} for '{}', falling back",
+                        jt,
+                        table_ref
+                    );
+                    return Ok(None);
+                }
+            };
 
             // Update tracking
             joined_tables.push(table_ref);
         }
 
         Ok(Some(current_batch))
+    }
+
+    /// Apply ORDER BY sorting to rows produced by the columnar join path (#5033)
+    ///
+    /// This wraps rows as RowWithSortKeys, applies the ORDER BY logic from the
+    /// order module, then unwraps back to plain rows.
+    fn apply_columnar_join_order_by(
+        &self,
+        rows: Vec<vibesql_storage::Row>,
+        order_by: &[vibesql_ast::OrderByItem],
+        select_list: &[SelectItem],
+        combined_schema: &CombinedSchema,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        if rows.is_empty() {
+            return Ok(rows);
+        }
+
+        log::debug!(
+            "Columnar join: applying ORDER BY to {} rows",
+            rows.len()
+        );
+
+        // Wrap rows as RowWithSortKeys (with None sort keys - apply_order_by will compute them)
+        let rows_with_keys: Vec<RowWithSortKeys> =
+            rows.into_iter().map(|r| (r, None)).collect();
+
+        // Create evaluator for ORDER BY expression evaluation
+        // SAFETY: combined_schema lives for the duration of this function call
+        let schema_ref: &'static CombinedSchema =
+            unsafe { std::mem::transmute(combined_schema) };
+        let evaluator =
+            CombinedExpressionEvaluator::with_database(schema_ref, self.database);
+
+        // Apply ORDER BY sorting
+        let sorted = apply_order_by(rows_with_keys, order_by, &evaluator, select_list)?;
+
+        // Unwrap back to plain rows
+        Ok(sorted.into_iter().map(|(row, _)| row).collect())
     }
 }
 
