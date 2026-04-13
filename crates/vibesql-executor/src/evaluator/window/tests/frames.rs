@@ -8,12 +8,17 @@ fn make_test_rows(values: Vec<i64>) -> Vec<Row> {
     values.into_iter().map(|v| Row::new(vec![SqlValue::Integer(v)])).collect()
 }
 
+/// Simple eval_fn for tests
+fn test_eval_fn(expr: &Expression, row: &Row) -> Result<SqlValue, String> {
+    evaluate_expression(expr, row)
+}
+
 #[test]
 fn test_calculate_frame_default() {
     let partition = Partition::new(make_test_rows(vec![1, 2, 3, 4, 5]));
 
     // Default frame WITHOUT ORDER BY: entire partition
-    let frame = calculate_frame(&partition, 2, &None, &None);
+    let frame = calculate_frame(&partition, 2, &None, &None, &test_eval_fn);
 
     assert_eq!(frame, 0..5); // Entire partition (no ORDER BY)
 }
@@ -29,7 +34,7 @@ fn test_calculate_frame_unbounded_preceding() {
         exclude: None,
     };
 
-    let frame = calculate_frame(&partition, 2, &None, &Some(frame_spec));
+    let frame = calculate_frame(&partition, 2, &None, &Some(frame_spec), &test_eval_fn);
 
     assert_eq!(frame, 0..3); // Rows 0, 1, 2
 }
@@ -45,7 +50,7 @@ fn test_calculate_frame_preceding() {
         exclude: None,
     };
 
-    let frame = calculate_frame(&partition, 3, &None, &Some(frame_spec));
+    let frame = calculate_frame(&partition, 3, &None, &Some(frame_spec), &test_eval_fn);
 
     // 2 PRECEDING from row 3 is row 1, so rows 1, 2, 3
     assert_eq!(frame, 1..4);
@@ -62,7 +67,7 @@ fn test_calculate_frame_following() {
         exclude: None,
     };
 
-    let frame = calculate_frame(&partition, 1, &None, &Some(frame_spec));
+    let frame = calculate_frame(&partition, 1, &None, &Some(frame_spec), &test_eval_fn);
 
     // Current row 1 to 2 FOLLOWING (row 3), so rows 1, 2, 3
     assert_eq!(frame, 1..4);
@@ -79,7 +84,7 @@ fn test_calculate_frame_unbounded_following() {
         exclude: None,
     };
 
-    let frame = calculate_frame(&partition, 2, &None, &Some(frame_spec));
+    let frame = calculate_frame(&partition, 2, &None, &Some(frame_spec), &test_eval_fn);
 
     // Current row 2 to end: rows 2, 3, 4
     assert_eq!(frame, 2..5);

@@ -4,12 +4,11 @@
 
 use std::cmp::Ordering;
 
-use vibesql_ast::OrderByItem;
+use vibesql_ast::{Expression, OrderByItem};
+use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use super::{
-    partitioning::Partition, sorting::compare_values, utils::evaluate_expression_with_map,
-};
+use super::{partitioning::Partition, sorting::compare_values};
 
 /// Evaluate ROW_NUMBER() window function
 ///
@@ -31,7 +30,17 @@ pub fn evaluate_row_number(partition: &Partition) -> Vec<SqlValue> {
 /// Example for scores [95, 90, 90, 85]: ranks are [1, 2, 2, 4]
 ///
 /// Requires ORDER BY clause - partitions must be pre-sorted.
-pub fn evaluate_rank(partition: &Partition, order_by: &Option<Vec<OrderByItem>>) -> Vec<SqlValue> {
+///
+/// The `eval_fn` closure evaluates ORDER BY expressions against rows,
+/// supporting complex expressions (BinaryOp, Function, etc.).
+pub fn evaluate_rank<F>(
+    partition: &Partition,
+    order_by: &Option<Vec<OrderByItem>>,
+    eval_fn: F,
+) -> Vec<SqlValue>
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     // RANK requires ORDER BY
     if order_by.is_none() || order_by.as_ref().unwrap().is_empty() {
         // Without ORDER BY, all rows get rank 1
@@ -50,12 +59,8 @@ pub fn evaluate_rank(partition: &Partition, order_by: &Option<Vec<OrderByItem>>)
             // Check if ORDER BY values differ
             let mut values_differ = false;
             for order_item in order_items {
-                let val_curr =
-                    evaluate_expression_with_map(&order_item.expr, row, &partition.column_map)
-                        .unwrap_or(SqlValue::Null);
-                let val_prev =
-                    evaluate_expression_with_map(&order_item.expr, prev_row, &partition.column_map)
-                        .unwrap_or(SqlValue::Null);
+                let val_curr = eval_fn(&order_item.expr, row).unwrap_or(SqlValue::Null);
+                let val_prev = eval_fn(&order_item.expr, prev_row).unwrap_or(SqlValue::Null);
 
                 if compare_values(&val_curr, &val_prev) != Ordering::Equal {
                     values_differ = true;
@@ -85,10 +90,17 @@ pub fn evaluate_rank(partition: &Partition, order_by: &Option<Vec<OrderByItem>>)
 /// Example for scores [95, 90, 90, 85]: ranks are [1, 2, 2, 3]
 ///
 /// Requires ORDER BY clause - partitions must be pre-sorted.
-pub fn evaluate_dense_rank(
+///
+/// The `eval_fn` closure evaluates ORDER BY expressions against rows,
+/// supporting complex expressions (BinaryOp, Function, etc.).
+pub fn evaluate_dense_rank<F>(
     partition: &Partition,
     order_by: &Option<Vec<OrderByItem>>,
-) -> Vec<SqlValue> {
+    eval_fn: F,
+) -> Vec<SqlValue>
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     // DENSE_RANK requires ORDER BY
     if order_by.is_none() || order_by.as_ref().unwrap().is_empty() {
         // Without ORDER BY, all rows get rank 1
@@ -107,12 +119,8 @@ pub fn evaluate_dense_rank(
             // Check if ORDER BY values differ
             let mut values_differ = false;
             for order_item in order_items {
-                let val_curr =
-                    evaluate_expression_with_map(&order_item.expr, row, &partition.column_map)
-                        .unwrap_or(SqlValue::Null);
-                let val_prev =
-                    evaluate_expression_with_map(&order_item.expr, prev_row, &partition.column_map)
-                        .unwrap_or(SqlValue::Null);
+                let val_curr = eval_fn(&order_item.expr, row).unwrap_or(SqlValue::Null);
+                let val_prev = eval_fn(&order_item.expr, prev_row).unwrap_or(SqlValue::Null);
 
                 if compare_values(&val_curr, &val_prev) != Ordering::Equal {
                     values_differ = true;
@@ -145,10 +153,17 @@ pub fn evaluate_dense_rank(
 ///   - percent_rank: [0.0, 0.333..., 0.333..., 1.0]
 ///
 /// Requires ORDER BY clause - partitions must be pre-sorted.
-pub fn evaluate_percent_rank(
+///
+/// The `eval_fn` closure evaluates ORDER BY expressions against rows,
+/// supporting complex expressions (BinaryOp, Function, etc.).
+pub fn evaluate_percent_rank<F>(
     partition: &Partition,
     order_by: &Option<Vec<OrderByItem>>,
-) -> Vec<SqlValue> {
+    eval_fn: F,
+) -> Vec<SqlValue>
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     let n = partition.len();
 
     // Single row partition - return 0.0
@@ -157,7 +172,7 @@ pub fn evaluate_percent_rank(
     }
 
     // Get ranks first (reuse RANK logic)
-    let ranks = evaluate_rank(partition, order_by);
+    let ranks = evaluate_rank(partition, order_by, eval_fn);
 
     // Convert ranks to percent_rank: (rank - 1) / (n - 1)
     let denominator = (n - 1) as f64;
@@ -189,10 +204,17 @@ pub fn evaluate_percent_rank(
 ///   - cume_dist: [0.25, 0.75, 0.75, 1.0]
 ///
 /// Requires ORDER BY clause - partitions must be pre-sorted.
-pub fn evaluate_cume_dist(
+///
+/// The `eval_fn` closure evaluates ORDER BY expressions against rows,
+/// supporting complex expressions (BinaryOp, Function, etc.).
+pub fn evaluate_cume_dist<F>(
     partition: &Partition,
     order_by: &Option<Vec<OrderByItem>>,
-) -> Vec<SqlValue> {
+    eval_fn: F,
+) -> Vec<SqlValue>
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     let n = partition.len();
 
     // Empty partition - shouldn't happen but handle gracefully
@@ -224,12 +246,8 @@ pub fn evaluate_cume_dist(
 
             let mut differs = false;
             for order_item in order_items {
-                let val_curr =
-                    evaluate_expression_with_map(&order_item.expr, curr_row, &partition.column_map)
-                        .unwrap_or(SqlValue::Null);
-                let val_next =
-                    evaluate_expression_with_map(&order_item.expr, next_row, &partition.column_map)
-                        .unwrap_or(SqlValue::Null);
+                let val_curr = eval_fn(&order_item.expr, curr_row).unwrap_or(SqlValue::Null);
+                let val_next = eval_fn(&order_item.expr, next_row).unwrap_or(SqlValue::Null);
 
                 if compare_values(&val_curr, &val_next) != Ordering::Equal {
                     differs = true;

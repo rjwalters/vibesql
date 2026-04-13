@@ -11,9 +11,10 @@ use vibesql_ast::{
 };
 use vibesql_types::SqlValue;
 
+use vibesql_storage::Row;
+
 use super::partitioning::Partition;
 use super::sorting::compare_values;
-use super::utils::evaluate_expression_with_map;
 
 /// Validate a window frame specification, returning an error if invalid.
 ///
@@ -108,12 +109,19 @@ fn evaluate_offset_expr(expr: &Expression) -> Result<Option<f64>, String> {
 ///
 /// Returns a `Range<usize>` representing the [start, end) indices of rows in the frame.
 /// Supports ROWS, RANGE, and GROUPS frame semantics.
-pub fn calculate_frame(
+///
+/// The `eval_fn` closure evaluates ORDER BY expressions against rows,
+/// supporting complex expressions (BinaryOp, Function, etc.).
+pub fn calculate_frame<F>(
     partition: &Partition,
     current_row_idx: usize,
     order_by: &Option<Vec<OrderByItem>>,
     frame_spec: &Option<WindowFrame>,
-) -> Range<usize> {
+    eval_fn: &F,
+) -> Range<usize>
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     let partition_size = partition.len();
 
     // Default frame depends on whether there's an ORDER BY:
@@ -134,6 +142,7 @@ pub fn calculate_frame(
                     order_by,
                     &FrameBound::UnboundedPreceding,
                     &Some(FrameBound::CurrentRow),
+                    eval_fn,
                 );
             } else {
                 // Default without ORDER BY: entire partition
@@ -147,12 +156,22 @@ pub fn calculate_frame(
         FrameUnit::Rows => {
             calculate_rows_frame(partition, current_row_idx, &frame.start, &frame.end)
         }
-        FrameUnit::Range => {
-            calculate_range_frame(partition, current_row_idx, order_by, &frame.start, &frame.end)
-        }
-        FrameUnit::Groups => {
-            calculate_groups_frame(partition, current_row_idx, order_by, &frame.start, &frame.end)
-        }
+        FrameUnit::Range => calculate_range_frame(
+            partition,
+            current_row_idx,
+            order_by,
+            &frame.start,
+            &frame.end,
+            eval_fn,
+        ),
+        FrameUnit::Groups => calculate_groups_frame(
+            partition,
+            current_row_idx,
+            order_by,
+            &frame.start,
+            &frame.end,
+            eval_fn,
+        ),
     }
 }
 
@@ -190,13 +209,17 @@ fn calculate_rows_frame(
 /// - CURRENT ROW: All rows with same ORDER BY values (peers)
 /// - N PRECEDING: Rows where ORDER BY value >= current_value - N
 /// - N FOLLOWING: Rows where ORDER BY value <= current_value + N
-fn calculate_range_frame(
+fn calculate_range_frame<F>(
     partition: &Partition,
     current_row_idx: usize,
     order_by: &Option<Vec<OrderByItem>>,
     start: &FrameBound,
     end: &Option<FrameBound>,
-) -> Range<usize> {
+    eval_fn: &F,
+) -> Range<usize>
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     let partition_size = partition.len();
 
     if partition_size == 0 || current_row_idx >= partition_size {
@@ -211,9 +234,7 @@ fn calculate_range_frame(
 
     // Get the current row's ORDER BY value (use first ORDER BY expression)
     let current_row = &partition.rows[current_row_idx];
-    let current_value =
-        evaluate_expression_with_map(&order_items[0].expr, current_row, &partition.column_map)
-            .unwrap_or(SqlValue::Null);
+    let current_value = eval_fn(&order_items[0].expr, current_row).unwrap_or(SqlValue::Null);
 
     // Calculate start boundary
     let start_idx = calculate_range_boundary(
@@ -223,6 +244,7 @@ fn calculate_range_frame(
         &current_value,
         start,
         true,
+        eval_fn,
     );
 
     // Calculate end boundary
@@ -234,10 +256,11 @@ fn calculate_range_frame(
             &current_value,
             end_bound,
             false,
+            eval_fn,
         ),
         None => {
             // Default: CURRENT ROW - find last peer
-            find_last_peer(partition, current_row_idx, order_items) + 1
+            find_last_peer(partition, current_row_idx, order_items, eval_fn) + 1
         }
     };
 
@@ -253,14 +276,18 @@ fn calculate_range_frame(
 /// Note: The meaning of PRECEDING/FOLLOWING depends on sort direction:
 /// - ASC: PRECEDING = smaller values, FOLLOWING = larger values
 /// - DESC: PRECEDING = larger values, FOLLOWING = smaller values
-fn calculate_range_boundary(
+fn calculate_range_boundary<F>(
     partition: &Partition,
     current_row_idx: usize,
     order_items: &[OrderByItem],
     current_value: &SqlValue,
     bound: &FrameBound,
     is_start: bool,
-) -> usize {
+    eval_fn: &F,
+) -> usize
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     use vibesql_ast::OrderDirection;
 
     let partition_size = partition.len();
@@ -276,10 +303,10 @@ fn calculate_range_boundary(
         FrameBound::CurrentRow => {
             if is_start {
                 // Find first peer (row with same ORDER BY values)
-                find_first_peer(partition, current_row_idx, order_items)
+                find_first_peer(partition, current_row_idx, order_items, eval_fn)
             } else {
                 // Find last peer + 1 (exclusive end)
-                find_last_peer(partition, current_row_idx, order_items) + 1
+                find_last_peer(partition, current_row_idx, order_items, eval_fn) + 1
             }
         }
 
@@ -298,16 +325,16 @@ fn calculate_range_boundary(
                 // For DESC: find first row where value <= target (target is larger, comes first)
                 // For ASC: find first row where value >= target (target is smaller, comes first)
                 if is_desc {
-                    find_first_row_le_desc(partition, order_items, &target_value)
+                    find_first_row_le_desc(partition, order_items, &target_value, eval_fn)
                 } else {
-                    find_first_row_ge(partition, order_items, &target_value)
+                    find_first_row_ge(partition, order_items, &target_value, eval_fn)
                 }
             } else {
                 // Find the boundary row and return exclusive end
                 if is_desc {
-                    find_last_row_ge_desc(partition, order_items, &target_value) + 1
+                    find_last_row_ge_desc(partition, order_items, &target_value, eval_fn) + 1
                 } else {
-                    find_last_row_le(partition, order_items, &target_value) + 1
+                    find_last_row_le(partition, order_items, &target_value, eval_fn) + 1
                 }
             }
         }
@@ -327,16 +354,16 @@ fn calculate_range_boundary(
                 // For DESC: find first row where value <= target (target is smaller, comes later)
                 // For ASC: find first row where value >= target (target is larger, comes later)
                 if is_desc {
-                    find_first_row_le_desc(partition, order_items, &target_value)
+                    find_first_row_le_desc(partition, order_items, &target_value, eval_fn)
                 } else {
-                    find_first_row_ge(partition, order_items, &target_value)
+                    find_first_row_ge(partition, order_items, &target_value, eval_fn)
                 }
             } else {
                 // Find the boundary row and return exclusive end
                 if is_desc {
-                    find_last_row_ge_desc(partition, order_items, &target_value) + 1
+                    find_last_row_ge_desc(partition, order_items, &target_value, eval_fn) + 1
                 } else {
-                    find_last_row_le(partition, order_items, &target_value) + 1
+                    find_last_row_le(partition, order_items, &target_value, eval_fn) + 1
                 }
             }
         }
@@ -350,13 +377,17 @@ fn calculate_range_boundary(
 /// - CURRENT ROW: Current peer group
 /// - N PRECEDING: N peer groups before current
 /// - N FOLLOWING: N peer groups after current
-fn calculate_groups_frame(
+fn calculate_groups_frame<F>(
     partition: &Partition,
     current_row_idx: usize,
     order_by: &Option<Vec<OrderByItem>>,
     start: &FrameBound,
     end: &Option<FrameBound>,
-) -> Range<usize> {
+    eval_fn: &F,
+) -> Range<usize>
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     let partition_size = partition.len();
 
     if partition_size == 0 || current_row_idx >= partition_size {
@@ -370,7 +401,7 @@ fn calculate_groups_frame(
     };
 
     // Build peer group boundaries
-    let group_boundaries = build_group_boundaries(partition, order_items);
+    let group_boundaries = build_group_boundaries(partition, order_items, eval_fn);
     let current_group = find_group_for_row(&group_boundaries, current_row_idx);
 
     // Calculate start boundary
@@ -462,7 +493,14 @@ fn calculate_groups_boundary(
 }
 
 /// Build a list of peer group start indices
-fn build_group_boundaries(partition: &Partition, order_items: &[OrderByItem]) -> Vec<usize> {
+fn build_group_boundaries<F>(
+    partition: &Partition,
+    order_items: &[OrderByItem],
+    eval_fn: &F,
+) -> Vec<usize>
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     let mut boundaries = vec![0];
 
     for i in 1..partition.len() {
@@ -472,12 +510,8 @@ fn build_group_boundaries(partition: &Partition, order_items: &[OrderByItem]) ->
         // Check if this row starts a new group (different ORDER BY values)
         let mut is_new_group = false;
         for item in order_items {
-            let prev_val =
-                evaluate_expression_with_map(&item.expr, prev_row, &partition.column_map)
-                    .unwrap_or(SqlValue::Null);
-            let curr_val =
-                evaluate_expression_with_map(&item.expr, curr_row, &partition.column_map)
-                    .unwrap_or(SqlValue::Null);
+            let prev_val = eval_fn(&item.expr, prev_row).unwrap_or(SqlValue::Null);
+            let curr_val = eval_fn(&item.expr, curr_row).unwrap_or(SqlValue::Null);
             if compare_values(&prev_val, &curr_val) != Ordering::Equal {
                 is_new_group = true;
                 break;
@@ -503,11 +537,15 @@ fn find_group_for_row(group_boundaries: &[usize], row_idx: usize) -> usize {
 }
 
 /// Find the first peer (row with same ORDER BY values as current)
-fn find_first_peer(
+fn find_first_peer<F>(
     partition: &Partition,
     current_row_idx: usize,
     order_items: &[OrderByItem],
-) -> usize {
+    eval_fn: &F,
+) -> usize
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     let current_row = &partition.rows[current_row_idx];
 
     for i in (0..current_row_idx).rev() {
@@ -515,11 +553,8 @@ fn find_first_peer(
         let mut is_peer = true;
 
         for item in order_items {
-            let curr_val =
-                evaluate_expression_with_map(&item.expr, current_row, &partition.column_map)
-                    .unwrap_or(SqlValue::Null);
-            let row_val = evaluate_expression_with_map(&item.expr, row, &partition.column_map)
-                .unwrap_or(SqlValue::Null);
+            let curr_val = eval_fn(&item.expr, current_row).unwrap_or(SqlValue::Null);
+            let row_val = eval_fn(&item.expr, row).unwrap_or(SqlValue::Null);
             if compare_values(&curr_val, &row_val) != Ordering::Equal {
                 is_peer = false;
                 break;
@@ -535,11 +570,15 @@ fn find_first_peer(
 }
 
 /// Find the last peer (row with same ORDER BY values as current)
-fn find_last_peer(
+fn find_last_peer<F>(
     partition: &Partition,
     current_row_idx: usize,
     order_items: &[OrderByItem],
-) -> usize {
+    eval_fn: &F,
+) -> usize
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     let current_row = &partition.rows[current_row_idx];
 
     for i in (current_row_idx + 1)..partition.len() {
@@ -547,11 +586,8 @@ fn find_last_peer(
         let mut is_peer = true;
 
         for item in order_items {
-            let curr_val =
-                evaluate_expression_with_map(&item.expr, current_row, &partition.column_map)
-                    .unwrap_or(SqlValue::Null);
-            let row_val = evaluate_expression_with_map(&item.expr, row, &partition.column_map)
-                .unwrap_or(SqlValue::Null);
+            let curr_val = eval_fn(&item.expr, current_row).unwrap_or(SqlValue::Null);
+            let row_val = eval_fn(&item.expr, row).unwrap_or(SqlValue::Null);
             if compare_values(&curr_val, &row_val) != Ordering::Equal {
                 is_peer = false;
                 break;
@@ -567,14 +603,17 @@ fn find_last_peer(
 }
 
 /// Find the first row where ORDER BY value >= target
-fn find_first_row_ge(
+fn find_first_row_ge<F>(
     partition: &Partition,
     order_items: &[OrderByItem],
     target: &SqlValue,
-) -> usize {
+    eval_fn: &F,
+) -> usize
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     for (i, row) in partition.rows.iter().enumerate() {
-        let val = evaluate_expression_with_map(&order_items[0].expr, row, &partition.column_map)
-            .unwrap_or(SqlValue::Null);
+        let val = eval_fn(&order_items[0].expr, row).unwrap_or(SqlValue::Null);
         if compare_values(&val, target) != Ordering::Less {
             return i;
         }
@@ -583,18 +622,17 @@ fn find_first_row_ge(
 }
 
 /// Find the last row where ORDER BY value <= target
-fn find_last_row_le(
+fn find_last_row_le<F>(
     partition: &Partition,
     order_items: &[OrderByItem],
     target: &SqlValue,
-) -> usize {
+    eval_fn: &F,
+) -> usize
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     for i in (0..partition.len()).rev() {
-        let val = evaluate_expression_with_map(
-            &order_items[0].expr,
-            &partition.rows[i],
-            &partition.column_map,
-        )
-        .unwrap_or(SqlValue::Null);
+        let val = eval_fn(&order_items[0].expr, &partition.rows[i]).unwrap_or(SqlValue::Null);
         if compare_values(&val, target) != Ordering::Greater {
             return i;
         }
@@ -606,14 +644,17 @@ fn find_last_row_le(
 ///
 /// In a DESC-sorted partition, values decrease as we go through the rows.
 /// This finds the first row (smallest index) where value <= target.
-fn find_first_row_le_desc(
+fn find_first_row_le_desc<F>(
     partition: &Partition,
     order_items: &[OrderByItem],
     target: &SqlValue,
-) -> usize {
+    eval_fn: &F,
+) -> usize
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     for (i, row) in partition.rows.iter().enumerate() {
-        let val = evaluate_expression_with_map(&order_items[0].expr, row, &partition.column_map)
-            .unwrap_or(SqlValue::Null);
+        let val = eval_fn(&order_items[0].expr, row).unwrap_or(SqlValue::Null);
         if compare_values(&val, target) != Ordering::Greater {
             return i;
         }
@@ -625,18 +666,17 @@ fn find_first_row_le_desc(
 ///
 /// In a DESC-sorted partition, values decrease as we go through the rows.
 /// This finds the last row (largest index) where value >= target.
-fn find_last_row_ge_desc(
+fn find_last_row_ge_desc<F>(
     partition: &Partition,
     order_items: &[OrderByItem],
     target: &SqlValue,
-) -> usize {
+    eval_fn: &F,
+) -> usize
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     for i in (0..partition.len()).rev() {
-        let val = evaluate_expression_with_map(
-            &order_items[0].expr,
-            &partition.rows[i],
-            &partition.column_map,
-        )
-        .unwrap_or(SqlValue::Null);
+        let val = eval_fn(&order_items[0].expr, &partition.rows[i]).unwrap_or(SqlValue::Null);
         if compare_values(&val, target) != Ordering::Less {
             return i;
         }
@@ -739,12 +779,16 @@ impl FrameResult {
     /// Check if a row index should be included in the frame calculation
     ///
     /// Takes into account both the frame range and the EXCLUDE clause.
-    pub fn includes(
+    pub fn includes<F>(
         &self,
         row_idx: usize,
         partition: &Partition,
         order_by: &Option<Vec<OrderByItem>>,
-    ) -> bool {
+        eval_fn: &F,
+    ) -> bool
+    where
+        F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+    {
         // First check if row is in the frame range
         if !self.range.contains(&row_idx) {
             return false;
@@ -758,13 +802,13 @@ impl FrameResult {
 
             Some(FrameExclude::Group) => {
                 // Exclude current row and all its peers (rows with same ORDER BY values)
-                !is_peer(row_idx, self.current_row_idx, partition, order_by)
+                !is_peer(row_idx, self.current_row_idx, partition, order_by, eval_fn)
             }
 
             Some(FrameExclude::Ties) => {
                 // Exclude peers of current row, but include current row itself
                 row_idx == self.current_row_idx
-                    || !is_peer(row_idx, self.current_row_idx, partition, order_by)
+                    || !is_peer(row_idx, self.current_row_idx, partition, order_by, eval_fn)
             }
         }
     }
@@ -772,25 +816,33 @@ impl FrameResult {
     /// Get an iterator over all included row indices
     ///
     /// This filters out excluded rows based on the EXCLUDE clause.
-    pub fn included_indices<'a>(
+    pub fn included_indices<'a, F>(
         &'a self,
         partition: &'a Partition,
         order_by: &'a Option<Vec<OrderByItem>>,
-    ) -> impl Iterator<Item = usize> + 'a {
-        self.range.clone().filter(move |&idx| self.includes(idx, partition, order_by))
+        eval_fn: &'a F,
+    ) -> impl Iterator<Item = usize> + 'a
+    where
+        F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+    {
+        self.range.clone().filter(move |&idx| self.includes(idx, partition, order_by, eval_fn))
     }
 }
 
 /// Calculate frame with exclusion information
 ///
 /// Returns a FrameResult that includes both the range and exclusion info.
-pub fn calculate_frame_with_exclusion(
+pub fn calculate_frame_with_exclusion<F>(
     partition: &Partition,
     current_row_idx: usize,
     order_by: &Option<Vec<OrderByItem>>,
     frame_spec: &Option<WindowFrame>,
-) -> FrameResult {
-    let range = calculate_frame(partition, current_row_idx, order_by, frame_spec);
+    eval_fn: &F,
+) -> FrameResult
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
+    let range = calculate_frame(partition, current_row_idx, order_by, frame_spec, eval_fn);
     let exclude = frame_spec.as_ref().and_then(|f| f.exclude);
 
     FrameResult { range, exclude, current_row_idx }
@@ -800,12 +852,16 @@ pub fn calculate_frame_with_exclusion(
 ///
 /// Rows are considered peers if they have identical values for all ORDER BY expressions.
 /// If there's no ORDER BY clause, all rows are considered peers.
-fn is_peer(
+fn is_peer<F>(
     row_idx_a: usize,
     row_idx_b: usize,
     partition: &Partition,
     order_by: &Option<Vec<OrderByItem>>,
-) -> bool {
+    eval_fn: &F,
+) -> bool
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     // Same row is always a peer of itself
     if row_idx_a == row_idx_b {
         return true;
@@ -827,10 +883,8 @@ fn is_peer(
 
     // Compare all ORDER BY expressions
     for order_item in order_items {
-        let val_a = evaluate_expression_with_map(&order_item.expr, row_a, &partition.column_map)
-            .unwrap_or(SqlValue::Null);
-        let val_b = evaluate_expression_with_map(&order_item.expr, row_b, &partition.column_map)
-            .unwrap_or(SqlValue::Null);
+        let val_a = eval_fn(&order_item.expr, row_a).unwrap_or(SqlValue::Null);
+        let val_b = eval_fn(&order_item.expr, row_b).unwrap_or(SqlValue::Null);
 
         if compare_values(&val_a, &val_b) != Ordering::Equal {
             return false;

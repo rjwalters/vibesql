@@ -8,6 +8,11 @@ fn make_test_rows(values: Vec<i64>) -> Vec<Row> {
     values.into_iter().map(|v| Row::new(vec![SqlValue::Integer(v)])).collect()
 }
 
+/// Simple eval_fn for tests: evaluates expressions using the test evaluator
+fn test_eval_fn(expr: &Expression, row: &Row) -> Result<SqlValue, String> {
+    evaluate_expression(expr, row)
+}
+
 // ===== ROW_NUMBER Tests =====
 
 #[test]
@@ -38,7 +43,7 @@ fn test_rank_with_ties() {
         nulls_order: None,
     }]);
 
-    let result = evaluate_rank(&partition, &order_by);
+    let result = evaluate_rank(&partition, &order_by, test_eval_fn);
 
     assert_eq!(result.len(), 4);
     assert_eq!(result[0], SqlValue::Integer(1)); // 95 -> rank 1
@@ -57,7 +62,7 @@ fn test_rank_no_ties() {
         nulls_order: None,
     }]);
 
-    let result = evaluate_rank(&partition, &order_by);
+    let result = evaluate_rank(&partition, &order_by, test_eval_fn);
 
     assert_eq!(result.len(), 4);
     assert_eq!(result[0], SqlValue::Integer(1));
@@ -70,7 +75,7 @@ fn test_rank_no_ties() {
 fn test_rank_without_order_by() {
     let partition = Partition::new(make_test_rows(vec![10, 20, 30]));
 
-    let result = evaluate_rank(&partition, &None);
+    let result = evaluate_rank(&partition, &None, test_eval_fn);
 
     // Without ORDER BY, all rows get rank 1
     assert_eq!(result.len(), 3);
@@ -93,7 +98,7 @@ fn test_dense_rank_with_ties() {
         nulls_order: None,
     }]);
 
-    let result = evaluate_dense_rank(&partition, &order_by);
+    let result = evaluate_dense_rank(&partition, &order_by, test_eval_fn);
 
     assert_eq!(result.len(), 4);
     assert_eq!(result[0], SqlValue::Integer(1)); // 95 -> rank 1
@@ -114,7 +119,7 @@ fn test_dense_rank_multiple_tie_groups() {
         nulls_order: None,
     }]);
 
-    let result = evaluate_dense_rank(&partition, &order_by);
+    let result = evaluate_dense_rank(&partition, &order_by, test_eval_fn);
 
     assert_eq!(result.len(), 7);
     assert_eq!(result[0], SqlValue::Integer(1));
