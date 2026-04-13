@@ -367,6 +367,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
 
     fn convert_window_spec(&self, spec: &arena_expr::WindowSpec<'arena>) -> WindowSpec {
         WindowSpec {
+            base_window_name: None, // Arena AST doesn't support named windows yet
             partition_by: spec
                 .partition_by
                 .as_ref()
@@ -444,6 +445,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             where_clause: stmt.where_clause.as_ref().map(|e| self.convert_expression(e)),
             group_by: stmt.group_by.as_ref().map(|g| self.convert_group_by(g)),
             having: stmt.having.as_ref().map(|e| self.convert_expression(e)),
+            window_definitions: None, // Arena AST doesn't support WINDOW clause yet
             order_by: stmt
                 .order_by
                 .as_ref()

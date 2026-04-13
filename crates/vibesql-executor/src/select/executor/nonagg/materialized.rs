@@ -280,6 +280,7 @@ impl SelectExecutor<'_> {
             let (rows_with_windows, mapping) = evaluate_window_functions(
                 std::mem::take(filtered_rows),
                 &stmt.select_list,
+                stmt.window_definitions.as_ref(),
                 evaluator,
             )?;
             *filtered_rows = rows_with_windows;

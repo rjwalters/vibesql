@@ -463,6 +463,11 @@ impl WindowFunctionSpec {
 /// Window specification (OVER clause)
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowSpec {
+    /// Base window name to inherit from (for OVER (win ...) syntax)
+    /// When present, this window spec inherits from the named window definition
+    /// Example: In `OVER (win ORDER BY z)`, base_window_name is "win"
+    pub base_window_name: Option<String>,
+
     /// PARTITION BY clause - divides rows into partitions
     /// Example: PARTITION BY department_id
     pub partition_by: Option<Vec<Expression>>,

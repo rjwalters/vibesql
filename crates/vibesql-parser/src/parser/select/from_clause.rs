@@ -446,6 +446,7 @@ impl Parser {
                 | Token::Keyword { keyword: Keyword::Where, .. }
                 | Token::Keyword { keyword: Keyword::Group, .. }
                 | Token::Keyword { keyword: Keyword::Having, .. }
+                | Token::Keyword { keyword: Keyword::Window, .. }
                 | Token::Keyword { keyword: Keyword::Order, .. }
                 | Token::Keyword { keyword: Keyword::Limit, .. }
                 | Token::Keyword { keyword: Keyword::Offset, .. }

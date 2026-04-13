@@ -240,6 +240,7 @@ fn try_decorrelate_subquery(
             ColumnIdentifier::simple(&inner_col_name, false),
         )])),
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,

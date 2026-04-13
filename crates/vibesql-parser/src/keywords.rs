@@ -97,6 +97,7 @@ pub enum Keyword {
     Exclude,
     Others,
     Ties,
+    Window,
     // Note: Window function names (ROW_NUMBER, RANK, etc.) are identifiers, not keywords
     // Constraint keywords
     Primary,
@@ -501,6 +502,7 @@ impl fmt::Display for Keyword {
             Keyword::Exclude => "EXCLUDE",
             Keyword::Others => "OTHERS",
             Keyword::Ties => "TIES",
+            Keyword::Window => "WINDOW",
             Keyword::Primary => "PRIMARY",
             Keyword::Foreign => "FOREIGN",
             Keyword::Key => "KEY",

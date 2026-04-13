@@ -86,6 +86,7 @@ pub(super) fn build_exists_checks(eliminated: &[EliminatedTable]) -> Vec<Express
                 where_clause: table.filter.clone(),
                 group_by: None,
                 having: None,
+                window_definitions: None,
                 order_by: None,
                 limit: Some(Expression::Literal(vibesql_types::SqlValue::Integer(1))),
                 offset: None,

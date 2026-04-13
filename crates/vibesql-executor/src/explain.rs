@@ -798,6 +798,7 @@ impl ExplainExecutor {
             where_clause: stmt.where_clause.clone(),
             group_by: stmt.group_by.clone(),
             having: stmt.having.clone(),
+            window_definitions: stmt.window_definitions.clone(),
             order_by: None, // ORDER BY applies to the compound result
             limit: None,
             offset: None,
@@ -830,6 +831,7 @@ impl ExplainExecutor {
                 where_clause: set_op.right.where_clause.clone(),
                 group_by: set_op.right.group_by.clone(),
                 having: set_op.right.having.clone(),
+                window_definitions: set_op.right.window_definitions.clone(),
                 order_by: None,
                 limit: None,
                 offset: None,

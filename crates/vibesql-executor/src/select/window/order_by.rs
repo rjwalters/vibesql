@@ -184,6 +184,7 @@ pub(in crate::select) fn evaluate_order_by_window_functions(
             _select_index: 0, // Dummy value for ORDER BY functions
             function_spec: function_spec.clone(),
             window_spec: window_spec.clone(),
+            original_window_spec: window_spec.clone(), // Same as resolved for ORDER BY functions
         };
         let result = evaluate_single_window_function(&rows, &win_func_info, evaluator)?;
         // Values are in original row order, which matches the input rows

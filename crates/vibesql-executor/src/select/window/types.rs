@@ -9,8 +9,10 @@ pub(super) struct WindowFunctionInfo {
     pub(super) _select_index: usize,
     /// The window function specification
     pub(super) function_spec: WindowFunctionSpec,
-    /// The OVER clause specification
+    /// The OVER clause specification (resolved - with named window specs expanded)
     pub(super) window_spec: vibesql_ast::WindowSpec,
+    /// The original OVER clause specification (for key generation, preserves base_window_name)
+    pub(super) original_window_spec: vibesql_ast::WindowSpec,
 }
 
 /// Key for identifying and hashing window function expressions
@@ -24,6 +26,10 @@ pub struct WindowFunctionKey {
 
 impl WindowFunctionKey {
     /// Create a key from a window function expression
+    ///
+    /// If the window spec has a base_window_name (i.e., references a named window),
+    /// that name is used as the key instead of the resolved spec. This ensures
+    /// that lookups using the original expression match the resolved result.
     pub fn from_expression(
         function: &WindowFunctionSpec,
         window: &vibesql_ast::WindowSpec,
@@ -49,33 +55,39 @@ impl WindowFunctionKey {
             }
         }
 
-        // Add PARTITION BY clause
-        if let Some(partition_by) = &window.partition_by {
-            if !partition_by.is_empty() {
-                let partition_str = partition_by
-                    .iter()
-                    .map(|expr| format!("{:?}", expr))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                key_parts.push(format!("PARTITION BY {}", partition_str));
+        // If we have a base_window_name, use that as the window part of the key
+        // This ensures lookups match even though we resolve the window spec for evaluation
+        if let Some(base_name) = &window.base_window_name {
+            key_parts.push(format!("WINDOW {}", base_name.to_lowercase()));
+        } else {
+            // Add PARTITION BY clause
+            if let Some(partition_by) = &window.partition_by {
+                if !partition_by.is_empty() {
+                    let partition_str = partition_by
+                        .iter()
+                        .map(|expr| format!("{:?}", expr))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    key_parts.push(format!("PARTITION BY {}", partition_str));
+                }
             }
-        }
 
-        // Add ORDER BY clause
-        if let Some(order_by) = &window.order_by {
-            if !order_by.is_empty() {
-                let order_str = order_by
-                    .iter()
-                    .map(|item| format!("{:?} {:?}", item.expr, item.direction))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                key_parts.push(format!("ORDER BY {}", order_str));
+            // Add ORDER BY clause
+            if let Some(order_by) = &window.order_by {
+                if !order_by.is_empty() {
+                    let order_str = order_by
+                        .iter()
+                        .map(|item| format!("{:?} {:?}", item.expr, item.direction))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    key_parts.push(format!("ORDER BY {}", order_str));
+                }
             }
-        }
 
-        // Add FRAME clause
-        if let Some(frame) = &window.frame {
-            key_parts.push(format!("{:?}", frame));
+            // Add FRAME clause
+            if let Some(frame) = &window.frame {
+                key_parts.push(format!("{:?}", frame));
+            }
         }
 
         WindowFunctionKey { key: key_parts.join("|") }

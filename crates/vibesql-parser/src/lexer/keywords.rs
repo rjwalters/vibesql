@@ -104,6 +104,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "EXCLUDE" => Keyword::Exclude,
     "OTHERS" => Keyword::Others,
     "TIES" => Keyword::Ties,
+    "WINDOW" => Keyword::Window,
     "CURRENT_DATE" => Keyword::CurrentDate,
     "CURRENT_TIME" => Keyword::CurrentTime,
     "CURRENT_TIMESTAMP" => Keyword::CurrentTimestamp,

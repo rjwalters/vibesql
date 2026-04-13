@@ -106,6 +106,7 @@ fn test_repeated_count_star_cached() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,
@@ -186,6 +187,7 @@ fn test_repeated_sum_cached() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,
@@ -316,6 +318,7 @@ fn test_cache_cleared_between_groups() {
             )),
         ])),
         having: None,
+        window_definitions: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
             expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
                 "category", false,
@@ -416,6 +419,7 @@ fn test_distinct_aggregates_not_confused() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,

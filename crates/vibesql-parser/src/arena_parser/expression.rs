@@ -1062,7 +1062,7 @@ impl<'arena> ArenaParser<'arena> {
             if self.peek_keyword(Keyword::Over) {
                 // Validate argument count for window functions
                 Self::validate_window_function_args(&name_upper, args.len(), name)?;
-                return self.parse_window_function(name_sym, args);
+                return self.parse_window_function(name_sym, &name_upper, args);
             }
 
             // Determine if this is truly an aggregate function
@@ -1112,7 +1112,7 @@ impl<'arena> ArenaParser<'arena> {
         if self.peek_keyword(Keyword::Over) {
             // Validate argument count for window functions
             Self::validate_window_function_args(&name_upper, args.len(), name)?;
-            return self.parse_window_function(name_sym, args);
+            return self.parse_window_function(name_sym, &name_upper, args);
         }
 
         // Check if this is a window-only function used without OVER clause
@@ -1173,10 +1173,34 @@ impl<'arena> ArenaParser<'arena> {
         Ok(())
     }
 
+    /// Classify a window function as aggregate, ranking, or value.
+    ///
+    /// This mirrors the classification in the regular parser to ensure
+    /// consistent behavior between parsing modes.
+    fn classify_window_function(
+        name_upper: &str,
+        name: Symbol,
+        args: BumpVec<'arena, Expression<'arena>>,
+    ) -> WindowFunctionSpec<'arena> {
+        match name_upper {
+            // Ranking functions
+            "ROW_NUMBER" | "RANK" | "DENSE_RANK" | "NTILE" | "PERCENT_RANK" | "CUME_DIST" => {
+                WindowFunctionSpec::Ranking { name, args }
+            }
+            // Value functions
+            "LAG" | "LEAD" | "FIRST_VALUE" | "LAST_VALUE" | "NTH_VALUE" => {
+                WindowFunctionSpec::Value { name, args }
+            }
+            // Everything else is an aggregate function
+            _ => WindowFunctionSpec::Aggregate { name, args },
+        }
+    }
+
     /// Parse window function (OVER clause).
     fn parse_window_function(
         &mut self,
         name: Symbol,
+        name_upper: &str,
         args: BumpVec<'arena, Expression<'arena>>,
     ) -> Result<Expression<'arena>, ParseError> {
         self.consume_keyword(Keyword::Over)?;
@@ -1203,7 +1227,8 @@ impl<'arena> ArenaParser<'arena> {
 
         self.expect_token(Token::RParen)?;
 
-        let function = WindowFunctionSpec::Aggregate { name, args };
+        // Classify the window function based on its name
+        let function = Self::classify_window_function(name_upper, name, args);
         let over = WindowSpec { partition_by, order_by, frame };
 
         Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::WindowFunction { function, over })))

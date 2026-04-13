@@ -105,6 +105,7 @@ pub(super) fn count_audit_rows(db: &Database) -> usize {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,

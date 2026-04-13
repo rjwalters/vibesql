@@ -67,6 +67,7 @@ fn test_order_by_single_column_asc() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
             expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
                 "age", false,
@@ -165,6 +166,7 @@ fn test_order_by_multiple_columns() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: Some(vec![
             vibesql_ast::OrderByItem {
                 expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
@@ -298,6 +300,7 @@ fn test_order_by_with_join_issue_4552() {
         }),
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
             expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
                 "e", false,
@@ -389,6 +392,7 @@ fn test_order_by_preserved_in_derived_table_issue_4734() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
             expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
                 "a", false,
@@ -416,6 +420,7 @@ fn test_order_by_preserved_in_derived_table_issue_4734() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None, // Outer query has NO ORDER BY
         limit: None,
         offset: None,
@@ -505,6 +510,7 @@ fn test_outer_order_by_takes_precedence_issue_4734() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
             expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
                 "a", false,
@@ -532,6 +538,7 @@ fn test_outer_order_by_takes_precedence_issue_4734() {
         where_clause: None,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
             expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
                 "b", false,

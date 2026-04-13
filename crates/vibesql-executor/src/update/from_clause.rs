@@ -139,6 +139,7 @@ pub fn execute_update_from_join(
         where_clause,
         group_by: None,
         having: None,
+        window_definitions: None,
         order_by: None,
         limit: None,
         offset: None,

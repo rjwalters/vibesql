@@ -989,6 +989,7 @@ impl Parser {
             where_clause,
             group_by,
             having,
+            window_definitions: None, // Legacy path - WINDOW clause parsed separately
             order_by,
             limit,
             offset,

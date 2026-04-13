@@ -408,6 +408,7 @@ mod tests {
                 where_clause: None,
                 group_by: None,
                 having: None,
+                window_definitions: None,
                 order_by: None,
                 limit: None,
                 offset: None,

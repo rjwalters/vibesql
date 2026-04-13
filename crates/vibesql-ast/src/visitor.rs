@@ -784,6 +784,7 @@ fn transform_window_function<V: ExpressionMutVisitor>(
 /// Transform a window specification
 fn transform_window_spec<V: ExpressionMutVisitor>(visitor: &mut V, spec: WindowSpec) -> WindowSpec {
     WindowSpec {
+        base_window_name: spec.base_window_name,
         partition_by: spec
             .partition_by
             .map(|exprs| exprs.into_iter().map(|e| transform_expression(visitor, e)).collect()),
@@ -1131,6 +1132,14 @@ pub fn transform_select<V: ExpressionMutVisitor>(visitor: &mut V, stmt: SelectSt
         where_clause: stmt.where_clause.map(|w| transform_expression(visitor, w)),
         group_by: stmt.group_by.map(|g| transform_group_by(visitor, g)),
         having: stmt.having.map(|h| transform_expression(visitor, h)),
+        window_definitions: stmt.window_definitions.map(|defs| {
+            defs.into_iter()
+                .map(|def| crate::WindowDefinition {
+                    name: def.name,
+                    spec: transform_window_spec(visitor, def.spec),
+                })
+                .collect()
+        }),
         order_by: stmt.order_by.map(|items| {
             items
                 .into_iter()
@@ -1699,6 +1708,7 @@ mod tests {
             }),
             group_by: None,
             having: None,
+            window_definitions: None,
             order_by: None,
             limit: None,
             offset: None,
