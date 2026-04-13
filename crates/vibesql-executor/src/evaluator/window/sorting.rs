@@ -4,16 +4,24 @@
 
 use std::cmp::Ordering;
 
-use vibesql_ast::{OrderByItem, OrderDirection};
+use vibesql_ast::{Expression, OrderByItem, OrderDirection};
+use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use super::{partitioning::Partition, utils::evaluate_expression_with_map};
+use super::partitioning::Partition;
 
 /// Sort a partition by ORDER BY clauses
 ///
 /// Sorts rows within a partition according to ORDER BY specification.
 /// Also keeps original_indices in sync with the sorted rows.
-pub fn sort_partition(partition: &mut Partition, order_by: &Option<Vec<OrderByItem>>) {
+///
+/// The `eval_fn` closure is used to evaluate ORDER BY expressions against rows.
+/// This supports complex expressions (BinaryOp, Function, etc.), not just literals
+/// and column references.
+pub fn sort_partition<F>(partition: &mut Partition, order_by: &Option<Vec<OrderByItem>>, eval_fn: F)
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     // If no ORDER BY, keep original order
     let Some(order_items) = order_by else {
         return;
@@ -28,13 +36,10 @@ pub fn sort_partition(partition: &mut Partition, order_by: &Option<Vec<OrderByIt
 
     // Sort indices by evaluating order expressions on the rows
     let rows = &partition.rows; // Borrow for comparison only
-    let column_map = &partition.column_map;
     indices.sort_by(|&a, &b| {
         for order_item in order_items {
-            let val_a = evaluate_expression_with_map(&order_item.expr, &rows[a], column_map)
-                .unwrap_or(SqlValue::Null);
-            let val_b = evaluate_expression_with_map(&order_item.expr, &rows[b], column_map)
-                .unwrap_or(SqlValue::Null);
+            let val_a = eval_fn(&order_item.expr, &rows[a]).unwrap_or(SqlValue::Null);
+            let val_b = eval_fn(&order_item.expr, &rows[b]).unwrap_or(SqlValue::Null);
 
             let cmp = compare_values(&val_a, &val_b);
 

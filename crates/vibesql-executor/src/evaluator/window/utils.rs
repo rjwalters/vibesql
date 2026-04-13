@@ -1,21 +1,17 @@
 //! Utility functions for window function evaluation
 //!
-//! This module provides expression evaluation for window function frame calculations.
-//! The `evaluate_expression_with_map` function supports column name resolution via
-//! a pre-built column name to index mapping.
+//! This module provides helper functions for window function evaluation.
 
 use vibesql_ast::Expression;
-use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-/// Evaluate expression with column name mapping support
+/// Simple expression evaluator for tests
 ///
-/// This version accepts a column name to index mapping for resolving named columns.
-pub fn evaluate_expression_with_map(
-    expr: &Expression,
-    row: &Row,
-    column_map: &std::collections::HashMap<String, usize>,
-) -> Result<SqlValue, String> {
+/// This version uses index-based column resolution (columns named "0", "1", etc.)
+/// and only handles Literal and ColumnRef expressions. It is used as a test-only
+/// eval_fn for unit tests where the full CombinedExpressionEvaluator is not available.
+#[cfg(test)]
+pub fn evaluate_expression(expr: &Expression, row: &vibesql_storage::Row) -> Result<SqlValue, String> {
     match expr {
         Expression::Literal(val) => Ok(val.clone()),
         Expression::ColumnRef(col_id) => {
@@ -26,33 +22,12 @@ pub fn evaluate_expression_with_map(
                     .cloned()
                     .ok_or_else(|| format!("Column index {} out of bounds", index))
             } else {
-                // Try to find column name in the mapping
-                if let Some(&index) = column_map.get(column) {
-                    row.get(index)
-                        .cloned()
-                        .ok_or_else(|| format!("Column index {} out of bounds", index))
-                } else if let Some(&index) = column_map.get(&column.to_lowercase()) {
-                    row.get(index)
-                        .cloned()
-                        .ok_or_else(|| format!("Column index {} out of bounds", index))
-                } else {
-                    // Fallback: assume first column
-                    // This is a limitation - proper implementation should use schema
-                    row.get(0).cloned().ok_or_else(|| "Row has no columns".to_string())
-                }
+                // Fallback: assume first column (for simple test cases)
+                row.get(0).cloned().ok_or_else(|| "Row has no columns".to_string())
             }
         }
-        _ => Err("Unsupported expression in window function".to_string()),
+        _ => Err("Unsupported expression in test evaluator".to_string()),
     }
-}
-
-/// Simple expression evaluator for tests
-///
-/// This version uses index-based column resolution (columns named "0", "1", etc.)
-/// without requiring a column name mapping.
-#[cfg(test)]
-pub fn evaluate_expression(expr: &Expression, row: &Row) -> Result<SqlValue, String> {
-    evaluate_expression_with_map(expr, row, &std::collections::HashMap::new())
 }
 
 /// Evaluate default value expression

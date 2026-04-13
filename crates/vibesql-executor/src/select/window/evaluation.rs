@@ -82,12 +82,42 @@ pub(super) fn evaluate_single_window_function(
         // Threshold: parallelize if total rows > sort threshold AND partitions > 1
         if partitions.len() > 1 && config.should_parallelize_sort(rows.len()) {
             let order_by = &win_func.window_spec.order_by;
+            // Get components for thread-local evaluators
+            let sort_components = evaluator.get_parallel_components();
             partitions.par_iter_mut().for_each(|partition| {
-                sort_partition(partition, order_by);
+                let (
+                    schema,
+                    database,
+                    outer_row,
+                    outer_schema,
+                    window_mapping,
+                    cte_context,
+                    enable_cse,
+                ) = sort_components;
+                let local_evaluator = CombinedExpressionEvaluator::from_parallel_components(
+                    schema,
+                    database,
+                    outer_row,
+                    outer_schema,
+                    window_mapping,
+                    cte_context,
+                    enable_cse,
+                );
+                let sort_eval_fn =
+                    |expr: &Expression, row: &vibesql_storage::Row| -> Result<SqlValue, String> {
+                        local_evaluator.clear_cse_cache();
+                        local_evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
+                    };
+                sort_partition(partition, order_by, sort_eval_fn);
             });
         } else {
             for partition in &mut partitions {
-                sort_partition(partition, &win_func.window_spec.order_by);
+                let sort_eval_fn =
+                    |expr: &Expression, row: &vibesql_storage::Row| -> Result<SqlValue, String> {
+                        evaluator.clear_cse_cache();
+                        evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
+                    };
+                sort_partition(partition, &win_func.window_spec.order_by, sort_eval_fn);
             }
         }
     }
@@ -95,7 +125,12 @@ pub(super) fn evaluate_single_window_function(
     #[cfg(not(feature = "parallel"))]
     {
         for partition in &mut partitions {
-            sort_partition(partition, &win_func.window_spec.order_by);
+            let sort_eval_fn =
+                |expr: &Expression, row: &vibesql_storage::Row| -> Result<SqlValue, String> {
+                    evaluator.clear_cse_cache();
+                    evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
+                };
+            sort_partition(partition, &win_func.window_spec.order_by, sort_eval_fn);
         }
     }
 
@@ -248,6 +283,13 @@ fn evaluate_window_function_for_partition(
     frame_spec: &Option<vibesql_ast::WindowFrame>,
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<Vec<SqlValue>, ExecutorError> {
+    // Create the eval_fn closure that uses the full evaluator
+    let eval_fn =
+        |expr: &Expression, row: &vibesql_storage::Row| -> Result<SqlValue, String> {
+            evaluator.clear_cse_cache();
+            evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
+        };
+
     // Handle ranking functions (they don't use frames)
     let results = match func_name.to_uppercase().as_str() {
         "ROW_NUMBER" => {
@@ -264,7 +306,7 @@ fn evaluate_window_function_for_partition(
                     function_name: "rank".to_string(),
                 });
             }
-            crate::evaluator::window::evaluate_rank(partition, order_by)
+            crate::evaluator::window::evaluate_rank(partition, order_by, &eval_fn)
         }
         "DENSE_RANK" => {
             if !args.is_empty() {
@@ -272,7 +314,7 @@ fn evaluate_window_function_for_partition(
                     function_name: "dense_rank".to_string(),
                 });
             }
-            crate::evaluator::window::evaluate_dense_rank(partition, order_by)
+            crate::evaluator::window::evaluate_dense_rank(partition, order_by, &eval_fn)
         }
         "PERCENT_RANK" => {
             if !args.is_empty() {
@@ -280,7 +322,7 @@ fn evaluate_window_function_for_partition(
                     function_name: "percent_rank".to_string(),
                 });
             }
-            crate::evaluator::window::evaluate_percent_rank(partition, order_by)
+            crate::evaluator::window::evaluate_percent_rank(partition, order_by, &eval_fn)
         }
         "CUME_DIST" => {
             if !args.is_empty() {
@@ -288,7 +330,7 @@ fn evaluate_window_function_for_partition(
                     function_name: "cume_dist".to_string(),
                 });
             }
-            crate::evaluator::window::evaluate_cume_dist(partition, order_by)
+            crate::evaluator::window::evaluate_cume_dist(partition, order_by, &eval_fn)
         }
         "NTILE" => {
             if args.len() != 1 {
@@ -514,13 +556,13 @@ fn evaluate_window_function_for_partition(
             for row_idx in 0..partition.len() {
                 // Calculate frame for this row with exclusion support
                 let frame_result =
-                    calculate_frame_with_exclusion(partition, row_idx, order_by, frame_spec);
+                    calculate_frame_with_exclusion(partition, row_idx, order_by, frame_spec, &eval_fn);
 
                 // Get the iterator of included indices (applies EXCLUDE filtering)
-                let frame_indices = frame_result.included_indices(partition, order_by);
+                let frame_indices = frame_result.included_indices(partition, order_by, &eval_fn);
 
                 // Create closure that evaluates expressions using the evaluator
-                let eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
+                let agg_eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
                     // Clear CSE cache before evaluating each row to prevent column values
                     // from being incorrectly cached across different rows
                     evaluator.clear_cse_cache();
@@ -540,7 +582,7 @@ fn evaluate_window_function_for_partition(
                         } else {
                             Some(&args[0])
                         };
-                        evaluate_count_window(partition, frame_indices, arg_expr, filter, eval_fn)
+                        evaluate_count_window(partition, frame_indices, arg_expr, filter, agg_eval_fn)
                     }
                     "SUM" => {
                         if args.is_empty() {
@@ -548,7 +590,7 @@ fn evaluate_window_function_for_partition(
                                 "SUM requires an argument".to_string(),
                             ));
                         }
-                        evaluate_sum_window(partition, frame_indices, &args[0], filter, eval_fn)
+                        evaluate_sum_window(partition, frame_indices, &args[0], filter, agg_eval_fn)
                     }
                     "AVG" => {
                         if args.is_empty() {
@@ -556,7 +598,7 @@ fn evaluate_window_function_for_partition(
                                 "AVG requires an argument".to_string(),
                             ));
                         }
-                        evaluate_avg_window(partition, frame_indices, &args[0], filter, eval_fn)
+                        evaluate_avg_window(partition, frame_indices, &args[0], filter, agg_eval_fn)
                     }
                     "MIN" => {
                         if args.is_empty() {
@@ -564,7 +606,7 @@ fn evaluate_window_function_for_partition(
                                 "MIN requires an argument".to_string(),
                             ));
                         }
-                        evaluate_min_window(partition, frame_indices, &args[0], filter, eval_fn)
+                        evaluate_min_window(partition, frame_indices, &args[0], filter, agg_eval_fn)
                     }
                     "MAX" => {
                         if args.is_empty() {
@@ -572,7 +614,7 @@ fn evaluate_window_function_for_partition(
                                 "MAX requires an argument".to_string(),
                             ));
                         }
-                        evaluate_max_window(partition, frame_indices, &args[0], filter, eval_fn)
+                        evaluate_max_window(partition, frame_indices, &args[0], filter, agg_eval_fn)
                     }
                     "GROUP_CONCAT" | "STRING_AGG" => {
                         if args.is_empty() {
@@ -600,7 +642,7 @@ fn evaluate_window_function_for_partition(
                             &args[0],
                             &separator,
                             filter,
-                            eval_fn,
+                            agg_eval_fn,
                         )
                     }
                     _ => {

@@ -161,8 +161,18 @@ pub(super) fn apply_window_functions_to_aggregates(
 
         let order_by_ref = order_by_items.clone();
 
+        // Create the eval_fn closure for sorting, ranking, and frame calculations
+        let agg_eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
+            evaluator.clear_cse_cache();
+            evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
+        };
+
         for partition in &mut partitions {
-            sort_partition(partition, &order_by_ref);
+            let sort_eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
+                evaluator.clear_cse_cache();
+                evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
+            };
+            sort_partition(partition, &order_by_ref, sort_eval_fn);
         }
 
         // Compute window function values for each partition
@@ -196,13 +206,16 @@ pub(super) fn apply_window_functions_to_aggregates(
                             row_idx,
                             &order_by_ref,
                             &win_func.window_spec.frame,
+                            &agg_eval_fn,
                         );
-                        let frame_indices = frame_result.included_indices(partition, &order_by_ref);
+                        let frame_indices =
+                            frame_result.included_indices(partition, &order_by_ref, &agg_eval_fn);
 
-                        let eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
-                            evaluator.clear_cse_cache();
-                            evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
-                        };
+                        let inner_eval_fn =
+                            |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
+                                evaluator.clear_cse_cache();
+                                evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
+                            };
 
                         let value = match win_func.func_name.to_uppercase().as_str() {
                             "COUNT" => evaluate_count_window(
@@ -210,20 +223,36 @@ pub(super) fn apply_window_functions_to_aggregates(
                                 frame_indices,
                                 Some(&arg_expr),
                                 None,
-                                eval_fn,
+                                inner_eval_fn,
                             ),
-                            "SUM" => {
-                                evaluate_sum_window(partition, frame_indices, &arg_expr, None, eval_fn)
-                            }
-                            "AVG" => {
-                                evaluate_avg_window(partition, frame_indices, &arg_expr, None, eval_fn)
-                            }
-                            "MIN" => {
-                                evaluate_min_window(partition, frame_indices, &arg_expr, None, eval_fn)
-                            }
-                            "MAX" => {
-                                evaluate_max_window(partition, frame_indices, &arg_expr, None, eval_fn)
-                            }
+                            "SUM" => evaluate_sum_window(
+                                partition,
+                                frame_indices,
+                                &arg_expr,
+                                None,
+                                inner_eval_fn,
+                            ),
+                            "AVG" => evaluate_avg_window(
+                                partition,
+                                frame_indices,
+                                &arg_expr,
+                                None,
+                                inner_eval_fn,
+                            ),
+                            "MIN" => evaluate_min_window(
+                                partition,
+                                frame_indices,
+                                &arg_expr,
+                                None,
+                                inner_eval_fn,
+                            ),
+                            "MAX" => evaluate_max_window(
+                                partition,
+                                frame_indices,
+                                &arg_expr,
+                                None,
+                                inner_eval_fn,
+                            ),
                             other => {
                                 return Err(ExecutorError::UnsupportedExpression(format!(
                                     "Unsupported aggregate window function: {}",
@@ -238,22 +267,19 @@ pub(super) fn apply_window_functions_to_aggregates(
                 WindowFunctionType::Ranking => {
                     let values = match win_func.func_name.to_uppercase().as_str() {
                         "ROW_NUMBER" => evaluate_row_number(partition),
-                        "RANK" => evaluate_rank(partition, &order_by_ref),
-                        "DENSE_RANK" => evaluate_dense_rank(partition, &order_by_ref),
-                        "PERCENT_RANK" => evaluate_percent_rank(partition, &order_by_ref),
-                        "CUME_DIST" => evaluate_cume_dist(partition, &order_by_ref),
+                        "RANK" => evaluate_rank(partition, &order_by_ref, &agg_eval_fn),
+                        "DENSE_RANK" => evaluate_dense_rank(partition, &order_by_ref, &agg_eval_fn),
+                        "PERCENT_RANK" => {
+                            evaluate_percent_rank(partition, &order_by_ref, &agg_eval_fn)
+                        }
+                        "CUME_DIST" => evaluate_cume_dist(partition, &order_by_ref, &agg_eval_fn),
                         "NTILE" => {
                             // NTILE requires a constant argument
                             if partition.is_empty() {
                                 vec![]
                             } else {
                                 let n_val = if !mapped_args.is_empty() {
-                                    let eval_fn =
-                                        |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
-                                            evaluator.clear_cse_cache();
-                                            evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
-                                        };
-                                    eval_fn(&mapped_args[0], &partition.rows[0])
+                                    agg_eval_fn(&mapped_args[0], &partition.rows[0])
                                         .ok()
                                         .and_then(|v| match v {
                                             SqlValue::Integer(n) => Some(n),
