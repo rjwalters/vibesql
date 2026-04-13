@@ -47,6 +47,7 @@ set ::pragma_short_column_names 1  ;# Default: ON
 set ::pragma_case_sensitive_like 0 ;# Default: OFF (case-insensitive LIKE)
 set ::pragma_count_changes 0       ;# Default: OFF (UPDATE/DELETE return nothing)
 set ::pragma_reverse_unordered_selects 0  ;# Default: OFF (normal row order)
+set ::pragma_foreign_keys 0              ;# Default: OFF (SQLite default)
 
 # DQS (Double-Quoted Strings) mode tracking
 # When enabled, double-quoted strings are treated as string literals instead of identifiers
@@ -830,6 +831,10 @@ proc build_pragma_prefix {} {
     if {$::pragma_reverse_unordered_selects != 0} {
         append prefix "PRAGMA reverse_unordered_selects=$::pragma_reverse_unordered_selects;\n"
     }
+    # Include foreign_keys if it's been set to ON
+    if {$::pragma_foreign_keys != 0} {
+        append prefix "PRAGMA foreign_keys=$::pragma_foreign_keys;\n"
+    }
     return $prefix
 }
 
@@ -898,6 +903,18 @@ proc track_pragma_setting {sql} {
             set ::pragma_reverse_unordered_selects 1
         } else {
             set ::pragma_reverse_unordered_selects 0
+        }
+        set found 1
+    }
+
+    # Look for foreign_keys settings (find all occurrences, use last one)
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?foreign_keys\s*[=(]\s*(\w+)\s*[)]?} $sql]
+    foreach {match value} $matches {
+        set upper [string toupper $value]
+        if {$upper eq "ON" || $upper eq "TRUE" || $upper eq "YES" || $value eq "1"} {
+            set ::pragma_foreign_keys 1
+        } else {
+            set ::pragma_foreign_keys 0
         }
         set found 1
     }
@@ -1073,7 +1090,7 @@ proc execsql {sql {db ""}} {
                 }
                 continue  ;# Check for more statements
             }
-            if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check)} [string trim $sql]]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys)} [string trim $sql]]} {
                 # This PRAGMA is supported (with =value) - stop stripping
                 break
             } else {
@@ -1522,8 +1539,8 @@ proc execsql2 {sql {db ""}} {
     # Handle SQLite-specific statements
     set sql_upper [string toupper [string trim $sql]]
     if {[string match "PRAGMA*" $sql_upper]} {
-        # Allow PRAGMA full_column_names and short_column_names through
-        if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names)} $sql]} {
+        # Allow supported PRAGMAs through
+        if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|foreign_key_list|foreign_key_check|foreign_keys)} $sql]} {
             # Pass through to VibeSQL - these are supported
         } else {
             return {}  ;# Skip unsupported PRAGMA statements
@@ -3995,6 +4012,13 @@ proc integrity_check {name} {
     puts "  $name... FAILED (integrity check: $result)"
 }
 
+proc database_may_be_corrupt {} {
+    # Stub for SQLite's database_may_be_corrupt assertion
+    # In SQLite, this sets a flag to suppress certain assertions
+    # In VibeSQL, it's a no-op
+    return
+}
+
 proc db_enter {db} {
     # Stub for entering database context
     return
@@ -4131,6 +4155,7 @@ proc sqlite3 {db args} {
     set ::pragma_short_column_names 1
     set ::pragma_case_sensitive_like 0
     set ::pragma_reverse_unordered_selects 0
+    set ::pragma_foreign_keys 0
     set ::dqs_dml_mode 0  ;# Reset DQS mode for new database
 
     # Create db command alias - if name is not "db" (which already exists)
@@ -4391,6 +4416,7 @@ proc reset_db {} {
     set ::pragma_short_column_names 1
     set ::pragma_case_sensitive_like 0
     set ::pragma_reverse_unordered_selects 0
+    set ::pragma_foreign_keys 0
 }
 
 proc forcedelete {args} {

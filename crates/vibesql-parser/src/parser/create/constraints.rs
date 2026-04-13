@@ -380,34 +380,18 @@ impl Parser {
                 }
                 Token::Keyword { keyword: Keyword::References, .. } => {
                     self.advance(); // consume REFERENCES
-                    let table = match self.peek() {
-                        Token::Identifier(t) => {
-                            let table_name = t.clone();
-                            self.advance();
-                            table_name
-                        }
-                        _ => {
-                            return Err(ParseError {
-                                message: "Expected table name after REFERENCES".to_string(),
-                            })
-                        }
-                    };
+                    // Accept both regular and quoted identifiers (e.g., REFERENCES t1, REFERENCES "t1")
+                    let table = self.parse_identifier().map_err(|_| ParseError {
+                        message: "Expected table name after REFERENCES".to_string(),
+                    })?;
 
                     // Column specification is optional in SQLite - defaults to PK
                     let column = if self.peek() == &Token::LParen {
                         self.advance(); // consume LParen
-                        let col_name = match self.peek() {
-                            Token::Identifier(c) => {
-                                let name = c.clone();
-                                self.advance();
-                                name
-                            }
-                            _ => {
-                                return Err(ParseError {
-                                    message: "Expected column name in REFERENCES".to_string(),
-                                })
-                            }
-                        };
+                        // Accept both regular and quoted identifiers for column names
+                        let col_name = self.parse_identifier().map_err(|_| ParseError {
+                            message: "Expected column name in REFERENCES".to_string(),
+                        })?;
                         self.expect_token(Token::RParen)?;
                         Some(col_name)
                     } else {
@@ -536,17 +520,11 @@ impl Parser {
 
                 let mut columns = Vec::new();
                 loop {
-                    match self.peek() {
-                        Token::Identifier(col) => {
-                            columns.push(col.clone());
-                            self.advance();
-                        }
-                        _ => {
-                            return Err(ParseError {
-                                message: "Expected column name in FOREIGN KEY".to_string(),
-                            })
-                        }
-                    }
+                    // Accept both regular and quoted identifiers for column names
+                    let col = self.parse_identifier().map_err(|_| ParseError {
+                        message: "Expected column name in FOREIGN KEY".to_string(),
+                    })?;
+                    columns.push(col);
 
                     if matches!(self.peek(), Token::Comma) {
                         self.advance();
@@ -558,43 +536,32 @@ impl Parser {
                 self.expect_token(Token::RParen)?;
                 self.expect_keyword(Keyword::References)?;
 
-                let references_table = match self.peek() {
-                    Token::Identifier(t) => {
-                        let table_name = t.clone();
-                        self.advance();
-                        table_name
-                    }
-                    _ => {
-                        return Err(ParseError {
-                            message: "Expected table name after REFERENCES".to_string(),
-                        })
-                    }
-                };
+                // Accept both regular and quoted identifiers for table names
+                let references_table = self.parse_identifier().map_err(|_| ParseError {
+                    message: "Expected table name after REFERENCES".to_string(),
+                })?;
 
-                self.expect_token(Token::LParen)?;
-
+                // Column specification is optional - if omitted, defaults to PK
                 let mut references_columns = Vec::new();
-                loop {
-                    match self.peek() {
-                        Token::Identifier(col) => {
-                            references_columns.push(col.clone());
+                if self.peek() == &Token::LParen {
+                    self.advance(); // consume LParen
+
+                    loop {
+                        // Accept both regular and quoted identifiers for column names
+                        let col = self.parse_identifier().map_err(|_| ParseError {
+                            message: "Expected column name in REFERENCES".to_string(),
+                        })?;
+                        references_columns.push(col);
+
+                        if matches!(self.peek(), Token::Comma) {
                             self.advance();
-                        }
-                        _ => {
-                            return Err(ParseError {
-                                message: "Expected column name in REFERENCES".to_string(),
-                            })
+                        } else {
+                            break;
                         }
                     }
 
-                    if matches!(self.peek(), Token::Comma) {
-                        self.advance();
-                    } else {
-                        break;
-                    }
+                    self.expect_token(Token::RParen)?;
                 }
-
-                self.expect_token(Token::RParen)?;
 
                 let (on_delete, on_update) = self.parse_referential_actions()?;
                 let deferral = self.parse_constraint_deferral()?;
