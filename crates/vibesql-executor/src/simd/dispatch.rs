@@ -141,25 +141,9 @@ pub mod dispatched {
         a.iter().zip(b.iter()).map(|(x, y)| x * y).collect()
     }
 
-    /// Sum all elements of a f64 vector
+    /// Sum all elements of a f64 vector, using explicit SIMD intrinsics.
     pub fn sum_f64(values: &[f64]) -> f64 {
-        // Use 4-accumulator pattern for LLVM auto-vectorization
-        let (mut s0, mut s1, mut s2, mut s3) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
-        let chunks = values.len() / 4;
-
-        for i in 0..chunks {
-            let off = i * 4;
-            s0 += values[off];
-            s1 += values[off + 1];
-            s2 += values[off + 2];
-            s3 += values[off + 3];
-        }
-
-        let mut sum = s0 + s1 + s2 + s3;
-        for value in &values[(chunks * 4)..] {
-            sum += value;
-        }
-        sum
+        crate::select::columnar::simd_ops::intrinsics::sum_f64(values)
     }
 
     /// Get the currently active SIMD level

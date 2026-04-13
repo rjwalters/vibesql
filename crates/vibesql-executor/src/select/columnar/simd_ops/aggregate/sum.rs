@@ -34,38 +34,28 @@ pub fn sum_i64(values: &[i64]) -> i64 {
     sum
 }
 
-/// Sum of f64 values using 4-accumulator auto-vectorization pattern.
+/// Sum of f64 values using explicit SIMD intrinsics.
 ///
-/// Performance: Matches explicit SIMD (~2ms for 10M elements).
+/// Dispatches to NEON (aarch64), AVX2 (x86_64), or scalar fallback.
 /// WARNING: Do NOT replace with `.iter().sum()` - it's 4x slower!
 #[inline]
 pub fn sum_f64(values: &[f64]) -> f64 {
-    let (mut s0, mut s1, mut s2, mut s3) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
-    let chunks = values.len() / 4;
-
-    for i in 0..chunks {
-        let off = i * 4;
-        s0 += values[off];
-        s1 += values[off + 1];
-        s2 += values[off + 2];
-        s3 += values[off + 3];
-    }
-
-    let mut sum = s0 + s1 + s2 + s3;
-    for i in (chunks * 4)..values.len() {
-        sum += values[i];
-    }
-    sum
+    super::super::intrinsics::sum_f64(values)
 }
 
 // ============================================================================
 // FILTERED SUM OPERATIONS (boolean mask)
 // ============================================================================
 
-/// Sum of f64 values where filter_mask[i] == true, using 4-accumulator pattern.
+/// Sum of f64 values where filter_mask[i] == true, using explicit SIMD.
 ///
 /// This fuses filtering and aggregation to avoid intermediate allocations.
-/// For simple aggregates like Q6, this can provide 2-3x speedup.
+/// Dispatches to NEON (aarch64), AVX2 (x86_64), or scalar fallback based
+/// on runtime CPU feature detection. Uses branchless SIMD blend instructions
+/// (`vbslq_f64` / `_mm256_blendv_pd`) instead of conditional branches,
+/// providing 2-4x improvement over auto-vectorized code for filtered sums.
+///
+/// This is the hottest path in TPC-H Q1 and Q6.
 ///
 /// # Arguments
 /// * `values` - Array of values to aggregate
@@ -82,35 +72,7 @@ pub fn sum_f64_filtered(values: &[f64], filter_mask: &[bool]) -> f64 {
         return 0.0;
     }
 
-    // Use 4-accumulator pattern with conditional adds
-    let (mut s0, mut s1, mut s2, mut s3) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
-    let chunks = len / 4;
-
-    for i in 0..chunks {
-        let off = i * 4;
-        // 4-accumulator pattern: reduces loop-carried dependencies
-        // The compiler may auto-vectorize these conditional adds
-        if filter_mask[off] {
-            s0 += values[off];
-        }
-        if filter_mask[off + 1] {
-            s1 += values[off + 1];
-        }
-        if filter_mask[off + 2] {
-            s2 += values[off + 2];
-        }
-        if filter_mask[off + 3] {
-            s3 += values[off + 3];
-        }
-    }
-
-    let mut sum = s0 + s1 + s2 + s3;
-    for i in (chunks * 4)..len {
-        if filter_mask[i] {
-            sum += values[i];
-        }
-    }
-    sum
+    super::super::intrinsics::sum_f64_filtered(values, filter_mask)
 }
 
 /// Sum of i64 values where filter_mask[i] == true.
