@@ -610,6 +610,7 @@ impl SelectExecutor<'_> {
                 result_rows,
                 &expanded_select_list,
                 self.database,
+                stmt.window_definitions.as_ref(),
             )?
         } else {
             result_rows
