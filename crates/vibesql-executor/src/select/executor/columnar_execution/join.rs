@@ -8,10 +8,11 @@ use std::collections::HashMap;
 use vibesql_ast::{FromClause, JoinType, SelectItem};
 
 use super::join_helpers::{
-    build_combined_schema, extract_equijoin_conditions, extract_join_conditions,
-    extract_non_join_predicates, flatten_join_tree_simple, flatten_join_tree_with_types,
-    has_cross_join_with_on_condition, is_columnar_supported_join, is_column_in_table,
-    is_column_in_tables, resolve_join_column_indices, EquiJoinCondition,
+    build_combined_schema, expression_has_is_null, extract_equijoin_conditions,
+    extract_join_conditions, extract_non_join_predicates, flatten_join_tree_simple,
+    flatten_join_tree_with_types, has_cross_join_with_on_condition, has_outer_join,
+    is_columnar_supported_join, is_column_in_table, is_column_in_tables,
+    resolve_join_column_indices, EquiJoinCondition,
 };
 use crate::{
     errors::ExecutorError,
@@ -114,6 +115,22 @@ impl SelectExecutor<'_> {
         if has_cross_join_with_on_condition(from_clause) {
             log::debug!("Columnar join: CROSS JOIN with ON condition detected, falling back");
             return Ok(None);
+        }
+
+        // Outer joins with IS NULL / IS NOT NULL in WHERE clause need row-oriented execution.
+        // The columnar SIMD filter does not support null-testing predicates (IS NULL / IS NOT NULL),
+        // so they are silently dropped during predicate extraction. For outer joins this causes
+        // incorrect results — e.g., anti-join pattern `LEFT JOIN ... WHERE t2.col IS NULL` would
+        // return all rows instead of only unmatched rows.
+        if has_outer_join(from_clause) {
+            if let Some(ref where_clause) = stmt.where_clause {
+                if expression_has_is_null(where_clause) {
+                    log::debug!(
+                        "Columnar join: outer join with IS NULL/IS NOT NULL in WHERE, falling back"
+                    );
+                    return Ok(None);
+                }
+            }
         }
 
         // Flatten the join tree to get all tables with their join types

@@ -48,6 +48,41 @@ pub(super) fn is_columnar_supported_join(from: &FromClause) -> bool {
     }
 }
 
+/// Check if a FROM clause contains any outer join (LEFT, RIGHT, or FULL OUTER)
+///
+/// Used to detect when WHERE clause predicates like IS NULL / IS NOT NULL
+/// need special handling, since the columnar SIMD filter doesn't support
+/// null-testing predicates and would silently drop them.
+pub(super) fn has_outer_join(from: &FromClause) -> bool {
+    match from {
+        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => false,
+        FromClause::Join { left, right, join_type, .. } => {
+            matches!(
+                join_type,
+                JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter
+            ) || has_outer_join(left)
+                || has_outer_join(right)
+        }
+    }
+}
+
+/// Check if an expression contains IS NULL or IS NOT NULL predicates
+///
+/// The columnar SIMD filter path does not support IS NULL / IS NOT NULL predicates,
+/// so they are silently dropped. For outer joins this produces incorrect results
+/// because post-join null-testing (e.g., anti-join pattern `LEFT JOIN ... WHERE right.col IS NULL`)
+/// is essential for correctness.
+pub(super) fn expression_has_is_null(expr: &Expression) -> bool {
+    match expr {
+        Expression::IsNull { .. } => true,
+        Expression::BinaryOp { left, right, .. } => {
+            expression_has_is_null(left) || expression_has_is_null(right)
+        }
+        Expression::UnaryOp { expr, .. } => expression_has_is_null(expr),
+        _ => false,
+    }
+}
+
 /// Check if a FROM clause contains a CROSS JOIN with a join condition
 ///
 /// CROSS JOIN with ON condition is semantically invalid SQL.
