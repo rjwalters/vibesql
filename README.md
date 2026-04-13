@@ -1,6 +1,6 @@
 # VibeSQL
 
-[![CI](https://github.com/rjwalters/vibesql/actions/workflows/ci.yml/badge.svg)](https://github.com/rjwalters/vibesql/actions/workflows/ci.yml)
+[![CI](https://github.com/rjwalters/vibesql/actions/workflows/ci-main.yml/badge.svg)](https://github.com/rjwalters/vibesql/actions/workflows/ci-main.yml)
 [![Demo](https://img.shields.io/badge/demo-live-success)](https://vibesql.org/)
 [![sqltest](https://img.shields.io/endpoint?url=https://vibesql.org/badges/sql1999-conformance.json)](https://vibesql.org/conformance.html)
 [![SQLLogicTest](https://img.shields.io/endpoint?url=https://vibesql.org/badges/sqllogictest.json)](https://vibesql.org/conformance.html#SQLlogicTest)
