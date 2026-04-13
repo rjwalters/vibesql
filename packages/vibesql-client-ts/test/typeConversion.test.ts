@@ -382,7 +382,7 @@ describe('parseColumnValue', () => {
       // PostgreSQL escapes quotes with backslash in array literals
       // The input is: {"{\\"a\\":1}","{\\"b\\":2}"}
       // Which represents array elements: {"a":1} and {"b":2}
-      const input = '{"{\\\"a\\\":1}","{\\\"b\\\":2}"}';
+      const input = '{"{\\"a\\":1}","{\\"b\\":2}"}';
       const result = parseColumnValue(input, PgTypeOid.JSON_ARRAY) as unknown[];
       expect(result).toEqual([{ a: 1 }, { b: 2 }]);
     });

@@ -23,8 +23,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint": "eslint src test --ext .ts",
-    "lint:fix": "eslint src test --ext .ts --fix",
+    "lint": "eslint src test",
+    "lint:fix": "eslint src test --fix",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\""
   },
@@ -56,16 +56,16 @@
     "LICENSE"
   ],
   "devDependencies": {
-    "@types/node": "^20.10.0",
-    "@types/react": "^19.2.7",
-    "@typescript-eslint/eslint-plugin": "^6.13.0",
-    "@typescript-eslint/parser": "^6.13.0",
-    "@vitest/coverage-v8": "^1.0.0",
-    "eslint": "^8.54.0",
-    "prettier": "^3.1.0",
-    "react": "^18.2.0",
-    "tsup": "^8.0.1",
-    "typescript": "^5.3.3",
-    "vitest": "^1.0.0"
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^20.19.39",
+    "@types/react": "^19.2.14",
+    "@vitest/coverage-v8": "^2.0.0",
+    "eslint": "^9.39.4",
+    "prettier": "^3.8.2",
+    "react": "^18.3.1",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.58.1",
+    "vitest": "^2.0.0"
   }
 }
