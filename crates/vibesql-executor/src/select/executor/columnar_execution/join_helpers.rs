@@ -26,6 +26,28 @@ pub(super) fn is_inner_or_cross_join_only(from: &FromClause) -> bool {
     }
 }
 
+/// Check if a FROM clause only contains join types supported by the columnar path
+///
+/// Supported join types:
+/// - INNER JOIN (explicit `JOIN ... ON` syntax)
+/// - CROSS JOIN (comma-separated tables `FROM a, b`)
+/// - LEFT OUTER JOIN (preserves all left rows, NULLs for unmatched right)
+/// - RIGHT OUTER JOIN (preserves all right rows, NULLs for unmatched left)
+///
+/// FULL OUTER, SEMI, and ANTI joins are not yet supported in the columnar path.
+pub(super) fn is_columnar_supported_join(from: &FromClause) -> bool {
+    match from {
+        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => true,
+        FromClause::Join { left, right, join_type, .. } => {
+            matches!(
+                join_type,
+                JoinType::Inner | JoinType::Cross | JoinType::LeftOuter | JoinType::RightOuter
+            ) && is_columnar_supported_join(left)
+                && is_columnar_supported_join(right)
+        }
+    }
+}
+
 /// Check if a FROM clause contains a CROSS JOIN with a join condition
 ///
 /// CROSS JOIN with ON condition is semantically invalid SQL.
@@ -72,6 +94,63 @@ pub(super) fn flatten_join_tree_simple(from: &FromClause, tables: &mut Vec<Simpl
     }
 }
 
+/// Flatten a join tree into a list of table references with their join types.
+///
+/// The first table in the list has no join type (it's the leftmost table in the tree).
+/// Each subsequent table has the JoinType that connects it to the previously joined tables.
+///
+/// For a query like `FROM a INNER JOIN b ON ... LEFT JOIN c ON ...`, this produces:
+/// - (a_info, None)
+/// - (b_info, Some(Inner))
+/// - (c_info, Some(LeftOuter))
+pub(super) fn flatten_join_tree_with_types(
+    from: &FromClause,
+    tables: &mut Vec<(SimpleTableRef, Option<JoinType>)>,
+) {
+    match from {
+        FromClause::Table { name, alias, .. } => {
+            tables.push(((name.clone(), alias.clone(), false), None));
+        }
+        FromClause::Subquery { alias, .. } => {
+            tables.push(((alias.clone(), Some(alias.clone()), true), None));
+        }
+        FromClause::Values { alias, .. } => {
+            tables.push(((alias.clone(), Some(alias.clone()), true), None));
+        }
+        FromClause::Join { left, right, join_type, .. } => {
+            flatten_join_tree_with_types(left, tables);
+            // The right side of this join node gets the join type
+            match right.as_ref() {
+                FromClause::Table { name, alias, .. } => {
+                    tables.push(((name.clone(), alias.clone(), false), Some(join_type.clone())));
+                }
+                FromClause::Subquery { alias, .. } => {
+                    tables.push((
+                        (alias.clone(), Some(alias.clone()), true),
+                        Some(join_type.clone()),
+                    ));
+                }
+                FromClause::Values { alias, .. } => {
+                    tables.push((
+                        (alias.clone(), Some(alias.clone()), true),
+                        Some(join_type.clone()),
+                    ));
+                }
+                FromClause::Join { .. } => {
+                    // Nested join on the right side - flatten it but mark the first
+                    // entry with this join's type
+                    let start_idx = tables.len();
+                    flatten_join_tree_with_types(right, tables);
+                    // Override the join type of the first table from the nested join
+                    if start_idx < tables.len() {
+                        tables[start_idx].1 = Some(join_type.clone());
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Equi-join condition: left_table.left_column = right_table.right_column
 #[derive(Debug, Clone)]
 pub(super) struct EquiJoinCondition {
@@ -86,9 +165,12 @@ pub(super) fn extract_join_conditions(from: &FromClause, conditions: &mut Vec<Eq
     match from {
         FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => {}
         FromClause::Join { left, right, condition, join_type, .. } => {
-            // Only handle INNER and CROSS joins in columnar path
-            // OUTER joins need special handling and are not supported
-            if !matches!(join_type, JoinType::Inner | JoinType::Cross) {
+            // Handle INNER, CROSS, LEFT OUTER, and RIGHT OUTER joins in columnar path
+            // FULL OUTER, SEMI, and ANTI joins are not supported
+            if !matches!(
+                join_type,
+                JoinType::Inner | JoinType::Cross | JoinType::LeftOuter | JoinType::RightOuter
+            ) {
                 return;
             }
 
