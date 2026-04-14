@@ -208,9 +208,86 @@ impl CombinedExpressionEvaluator<'_> {
                 } else {
                     crate::select::SelectExecutor::new_with_depth(database, self.depth)
                 };
-                let rows = select_executor.execute(subquery)?;
-                self.subquery_cache.borrow_mut().put(cache_key, rows.clone());
-                rows
+                match select_executor.execute(subquery) {
+                    Ok(rows) => {
+                        self.subquery_cache.borrow_mut().put(cache_key, rows.clone());
+                        rows
+                    }
+                    Err(ExecutorError::ColumnNotFound { .. }) => {
+                        // Correlation detection heuristic was wrong - this subquery
+                        // actually references columns from the outer scope (e.g.,
+                        // unqualified column refs in nested derived tables).
+                        // Retry with outer context for column resolution.
+                        let merged_schema =
+                            if !self.schema.table_schemas.is_empty() || self.outer_schema.is_some()
+                            {
+                                Some(build_merged_outer_schema(self.schema, self.outer_schema))
+                            } else {
+                                None
+                            };
+
+                        let merged_row = if merged_schema.is_some() {
+                            Some(build_merged_outer_row(row, self.outer_row))
+                        } else {
+                            None
+                        };
+
+                        let retry_executor = if let (Some(ref schema), Some(ref outer_row)) =
+                            (&merged_schema, &merged_row)
+                        {
+                            if let Some(cte_ctx) = self.cte_context {
+                                crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
+                                    database,
+                                    outer_row,
+                                    schema,
+                                    cte_ctx,
+                                    self.depth,
+                                )
+                            } else {
+                                crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                                    database,
+                                    outer_row,
+                                    schema,
+                                    self.depth,
+                                )
+                            }
+                        } else if let Some(cte_ctx) = self.cte_context {
+                            crate::select::SelectExecutor::new_with_cte_and_depth(
+                                database, cte_ctx, self.depth,
+                            )
+                        } else {
+                            crate::select::SelectExecutor::new(database)
+                        };
+                        let rows = retry_executor.execute(subquery)?;
+
+                        let column_count = if !rows.is_empty() {
+                            rows[0].values.len()
+                        } else {
+                            compute_select_list_column_count(
+                                subquery,
+                                database,
+                                self.cte_context,
+                            )?
+                        };
+
+                        if column_count != 1 {
+                            return Err(ExecutorError::SubqueryColumnCountMismatch {
+                                expected: 1,
+                                actual: column_count,
+                            });
+                        }
+
+                        return eval_in_linear(
+                            &expr_val,
+                            &rows,
+                            negated,
+                            sql_mode,
+                            left_affinity,
+                            subquery_affinity,
+                        );
+                    }
+                    Err(e) => return Err(e),
+                }
             };
 
             // Validate column count

@@ -116,10 +116,12 @@ impl Parser {
                 // Parenthesized expression: could be a subquery, VALUES, or a JOIN expression
                 self.advance(); // Consume '('
 
-                // Check if this is a subquery (starts with SELECT), VALUES, or a table
+                // Check if this is a subquery (starts with SELECT or WITH), VALUES, or a table
                 // reference/JOIN
-                let result = if self.peek_keyword(Keyword::Select) {
-                    // Parse the SELECT statement (subquery)
+                let result = if self.peek_keyword(Keyword::Select)
+                    || self.peek_keyword(Keyword::With)
+                {
+                    // Parse the SELECT statement (subquery, possibly with CTE)
                     let query = Box::new(self.parse_select_statement()?);
 
                     // Expect closing ')'

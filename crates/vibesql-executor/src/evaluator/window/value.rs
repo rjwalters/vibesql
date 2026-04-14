@@ -37,9 +37,16 @@ where
 {
     let offset_val = offset.unwrap_or(1);
 
-    // Validate offset is non-negative
+    // Negative offset means look forward (equivalent to LEAD with positive offset)
     if offset_val < 0 {
-        return Err(format!("LAG offset must be non-negative, got {}", offset_val));
+        return evaluate_lead(
+            partition,
+            current_row_idx,
+            value_expr,
+            Some(-offset_val),
+            default,
+            eval_fn,
+        );
     }
 
     // Calculate target row index (current_row_idx - offset)
@@ -87,9 +94,16 @@ where
 {
     let offset_val = offset.unwrap_or(1);
 
-    // Validate offset is non-negative
+    // Negative offset means look backward (equivalent to LAG with positive offset)
     if offset_val < 0 {
-        return Err(format!("LEAD offset must be non-negative, got {}", offset_val));
+        return evaluate_lag(
+            partition,
+            current_row_idx,
+            value_expr,
+            Some(-offset_val),
+            default,
+            eval_fn,
+        );
     }
 
     // Calculate target row index (current_row_idx + offset)

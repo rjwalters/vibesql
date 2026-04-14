@@ -258,25 +258,27 @@ fn test_lag_lead_with_zero_offset() {
 // ===== Error Tests =====
 
 #[test]
-fn test_lag_negative_offset_error() {
-    // LAG with negative offset should return error
+fn test_lag_negative_offset_becomes_lead() {
+    // LAG with negative offset is equivalent to LEAD with positive offset
+    // LAG(x, -1) at row 1 (value=20) should look forward 1 row -> value 30
     let partition = Partition::new(make_test_rows(vec![10, 20, 30]));
 
     let value_expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("0", false));
 
     let result = evaluate_lag(&partition, 1, &value_expr, Some(-1), None, simple_eval);
-    assert!(result.is_err());
-    assert!(result.unwrap_err().contains("non-negative"));
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), SqlValue::Integer(30));
 }
 
 #[test]
-fn test_lead_negative_offset_error() {
-    // LEAD with negative offset should return error
+fn test_lead_negative_offset_becomes_lag() {
+    // LEAD with negative offset is equivalent to LAG with positive offset
+    // LEAD(x, -1) at row 1 (value=20) should look back 1 row -> value 10
     let partition = Partition::new(make_test_rows(vec![10, 20, 30]));
 
     let value_expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("0", false));
 
     let result = evaluate_lead(&partition, 1, &value_expr, Some(-1), None, simple_eval);
-    assert!(result.is_err());
-    assert!(result.unwrap_err().contains("non-negative"));
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), SqlValue::Integer(10));
 }

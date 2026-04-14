@@ -184,7 +184,7 @@ pub fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<Column
             }
         }
 
-        Expression::AggregateFunction { args, order_by, .. } => {
+        Expression::AggregateFunction { args, order_by, filter, .. } => {
             for arg in args {
                 collect_columns_from_expr(arg, columns);
             }
@@ -193,6 +193,11 @@ pub fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<Column
                 for item in order_items {
                     collect_columns_from_expr(&item.expr, columns);
                 }
+            }
+            // Also collect columns from FILTER clause within the aggregate
+            // e.g., COUNT(a) FILTER (WHERE b='odd') requires column 'b'
+            if let Some(filter_expr) = filter {
+                collect_columns_from_expr(filter_expr, columns);
             }
         }
 
