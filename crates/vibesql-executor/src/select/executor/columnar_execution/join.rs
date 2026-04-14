@@ -4,6 +4,7 @@
 //! providing 3-5x improvement for JOIN-heavy queries like TPC-H Q3, Q5, Q7-Q10, Q19.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use vibesql_ast::{FromClause, JoinType, SelectItem};
 
@@ -63,8 +64,8 @@ impl SelectExecutor<'_> {
         stmt: &vibesql_ast::SelectStmt,
         cte_results: &HashMap<String, CteResult>,
     ) -> Result<Option<Vec<vibesql_storage::Row>>, ExecutorError> {
-        // Disable via env var for debugging
-        if std::env::var("VIBESQL_DISABLE_COLUMNAR_JOIN").is_ok() {
+        // Disable via env var for debugging (cached to avoid per-query global lock)
+        if is_columnar_join_disabled() {
             log::debug!("Columnar join: disabled via VIBESQL_DISABLE_COLUMNAR_JOIN");
             return Ok(None);
         }
@@ -152,6 +153,63 @@ impl SelectExecutor<'_> {
             log::debug!("Columnar join: skipping - contains subqueries");
             return Ok(None);
         }
+
+        // ── Early bail-out checks (#5047) ──────────────────────────────────
+        // These checks detect queries the columnar join path cannot fully
+        // handle BEFORE we do any expensive work (table loading, hash joins,
+        // SIMD filtering). Without these, the columnar path would do all
+        // that work and then discover it can't handle the GROUP BY / aggregate
+        // / subquery predicate, return Ok(None), and the row-oriented path
+        // would redo everything from scratch.
+
+        // 1. WHERE clause subquery predicates (Q18: IN (SELECT ...))
+        //    Must bail before join, not after.
+        if let Some(ref where_clause) = stmt.where_clause {
+            if contains_unsupported_predicates(where_clause) {
+                log::debug!(
+                    "Columnar join: WHERE contains unsupported predicates (subquery/EXISTS), skipping early"
+                );
+                return Ok(None);
+            }
+        }
+
+        // 2. GROUP BY with non-column expressions (Q7: GROUP BY strftime(...))
+        //    The columnar join GROUP BY path only supports simple ColumnRef keys.
+        if let Some(ref group_by_clause) = stmt.group_by {
+            match group_by_clause.as_simple() {
+                Some(exprs) => {
+                    if exprs.iter().any(|e| !matches!(e, vibesql_ast::Expression::ColumnRef(_))) {
+                        log::debug!(
+                            "Columnar join: GROUP BY has non-column expressions, skipping early"
+                        );
+                        return Ok(None);
+                    }
+                }
+                None => {
+                    // ROLLUP/CUBE/GROUPING SETS not supported
+                    log::debug!(
+                        "Columnar join: ROLLUP/CUBE/GROUPING SETS not supported, skipping early"
+                    );
+                    return Ok(None);
+                }
+            }
+        }
+
+        // 3. Aggregate function args the columnar join path can't handle
+        //    (Q12: SUM(CASE WHEN ...), Q10: SUM(expr * expr) => Expression aggregate)
+        //    The join GROUP BY path rejects AggregateSource::Expression entirely,
+        //    so any aggregate arg that isn't a simple ColumnRef or Wildcard will
+        //    cause a late bail-out. Check this up front.
+        if stmt.group_by.is_some() {
+            if has_unsupported_join_aggregates(&stmt.select_list) {
+                log::debug!(
+                    "Columnar join: SELECT has aggregate args unsupported in join path, skipping early"
+                );
+                return Ok(None);
+            }
+        }
+
+        // ── End early bail-out checks ──────────────────────────────────────
 
         // Extract join types for the chain (first table has no join type)
         let join_types: Vec<Option<JoinType>> =
@@ -701,6 +759,100 @@ fn contains_unsupported_predicates(expr: &vibesql_ast::Expression) -> bool {
         vibesql_ast::Expression::UnaryOp { expr, .. } => contains_unsupported_predicates(expr),
 
         // Other expressions don't contain subqueries
+        _ => false,
+    }
+}
+
+/// Cached check for VIBESQL_DISABLE_COLUMNAR_JOIN environment variable.
+///
+/// Uses `OnceLock` to read the env var once (avoiding the per-query global lock
+/// that `std::env::var()` acquires).
+fn is_columnar_join_disabled() -> bool {
+    static DISABLED: OnceLock<bool> = OnceLock::new();
+    *DISABLED.get_or_init(|| std::env::var("VIBESQL_DISABLE_COLUMNAR_JOIN").is_ok())
+}
+
+/// Check if the SELECT list contains aggregate functions with arguments that
+/// the columnar JOIN GROUP BY path cannot handle.
+///
+/// The join GROUP BY path (`execute_columnar_join_group_by`) only supports:
+/// - `AggregateSource::Column` (simple column ref like `SUM(col)`)
+/// - `AggregateSource::CountStar` (COUNT(*))
+///
+/// It explicitly rejects `AggregateSource::Expression` (e.g., `SUM(a * b)`),
+/// and `extract_aggregates` returns `None` for CASE, function calls, and other
+/// complex argument types. This function detects those patterns early so we
+/// can skip the expensive table loading and hash join work.
+fn has_unsupported_join_aggregates(select_list: &[SelectItem]) -> bool {
+    for item in select_list {
+        let expr = match item {
+            SelectItem::Expression { expr, .. } => expr,
+            _ => continue,
+        };
+        if check_expr_for_unsupported_agg(expr) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Recursively check an expression tree for aggregate functions with
+/// unsupported argument types in the columnar join path.
+fn check_expr_for_unsupported_agg(expr: &vibesql_ast::Expression) -> bool {
+    match expr {
+        vibesql_ast::Expression::AggregateFunction { args, distinct, .. } => {
+            // DISTINCT aggregates not supported in columnar path
+            if *distinct {
+                return true;
+            }
+            // COUNT(*) / COUNT() -- always OK
+            if args.is_empty() {
+                return false;
+            }
+            if args.len() == 1 {
+                match &args[0] {
+                    vibesql_ast::Expression::Wildcard => false,        // COUNT(*)
+                    vibesql_ast::Expression::ColumnRef(_) => false,    // SUM(col)
+                    // Everything else (BinaryOp, CASE, Function, etc.) will be
+                    // rejected by the join GROUP BY path, either as an
+                    // unsupported arg type or as AggregateSource::Expression.
+                    _ => true,
+                }
+            } else {
+                // Multiple arguments not supported
+                true
+            }
+        }
+        // Recurse into expression wrappers that may contain aggregates
+        vibesql_ast::Expression::BinaryOp { left, right, .. } => {
+            check_expr_for_unsupported_agg(left) || check_expr_for_unsupported_agg(right)
+        }
+        vibesql_ast::Expression::UnaryOp { expr, .. } => check_expr_for_unsupported_agg(expr),
+        vibesql_ast::Expression::Cast { expr, .. } => check_expr_for_unsupported_agg(expr),
+        vibesql_ast::Expression::Case {
+            operand,
+            when_clauses,
+            else_result,
+        } => {
+            if operand.as_ref().is_some_and(|e| check_expr_for_unsupported_agg(e)) {
+                return true;
+            }
+            for w in when_clauses {
+                if w.conditions.iter().any(check_expr_for_unsupported_agg)
+                    || check_expr_for_unsupported_agg(&w.result)
+                {
+                    return true;
+                }
+            }
+            if else_result.as_ref().is_some_and(|e| check_expr_for_unsupported_agg(e)) {
+                return true;
+            }
+            false
+        }
+        vibesql_ast::Expression::Function { args, .. } => {
+            args.iter().any(check_expr_for_unsupported_agg)
+        }
+        // Leaf expressions and other variants don't contain aggregates
         _ => false,
     }
 }
