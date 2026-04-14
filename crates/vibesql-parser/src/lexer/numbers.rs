@@ -3,11 +3,13 @@ use crate::token::Token;
 
 impl<'a> Lexer<'a> {
     /// Tokenize a number literal.
-    /// Supports integers, decimals, scientific notation (E-notation), and hex literals.
-    /// Examples: 42, 3.14, 2.5E+10, 1.2E-5, .2E+2, 0x1A, 0xFF
+    /// Supports integers, decimals, scientific notation (E-notation), hex literals,
+    /// and underscore-separated digits (e.g., 1_000_000).
+    /// Examples: 42, 3.14, 2.5E+10, 1.2E-5, .2E+2, 0x1A, 0xFF, 10_000_000_000
     pub(super) fn tokenize_number(&mut self) -> Result<Token, LexerError> {
         let start = self.position();
         let mut has_dot = false;
+        let mut has_underscore = false;
 
         // Handle leading decimal point (e.g., .5)
         if !self.is_eof() && self.current_char() == '.' {
@@ -28,6 +30,12 @@ impl<'a> Lexer<'a> {
         while !self.is_eof() {
             let ch = self.current_char();
             if ch.is_ascii_digit() {
+                self.advance();
+            } else if ch == '_' && !has_dot {
+                // SQLite 3.46+ supports underscores as digit separators in integer literals
+                // e.g., 1_000_000_000, 10_000
+                // Only allowed between digits, not in decimal/float parts
+                has_underscore = true;
                 self.advance();
             } else if ch == '.' && !has_dot {
                 has_dot = true;
@@ -71,7 +79,13 @@ impl<'a> Lexer<'a> {
         }
 
         let number = self.slice_from(start).to_string();
-        Ok(Token::Number(number))
+        // Strip underscores from the token value so downstream sees a plain number
+        if has_underscore {
+            let stripped = number.replace('_', "");
+            Ok(Token::Number(stripped))
+        } else {
+            Ok(Token::Number(number))
+        }
     }
 
     /// Tokenize a hexadecimal literal (0x... or 0X...).
@@ -257,6 +271,33 @@ mod tests {
             let mut lexer = Lexer::new(input);
             let result = lexer.tokenize();
             assert!(result.is_err(), "Expected error for input: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_underscore_separated_integers() {
+        // SQLite 3.46+ supports underscores as digit separators in integer literals
+        let test_cases = vec![
+            ("1_000", "1000"),
+            ("1_000_000", "1000000"),
+            ("10_000_000_000", "10000000000"),
+            ("1_2_3", "123"),
+            ("100_00", "10000"),
+        ];
+
+        for (input, expected) in test_cases {
+            let mut lexer = Lexer::new(input);
+            let tokens =
+                lexer.tokenize().unwrap_or_else(|_| panic!("Failed to tokenize: {}", input));
+
+            assert_eq!(tokens.len(), 2, "Input: {}", input);
+
+            match &tokens[0] {
+                Token::Number(n) => assert_eq!(n, expected, "Input: {}", input),
+                other => panic!("Expected Number token for {}, got {:?}", input, other),
+            }
+
+            assert_eq!(tokens[1], Token::Eof);
         }
     }
 }
