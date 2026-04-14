@@ -66,7 +66,13 @@ pub enum ColumnPredicate {
     Between { column_idx: usize, low: SqlValue, high: SqlValue },
 
     /// column LIKE pattern
-    Like { column_idx: usize, pattern: String, negated: bool },
+    Like {
+        column_idx: usize,
+        pattern: String,
+        negated: bool,
+        case_sensitive: bool,
+        escape: Option<char>,
+    },
 
     /// column IN (value1, value2, ...)
     /// The `use_strict_type_ordering` flag indicates whether to use SQLite's strict
@@ -190,11 +196,15 @@ fn remap_predicate(predicate: &ColumnPredicate, column_mapping: &[usize]) -> Col
             low: low.clone(),
             high: high.clone(),
         },
-        ColumnPredicate::Like { column_idx, pattern, negated } => ColumnPredicate::Like {
-            column_idx: find_new_idx(*column_idx),
-            pattern: pattern.clone(),
-            negated: *negated,
-        },
+        ColumnPredicate::Like { column_idx, pattern, negated, case_sensitive, escape } => {
+            ColumnPredicate::Like {
+                column_idx: find_new_idx(*column_idx),
+                pattern: pattern.clone(),
+                negated: *negated,
+                case_sensitive: *case_sensitive,
+                escape: *escape,
+            }
+        }
         ColumnPredicate::InList { column_idx, values, negated, use_strict_type_ordering } => {
             ColumnPredicate::InList {
                 column_idx: find_new_idx(*column_idx),
@@ -233,7 +243,16 @@ fn remap_predicate(predicate: &ColumnPredicate, column_mapping: &[usize]) -> Col
 /// Some(tree) if the expression can be converted to columnar predicates,
 /// None if the expression is too complex for columnar optimization.
 pub fn extract_predicate_tree(expr: &Expression, schema: &CombinedSchema) -> Option<PredicateTree> {
-    extract_tree_recursive(expr, schema)
+    extract_predicate_tree_with_options(expr, schema, false)
+}
+
+/// Extract predicate tree with explicit case_sensitive_like setting
+pub fn extract_predicate_tree_with_options(
+    expr: &Expression,
+    schema: &CombinedSchema,
+    case_sensitive_like: bool,
+) -> Option<PredicateTree> {
+    extract_tree_recursive(expr, schema, case_sensitive_like)
 }
 
 /// Extract simple column predicates from a WHERE clause expression (legacy)
@@ -258,9 +277,10 @@ pub fn extract_predicate_tree(expr: &Expression, schema: &CombinedSchema) -> Opt
 pub fn extract_column_predicates(
     expr: &Expression,
     schema: &CombinedSchema,
+    case_sensitive_like: bool,
 ) -> Option<Vec<ColumnPredicate>> {
     let mut predicates = Vec::new();
-    extract_predicates_recursive(expr, schema, &mut predicates)?;
+    extract_predicates_recursive(expr, schema, &mut predicates, case_sensitive_like)?;
     // Return None if no predicates were extracted (all were cross-table or unsupported)
     // This allows fallback to generic predicate evaluation
     if predicates.is_empty() {
@@ -337,12 +357,16 @@ fn try_fold_constant(expr: &Expression) -> Option<SqlValue> {
 }
 
 /// Recursively extract predicates as a tree from an expression (handles OR)
-fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<PredicateTree> {
+fn extract_tree_recursive(
+    expr: &Expression,
+    schema: &CombinedSchema,
+    case_sensitive_like: bool,
+) -> Option<PredicateTree> {
     match expr {
         // AND: combine both sides
         Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
-            let left_tree = extract_tree_recursive(left, schema)?;
-            let right_tree = extract_tree_recursive(right, schema)?;
+            let left_tree = extract_tree_recursive(left, schema, case_sensitive_like)?;
+            let right_tree = extract_tree_recursive(right, schema, case_sensitive_like)?;
 
             // Flatten nested ANDs
             let mut children = Vec::new();
@@ -360,8 +384,8 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
 
         // OR: combine both sides
         Expression::BinaryOp { left, op: BinaryOperator::Or, right } => {
-            let left_tree = extract_tree_recursive(left, schema)?;
-            let right_tree = extract_tree_recursive(right, schema)?;
+            let left_tree = extract_tree_recursive(left, schema, case_sensitive_like)?;
+            let right_tree = extract_tree_recursive(right, schema, case_sensitive_like)?;
 
             // Flatten nested ORs
             let mut children = Vec::new();
@@ -486,7 +510,7 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
         }
 
         // LIKE: column LIKE pattern
-        Expression::Like { expr: inner, pattern, negated, .. } => {
+        Expression::Like { expr: inner, pattern, negated, escape } => {
             if let Expression::ColumnRef(col_id) = inner.as_ref() {
                 let table = col_id.table_canonical();
                 let column = col_id.column_canonical();
@@ -494,11 +518,24 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
                 if let Expression::Literal(SqlValue::Character(pattern_str))
                 | Expression::Literal(SqlValue::Varchar(pattern_str)) = pattern.as_ref()
                 {
+                    // Extract escape character from ESCAPE clause if present
+                    let escape_char = escape.as_ref().and_then(|esc_expr| {
+                        if let Expression::Literal(SqlValue::Character(s))
+                        | Expression::Literal(SqlValue::Varchar(s)) = esc_expr.as_ref()
+                        {
+                            s.chars().next()
+                        } else {
+                            None
+                        }
+                    });
+
                     let column_idx = schema.get_column_index(table, column)?;
                     return Some(PredicateTree::Leaf(ColumnPredicate::Like {
                         column_idx,
                         pattern: pattern_str.to_string(),
                         negated: *negated,
+                        case_sensitive: case_sensitive_like,
+                        escape: escape_char,
                     }));
                 }
             }
@@ -558,6 +595,7 @@ fn extract_predicates_recursive(
     expr: &Expression,
     schema: &CombinedSchema,
     predicates: &mut Vec<ColumnPredicate>,
+    case_sensitive_like: bool,
 ) -> Option<()> {
     match expr {
         // AND: extract predicates from both sides
@@ -565,8 +603,8 @@ fn extract_predicates_recursive(
         // This allows Q3-style queries where WHERE has both table-local and cross-table predicates
         Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
             // Try both sides - don't propagate failure from either side
-            let _ = extract_predicates_recursive(left, schema, predicates);
-            let _ = extract_predicates_recursive(right, schema, predicates);
+            let _ = extract_predicates_recursive(left, schema, predicates, case_sensitive_like);
+            let _ = extract_predicates_recursive(right, schema, predicates, case_sensitive_like);
             Some(())
         }
 
@@ -701,7 +739,7 @@ fn extract_predicates_recursive(
         }
 
         // LIKE: column LIKE pattern
-        Expression::Like { expr: inner, pattern, negated, .. } => {
+        Expression::Like { expr: inner, pattern, negated, escape } => {
             if let Expression::ColumnRef(col_id) = inner.as_ref() {
                 let table = col_id.table_canonical();
                 let column = col_id.column_canonical();
@@ -709,12 +747,25 @@ fn extract_predicates_recursive(
                 if let Expression::Literal(SqlValue::Character(pattern_str))
                 | Expression::Literal(SqlValue::Varchar(pattern_str)) = pattern.as_ref()
                 {
+                    // Extract escape character from ESCAPE clause if present
+                    let escape_char = escape.as_ref().and_then(|esc_expr| {
+                        if let Expression::Literal(SqlValue::Character(s))
+                        | Expression::Literal(SqlValue::Varchar(s)) = esc_expr.as_ref()
+                        {
+                            s.chars().next()
+                        } else {
+                            None
+                        }
+                    });
+
                     // Skip if column not in schema (cross-table predicate)
                     if let Some(column_idx) = schema.get_column_index(table, column) {
                         predicates.push(ColumnPredicate::Like {
                             column_idx,
                             pattern: pattern_str.to_string(),
                             negated: *negated,
+                            case_sensitive: case_sensitive_like,
+                            escape: escape_char,
                         });
                     }
                     return Some(());
@@ -1088,7 +1139,7 @@ mod tests {
             }),
         };
 
-        let predicates = extract_column_predicates(&expr, &schema);
+        let predicates = extract_column_predicates(&expr, &schema, false);
         assert!(predicates.is_some());
 
         let predicates = predicates.unwrap();

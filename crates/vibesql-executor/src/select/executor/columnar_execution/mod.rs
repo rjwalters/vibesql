@@ -313,6 +313,7 @@ impl SelectExecutor<'_> {
             stmt.where_clause.as_ref(), // Let columnar module apply WHERE with SIMD
             &select_exprs,
             &schema,
+            self.database.case_sensitive_like(),
         ) {
             Some(result) => {
                 #[cfg(feature = "profile-q6")]
@@ -473,15 +474,21 @@ impl SelectExecutor<'_> {
         // IS NOT NULL, or other unsupported expressions), we MUST fall back to row-based
         // execution. Using an empty predicate list would incorrectly skip filtering! (#4XXX)
         let predicates = match stmt.where_clause.as_ref() {
-            Some(where_expr) => match columnar::extract_column_predicates(where_expr, &schema) {
-                Some(preds) => preds,
-                None => {
-                    log::debug!(
-                        "Native columnar: skipping - WHERE clause contains unsupported predicates"
-                    );
-                    return Ok(None);
+            Some(where_expr) => {
+                match columnar::extract_column_predicates(
+                    where_expr,
+                    &schema,
+                    self.database.case_sensitive_like(),
+                ) {
+                    Some(preds) => preds,
+                    None => {
+                        log::debug!(
+                            "Native columnar: skipping - WHERE clause contains unsupported predicates"
+                        );
+                        return Ok(None);
+                    }
                 }
-            },
+            }
             None => vec![],
         };
 

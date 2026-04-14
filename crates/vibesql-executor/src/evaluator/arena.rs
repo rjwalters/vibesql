@@ -686,8 +686,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
             SqlValue::Blob(b) => {
-                let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
-                arcstr::ArcStr::from(hex)
+                arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
             }
             _ => {
                 return Err(ExecutorError::TypeError(format!(
@@ -734,8 +733,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
             SqlValue::Blob(b) => {
-                let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
-                arcstr::ArcStr::from(hex)
+                arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
             }
             _ => {
                 return Err(ExecutorError::TypeError(format!(

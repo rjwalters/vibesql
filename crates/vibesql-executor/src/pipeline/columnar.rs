@@ -107,7 +107,7 @@ impl ExecutionPipeline for ColumnarPipeline {
             let predicate = predicate.unwrap();
 
             // Try to extract simple predicates for SIMD filtering
-            let predicates = match extract_column_predicates(predicate, ctx.schema) {
+            let predicates = match extract_column_predicates(predicate, ctx.schema, false) {
                 Some(preds) => preds,
                 None => {
                     // Complex predicate - fall back to row-oriented filtering
@@ -143,7 +143,7 @@ impl ExecutionPipeline for ColumnarPipeline {
         let predicate = predicate.unwrap();
 
         // Try to extract simple predicates for SIMD filtering
-        let predicates = match extract_column_predicates(predicate, ctx.schema) {
+        let predicates = match extract_column_predicates(predicate, ctx.schema, false) {
             Some(preds) => preds,
             None => {
                 // Complex predicate - fall back to row-oriented filtering

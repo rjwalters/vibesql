@@ -246,7 +246,7 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
                 compare_values(value, high).matches(&[Ordering::Less, Ordering::Equal]);
             passes_low && passes_high
         }
-        ColumnPredicate::Like { pattern, negated, .. } => {
+        ColumnPredicate::Like { pattern, negated, case_sensitive, escape, .. } => {
             // Issue #4913: SQLite coerces numeric types to strings for LIKE comparison
             let text_owned: String;
             let text: &str = match value {
@@ -274,13 +274,14 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
                     &text_owned
                 }
                 SqlValue::Blob(b) => {
-                    text_owned = b.iter().map(|byte| format!("{:02X}", byte)).collect();
+                    text_owned = String::from_utf8_lossy(b).into_owned();
                     &text_owned
                 }
                 _ => return false,
             };
 
-            let matches = like_match(text, pattern);
+            let matches =
+                crate::evaluator::pattern::like_match(text, pattern, *case_sensitive, *escape);
             if *negated {
                 !matches
             } else {
@@ -334,55 +335,6 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
     }
 }
 
-/// Match a string against a SQL LIKE pattern
-///
-/// Uses dynamic programming for pattern matching with `%` and `_` wildcards.
-/// SQLite LIKE is case-insensitive for ASCII letters (A-Z = a-z).
-fn like_match(text: &str, pattern: &str) -> bool {
-    let text_chars: Vec<char> = text.chars().collect();
-    let pattern_chars: Vec<char> = pattern.chars().collect();
-
-    let m = text_chars.len();
-    let n = pattern_chars.len();
-
-    // dp[i][j] = true if text[0..i] matches pattern[0..j]
-    let mut dp = vec![vec![false; n + 1]; m + 1];
-
-    // Empty pattern matches empty text
-    dp[0][0] = true;
-
-    // Handle leading % in pattern (can match empty string)
-    for j in 1..=n {
-        if pattern_chars[j - 1] == '%' {
-            dp[0][j] = dp[0][j - 1];
-        }
-    }
-
-    // Fill the DP table
-    for i in 1..=m {
-        for j in 1..=n {
-            let pc = pattern_chars[j - 1];
-            let tc = text_chars[i - 1];
-
-            if pc == '%' {
-                // % matches zero or more characters
-                dp[i][j] = dp[i][j - 1] || dp[i - 1][j];
-            } else if pc == '_' {
-                // _ matches any single character
-                dp[i][j] = dp[i - 1][j - 1];
-            } else {
-                // SQLite LIKE is case-insensitive for ASCII letters
-                let matches = if pc.is_ascii_alphabetic() && tc.is_ascii_alphabetic() {
-                    pc.eq_ignore_ascii_case(&tc)
-                } else {
-                    pc == tc
-                };
-                if matches {
-                    dp[i][j] = dp[i - 1][j - 1];
-                }
-            }
-        }
-    }
-
-    dp[m][n]
-}
+// NOTE: The old like_match() function was removed in favor of
+// crate::evaluator::pattern::like_match() which supports case_sensitive
+// and escape parameters correctly.
