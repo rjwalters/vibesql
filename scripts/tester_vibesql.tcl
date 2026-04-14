@@ -4168,6 +4168,7 @@ proc sqlite3 {db args} {
 proc db {cmd args} {
     # Default db command - supports multiple call patterns:
     # db eval SQL                    - returns results as list
+    # db eval SQL script             - iterates over rows, setting column names as local vars
     # db eval SQL varname script     - iterates over rows, setting varname array
     # db one SQL                     - returns first column of first row
     switch $cmd {
@@ -4178,6 +4179,41 @@ proc db {cmd args} {
             if {[llength $args] == 1} {
                 # Simple case: just return the results
                 return [execsql $sql]
+            } elseif {[llength $args] == 2} {
+                # Body script case: db eval $sql script
+                # SQLite sets each column name as a local variable in caller's scope
+                set script [lindex $args 1]
+
+                # Execute SQL and get column names + data
+                set raw_result [execsql_with_headers $sql]
+                set headers [lindex $raw_result 0]
+                set rows [lindex $raw_result 1]
+
+                # Iterate over each row
+                foreach row $rows {
+                    # Set each column name as a local variable in caller's scope
+                    set idx 0
+                    foreach col $headers {
+                        uplevel 1 [list set $col [lindex $row $idx]]
+                        incr idx
+                    }
+                    # Execute the script in caller's scope
+                    set code [catch {uplevel 1 $script} msg]
+                    if {$code == 1} {
+                        # Error - propagate
+                        return -code error $msg
+                    } elseif {$code == 2} {
+                        # Return from script
+                        return -code return $msg
+                    } elseif {$code == 3} {
+                        # Break
+                        break
+                    } elseif {$code == 4} {
+                        # Continue
+                        continue
+                    }
+                }
+                return
             } elseif {[llength $args] == 3} {
                 # Iterator case: db eval $sql varname script
                 set varname [lindex $args 1]
@@ -4204,7 +4240,7 @@ proc db {cmd args} {
                 }
                 return
             } else {
-                # Two args case: db eval $sql varname (no script)
+                # Unknown args count - try simple eval
                 return [execsql $sql]
             }
         }
