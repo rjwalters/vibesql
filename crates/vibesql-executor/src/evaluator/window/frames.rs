@@ -36,6 +36,49 @@ pub fn validate_frame(frame_spec: &Option<WindowFrame>) -> Result<(), String> {
     Ok(())
 }
 
+/// Validate that RANGE frames with offset PRECEDING/FOLLOWING have exactly one ORDER BY column.
+///
+/// Per the SQL standard and SQLite behavior, RANGE with numeric offsets (N PRECEDING or
+/// N FOLLOWING) requires exactly one ORDER BY expression. Without ORDER BY, or with
+/// multiple ORDER BY columns, an error is returned.
+pub fn validate_range_order_by(
+    frame_spec: &Option<WindowFrame>,
+    order_by: &Option<Vec<OrderByItem>>,
+) -> Result<(), String> {
+    let frame = match frame_spec {
+        Some(f) => f,
+        None => return Ok(()),
+    };
+
+    // Only applies to RANGE frames
+    if !matches!(frame.unit, FrameUnit::Range) {
+        return Ok(());
+    }
+
+    // Check if either bound uses a numeric offset (N PRECEDING or N FOLLOWING)
+    let has_offset_bound = matches!(
+        frame.start,
+        FrameBound::Preceding(_) | FrameBound::Following(_)
+    ) || frame
+        .end
+        .as_ref()
+        .is_some_and(|end| matches!(end, FrameBound::Preceding(_) | FrameBound::Following(_)));
+
+    if !has_offset_bound {
+        return Ok(());
+    }
+
+    // RANGE with offset requires exactly one ORDER BY column
+    let order_by_count = order_by.as_ref().map_or(0, |items| items.len());
+    if order_by_count != 1 {
+        return Err(
+            "RANGE with offset PRECEDING/FOLLOWING requires one ORDER BY expression".to_string(),
+        );
+    }
+
+    Ok(())
+}
+
 /// Validate a single frame bound
 fn validate_frame_bound(bound: &FrameBound, is_start: bool) -> Result<(), String> {
     match bound {
