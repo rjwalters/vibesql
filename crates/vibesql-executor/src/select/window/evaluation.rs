@@ -381,21 +381,7 @@ fn evaluate_window_function_for_partition(
             }
 
             let value_expr = &args[0];
-            let offset = if args.len() > 1 {
-                // Evaluate offset argument (should be constant)
-                let offset_value = evaluator.eval(&args[1], &partition.rows[0])?;
-                match offset_value {
-                    SqlValue::Integer(n) => Some(n),
-                    _ => {
-                        return Err(ExecutorError::UnsupportedExpression(
-                            "LAG offset must be an integer".to_string(),
-                        ))
-                    }
-                }
-            } else {
-                None // Default offset is 1
-            };
-
+            let has_offset = args.len() > 1;
             let default_expr = if args.len() > 2 { Some(&args[2]) } else { None };
 
             // Create closure that evaluates expressions using the evaluator
@@ -407,6 +393,22 @@ fn evaluate_window_function_for_partition(
             // Evaluate LAG for each row in partition
             let mut results = Vec::with_capacity(partition.len());
             for row_idx in 0..partition.len() {
+                // Evaluate offset per row (supports expressions like LAG(b, b))
+                let offset = if has_offset {
+                    let offset_value = evaluator.eval(&args[1], &partition.rows[row_idx])
+                        .map_err(|e| ExecutorError::UnsupportedExpression(format!("{:?}", e)))?;
+                    match offset_value {
+                        SqlValue::Integer(n) => Some(n),
+                        SqlValue::Null => Some(0),
+                        _ => {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                "LAG offset must be an integer".to_string(),
+                            ))
+                        }
+                    }
+                } else {
+                    None // Default offset is 1
+                };
                 let value = crate::evaluator::window::evaluate_lag(
                     partition,
                     row_idx,
@@ -433,21 +435,7 @@ fn evaluate_window_function_for_partition(
             }
 
             let value_expr = &args[0];
-            let offset = if args.len() > 1 {
-                // Evaluate offset argument (should be constant)
-                let offset_value = evaluator.eval(&args[1], &partition.rows[0])?;
-                match offset_value {
-                    SqlValue::Integer(n) => Some(n),
-                    _ => {
-                        return Err(ExecutorError::UnsupportedExpression(
-                            "LEAD offset must be an integer".to_string(),
-                        ))
-                    }
-                }
-            } else {
-                None // Default offset is 1
-            };
-
+            let has_offset = args.len() > 1;
             let default_expr = if args.len() > 2 { Some(&args[2]) } else { None };
 
             // Create closure that evaluates expressions using the evaluator
@@ -459,6 +447,22 @@ fn evaluate_window_function_for_partition(
             // Evaluate LEAD for each row in partition
             let mut results = Vec::with_capacity(partition.len());
             for row_idx in 0..partition.len() {
+                // Evaluate offset per row (supports expressions like LEAD(b, b))
+                let offset = if has_offset {
+                    let offset_value = evaluator.eval(&args[1], &partition.rows[row_idx])
+                        .map_err(|e| ExecutorError::UnsupportedExpression(format!("{:?}", e)))?;
+                    match offset_value {
+                        SqlValue::Integer(n) => Some(n),
+                        SqlValue::Null => Some(0),
+                        _ => {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                "LEAD offset must be an integer".to_string(),
+                            ))
+                        }
+                    }
+                } else {
+                    None // Default offset is 1
+                };
                 let value = crate::evaluator::window::evaluate_lead(
                     partition,
                     row_idx,
@@ -542,27 +546,29 @@ fn evaluate_window_function_for_partition(
 
             let value_expr = &args[0];
 
-            // Evaluate n argument (should be constant integer)
-            let n_value = evaluator.eval(&args[1], &partition.rows[0])?;
-            let n = match n_value {
-                SqlValue::Integer(n) => n,
-                _ => {
-                    return Err(ExecutorError::UnsupportedExpression(
-                        "NTH_VALUE second argument must be an integer".to_string(),
-                    ))
-                }
-            };
-
-            if n < 1 {
-                return Err(ExecutorError::UnsupportedExpression(
-                    format!("NTH_VALUE n must be a positive integer, got {}", n),
-                ));
-            }
-
             // NTH_VALUE respects frame boundaries - evaluate per-row
-            let nth_zero_based = (n - 1) as usize;
+            // The n argument is evaluated per row to support expressions like nth_value(b, b+1)
             let mut results = Vec::with_capacity(partition.len());
             for row_idx in 0..partition.len() {
+                // Evaluate n argument against current row
+                let n_value = evaluator.eval(&args[1], &partition.rows[row_idx])
+                    .map_err(|e| ExecutorError::UnsupportedExpression(format!("{:?}", e)))?;
+                let n = match n_value {
+                    SqlValue::Integer(n) => n,
+                    _ => {
+                        return Err(ExecutorError::UnsupportedExpression(
+                            "NTH_VALUE second argument must be an integer".to_string(),
+                        ))
+                    }
+                };
+
+                if n < 1 {
+                    return Err(ExecutorError::UnsupportedExpression(
+                        format!("NTH_VALUE n must be a positive integer, got {}", n),
+                    ));
+                }
+
+                let nth_zero_based = (n - 1) as usize;
                 let frame_result = calculate_frame_with_exclusion(
                     partition, row_idx, order_by, frame_spec, &eval_fn,
                 );

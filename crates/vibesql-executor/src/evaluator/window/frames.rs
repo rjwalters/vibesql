@@ -748,7 +748,18 @@ fn calculate_rows_boundary(
 
         FrameBound::Preceding(offset_expr) => {
             let offset = get_numeric_offset(offset_expr) as usize;
-            current_row_idx.saturating_sub(offset)
+            if is_start {
+                current_row_idx.saturating_sub(offset)
+            } else {
+                // For end boundary, +1 for exclusive end (Range semantics)
+                // If offset > current_row_idx, the position is before the partition start,
+                // so return 0 (empty frame when combined with any start boundary)
+                if offset > current_row_idx {
+                    0
+                } else {
+                    current_row_idx - offset + 1
+                }
+            }
         }
 
         FrameBound::Following(offset_expr) => {
