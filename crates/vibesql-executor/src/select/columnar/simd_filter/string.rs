@@ -173,9 +173,30 @@ pub fn evaluate_predicate_string_batch(
             batch_string_ne(values, nulls, target)
         }
 
-        ColumnPredicate::Like { pattern, negated, .. } => {
-            let parsed_pattern = LikePattern::parse(pattern);
-            let mut mask = batch_string_like(values, nulls, &parsed_pattern);
+        ColumnPredicate::Like { pattern, negated, case_sensitive, escape, .. } => {
+            // When escape is set or case_sensitive is true, use the full pattern matcher
+            // since the optimized batch functions only handle case-insensitive without escape
+            let mut mask = if escape.is_some() || *case_sensitive {
+                let mut result = Vec::with_capacity(values.len());
+                for (i, value) in values.iter().enumerate() {
+                    if let Some(null_mask) = nulls {
+                        if null_mask[i] {
+                            result.push(false);
+                            continue;
+                        }
+                    }
+                    result.push(crate::evaluator::pattern::like_match(
+                        value,
+                        pattern,
+                        *case_sensitive,
+                        *escape,
+                    ));
+                }
+                result
+            } else {
+                let parsed_pattern = LikePattern::parse(pattern);
+                batch_string_like(values, nulls, &parsed_pattern)
+            };
 
             // Handle NOT LIKE by inverting the mask (but keeping NULLs as false)
             if *negated {

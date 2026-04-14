@@ -546,7 +546,7 @@ pub(crate) fn execute_table_scan(
             // Try columnar filter optimization for simple predicates
             // Extract predicates once and choose the best execution path (#2972)
             if let Some(column_predicates) =
-                crate::select::columnar::extract_column_predicates(where_expr, &schema)
+                crate::select::columnar::extract_column_predicates(where_expr, &schema, false)
             {
                 // OPTIMIZATION: Avoid double-cloning rows
                 // Before: scan_live_vec() clones ALL rows, then filter clones passing rows again

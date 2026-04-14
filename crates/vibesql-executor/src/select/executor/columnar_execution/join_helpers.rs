@@ -267,13 +267,13 @@ fn extract_non_join_predicates_recursive(
                 return;
             }
             // Try to extract as column predicate
-            if let Some(pred) = columnar::extract_column_predicates(expr, schema) {
+            if let Some(pred) = columnar::extract_column_predicates(expr, schema, false) {
                 predicates.extend(pred);
             }
         }
         _ => {
             // Try to extract other predicates
-            if let Some(pred) = columnar::extract_column_predicates(expr, schema) {
+            if let Some(pred) = columnar::extract_column_predicates(expr, schema, false) {
                 predicates.extend(pred);
             }
         }

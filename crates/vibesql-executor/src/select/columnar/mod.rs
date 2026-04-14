@@ -406,29 +406,29 @@ fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
                     && compare_values(v, high) != std::cmp::Ordering::Greater
             })
             .unwrap_or(false),
-        ColumnPredicate::Like { column_idx, pattern, negated } => {
-            // Simple LIKE pattern matching for row-based fast path
+        ColumnPredicate::Like { column_idx, pattern, negated, case_sensitive, escape } => {
+            // LIKE pattern matching using the proper evaluator
             let matches = row
                 .get(*column_idx)
                 .map(|v| {
-                    if let SqlValue::Varchar(s) = v {
-                        // Convert SQL LIKE pattern to simple check
-                        // This is a simplified version - full LIKE support is in simd_filter
-                        let pattern_str = pattern.as_str();
-                        if let Some(inner) =
-                            pattern_str.strip_prefix('%').and_then(|s| s.strip_suffix('%'))
-                        {
-                            s.contains(inner)
-                        } else if let Some(suffix) = pattern_str.strip_prefix('%') {
-                            s.ends_with(suffix)
-                        } else if let Some(prefix) = pattern_str.strip_suffix('%') {
-                            s.starts_with(prefix)
-                        } else {
-                            &**s == pattern_str
+                    let text: std::borrow::Cow<str> = match v {
+                        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                            std::borrow::Cow::Borrowed(s.as_str())
                         }
-                    } else {
-                        false
-                    }
+                        SqlValue::Integer(i) => std::borrow::Cow::Owned(i.to_string()),
+                        SqlValue::Bigint(i) => std::borrow::Cow::Owned(i.to_string()),
+                        SqlValue::Float(f) => std::borrow::Cow::Owned(f.to_string()),
+                        SqlValue::Double(f) => std::borrow::Cow::Owned(f.to_string()),
+                        SqlValue::Real(f) => std::borrow::Cow::Owned(f.to_string()),
+                        SqlValue::Blob(b) => String::from_utf8_lossy(b),
+                        _ => return false,
+                    };
+                    crate::evaluator::pattern::like_match(
+                        &text,
+                        pattern,
+                        *case_sensitive,
+                        *escape,
+                    )
                 })
                 .unwrap_or(false);
             if *negated {
@@ -684,12 +684,13 @@ pub fn execute_columnar(
     filter: Option<&vibesql_ast::Expression>,
     aggregates: &[vibesql_ast::Expression],
     schema: &CombinedSchema,
+    case_sensitive_like: bool,
 ) -> Option<Result<Vec<Row>, ExecutorError>> {
     log::debug!("  Executing columnar query with {} rows", rows.len());
 
     // Extract column predicates from filter expression
     let predicates = if let Some(filter_expr) = filter {
-        match extract_column_predicates(filter_expr, schema) {
+        match extract_column_predicates(filter_expr, schema, case_sensitive_like) {
             Some(preds) => {
                 log::debug!("    ✓ Extracted {} column predicates for SIMD filtering", preds.len());
                 preds
@@ -903,7 +904,7 @@ mod tests {
             filter: None,
         }];
 
-        let result = execute_columnar(&rows, None, &aggregates, &schema);
+        let result = execute_columnar(&rows, None, &aggregates, &schema, false);
         assert!(result.is_some());
 
         let rows_result = result.unwrap();
@@ -945,7 +946,7 @@ mod tests {
             filter: None,
         }];
 
-        let result = execute_columnar(&rows, Some(&filter), &aggregates, &schema);
+        let result = execute_columnar(&rows, Some(&filter), &aggregates, &schema, false);
         assert!(result.is_some());
 
         let rows_result = result.unwrap();
@@ -997,7 +998,7 @@ mod tests {
             },
         ];
 
-        let result = execute_columnar(&rows, None, &aggregates, &schema);
+        let result = execute_columnar(&rows, None, &aggregates, &schema, false);
         assert!(result.is_some());
 
         let rows_result = result.unwrap();
@@ -1041,7 +1042,7 @@ mod tests {
             filter: None,
         }];
 
-        let result = execute_columnar(&rows, None, &aggregates, &schema);
+        let result = execute_columnar(&rows, None, &aggregates, &schema, false);
         assert!(result.is_none());
     }
 
@@ -1079,7 +1080,7 @@ mod tests {
             filter: None,
         }];
 
-        let result = execute_columnar(&rows, Some(&filter), &aggregates, &schema);
+        let result = execute_columnar(&rows, Some(&filter), &aggregates, &schema, false);
         assert!(result.is_none());
     }
 }

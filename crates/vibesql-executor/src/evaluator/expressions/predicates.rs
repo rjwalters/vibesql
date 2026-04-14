@@ -487,10 +487,9 @@ impl ExpressionEvaluator<'_> {
             vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
-            // Blob values are coerced to hex representation in SQLite
+            // SQLite treats blob bytes as raw text for LIKE comparison
             vibesql_types::SqlValue::Blob(b) => {
-                let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
-                arcstr::ArcStr::from(hex)
+                arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
             }
             _ => {
                 return Err(ExecutorError::TypeMismatch {
@@ -596,10 +595,9 @@ impl ExpressionEvaluator<'_> {
             vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
-            // Blob values are coerced to hex representation in SQLite
+            // SQLite treats blob bytes as raw text for GLOB comparison
             vibesql_types::SqlValue::Blob(b) => {
-                let hex: String = b.iter().map(|byte| format!("{:02X}", byte)).collect();
-                arcstr::ArcStr::from(hex)
+                arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
             }
             _ => {
                 return Err(ExecutorError::TypeMismatch {
