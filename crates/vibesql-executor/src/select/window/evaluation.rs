@@ -16,7 +16,7 @@ use crate::{
     evaluator::{
         window::{
             calculate_frame_with_exclusion, evaluate_avg_window, evaluate_count_window,
-            evaluate_group_concat_window, evaluate_max_window, evaluate_min_window,
+            evaluate_group_concat_window_with_expr, evaluate_max_window, evaluate_min_window,
             evaluate_sum_window, evaluate_total_window, partition_rows, sort_partition,
             validate_frame, Partition,
         },
@@ -666,25 +666,18 @@ fn evaluate_window_function_for_partition(
                                 "GROUP_CONCAT/STRING_AGG requires an argument".to_string(),
                             ));
                         }
-                        // Get separator (default is comma for group_concat, required for string_agg)
-                        let separator = if args.len() > 1 {
-                            // Evaluate separator expression
-                            if let Ok(sep_val) = evaluator.eval(&args[1], &partition.rows[0]) {
-                                match sep_val {
-                                    SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
-                                    _ => ",".to_string(),
-                                }
-                            } else {
-                                ",".to_string()
-                            }
+                        // Pass separator expression for per-row evaluation
+                        let separator_expr = if args.len() > 1 {
+                            Some(&args[1])
                         } else {
-                            ",".to_string()
+                            None
                         };
-                        evaluate_group_concat_window(
+                        evaluate_group_concat_window_with_expr(
                             partition,
                             frame_indices,
                             &args[0],
-                            &separator,
+                            separator_expr,
+                            ",",
                             filter,
                             agg_eval_fn,
                         )
