@@ -404,7 +404,7 @@ impl Keyword {
             Keyword::Current | Keyword::Exclude | Keyword::Filter | Keyword::Following |
             Keyword::Groups | Keyword::No | Keyword::Others | Keyword::Over |
             Keyword::Partition | Keyword::Preceding | Keyword::Range | Keyword::Ties |
-            Keyword::Unbounded | Keyword::First | Keyword::Last
+            Keyword::Unbounded | Keyword::Window | Keyword::First | Keyword::Last
         )
     }
 }

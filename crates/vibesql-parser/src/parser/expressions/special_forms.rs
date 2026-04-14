@@ -45,41 +45,49 @@ impl Parser {
                 if let Token::Identifier(ref id) = self.peek() {
                     // Build the original name by combining CURRENT with the suffix
                     let suffix = id.clone();
-                    let function_name = match id.to_uppercase().as_str() {
+                    match id.to_uppercase().as_str() {
                         "_DATE" => {
                             self.advance(); // consume _DATE
-                            format!("CURRENT{}", suffix)
+                            let function_name = format!("CURRENT{}", suffix);
+                            Ok(Some(vibesql_ast::Expression::Function {
+                                name: vibesql_ast::FunctionIdentifier::new(&function_name),
+                                args: vec![],
+                                character_unit: None,
+                            }))
                         }
                         "_TIME" => {
                             self.advance(); // consume _TIME
-                            format!("CURRENT{}", suffix)
+                            let function_name = format!("CURRENT{}", suffix);
+                            Ok(Some(vibesql_ast::Expression::Function {
+                                name: vibesql_ast::FunctionIdentifier::new(&function_name),
+                                args: vec![],
+                                character_unit: None,
+                            }))
                         }
                         "_TIMESTAMP" => {
                             self.advance(); // consume _TIMESTAMP
-                            format!("CURRENT{}", suffix)
+                            let function_name = format!("CURRENT{}", suffix);
+                            Ok(Some(vibesql_ast::Expression::Function {
+                                name: vibesql_ast::FunctionIdentifier::new(&function_name),
+                                args: vec![],
+                                character_unit: None,
+                            }))
                         }
                         _ => {
-                            return Err(ParseError {
-                                message: format!(
-                                    "Expected DATE, TIME, or TIMESTAMP after CURRENT, found {}",
-                                    id
-                                ),
-                            })
+                            // Not a CURRENT_DATE/TIME/TIMESTAMP — treat CURRENT as
+                            // a regular identifier (column name). CURRENT is already
+                            // listed in can_be_identifier().
+                            Ok(Some(vibesql_ast::Expression::ColumnRef(
+                                vibesql_ast::ColumnIdentifier::simple("current", false),
+                            )))
                         }
-                    };
-
-                    Ok(Some(vibesql_ast::Expression::Function {
-                        name: vibesql_ast::FunctionIdentifier::new(&function_name),
-                        args: vec![],
-                        character_unit: None,
-                    }))
+                    }
                 } else {
-                    Err(ParseError {
-                        message: format!(
-                            "Expected identifier after CURRENT, found {:?}",
-                            self.peek()
-                        ),
-                    })
+                    // Next token is not an identifier (e.g., comma, RParen) —
+                    // treat CURRENT as a column name reference.
+                    Ok(Some(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("current", false),
+                    )))
                 }
             }
             // CAST expression: CAST(expr AS data_type)
