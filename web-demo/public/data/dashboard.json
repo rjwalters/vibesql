@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-14T11:23:00.211847Z",
+  "generated_at": "2026-04-14T15:02:47.128272Z",
   "version": "2.0",
   "summary": {
     "conformance": {
@@ -36,9 +36,9 @@
       "tests_count": 5
     },
     "tcl": {
-      "pass_rate": 92.2,
-      "passed": 3122,
-      "failed": 263,
+      "pass_rate": 93.8,
+      "passed": 3175,
+      "failed": 210,
       "skipped": 1561,
       "total_tests": 4946
     }
@@ -368,7 +368,7 @@
   "timeline": [
     {
       "date": "2026-04-14",
-      "commit": "562decbf3",
+      "commit": "d00d58ed1",
       "conformance_pass_rate": 100.0,
       "tpch_geo_mean_ms": 20.51,
       "tpch_passing": 22,
