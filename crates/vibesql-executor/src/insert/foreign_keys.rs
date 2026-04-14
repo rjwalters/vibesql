@@ -6,6 +6,11 @@ pub fn validate_foreign_key_constraints(
     table_name: &str,
     row_values: &[vibesql_types::SqlValue],
 ) -> Result<(), ExecutorError> {
+    // Skip FK enforcement when PRAGMA foreign_keys is OFF (default)
+    if !db.foreign_keys_enabled() {
+        return Ok(());
+    }
+
     let schema = db
         .catalog
         .get_table(table_name)

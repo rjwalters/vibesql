@@ -341,6 +341,11 @@ impl<'a> RowValidator<'a> {
         &self,
         fk_keys: &[Option<Vec<vibesql_types::SqlValue>>],
     ) -> Result<(), ExecutorError> {
+        // Skip FK enforcement when PRAGMA foreign_keys is OFF (default)
+        if !self.db.foreign_keys_enabled() {
+            return Ok(());
+        }
+
         for (fk_idx, fk_values) in fk_keys.iter().enumerate() {
             // Skip if any FK value is NULL (stored as None)
             let Some(ref fk_values) = fk_values else {
