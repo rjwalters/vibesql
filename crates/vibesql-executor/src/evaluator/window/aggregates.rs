@@ -430,7 +430,38 @@ where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
     I: IntoIterator<Item = usize>,
 {
-    let mut values: Vec<String> = Vec::new();
+    evaluate_group_concat_window_with_expr(
+        partition,
+        frame_indices,
+        arg_expr,
+        None,
+        separator,
+        filter,
+        eval_fn,
+    )
+}
+
+/// Evaluate GROUP_CONCAT with per-row separator expression support.
+///
+/// When `separator_expr` is Some, the separator is evaluated per-row against each
+/// row in the frame. The separator between values[i] and values[i+1] uses the
+/// separator evaluated at the row that produced values[i+1].
+/// When `separator_expr` is None, falls back to the static `default_separator`.
+pub fn evaluate_group_concat_window_with_expr<F, I>(
+    partition: &Partition,
+    frame_indices: I,
+    arg_expr: &Expression,
+    separator_expr: Option<&Expression>,
+    default_separator: &str,
+    filter: Option<&Expression>,
+    eval_fn: F,
+) -> SqlValue
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+    I: IntoIterator<Item = usize>,
+{
+    // Collect (value_string, separator_string) pairs
+    let mut entries: Vec<(String, String)> = Vec::new();
 
     for idx in frame_indices {
         if idx >= partition.len() {
@@ -445,60 +476,73 @@ where
         }
 
         if let Ok(val) = eval_fn(arg_expr, row) {
-            match val {
-                SqlValue::Null => {} // Ignore NULL
-                SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                    values.push(s.to_string());
-                }
-                SqlValue::Integer(n) => {
-                    values.push(n.to_string());
-                }
-                SqlValue::Bigint(n) => {
-                    values.push(n.to_string());
-                }
-                SqlValue::Smallint(n) => {
-                    values.push(n.to_string());
-                }
+            let val_str = match val {
+                SqlValue::Null => continue, // Ignore NULL
+                SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+                SqlValue::Integer(n) => n.to_string(),
+                SqlValue::Bigint(n) => n.to_string(),
+                SqlValue::Smallint(n) => n.to_string(),
                 SqlValue::Numeric(n) => {
-                    // Format as integer if whole number
                     if n.fract() == 0.0 {
-                        values.push((n as i64).to_string());
+                        (n as i64).to_string()
                     } else {
-                        values.push(n.to_string());
+                        n.to_string()
                     }
                 }
                 SqlValue::Float(n) => {
                     if n.fract() == 0.0 {
-                        values.push((n as i64).to_string());
+                        (n as i64).to_string()
                     } else {
-                        values.push(n.to_string());
+                        n.to_string()
                     }
                 }
                 SqlValue::Real(n) => {
                     if n.fract() == 0.0 {
-                        values.push((n as i64).to_string());
+                        (n as i64).to_string()
                     } else {
-                        values.push(n.to_string());
+                        n.to_string()
                     }
                 }
                 SqlValue::Double(n) => {
                     if n.fract() == 0.0 {
-                        values.push((n as i64).to_string());
+                        (n as i64).to_string()
                     } else {
-                        values.push(n.to_string());
+                        n.to_string()
                     }
                 }
-                other => {
-                    // Convert other types to string
-                    values.push(format!("{}", other));
+                other => format!("{}", other),
+            };
+
+            // Evaluate separator per-row if expression is provided
+            let sep = if let Some(sep_expr) = separator_expr {
+                if let Ok(sep_val) = eval_fn(sep_expr, row) {
+                    match sep_val {
+                        SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+                        SqlValue::Null => default_separator.to_string(),
+                        other => format!("{}", other),
+                    }
+                } else {
+                    default_separator.to_string()
                 }
-            }
+            } else {
+                default_separator.to_string()
+            };
+
+            entries.push((val_str, sep));
         }
     }
 
-    if values.is_empty() {
+    if entries.is_empty() {
         SqlValue::Null
     } else {
-        SqlValue::Varchar(values.join(separator).into())
+        let mut result = String::new();
+        for (i, (val, sep)) in entries.iter().enumerate() {
+            if i > 0 {
+                // Use the separator from this row (the row that produced this value)
+                result.push_str(sep);
+            }
+            result.push_str(val);
+        }
+        SqlValue::Varchar(result.into())
     }
 }

@@ -462,30 +462,52 @@ fn calculate_groups_boundary(
 
         FrameBound::Preceding(offset_expr) => {
             let offset = get_numeric_offset(offset_expr) as usize;
-            let target_group = current_group.saturating_sub(offset);
 
-            if is_start {
-                group_boundaries[target_group]
-            } else {
-                if target_group + 1 < num_groups {
-                    group_boundaries[target_group + 1]
+            if offset > current_group {
+                // Target group is before the partition start
+                if is_start {
+                    // Start at beginning of partition (include everything from start)
+                    0
                 } else {
-                    partition_size
+                    // End bound is before the partition start => empty frame
+                    0
+                }
+            } else {
+                let target_group = current_group - offset;
+                if is_start {
+                    group_boundaries[target_group]
+                } else {
+                    if target_group + 1 < num_groups {
+                        group_boundaries[target_group + 1]
+                    } else {
+                        partition_size
+                    }
                 }
             }
         }
 
         FrameBound::Following(offset_expr) => {
             let offset = get_numeric_offset(offset_expr) as usize;
-            let target_group = (current_group + offset).min(num_groups.saturating_sub(1));
+            let target_group = current_group + offset;
 
-            if is_start {
-                group_boundaries[target_group]
-            } else {
-                if target_group + 1 < num_groups {
-                    group_boundaries[target_group + 1]
-                } else {
+            if target_group >= num_groups {
+                // Target group is beyond the partition end
+                if is_start {
+                    // Start bound is beyond partition => empty frame
                     partition_size
+                } else {
+                    // End at end of partition (include everything to end)
+                    partition_size
+                }
+            } else {
+                if is_start {
+                    group_boundaries[target_group]
+                } else {
+                    if target_group + 1 < num_groups {
+                        group_boundaries[target_group + 1]
+                    } else {
+                        partition_size
+                    }
                 }
             }
         }
