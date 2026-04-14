@@ -25,6 +25,11 @@ pub fn check_no_child_references(
     parent_table_name: &str,
     parent_row: &vibesql_storage::Row,
 ) -> Result<(), ExecutorError> {
+    // Skip FK enforcement when PRAGMA foreign_keys is OFF (default)
+    if !db.foreign_keys_enabled() {
+        return Ok(());
+    }
+
     let parent_schema = db
         .catalog
         .get_table(parent_table_name)

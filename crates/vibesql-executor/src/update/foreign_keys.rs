@@ -17,6 +17,11 @@ impl ForeignKeyValidator {
         table_name: &str,
         row_values: &[vibesql_types::SqlValue],
     ) -> Result<(), ExecutorError> {
+        // Skip FK enforcement when PRAGMA foreign_keys is OFF (default)
+        if !db.foreign_keys_enabled() {
+            return Ok(());
+        }
+
         let schema = db
             .catalog
             .get_table(table_name)
@@ -68,6 +73,11 @@ impl ForeignKeyValidator {
         parent_row: &vibesql_storage::Row,
         new_parent_row: &vibesql_storage::Row,
     ) -> Result<(), ExecutorError> {
+        // Skip FK enforcement when PRAGMA foreign_keys is OFF (default)
+        if !db.foreign_keys_enabled() {
+            return Ok(());
+        }
+
         let parent_schema = db
             .catalog
             .get_table(parent_table_name)

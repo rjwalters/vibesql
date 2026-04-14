@@ -11,6 +11,7 @@ use vibesql_types::SqlValue;
 /// Helper to execute SQL and return the database
 fn execute_sql(sql: &str) -> Database {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
     // Split by semicolon and parse/execute each statement
     for sql_stmt in sql.split(';') {
         let trimmed = sql_stmt.trim();

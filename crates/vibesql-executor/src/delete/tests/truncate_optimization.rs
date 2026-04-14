@@ -64,6 +64,7 @@ fn test_truncate_optimization_basic() {
 #[test]
 fn test_truncate_blocked_by_fk_reference() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     // Create parent table with primary key
     let parent_schema = TableSchema::with_primary_key(

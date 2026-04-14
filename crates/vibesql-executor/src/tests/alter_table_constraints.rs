@@ -31,6 +31,7 @@ fn exec_sql(db: &mut Database, sql: &str) -> Result<String, String> {
 #[test]
 fn test_alter_table_add_primary_key_single_column() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE users (id INT, name VARCHAR(100))").unwrap();
     exec_sql(&mut db, "INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob')").unwrap();
@@ -52,6 +53,7 @@ fn test_alter_table_add_primary_key_single_column() {
 #[test]
 fn test_alter_table_add_primary_key_composite() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE order_items (order_id INT, item_id INT, quantity INT)")
         .unwrap();
@@ -80,6 +82,7 @@ fn test_alter_table_add_primary_key_composite() {
 #[test]
 fn test_alter_table_add_primary_key_already_exists() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))").unwrap();
 
@@ -91,6 +94,7 @@ fn test_alter_table_add_primary_key_already_exists() {
 #[test]
 fn test_alter_table_add_foreign_key_basic() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     // Create parent and child tables
     exec_sql(&mut db, "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))").unwrap();
@@ -117,6 +121,7 @@ fn test_alter_table_add_foreign_key_basic() {
 #[test]
 fn test_alter_table_add_foreign_key_with_constraint_name() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))").unwrap();
     exec_sql(&mut db, "CREATE TABLE orders (id INT PRIMARY KEY, user_id INT)").unwrap();
@@ -132,6 +137,7 @@ fn test_alter_table_add_foreign_key_with_constraint_name() {
 #[test]
 fn test_alter_table_drop_foreign_key() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))").unwrap();
     exec_sql(&mut db, "CREATE TABLE orders (id INT PRIMARY KEY, user_id INT)").unwrap();
@@ -157,6 +163,7 @@ fn test_alter_table_drop_foreign_key() {
 #[test]
 fn test_foreign_key_null_values_allowed() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))").unwrap();
     exec_sql(&mut db, "CREATE TABLE orders (id INT PRIMARY KEY, user_id INT)").unwrap();
@@ -173,6 +180,7 @@ fn test_foreign_key_null_values_allowed() {
 #[test]
 fn test_foreign_key_cascade_delete() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))").unwrap();
     exec_sql(&mut db, "CREATE TABLE orders (id INT PRIMARY KEY, user_id INT)").unwrap();
@@ -198,6 +206,7 @@ fn test_foreign_key_cascade_delete() {
 #[test]
 fn test_foreign_key_restrict_delete() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))").unwrap();
     exec_sql(&mut db, "CREATE TABLE orders (id INT PRIMARY KEY, user_id INT)").unwrap();
@@ -224,6 +233,7 @@ fn test_foreign_key_restrict_delete() {
 #[test]
 fn test_foreign_key_set_null() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))").unwrap();
     exec_sql(&mut db, "CREATE TABLE orders (id INT PRIMARY KEY, user_id INT)").unwrap();
@@ -252,6 +262,7 @@ fn test_foreign_key_set_null() {
 #[test]
 fn test_foreign_key_self_reference() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE employees (id INT PRIMARY KEY, manager_id INT)").unwrap();
 
@@ -279,6 +290,7 @@ fn test_foreign_key_self_reference() {
 #[test]
 fn test_foreign_key_composite() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE courses (dept VARCHAR(10), course_num INT, title VARCHAR(100), PRIMARY KEY (dept, course_num))").unwrap();
     exec_sql(&mut db, "CREATE TABLE enrollments (student_id INT, dept VARCHAR(10), course_num INT, grade VARCHAR(2))").unwrap();
@@ -303,6 +315,7 @@ fn test_foreign_key_composite() {
 #[test]
 fn test_foreign_key_update_cascade() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))").unwrap();
     exec_sql(&mut db, "CREATE TABLE orders (id INT PRIMARY KEY, user_id INT)").unwrap();
@@ -333,6 +346,7 @@ fn test_foreign_key_update_cascade() {
 #[test]
 fn test_cascading_foreign_keys_multi_level() {
     let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))").unwrap();
     exec_sql(&mut db, "CREATE TABLE orders (id INT PRIMARY KEY, user_id INT)").unwrap();
