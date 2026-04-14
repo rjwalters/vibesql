@@ -9,23 +9,6 @@ use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType};
 
 use crate::{errors::ExecutorError, schema::CombinedSchema, select::columnar};
 
-/// Check if a FROM clause only contains INNER or CROSS joins
-///
-/// CROSS joins are included because:
-/// - Comma-separated tables (`FROM a, b`) are parsed as CROSS joins
-/// - CROSS JOIN with equijoin conditions in WHERE is semantically equivalent to INNER JOIN
-/// - This enables columnar execution for implicit join syntax (e.g., TPC-H Q19)
-pub(super) fn is_inner_or_cross_join_only(from: &FromClause) -> bool {
-    match from {
-        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => true,
-        FromClause::Join { left, right, join_type, .. } => {
-            matches!(join_type, JoinType::Inner | JoinType::Cross)
-                && is_inner_or_cross_join_only(left)
-                && is_inner_or_cross_join_only(right)
-        }
-    }
-}
-
 /// Check if a FROM clause only contains join types supported by the columnar path
 ///
 /// Supported join types:
