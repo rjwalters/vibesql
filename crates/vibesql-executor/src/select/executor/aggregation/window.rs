@@ -20,10 +20,11 @@ use crate::{
     evaluator::{
         window::{
             calculate_frame_with_exclusion, evaluate_avg_window, evaluate_count_window,
-            evaluate_cume_dist, evaluate_dense_rank, evaluate_lag, evaluate_lead,
-            evaluate_max_window, evaluate_min_window, evaluate_ntile, evaluate_percent_rank,
-            evaluate_rank, evaluate_row_number, evaluate_sum_window, partition_rows,
-            sort_partition, validate_frame,
+            evaluate_cume_dist, evaluate_dense_rank, evaluate_group_concat_window_with_expr,
+            evaluate_lag, evaluate_lead, evaluate_max_window, evaluate_min_window,
+            evaluate_ntile, evaluate_percent_rank, evaluate_rank, evaluate_row_number,
+            evaluate_sum_window, evaluate_total_window, partition_rows, sort_partition,
+            validate_frame, validate_range_order_by,
         },
         CombinedExpressionEvaluator,
     },
@@ -212,6 +213,9 @@ pub(super) fn apply_window_functions_to_aggregates(
     for win_func in &window_funcs {
         // Validate frame specification (checks for non-negative offsets, etc.)
         validate_frame(&win_func.window_spec.frame).map_err(ExecutorError::SqliteCompatError)?;
+        // Validate RANGE with offset requires exactly one ORDER BY expression
+        validate_range_order_by(&win_func.window_spec.frame, &win_func.window_spec.order_by)
+            .map_err(ExecutorError::SqliteCompatError)?;
 
         // For partition/order expressions, we need to map them to column indices
         // in the aggregate result schema. Create column reference expressions.
@@ -335,6 +339,30 @@ pub(super) fn apply_window_functions_to_aggregates(
                                 None,
                                 inner_eval_fn,
                             ),
+                            "TOTAL" => evaluate_total_window(
+                                partition,
+                                frame_indices,
+                                &arg_expr,
+                                None,
+                                inner_eval_fn,
+                            ),
+                            "GROUP_CONCAT" | "STRING_AGG" => {
+                                // Use separator expression if present (second arg)
+                                let separator_expr = if mapped_args.len() > 1 {
+                                    Some(&mapped_args[1])
+                                } else {
+                                    None
+                                };
+                                evaluate_group_concat_window_with_expr(
+                                    partition,
+                                    frame_indices,
+                                    &arg_expr,
+                                    separator_expr,
+                                    ",",
+                                    None,
+                                    inner_eval_fn,
+                                )
+                            }
                             other => {
                                 return Err(ExecutorError::UnsupportedExpression(format!(
                                     "Unsupported aggregate window function: {}",

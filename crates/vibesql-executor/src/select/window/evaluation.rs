@@ -18,7 +18,7 @@ use crate::{
             calculate_frame_with_exclusion, evaluate_avg_window, evaluate_count_window,
             evaluate_group_concat_window_with_expr, evaluate_max_window, evaluate_min_window,
             evaluate_sum_window, evaluate_total_window, partition_rows, sort_partition,
-            validate_frame, Partition,
+            validate_frame, validate_range_order_by, Partition,
         },
         CombinedExpressionEvaluator,
     },
@@ -50,6 +50,9 @@ pub(super) fn evaluate_single_window_function(
 ) -> Result<WindowEvaluationResult, ExecutorError> {
     // Validate frame specification (checks for non-negative offsets, etc.)
     validate_frame(&win_func.window_spec.frame).map_err(ExecutorError::SqliteCompatError)?;
+    // Validate RANGE with offset requires exactly one ORDER BY expression
+    validate_range_order_by(&win_func.window_spec.frame, &win_func.window_spec.order_by)
+        .map_err(ExecutorError::SqliteCompatError)?;
 
     // Extract function details including optional FILTER clause
     let (func_name, args, filter) = match &win_func.function_spec {
