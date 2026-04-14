@@ -1,38 +1,38 @@
 {
   "version": "1.0",
-  "generated_at": "2026-04-13T18:54:35.173011",
+  "generated_at": "2026-04-14T11:23:00.230005",
   "latest_run": {
-    "run_id": 406,
-    "started_at": "2026-04-13T18:48:41.551487",
-    "completed_at": "2026-04-13T18:48:41.551509",
-    "git_commit": "e9138df6",
+    "run_id": 407,
+    "started_at": "2026-04-14T11:21:04.405902",
+    "completed_at": "2026-04-14T11:21:04.405925",
+    "git_commit": "562decbf",
     "total_files": 75,
     "total_tests": 4946,
-    "passed": 3122,
-    "failed": 263,
+    "passed": 3175,
+    "failed": 210,
     "skipped": 1561,
     "parse_errors": 0
   },
   "summary": {
     "total_tests": 4946,
-    "passed": 3122,
-    "failed": 263,
+    "passed": 3175,
+    "failed": 210,
     "skipped": 1561,
-    "pass_rate": 92.2
+    "pass_rate": 93.8
   },
   "categories": {},
   "by_file": [],
   "failure_patterns": [],
   "history": [
     {
-      "run_id": 406,
-      "date": "2026-04-13T18:48:41.551487",
-      "commit": "e9138df6",
+      "run_id": 407,
+      "date": "2026-04-14T11:21:04.405902",
+      "commit": "562decbf",
       "total": 4946,
-      "passed": 3122,
-      "failed": 263,
+      "passed": 3175,
+      "failed": 210,
       "skipped": 1561,
-      "pass_rate": 92.2
+      "pass_rate": 93.8
     }
   ]
 }
