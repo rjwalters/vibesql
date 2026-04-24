@@ -22,9 +22,9 @@ crossbeam-deque = { version = "0.8", optional = true }
 indexmap = "2.0"
 hex = "0.4"
 instant = { version = "0.1", features = ["wasm-bindgen"] }
-geo = { version = "0.32", optional = true }
+geo = { version = "0.33", optional = true }
 rstar = { version = "0.12", optional = true }
-lru = "0.16"
+lru = "0.17"
 log = "0.4"
 bumpalo = { version = "3.16", features = ["collections"] }
 ahash = "0.8"
