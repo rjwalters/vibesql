@@ -698,97 +698,72 @@ conformance-tcl-about-title = TCL 테스트 소개:
 conformance-tcl-about-text = SQLite의 TCL 테스트 스위트는 SQLite 호환성을 위한 표준 적합성 테스트입니다. 표준 SQL 테스트 스위트에서 다루지 않을 수 있는 특정 SQLite 동작, 특이점 및 엣지 케이스를 테스트합니다. 여기서 높은 통과율은 애플리케이션 마이그레이션 시나리오에 대한 강력한 SQLite 호환성을 나타냅니다.
 
 # =============================================================================
-# Challenge Page
+# 홈페이지
 # =============================================================================
 
-# Page title and header
-challenge-page-title = SQL 바이브 코딩 챌린지 - VibeSQL
-challenge-header = SQL 바이브 코딩 챌린지
+home-page-title = VibeSQL — 속도를 위해 구축된 순수 Rust SQL 데이터베이스
 
-# Hero section
-challenge-hero-title = SQL 바이브 코딩 챌린지
-challenge-hero-subtitle = 멀티 에이전트 소프트웨어 개발을 위한 객관적인 벤치마크. SQL 데이터베이스를 처음부터 구축하세요. 600만 개의 테스트를 통과하세요. 트로피를 획득하세요.
-challenge-btn-start = 빌드 시작
-challenge-btn-trophy = 트로피 보기
-challenge-btn-leaderboard = 리더보드
+# 히어로 섹션
+home-hero-title = 순수 Rust SQL 데이터베이스<br>속도를 위해 구축
+home-hero-subtitle = VibeSQL은 스토리지 효율성 대신 성능을 선택합니다. 하이브리드 행 + 열 스토리지, 벡터화된 실행, unsafe 코드 제로. 메모리에 들어가는 데이터세트에 최적화.
+home-hero-subtext = SQL:1999 호환. 네이티브, WebAssembly, 임베디드 라이브러리로 실행.
+home-btn-demo = 브라우저에서 체험
+home-btn-github = GitHub
+home-btn-crates = crates.io
 
-# Key Insight callout
-challenge-insight-title = 중요한 유일한 지표: 달력 일수
-challenge-insight-text = 커밋과 코드 라인은 대리 지표입니다. 중요한 것은 <strong>완료까지의 일수</strong>입니다. 병렬로 작업하는 1,000개의 에이전트가 100개의 에이전트를 이길 수 있을까요? 오케스트레이션 프레임워크가 규모가 커져도 생산성을 유지할까요? 이 벤치마크가 알려줄 것입니다.
+# 왜 VibeSQL인가 섹션
+home-why-title = 왜 VibeSQL인가?
+home-hybrid-title = 하이브리드 스토리지
+home-hybrid-text = 하나의 엔진에 행과 열 스토리지를 모두 탑재. 행 형식은 빠른 포인트 조회와 OLTP에, 열 형식은 벡터화된 실행을 통한 분석 스캔에 적합합니다. 선택할 필요가 없습니다.
+home-speed-title = 스토리지보다 속도
+home-speed-text = 디스크 공간을 의도적으로 쿼리 성능과 교환합니다. 중복 스토리지 레이아웃, 적극적인 캐싱, 사전 계산된 인덱스로 작은 데이터베이스를 최대한 빠르게 실행합니다.
+home-rust-title = 순수 Rust, unsafe 제로
+home-rust-text = 전체가 안전한 Rust로 작성되었습니다. C 의존성 없음, FFI 없음, unsafe 블록 없음. 동일한 코드베이스에서 네이티브 바이너리와 WebAssembly로 컴파일.
 
-# The Challenge section
-challenge-section-title = 챌린지
-challenge-objective-title = 목표
-challenge-objective-text = <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest 스위트</a>를 통과하는 SQL 데이터베이스 엔진을 처음부터 구축하세요. 이것은 SQLite, DuckDB 및 기타 프로덕션 데이터베이스를 검증하는 데 사용되는 동일한 테스트 스위트입니다.
-challenge-success-title = 성공 기준
-challenge-success-pass-rate = SQLLogicTest 스위트 100% 통과율
-challenge-success-assertions = ~600만 개의 개별 테스트 어설션
-challenge-success-files = 622개의 모든 테스트 파일 통과
-challenge-constraints-title = 제약 사항
-challenge-constraint-parser = <strong>기존 SQL 파서 라이브러리 금지</strong> — 직접 파서를 구축하세요
-challenge-constraint-engine = <strong>기존 쿼리 엔진 금지</strong> — 처음부터 실행을 구현하세요
-challenge-constraint-libs = <strong>데이터베이스 전용 라이브러리 금지</strong> — 범용 라이브러리만 사용하세요
-challenge-allowed-title = 허용
-challenge-allowed-lang = 모든 프로그래밍 언어
-challenge-allowed-ai = 모든 AI 오케스트레이션 프레임워크
-challenge-allowed-human = 인간 개입 (무제한)
-challenge-allowed-libs = 범용 라이브러리 (데이터 구조, I/O 등)
+# 아키텍처 섹션
+home-arch-title = 아키텍처
+home-pipeline-title = 쿼리 파이프라인
+home-pipeline-parser = <strong>파서</strong> — 완전한 SQL:1999 문법, 아레나 할당 AST
+home-pipeline-planner = <strong>플래너</strong> — 조인 재정렬이 포함된 비용 기반 옵티마이저
+home-pipeline-executor = <strong>실행기</strong> — 배치 처리를 통한 벡터화된 실행
+home-pipeline-storage = <strong>스토리지</strong> — B-tree 인덱스 기반 하이브리드 행/열 스토리지
+home-features-title = 주요 기능
+home-feature-window = 윈도우 함수 (ROW_NUMBER, RANK, LEAD/LAG, NTILE, ...)
+home-feature-cte = 공통 테이블 표현식 (WITH, 재귀 CTE)
+home-feature-subquery = 서브쿼리 (상관, EXISTS, IN, 스칼라)
+home-feature-join = 완전한 JOIN 지원 (INNER, LEFT, RIGHT, FULL, CROSS, NATURAL)
+home-feature-triggers = 트리거, 뷰, 외래 키, CHECK 제약 조건
+home-feature-wasm = OPFS 영구 스토리지 지원 WASM 타겟
 
-# The Trophy section
-challenge-trophy-title = 트로피
-challenge-trophy-name = 바이브 코딩 트로피
-challenge-trophy-desc = 각 기록 보유자에게 물리적 트로피가 수여됩니다. 디자인은 "바이브 코딩"의 정신을 반영합니다 — 황동 명판이 있는 호두나무에 장착된 금도금 지팡이.
-challenge-trophy-claim = 현재 기록을 최소 5% 이상 경신하면 <strong>트로피에 이름이 올라갑니다</strong>.
-challenge-rules-title = 수상 규칙
-challenge-rule-improve = <strong>5% 개선 필요</strong> — 트로피를 획득하려면 이전 기록을 최소 5%(달력 일수 기준) 경신해야 합니다
-challenge-rule-public = <strong>공개 저장소</strong> — 코드가 검증을 위해 공개적으로 사용 가능해야 합니다
-challenge-rule-pass = <strong>100% 통과율</strong> — 622개의 모든 SQLLogicTest 파일이 통과해야 합니다
-challenge-rule-git = <strong>검증 가능한 git 기록</strong> — 첫 커밋 날짜부터 100% 통과율까지가 시간을 결정합니다
-challenge-record-title = 현재 기록 보유자
-challenge-record-days = { $days }일
-challenge-record-name = VibeSQL (기준선)
-challenge-record-date = 2025년 10월 - 11월
-challenge-record-beat = 이것을 5% 경신? 트로피를 획득하려면 <strong>24일 이하</strong>입니다.
+# 성능 섹션
+home-perf-title = 성능
+home-perf-full = 전체 벤치마크 →
+home-stat-tpch-label = TPC-H 쿼리 통과
+home-stat-tpch-sub = 의사결정 지원 벤치마크
+home-stat-conformance-label = SQLLogicTest 통과율
+home-stat-conformance-sub = 600만 이상의 테스트 어설션
+home-stat-tpcds-label = TPC-DS 쿼리 통과
+home-stat-tpcds-sub = 복잡한 분석 벤치마크
+home-perf-note = SQLite, DuckDB, MySQL과 동일한 워크로드로 벤치마크 수행. <a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline">전체 결과 보기.</a>
 
-# Why This Challenge section
-challenge-why-title = 왜 이 챌린지인가?
-challenge-why-objective-title = 객관적 측정
-challenge-why-objective-text = 주관적인 코드 리뷰가 없습니다. 테스트가 통과하거나 통과하지 않거나입니다. 600만 개의 어설션은 모호함의 여지를 남기지 않습니다.
-challenge-why-complexity-title = 실제 복잡성
-challenge-why-complexity-text = SQL 데이터베이스는 파서, 옵티마이저, 실행 엔진이 필요합니다. 이것은 장난감 문제가 아닙니다—프로덕션급 엔지니어링입니다.
-challenge-why-time-title = 시간이 진실
-challenge-why-time-text = 완료까지의 달력 일수가 궁극적인 지표입니다. 1,000개의 에이전트로 병렬화하면 도움이 될까요? 이제 알 수 있습니다.
+# 시작하기 섹션
+home-start-title = 시작하기
+home-demo-title = 인터랙티브 데모
+home-demo-text = 브라우저에서 SQL 쿼리를 실행하세요. WebAssembly로 컴파일된 완전한 데이터베이스 엔진과 OPFS를 통한 영구 스토리지. 설치 불필요.
+home-install-title = 설치
+home-install-cargo = Cargo
+home-install-library = 라이브러리로 사용
 
-# Get Started section
-challenge-start-title = 시작하기
-challenge-start-intro = 어떤 언어로든 처음부터 시작하거나 편의를 위해 시드 저장소 중 하나를 사용하세요. 각 시드에는 SQLLogicTest 스위트, 테스트 러너 및 CI 워크플로우가 포함됩니다.
-challenge-seed-title = 시드 저장소
-challenge-seed-optional = (선택 사항)
-challenge-seed-rust-desc = Cargo 빌드 시스템, 제로 코스트 추상화, GC 없는 메모리 안전성.
-challenge-seed-cpp-desc = CMake 빌드 시스템, 최대 성능, 메모리에 대한 완전한 제어.
-challenge-seed-go-desc = 간단한 툴체인, 빠른 컴파일, 우수한 동시성 기본 요소.
-challenge-seed-fork = GitHub에서 Fork →
-challenge-step1-title = 프로젝트 시작
-challenge-step1-text = 처음부터 새 저장소를 만들거나 위의 시드를 포크하여 빠르게 시작하세요. <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest 스위트</a>를 가져오세요. 첫 커밋이 시간을 시작합니다.
-challenge-step2-title = 데이터베이스 구축
-challenge-step2-text = SQL 파서, 쿼리 실행기, 스토리지 엔진을 구현하세요. Claude, Copilot 또는 자체 에이전트 등 모든 AI 도구를 사용하세요. <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code>를 실행하여 진행 상황을 추적하세요.
-challenge-step3-title = 100% 달성 후 제출
-challenge-step3-text = 622개의 모든 테스트 파일이 통과하면 <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a>에서 저장소 링크와 커밋 해시로 이슈를 열어주세요. 25일을 경신하여 리더보드에 합류하세요.
+# 탐색 섹션
+home-explore-conformance-title = 적합성 보고서
+home-explore-conformance-text = 622개의 테스트 파일에 걸친 SQL:1999 표준 준수의 상세한 분석.
+home-explore-bench-title = 성능 벤치마크
+home-explore-bench-text = SQLite, DuckDB, MySQL 대비 TPC-H, TPC-DS, TPC-C, Sysbench 결과.
 
-# Explore VibeSQL section
-challenge-explore-title = VibeSQL 탐색
-challenge-explore-demo-title = 데모 체험
-challenge-explore-demo-text = WebAssembly 빌드를 사용하여 브라우저에서 SQL 쿼리를 실행하세요.
-challenge-explore-conformance-title = 적합성 보고서
-challenge-explore-conformance-text = SQL:1999 표준 준수에 대한 상세한 분석.
-challenge-explore-benchmarks-title = 성능 벤치마크
-challenge-explore-benchmarks-text = SQLite 및 DuckDB와의 TPC-H, TPC-C 및 기타 벤치마크.
-
-# Footer
-challenge-footer = VibeSQL - WebAssembly의 SQL:1999 데이터베이스
+# 푸터
+home-footer = VibeSQL — 속도를 위해 구축된 순수 Rust SQL 데이터베이스
 
 # Navigation
-nav-challenge = SQL 바이브 코딩 챌린지
 nav-trends = 성능 트렌드
 
 # Trends page

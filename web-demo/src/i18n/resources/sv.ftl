@@ -707,97 +707,72 @@ conformance-tcl-about-title = Om TCL-tester:
 conformance-tcl-about-text = SQLites TCL-testsvit är det kanoniska överensstämmelsetestet för SQLite-kompatibilitet. Den testar specifika SQLite-beteenden, egenheter och gränsfall som kanske inte täcks av standard SQL-testsviter. Höga godkännandegrader här indikerar stark SQLite-kompatibilitet för applikationsmigreringsscenarier.
 
 # =============================================================================
-# Challenge Page
+# Startsida
 # =============================================================================
 
-# Page title and header
-challenge-page-title = SQL Vibe Coding Challenge - VibeSQL
-challenge-header = SQL Vibe Coding Challenge
+home-page-title = VibeSQL — En ren Rust SQL-databas byggd för hastighet
 
-# Hero section
-challenge-hero-title = SQL Vibe Coding Challenge
-challenge-hero-subtitle = En objektiv benchmark för multi-agent mjukvaruutveckling. Bygg en SQL-databas från grunden. Klara 6 miljoner tester. Vinn trofén.
-challenge-btn-start = Börja Bygga
-challenge-btn-trophy = Se Trofén
-challenge-btn-leaderboard = Topplista
+# Hero-sektion
+home-hero-title = En ren Rust SQL-databas<br>byggd för hastighet
+home-hero-subtitle = VibeSQL byter lagringseffektivitet mot prestanda. Hybrid rad- och kolumnlagring, vektoriserad exekvering och noll unsafe-kod. Optimerad för dataset som ryms i minnet.
+home-hero-subtext = SQL:1999-kompatibel. Kör nativer, i WebAssembly och som inbäddat bibliotek.
+home-btn-demo = Prova i Webbläsaren
+home-btn-github = GitHub
+home-btn-crates = crates.io
 
-# Key Insight callout
-challenge-insight-title = Det Enda Måttet Som Spelar Roll: Kalendertid
-challenge-insight-text = Commits och kodrader är bara indikatorer. Det som räknas är <strong>dagar till färdigställande</strong>. Kan 1000 agenter som arbetar parallellt slå 100 agenter? Behåller ditt orkestrationsramverk produktiviteten vid skalning? Denna benchmark ger dig svaret.
+# Varför VibeSQL-sektion
+home-why-title = Varför VibeSQL?
+home-hybrid-title = Hybrid Lagring
+home-hybrid-text = Både rad- och kolumnlagring i en motor. Radformat för snabba punktuppslag och OLTP. Kolumnformat för analytiska skanningar med vektoriserad exekvering. Inget val behövs.
+home-speed-title = Hastighet Före Lagring
+home-speed-text = Byter medvetet diskutrymme mot frågeprestanda. Redundanta lagringslayouter, aggressiv cachning och förberäknade index gör att mindre databaser körs så snabbt som möjligt.
+home-rust-title = Ren Rust, Noll Unsafe
+home-rust-text = Helt skriven i säker Rust. Inga C-beroenden, inget FFI, inga unsafe-block. Kompilerar till nativa binärer och WebAssembly från samma kodbas.
 
-# The Challenge section
-challenge-section-title = Utmaningen
-challenge-objective-title = Mål
-challenge-objective-text = Bygg en SQL-databasmotor från grunden som klarar <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest-sviten</a>. Detta är samma testsvit som används för att validera SQLite, DuckDB och andra produktionsdatabaser.
-challenge-success-title = Framgångskriterier
-challenge-success-pass-rate = 100% godkännandegrad på SQLLogicTest-sviten
-challenge-success-assertions = ~6 miljoner individuella testpåståenden
-challenge-success-files = Alla 622 testfiler godkända
-challenge-constraints-title = Begränsningar
-challenge-constraint-parser = <strong>Inga befintliga SQL-parserbibliotek</strong> — bygg din egen parser
-challenge-constraint-engine = <strong>Inga befintliga frågemotorer</strong> — implementera exekvering från grunden
-challenge-constraint-libs = <strong>Inga databasspecifika bibliotek</strong> — använd endast generella bibliotek
-challenge-allowed-title = Tillåtet
-challenge-allowed-lang = Vilket programmeringsspråk som helst
-challenge-allowed-ai = Vilket AI-orkestrationsramverk som helst
-challenge-allowed-human = Mänsklig intervention (obegränsat)
-challenge-allowed-libs = Generella bibliotek (datastrukturer, I/O, etc.)
+# Arkitektur-sektion
+home-arch-title = Arkitektur
+home-pipeline-title = Fråge-pipeline
+home-pipeline-parser = <strong>Parser</strong> — Fullständig SQL:1999-grammatik, arena-allokerad AST
+home-pipeline-planner = <strong>Planerare</strong> — Kostnadsbaserad optimerare med join-omordning
+home-pipeline-executor = <strong>Exekverare</strong> — Vektoriserad exekvering med batchbearbetning
+home-pipeline-storage = <strong>Lagring</strong> — Hybrid rad/kolumn med B-tree-index
+home-features-title = Nyckelfunktioner
+home-feature-window = Fönsterfunktioner (ROW_NUMBER, RANK, LEAD/LAG, NTILE, ...)
+home-feature-cte = Common Table Expressions (WITH, rekursiva CTEs)
+home-feature-subquery = Underfrågor (korrelerade, EXISTS, IN, skalära)
+home-feature-join = Fullständigt JOIN-stöd (INNER, LEFT, RIGHT, FULL, CROSS, NATURAL)
+home-feature-triggers = Triggers, vyer, främmande nycklar, CHECK-begränsningar
+home-feature-wasm = WASM-mål med OPFS-persistent lagring
 
-# The Trophy section
-challenge-trophy-title = Trofén
-challenge-trophy-name = Vibe Coding Trofén
-challenge-trophy-desc = En fysisk trofé tilldelas varje rekordhållare. Designen speglar andan i "vibe coding" — en förgylld trollstav monterad på valnöt med mässingsplaketter.
-challenge-trophy-claim = <strong>Ditt namn hamnar på trofén</strong> när du slår det nuvarande rekordet med minst 5%.
-challenge-rules-title = Tilldelningsregler
-challenge-rule-improve = <strong>5% förbättring krävs</strong> — slå det tidigare rekordet med minst 5% (i kalenderdagar) för att ta hem trofén
-challenge-rule-public = <strong>Offentligt repository</strong> — din kod måste vara offentligt tillgänglig för verifiering
-challenge-rule-pass = <strong>100% godkännandegrad</strong> — alla 622 SQLLogicTest-filer måste godkännas
-challenge-rule-git = <strong>Verifierbar git-historik</strong> — första commit-datumet till 100% godkännandegrad bestämmer din tid
-challenge-record-title = Nuvarande Rekordhållare
-challenge-record-days = { $days } dagar
-challenge-record-name = VibeSQL (Baslinje)
-challenge-record-date = Oktober - November 2025
-challenge-record-beat = Slå detta med 5%? Det är <strong>24 dagar eller mindre</strong> för att ta hem trofén.
+# Prestanda-sektion
+home-perf-title = Prestanda
+home-perf-full = Fullständiga benchmarks →
+home-stat-tpch-label = TPC-H-frågor godkända
+home-stat-tpch-sub = Beslutsstödsbenchmark
+home-stat-conformance-label = SQLLogicTest godkännandegrad
+home-stat-conformance-sub = 6M+ testpåståenden
+home-stat-tpcds-label = TPC-DS-frågor godkända
+home-stat-tpcds-sub = Komplext analytiskt benchmark
+home-perf-note = Benchmarkad mot SQLite, DuckDB och MySQL på jämförbara arbetsbelastningar. <a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline">Se fullständiga resultat.</a>
 
-# Why This Challenge section
-challenge-why-title = Varför Denna Utmaning?
-challenge-why-objective-title = Objektiv Mätning
-challenge-why-objective-text = Inga subjektiva kodgranskningar. Testerna godkänns eller inte. 6 miljoner påståenden lämnar inget utrymme för tvetydighet.
-challenge-why-complexity-title = Verklig Komplexitet
-challenge-why-complexity-text = SQL-databaser kräver parsers, optimerare och exekveringsmotorer. Detta är inte ett leksaksproblem—det är produktionsnivå ingenjörskonst.
-challenge-why-time-title = Tid Är Sanning
-challenge-why-time-text = Kalenderdagar till färdigställande är det ultimata måttet. Hjälper parallellisering till 1000 agenter? Nu kan du ta reda på det.
+# Kom igång-sektion
+home-start-title = Kom Igång
+home-demo-title = Interaktiv Demo
+home-demo-text = Kör SQL-frågor i din webbläsare. Fullständig databasmotor kompilerad till WebAssembly med persistent lagring via OPFS. Ingen installation krävs.
+home-install-title = Installera
+home-install-cargo = Cargo
+home-install-library = Som bibliotek
 
-# Get Started section
-challenge-start-title = Kom Igång
-challenge-start-intro = Börja från grunden på vilket språk som helst, eller använd ett av våra seed-repos för bekvämlighet. Varje seed inkluderar SQLLogicTest-sviten, en testlöpare och CI-arbetsflöde.
-challenge-seed-title = Seed Repos
-challenge-seed-optional = (valfritt)
-challenge-seed-rust-desc = Cargo byggsystem, nollkostnadsabstraktioner, minnessäkerhet utan GC.
-challenge-seed-cpp-desc = CMake byggsystem, maximal prestanda, full kontroll över minne.
-challenge-seed-go-desc = Enkel toolchain, snabb kompilering, utmärkta concurrency-primitiver.
-challenge-seed-fork = Fork på GitHub →
-challenge-step1-title = Starta Ditt Projekt
-challenge-step1-text = Skapa ett nytt repo från grunden, eller forka en seed ovan för en snabbstart. Hämta <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest-sviten</a>. Din första commit startar klockan.
-challenge-step2-title = Bygg Din Databas
-challenge-step2-text = Implementera en SQL-parser, frågexekverare och lagringsmotor. Använd vilka AI-verktyg som helst—Claude, Copilot eller dina egna agenter. Kör <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> för att följa framstegen.
-challenge-step3-title = Nå 100% och Skicka In
-challenge-step3-text = När alla 622 testfiler godkänns, öppna ett ärende på <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> med din repo-länk och commit-hashar. Slå 25 dagar för att komma med på topplistan.
+# Utforska-sektion
+home-explore-conformance-title = Överensstämmelserapport
+home-explore-conformance-text = Detaljerad uppdelning av SQL:1999-standardöverensstämmelse över 622 testfiler.
+home-explore-bench-title = Prestandabenchmarks
+home-explore-bench-text = TPC-H, TPC-DS, TPC-C och Sysbench-resultat vs SQLite, DuckDB och MySQL.
 
-# Explore VibeSQL section
-challenge-explore-title = Utforska VibeSQL
-challenge-explore-demo-title = Prova Demon
-challenge-explore-demo-text = Kör SQL-frågor i din webbläsare med WebAssembly-bygget.
-challenge-explore-conformance-title = Överensstämmelserapport
-challenge-explore-conformance-text = Detaljerad uppdelning av SQL:1999 standardöverensstämmelse.
-challenge-explore-benchmarks-title = Prestandabenchmarks
-challenge-explore-benchmarks-text = TPC-H, TPC-C och andra benchmarks vs SQLite och DuckDB.
-
-# Footer
-challenge-footer = VibeSQL - SQL:1999 Databas i WebAssembly
+# Sidfot
+home-footer = VibeSQL — En ren Rust SQL-databas byggd för hastighet
 
 # Navigation
-nav-challenge = SQL Vibe Coding Challenge
 nav-trends = Prestandatrender
 
 # Trends page

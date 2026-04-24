@@ -698,97 +698,72 @@ conformance-tcl-about-title = Tentang Tes TCL:
 conformance-tcl-about-text = Suite tes TCL SQLite adalah tes kesesuaian kanonik untuk kompatibilitas SQLite. Ini menguji perilaku SQLite tertentu, keunikan, dan kasus tepi yang mungkin tidak tercakup oleh suite tes SQL standar. Tingkat kelulusan tinggi di sini menunjukkan kompatibilitas SQLite yang kuat untuk skenario migrasi aplikasi.
 
 # =============================================================================
-# Challenge Page
+# Beranda
 # =============================================================================
 
-# Page title and header
-challenge-page-title = Tantangan Vibe Coding SQL - VibeSQL
-challenge-header = Tantangan Vibe Coding SQL
+home-page-title = VibeSQL — Database SQL Rust Murni yang Dibangun untuk Kecepatan
 
-# Hero section
-challenge-hero-title = Tantangan Vibe Coding SQL
-challenge-hero-subtitle = Tolok ukur objektif untuk pengembangan perangkat lunak multi-agen. Bangun database SQL dari nol. Loloskan 6 juta tes. Menangkan trofi.
-challenge-btn-start = Mulai Membangun
-challenge-btn-trophy = Lihat Trofi
-challenge-btn-leaderboard = Papan Peringkat
+# Bagian Hero
+home-hero-title = Database SQL Rust murni<br>dibangun untuk kecepatan
+home-hero-subtitle = VibeSQL menukar efisiensi penyimpanan dengan performa. Penyimpanan hybrid row + columnar, eksekusi vectorized, dan nol kode unsafe. Dioptimalkan untuk dataset yang muat di memori.
+home-hero-subtext = Sesuai SQL:1999. Berjalan secara native, di WebAssembly, dan sebagai pustaka tertanam.
+home-btn-demo = Coba di Browser
+home-btn-github = GitHub
+home-btn-crates = crates.io
 
-# Key Insight callout
-challenge-insight-title = Satu-satunya Metrik yang Penting: Waktu Kalender
-challenge-insight-text = Commit dan baris kode adalah proksi. Yang penting adalah <strong>hari hingga penyelesaian</strong>. Bisakah 1.000 agen yang bekerja paralel mengalahkan 100 agen? Apakah kerangka orkestrasi Anda mempertahankan produktivitas saat Anda berkembang? Tolok ukur ini akan memberitahu Anda.
+# Bagian Mengapa VibeSQL
+home-why-title = Mengapa VibeSQL?
+home-hybrid-title = Penyimpanan Hybrid
+home-hybrid-text = Penyimpanan row dan columnar dalam satu mesin. Format row untuk pencarian titik cepat dan OLTP. Format columnar untuk pemindaian analitis dengan eksekusi vectorized. Tidak perlu memilih.
+home-speed-title = Kecepatan di Atas Penyimpanan
+home-speed-text = Secara sengaja menukar ruang disk untuk performa kueri. Tata letak penyimpanan redundan, caching agresif, dan indeks yang telah dihitung sebelumnya berarti database kecil berjalan secepat mungkin.
+home-rust-title = Rust Murni, Nol Unsafe
+home-rust-text = Ditulis sepenuhnya dalam safe Rust. Tanpa dependensi C, tanpa FFI, tanpa blok unsafe. Dikompilasi menjadi binary native dan WebAssembly dari codebase yang sama.
 
-# The Challenge section
-challenge-section-title = Tantangannya
-challenge-objective-title = Tujuan
-challenge-objective-text = Bangun mesin database SQL dari nol yang lolos <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">suite SQLLogicTest</a>. Ini adalah suite tes yang sama yang digunakan untuk memvalidasi SQLite, DuckDB, dan database produksi lainnya.
-challenge-success-title = Kriteria Keberhasilan
-challenge-success-pass-rate = 100% tingkat kelulusan pada suite SQLLogicTest
-challenge-success-assertions = ~6 juta asersi tes individual
-challenge-success-files = Semua 622 file tes lulus
-challenge-constraints-title = Batasan
-challenge-constraint-parser = <strong>Tidak ada pustaka parser SQL yang ada</strong> — bangun parser Anda sendiri
-challenge-constraint-engine = <strong>Tidak ada mesin kueri yang ada</strong> — implementasikan eksekusi dari nol
-challenge-constraint-libs = <strong>Tidak ada pustaka khusus database</strong> — gunakan hanya pustaka tujuan umum
-challenge-allowed-title = Diizinkan
-challenge-allowed-lang = Bahasa pemrograman apa pun
-challenge-allowed-ai = Kerangka orkestrasi AI apa pun
-challenge-allowed-human = Intervensi manusia (tidak terbatas)
-challenge-allowed-libs = Pustaka tujuan umum (struktur data, I/O, dll.)
+# Bagian Arsitektur
+home-arch-title = Arsitektur
+home-pipeline-title = Pipeline Kueri
+home-pipeline-parser = <strong>Parser</strong> — Tata bahasa SQL:1999 lengkap, AST dialokasikan arena
+home-pipeline-planner = <strong>Planner</strong> — Optimizer berbasis biaya dengan pengurutan ulang join
+home-pipeline-executor = <strong>Executor</strong> — Eksekusi vectorized dengan pemrosesan batch
+home-pipeline-storage = <strong>Storage</strong> — Hybrid row/columnar dengan indeks B-tree
+home-features-title = Fitur Utama
+home-feature-window = Fungsi window (ROW_NUMBER, RANK, LEAD/LAG, NTILE, ...)
+home-feature-cte = Common Table Expressions (WITH, CTE rekursif)
+home-feature-subquery = Subquery (terkorelasi, EXISTS, IN, skalar)
+home-feature-join = Dukungan JOIN penuh (INNER, LEFT, RIGHT, FULL, CROSS, NATURAL)
+home-feature-triggers = Trigger, view, foreign key, constraint CHECK
+home-feature-wasm = Target WASM dengan penyimpanan persisten OPFS
 
-# The Trophy section
-challenge-trophy-title = Trofi
-challenge-trophy-name = Trofi Vibe Coding
-challenge-trophy-desc = Trofi fisik akan diberikan kepada setiap pemegang rekor. Desainnya mencerminkan semangat "vibe coding" — tongkat berlapis emas yang dipasang pada kayu walnut dengan plakat kuningan.
-challenge-trophy-claim = <strong>Nama Anda ada di trofi</strong> ketika Anda mengalahkan rekor saat ini minimal 5%.
-challenge-rules-title = Aturan Penghargaan
-challenge-rule-improve = <strong>Peningkatan 5% diperlukan</strong> — kalahkan rekor sebelumnya minimal 5% (dalam hari kalender) untuk mengklaim trofi
-challenge-rule-public = <strong>Repositori publik</strong> — kode Anda harus tersedia untuk umum untuk verifikasi
-challenge-rule-pass = <strong>100% tingkat kelulusan</strong> — semua 622 file SQLLogicTest harus lulus
-challenge-rule-git = <strong>Riwayat git yang dapat diverifikasi</strong> — tanggal commit pertama hingga 100% tingkat kelulusan menentukan waktu Anda
-challenge-record-title = Pemegang Rekor Saat Ini
-challenge-record-days = { $days } hari
-challenge-record-name = VibeSQL (Baseline)
-challenge-record-date = Oktober - November 2025
-challenge-record-beat = Kalahkan ini 5%? Itu <strong>24 hari atau kurang</strong> untuk mengklaim trofi.
+# Bagian Performa
+home-perf-title = Performa
+home-perf-full = Benchmark lengkap →
+home-stat-tpch-label = Kueri TPC-H Lulus
+home-stat-tpch-sub = Benchmark dukungan keputusan
+home-stat-conformance-label = Tingkat Kelulusan SQLLogicTest
+home-stat-conformance-sub = 6 juta+ asersi tes
+home-stat-tpcds-label = Kueri TPC-DS Lulus
+home-stat-tpcds-sub = Benchmark analitik kompleks
+home-perf-note = Diukur terhadap SQLite, DuckDB, dan MySQL pada beban kerja setara. <a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline">Lihat hasil lengkap.</a>
 
-# Why This Challenge section
-challenge-why-title = Mengapa Tantangan Ini?
-challenge-why-objective-title = Pengukuran Objektif
-challenge-why-objective-text = Tidak ada review kode subjektif. Entah tes lulus atau tidak. 6 juta asersi tidak menyisakan ruang untuk ambiguitas.
-challenge-why-complexity-title = Kompleksitas Nyata
-challenge-why-complexity-text = Database SQL memerlukan parser, optimizer, dan mesin eksekusi. Ini bukan masalah mainan—ini adalah rekayasa kelas produksi.
-challenge-why-time-title = Waktu Adalah Kebenaran
-challenge-why-time-text = Hari kalender hingga penyelesaian adalah metrik utama. Apakah paralelisasi ke 1.000 agen membantu? Sekarang Anda bisa mengetahuinya.
+# Bagian Memulai
+home-start-title = Memulai
+home-demo-title = Demo Interaktif
+home-demo-text = Jalankan kueri SQL di browser Anda. Mesin database lengkap yang dikompilasi ke WebAssembly dengan penyimpanan persisten via OPFS. Tidak perlu instalasi.
+home-install-title = Instalasi
+home-install-cargo = Cargo
+home-install-library = Sebagai pustaka
 
-# Get Started section
-challenge-start-title = Mulai
-challenge-start-intro = Mulai dari nol dalam bahasa apa pun, atau gunakan salah satu repo seed kami untuk kenyamanan. Setiap seed mencakup suite SQLLogicTest, test runner, dan alur kerja CI.
-challenge-seed-title = Repo Seed
-challenge-seed-optional = (opsional)
-challenge-seed-rust-desc = Sistem build Cargo, abstraksi tanpa biaya, keamanan memori tanpa GC.
-challenge-seed-cpp-desc = Sistem build CMake, kinerja maksimal, kontrol penuh atas memori.
-challenge-seed-go-desc = Toolchain sederhana, kompilasi cepat, primitif konkurensi yang sangat baik.
-challenge-seed-fork = Fork di GitHub →
-challenge-step1-title = Mulai Proyek Anda
-challenge-step1-text = Buat repo baru dari nol, atau fork seed di atas untuk awal yang baik. Dapatkan <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">suite SQLLogicTest</a>. Commit pertama Anda memulai waktu.
-challenge-step2-title = Bangun Database Anda
-challenge-step2-text = Implementasikan parser SQL, eksekutor kueri, dan mesin penyimpanan. Gunakan alat AI apa pun—Claude, Copilot, atau agen Anda sendiri. Jalankan <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> untuk melacak kemajuan.
-challenge-step3-title = Capai 100% dan Kirim
-challenge-step3-text = Ketika semua 622 file tes lulus, buka issue di <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> dengan tautan repo dan hash commit Anda. Kalahkan 25 hari untuk bergabung dengan papan peringkat.
-
-# Explore VibeSQL section
-challenge-explore-title = Jelajahi VibeSQL
-challenge-explore-demo-title = Coba Demo
-challenge-explore-demo-text = Jalankan kueri SQL di browser Anda menggunakan build WebAssembly.
-challenge-explore-conformance-title = Laporan Kesesuaian
-challenge-explore-conformance-text = Rincian detail kepatuhan standar SQL:1999.
-challenge-explore-benchmarks-title = Benchmark Kinerja
-challenge-explore-benchmarks-text = TPC-H, TPC-C, dan benchmark lainnya vs SQLite dan DuckDB.
+# Bagian Jelajahi
+home-explore-conformance-title = Laporan Kesesuaian
+home-explore-conformance-text = Rincian detail kepatuhan standar SQL:1999 di 622 file tes.
+home-explore-bench-title = Benchmark Kinerja
+home-explore-bench-text = Hasil TPC-H, TPC-DS, TPC-C, dan Sysbench vs SQLite, DuckDB, dan MySQL.
 
 # Footer
-challenge-footer = VibeSQL - Database SQL:1999 di WebAssembly
+home-footer = VibeSQL — Database SQL Rust Murni yang Dibangun untuk Kecepatan
 
 # Navigation
-nav-challenge = Tantangan Vibe Coding SQL
 nav-trends = Tren Kinerja
 
 # Trends page

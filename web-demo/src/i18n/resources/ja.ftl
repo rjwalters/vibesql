@@ -718,91 +718,67 @@ conformance-commit = コミット:
 conformance-status = ステータス:
 
 # =============================================================================
-# チャレンジページ
+# ホームページ
 # =============================================================================
 
-# ページタイトルとヘッダー
-challenge-page-title = SQL Vibe コーディングチャレンジ - VibeSQL
-challenge-header = SQL Vibe コーディングチャレンジ
+home-page-title = VibeSQL — 速度を追求したピュアRust SQLデータベース
 
 # ヒーローセクション
-challenge-hero-title = SQL Vibe コーディングチャレンジ
-challenge-hero-subtitle = マルチエージェントソフトウェア開発のための客観的ベンチマーク。SQLデータベースをゼロから構築。600万件のテストに合格。トロフィーを獲得。
-challenge-btn-start = 構築を開始
-challenge-btn-trophy = トロフィーを見る
-challenge-btn-leaderboard = リーダーボード
+home-hero-title = ピュアRust SQLデータベース<br>速度を追求して構築
+home-hero-subtitle = VibeSQLはストレージ効率よりもパフォーマンスを優先します。ハイブリッド行+列指向ストレージ、ベクトル化実行、unsafeコードゼロ。メモリに収まるデータセットに最適化。
+home-hero-subtext = SQL:1999準拠。ネイティブ、WebAssembly、組み込みライブラリとして動作。
+home-btn-demo = ブラウザで試す
+home-btn-github = GitHub
+home-btn-crates = crates.io
 
-# 重要な洞察
-challenge-insight-title = 重要な唯一の指標：カレンダー時間
-challenge-insight-text = コミット数やコード行数は代理指標です。重要なのは<strong>完了までの日数</strong>です。1,000のエージェントが並列で動作すれば100のエージェントに勝てるでしょうか？あなたのオーケストレーションフレームワークはスケール時に生産性を維持できますか？このベンチマークが答えを教えてくれます。
+# なぜVibeSQLかセクション
+home-why-title = なぜVibeSQL？
+home-hybrid-title = ハイブリッドストレージ
+home-hybrid-text = 1つのエンジンに行指向と列指向の両方のストレージを搭載。行形式は高速なポイント検索とOLTPに。列形式はベクトル化実行による分析スキャンに。選択する必要はありません。
+home-speed-title = ストレージより速度
+home-speed-text = ディスク容量をクエリパフォーマンスのために意図的にトレードオフ。冗長なストレージレイアウト、積極的なキャッシング、事前計算されたインデックスにより、小規模データベースを可能な限り高速に実行。
+home-rust-title = ピュアRust、unsafeゼロ
+home-rust-text = 完全にセーフRustで記述。C依存なし、FFIなし、unsafeブロックなし。同一のコードベースからネイティブバイナリとWebAssemblyにコンパイル。
 
-# チャレンジセクション
-challenge-section-title = チャレンジ
-challenge-objective-title = 目標
-challenge-objective-text = <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTestスイート</a>に合格するSQLデータベースエンジンをゼロから構築します。これはSQLite、DuckDB、その他の本番データベースの検証に使用されているものと同じテストスイートです。
-challenge-success-title = 成功基準
-challenge-success-pass-rate = SQLLogicTestで100%の合格率
-challenge-success-assertions = 約600万件の個別テストアサーション
-challenge-success-files = 全622個のテストファイルが合格
-challenge-constraints-title = 制約
-challenge-constraint-parser = <strong>既存のSQLパーサーライブラリ禁止</strong> — 独自のパーサーを構築
-challenge-constraint-engine = <strong>既存のクエリエンジン禁止</strong> — 実行をゼロから実装
-challenge-constraint-libs = <strong>データベース専用ライブラリ禁止</strong> — 汎用ライブラリのみ使用可
-challenge-allowed-title = 許可
-challenge-allowed-lang = 任意のプログラミング言語
-challenge-allowed-ai = 任意のAIオーケストレーションフレームワーク
-challenge-allowed-human = 人間の介入（無制限）
-challenge-allowed-libs = 汎用ライブラリ（データ構造、I/Oなど）
+# アーキテクチャセクション
+home-arch-title = アーキテクチャ
+home-pipeline-title = クエリパイプライン
+home-pipeline-parser = <strong>パーサー</strong> — 完全なSQL:1999文法、アリーナ割り当てAST
+home-pipeline-planner = <strong>プランナー</strong> — 結合順序変更を備えたコストベースオプティマイザ
+home-pipeline-executor = <strong>エグゼキューター</strong> — バッチ処理によるベクトル化実行
+home-pipeline-storage = <strong>ストレージ</strong> — B-treeインデックス付きハイブリッド行/列指向
+home-features-title = 主要機能
+home-feature-window = ウィンドウ関数（ROW_NUMBER、RANK、LEAD/LAG、NTILE、...）
+home-feature-cte = 共通テーブル式（WITH、再帰CTE）
+home-feature-subquery = サブクエリ（相関、EXISTS、IN、スカラー）
+home-feature-join = 完全なJOINサポート（INNER、LEFT、RIGHT、FULL、CROSS、NATURAL）
+home-feature-triggers = トリガー、ビュー、外部キー、CHECK制約
+home-feature-wasm = OPFS永続ストレージ対応のWASMターゲット
 
-# トロフィーセクション
-challenge-trophy-title = トロフィー
-challenge-trophy-name = Vibe Codingトロフィー
-challenge-trophy-desc = 各記録保持者に実物のトロフィーが授与されます。デザインは「Vibe Coding」の精神を反映 — ウォールナットに取り付けられた金メッキのワンドと真鍮のネームプレート。
-challenge-trophy-claim = 現在の記録を少なくとも5%上回ると、<strong>あなたの名前がトロフィーに刻まれます</strong>。
-challenge-rules-title = 受賞規則
-challenge-rule-improve = <strong>5%の改善が必要</strong> — トロフィーを獲得するには、前の記録を少なくとも5%（カレンダー日数で）上回る必要があります
-challenge-rule-public = <strong>公開リポジトリ</strong> — 検証のためにコードが公開されている必要があります
-challenge-rule-pass = <strong>100%の合格率</strong> — 全622個のSQLLogicTestファイルが合格する必要があります
-challenge-rule-git = <strong>検証可能なgit履歴</strong> — 最初のコミット日から100%合格までの時間があなたの記録となります
-challenge-record-title = 現在の記録保持者
-challenge-record-days = { $days }日
-challenge-record-name = VibeSQL（ベースライン）
-challenge-record-date = 2025年10月〜11月
-challenge-record-beat = これを5%上回りますか？トロフィーを獲得するには<strong>24日以下</strong>が必要です。
+# パフォーマンスセクション
+home-perf-title = パフォーマンス
+home-perf-full = 全ベンチマーク →
+home-stat-tpch-label = TPC-Hクエリ合格数
+home-stat-tpch-sub = 意思決定支援ベンチマーク
+home-stat-conformance-label = SQLLogicTest合格率
+home-stat-conformance-sub = 600万以上のテストアサーション
+home-stat-tpcds-label = TPC-DSクエリ合格数
+home-stat-tpcds-sub = 複雑な分析ベンチマーク
+home-perf-note = SQLite、DuckDB、MySQLと同等のワークロードでベンチマーク。<a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline">全結果を表示。</a>
 
-# なぜこのチャレンジかセクション
-challenge-why-title = なぜこのチャレンジ？
-challenge-why-objective-title = 客観的測定
-challenge-why-objective-text = 主観的なコードレビューはありません。テストは合格するか不合格かのどちらかです。600万件のアサーションは曖昧さの余地を残しません。
-challenge-why-complexity-title = 本物の複雑さ
-challenge-why-complexity-text = SQLデータベースにはパーサー、オプティマイザー、実行エンジンが必要です。これはおもちゃの問題ではなく、本番レベルのエンジニアリングです。
-challenge-why-time-title = 時間が真実
-challenge-why-time-text = 完了までのカレンダー日数が究極の指標です。1,000エージェントへの並列化は役立ちますか？今、あなたはそれを確かめることができます。
+# はじめにセクション
+home-start-title = はじめに
+home-demo-title = インタラクティブデモ
+home-demo-text = ブラウザでSQLクエリを実行。WebAssemblyにコンパイルされた完全なデータベースエンジンとOPFSによる永続ストレージ。インストール不要。
+home-install-title = インストール
+home-install-cargo = Cargo
+home-install-library = ライブラリとして
 
-# 開始セクション
-challenge-start-title = 開始
-challenge-start-intro = 任意の言語でゼロから始めるか、便利なシードリポジトリの1つを使用してください。各シードにはSQLLogicTestスイート、テストランナー、CIワークフローが含まれています。
-challenge-seed-title = シードリポジトリ
-challenge-seed-optional = （オプション）
-challenge-seed-rust-desc = Cargoビルドシステム、ゼロコスト抽象化、GCなしのメモリ安全性。
-challenge-seed-cpp-desc = CMakeビルドシステム、最大性能、メモリの完全制御。
-challenge-seed-go-desc = シンプルなツールチェーン、高速コンパイル、優れた並行性プリミティブ。
-challenge-seed-fork = GitHubでFork →
-challenge-step1-title = プロジェクトを開始
-challenge-step1-text = ゼロから新しいリポジトリを作成するか、上記のシードをフォークして素早く開始してください。<a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTestスイート</a>を取得してください。最初のコミットで時計が動き始めます。
-challenge-step2-title = データベースを構築
-challenge-step2-text = SQLパーサー、クエリエグゼキューター、ストレージエンジンを実装します。任意のAIツールを使用してください — Claude、Copilot、または独自のエージェント。進捗を追跡するには<code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code>を実行してください。
-challenge-step3-title = 100%達成して提出
-challenge-step3-text = 全622個のテストファイルが合格したら、<a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a>にリポジトリリンクとコミットハッシュを含むissueを開いてください。リーダーボードに参加するには25日を下回ってください。
-
-# VibeSQLを探索セクション
-challenge-explore-title = VibeSQLを探索
-challenge-explore-demo-title = デモを試す
-challenge-explore-demo-text = WebAssemblyビルドを使用してブラウザでSQLクエリを実行します。
-challenge-explore-conformance-title = 適合性レポート
-challenge-explore-conformance-text = SQL:1999標準への準拠の詳細な内訳。
-challenge-explore-benchmarks-title = パフォーマンスベンチマーク
-challenge-explore-benchmarks-text = SQLiteおよびDuckDBとの比較でTPC-H、TPC-C、その他のベンチマーク。
+# 探索セクション
+home-explore-conformance-title = 準拠レポート
+home-explore-conformance-text = 622のテストファイルにわたるSQL:1999標準準拠の詳細な内訳。
+home-explore-bench-title = パフォーマンスベンチマーク
+home-explore-bench-text = SQLite、DuckDB、MySQLとのTPC-H、TPC-DS、TPC-C、Sysbenchの結果。
 
 # フッター
-challenge-footer = VibeSQL - WebAssemblyで動作するSQL:1999データベース
+home-footer = VibeSQL — 速度を追求したピュアRust SQLデータベース

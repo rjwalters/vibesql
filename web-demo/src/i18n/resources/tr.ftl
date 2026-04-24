@@ -700,94 +700,70 @@ conformance-tcl-about-title = TCL Testleri Hakkında:
 conformance-tcl-about-text = SQLite'ın TCL test paketi, SQLite uyumluluğu için standart uygunluk testidir. Standart SQL test paketleri tarafından kapsanmayabilecek belirli SQLite davranışlarını, tuhaflıkları ve uç durumları test eder. Burada yüksek geçme oranları, uygulama taşıma senaryoları için güçlü SQLite uyumluluğunu gösterir.
 
 # =============================================================================
-# Challenge Page
+# Homepage
 # =============================================================================
 
-# Page title and header
-challenge-page-title = SQL Vibe Kodlama Mücadelesi - VibeSQL
-challenge-header = SQL Vibe Kodlama Mücadelesi
+home-page-title = VibeSQL — Hız İçin Tasarlanmış Saf Rust SQL Veritabanı
 
 # Hero section
-challenge-hero-title = SQL Vibe Kodlama Mücadelesi
-challenge-hero-subtitle = Çoklu ajan yazılım geliştirme için objektif bir kıyaslama. Sıfırdan bir SQL veritabanı oluşturun. 6 milyon testi geçin. Kupayı kazanın.
-challenge-btn-start = Oluşturmaya Başla
-challenge-btn-trophy = Kupayı Gör
-challenge-btn-leaderboard = Liderlik Tablosu
+home-hero-title = Hız için tasarlanmış<br>saf Rust SQL veritabanı
+home-hero-subtitle = VibeSQL, depolama verimliliği yerine performansı tercih eder. Hibrit satır + sütunlu depolama, vektörize yürütme ve sıfır unsafe kod. Belleğe sığan veri setleri için optimize edilmiştir.
+home-hero-subtext = SQL:1999 uyumlu. Nativ, WebAssembly ve gömülü kütüphane olarak çalışır.
+home-btn-demo = Tarayıcıda Dene
+home-btn-github = GitHub
+home-btn-crates = crates.io
 
-# Key Insight callout
-challenge-insight-title = Önemli Olan Tek Ölçü: Takvim Süresi
-challenge-insight-text = Commit'ler ve kod satırları sadece göstergelerdir. Önemli olan <strong>tamamlamaya kadar geçen gün sayısı</strong>dır. Paralel çalışan 1.000 ajan 100 ajanı yenebilir mi? Orkestrasyon çerçeveniz ölçeklendikçe üretkenliğini korur mu? Bu kıyaslama size söyleyecek.
+# Why VibeSQL section
+home-why-title = Neden VibeSQL?
+home-hybrid-title = Hibrit Depolama
+home-hybrid-text = Tek motorda hem satır hem sütunlu depolama. Hızlı nokta aramaları ve OLTP için satır formatı. Vektörize yürütme ile analitik taramalar için sütunlu format. Seçim yapmanıza gerek yok.
+home-speed-title = Depolama Yerine Hız
+home-speed-text = Bilinçli olarak disk alanını sorgu performansı için feda eder. Yedekli depolama düzenleri, agresif önbellekleme ve önceden hesaplanmış indeksler, küçük veritabanlarının mümkün olan en hızlı şekilde çalışmasını sağlar.
+home-rust-title = Saf Rust, Sıfır Unsafe
+home-rust-text = Tamamen güvenli Rust ile yazılmıştır. C bağımlılığı yok, FFI yok, unsafe blokları yok. Aynı kod tabanından nativ ikili dosyalara ve WebAssembly'ye derlenir.
 
-# The Challenge section
-challenge-section-title = Mücadele
-challenge-objective-title = Hedef
-challenge-objective-text = <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest paketini</a> geçen sıfırdan bir SQL veritabanı motoru oluşturun. Bu, SQLite, DuckDB ve diğer üretim veritabanlarını doğrulamak için kullanılan aynı test paketidir.
-challenge-success-title = Başarı Kriterleri
-challenge-success-pass-rate = SQLLogicTest paketinde %100 geçme oranı
-challenge-success-assertions = ~6 milyon bireysel test doğrulaması
-challenge-success-files = Tüm 622 test dosyası geçer
-challenge-constraints-title = Kısıtlamalar
-challenge-constraint-parser = <strong>Mevcut SQL ayrıştırıcı kütüphaneleri yok</strong> — kendi ayrıştırıcınızı oluşturun
-challenge-constraint-engine = <strong>Mevcut sorgu motorları yok</strong> — sıfırdan yürütme uygulayın
-challenge-constraint-libs = <strong>Veritabanına özgü kütüphaneler yok</strong> — yalnızca genel amaçlı kütüphaneler kullanın
-challenge-allowed-title = İzin Verilenler
-challenge-allowed-lang = Herhangi bir programlama dili
-challenge-allowed-ai = Herhangi bir AI orkestrasyon çerçevesi
-challenge-allowed-human = İnsan müdahalesi (sınırsız)
-challenge-allowed-libs = Genel amaçlı kütüphaneler (veri yapıları, G/Ç, vb.)
+# Architecture section
+home-arch-title = Mimari
+home-pipeline-title = Sorgu İşlem Hattı
+home-pipeline-parser = <strong>Ayrıştırıcı</strong> — Tam SQL:1999 dilbilgisi, arena tahsisli AST
+home-pipeline-planner = <strong>Planlayıcı</strong> — Birleştirme yeniden sıralamalı maliyet tabanlı optimize edici
+home-pipeline-executor = <strong>Yürütücü</strong> — Toplu işleme ile vektörize yürütme
+home-pipeline-storage = <strong>Depolama</strong> — B-tree indeksli hibrit satır/sütunlu depolama
+home-features-title = Temel Özellikler
+home-feature-window = Pencere fonksiyonları (ROW_NUMBER, RANK, LEAD/LAG, NTILE, ...)
+home-feature-cte = Ortak tablo ifadeleri (WITH, özyinelemeli CTE'ler)
+home-feature-subquery = Alt sorgular (ilişkili, EXISTS, IN, skaler)
+home-feature-join = Tam JOIN desteği (INNER, LEFT, RIGHT, FULL, CROSS, NATURAL)
+home-feature-triggers = Tetikleyiciler, görünümler, yabancı anahtarlar, CHECK kısıtlamaları
+home-feature-wasm = OPFS kalıcı depolamalı WASM hedefi
 
-# The Trophy section
-challenge-trophy-title = Kupa
-challenge-trophy-name = Vibe Kodlama Kupası
-challenge-trophy-desc = Her rekor sahibine fiziksel bir kupa verilecektir. Tasarım "vibe coding" ruhunu yansıtır — pirinç plaketlerle ceviz üzerine monte edilmiş altın kaplama bir asa.
-challenge-trophy-claim = Mevcut rekoru en az %5 geçtiğinizde <strong>adınız kupaya yazılır</strong>.
-challenge-rules-title = Ödül Kuralları
-challenge-rule-improve = <strong>%5 iyileştirme gerekli</strong> — kupayı talep etmek için önceki rekoru en az %5 (takvim günlerinde) yenin
-challenge-rule-public = <strong>Açık depo</strong> — kodunuz doğrulama için herkese açık olmalıdır
-challenge-rule-pass = <strong>%100 geçme oranı</strong> — tüm 622 SQLLogicTest dosyası geçmelidir
-challenge-rule-git = <strong>Doğrulanabilir git geçmişi</strong> — ilk commit tarihinden %100 geçme oranına kadar geçen süre sizin sürenizi belirler
-challenge-record-title = Mevcut Rekor Sahibi
-challenge-record-days = { $days } gün
-challenge-record-name = VibeSQL (Temel)
-challenge-record-date = Ekim - Kasım 2025
-challenge-record-beat = Bunu %5 yenin? Kupayı almak için <strong>24 gün veya daha az</strong>.
-
-# Why This Challenge section
-challenge-why-title = Neden Bu Mücadele?
-challenge-why-objective-title = Objektif Ölçüm
-challenge-why-objective-text = Subjektif kod incelemeleri yok. Ya testler geçer ya da geçmez. 6 milyon doğrulama belirsizliğe yer bırakmaz.
-challenge-why-complexity-title = Gerçek Karmaşıklık
-challenge-why-complexity-text = SQL veritabanları ayrıştırıcılar, optimize ediciler ve yürütme motorları gerektirir. Bu bir oyuncak problem değil—üretim kalitesinde mühendislik.
-challenge-why-time-title = Zaman Gerçektir
-challenge-why-time-text = Tamamlamaya kadar geçen takvim günleri nihai ölçüdür. 1.000 ajana paralelize etmek yardımcı olur mu? Artık öğrenebilirsiniz.
+# Performance section
+home-perf-title = Performans
+home-perf-full = Tam kıyaslamalar →
+home-stat-tpch-label = TPC-H Sorgu Başarısı
+home-stat-tpch-sub = Karar destek kıyaslaması
+home-stat-conformance-label = SQLLogicTest Geçme Oranı
+home-stat-conformance-sub = 6M+ test doğrulaması
+home-stat-tpcds-label = TPC-DS Sorgu Başarısı
+home-stat-tpcds-sub = Karmaşık analitik kıyaslaması
+home-perf-note = SQLite, DuckDB ve MySQL ile eşdeğer iş yüklerinde kıyaslanmıştır. <a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline">Tam sonuçları görün.</a>
 
 # Get Started section
-challenge-start-title = Başlayın
-challenge-start-intro = Herhangi bir dilde sıfırdan başlayın veya kolaylık için tohum depolarımızdan birini kullanın. Her tohum SQLLogicTest paketini, bir test çalıştırıcısını ve CI iş akışını içerir.
-challenge-seed-title = Tohum Depoları
-challenge-seed-optional = (isteğe bağlı)
-challenge-seed-rust-desc = Cargo derleme sistemi, sıfır maliyetli soyutlamalar, GC olmadan bellek güvenliği.
-challenge-seed-cpp-desc = CMake derleme sistemi, maksimum performans, bellek üzerinde tam kontrol.
-challenge-seed-go-desc = Basit araç zinciri, hızlı derleme, mükemmel eşzamanlılık ilkelleri.
-challenge-seed-fork = GitHub'da Fork Et →
-challenge-step1-title = Projenizi Başlatın
-challenge-step1-text = Sıfırdan yeni bir depo oluşturun veya hızlı bir başlangıç için yukarıdaki bir tohumu fork edin. <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest paketini</a> alın. İlk commit'iniz saati başlatır.
-challenge-step2-title = Veritabanınızı Oluşturun
-challenge-step2-text = Bir SQL ayrıştırıcısı, sorgu yürütücüsü ve depolama motoru uygulayın. Herhangi bir AI aracı kullanın—Claude, Copilot veya kendi ajanlarınız. İlerlemeyi takip etmek için <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> çalıştırın.
-challenge-step3-title = %100'e Ulaşın ve Gönderin
-challenge-step3-text = Tüm 622 test dosyası geçtiğinde, depo bağlantınız ve commit hash'lerinizle <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> adresinde bir issue açın. Liderlik tablosuna katılmak için 25 günü yenin.
+home-start-title = Başlayın
+home-demo-title = Etkileşimli Demo
+home-demo-text = Tarayıcınızda SQL sorguları çalıştırın. OPFS ile kalıcı depolamaya sahip, WebAssembly'ye derlenmiş tam veritabanı motoru. Kurulum gerektirmez.
+home-install-title = Kurulum
+home-install-cargo = Cargo
+home-install-library = Kütüphane olarak
 
-# Explore VibeSQL section
-challenge-explore-title = VibeSQL'i Keşfedin
-challenge-explore-demo-title = Demo'yu Deneyin
-challenge-explore-demo-text = WebAssembly derlemesini kullanarak tarayıcınızda SQL sorguları çalıştırın.
-challenge-explore-conformance-title = Uygunluk Raporu
-challenge-explore-conformance-text = SQL:1999 standart uyumluluğunun ayrıntılı dökümü.
-challenge-explore-benchmarks-title = Performans Kıyaslamaları
-challenge-explore-benchmarks-text = SQLite ve DuckDB'ye karşı TPC-H, TPC-C ve diğer kıyaslamalar.
+# Explore section
+home-explore-conformance-title = Uyumluluk Raporu
+home-explore-conformance-text = 622 test dosyası genelinde SQL:1999 standart uyumluluğunun ayrıntılı dökümü.
+home-explore-bench-title = Performans Kıyaslamaları
+home-explore-bench-text = SQLite, DuckDB ve MySQL'e karşı TPC-H, TPC-DS, TPC-C ve Sysbench sonuçları.
 
 # Footer
-challenge-footer = VibeSQL - WebAssembly'de SQL:1999 Veritabanı
+home-footer = VibeSQL — Hız için tasarlanmış saf Rust SQL veritabanı
 
 # Navigation
 nav-challenge = SQL Vibe Kodlama Mücadelesi

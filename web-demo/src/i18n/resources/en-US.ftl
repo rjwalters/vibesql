@@ -729,120 +729,67 @@ conformance-commit = Commit:
 conformance-status = Status:
 
 # =============================================================================
-# Challenge Page
+# Homepage
 # =============================================================================
 
-# Page title and header
-challenge-page-title = SQL Vibe Coding Challenge - VibeSQL
-challenge-header = SQL Vibe Coding Challenge
+home-page-title = VibeSQL — A Pure-Rust SQL Database Built for Speed
 
 # Hero section
-challenge-hero-title = The SQL Vibe Coding Challenge
-challenge-hero-subtitle = An objective benchmark for multi-agent software development. Build a SQL database from scratch. Pass 6 million tests. Win the trophy.
-challenge-btn-start = Start Building
-challenge-btn-trophy = See The Trophy
-challenge-btn-leaderboard = Leaderboard
+home-hero-title = A pure-Rust SQL database<br>built for speed
+home-hero-subtitle = VibeSQL trades storage efficiency for performance. Hybrid row + columnar storage, vectorized execution, and zero unsafe code. Optimized for datasets that fit in memory.
+home-hero-subtext = SQL:1999 compliant. Runs natively, in WebAssembly, and as an embedded library.
+home-btn-demo = Try in Browser
+home-btn-github = GitHub
+home-btn-crates = crates.io
 
-# Key Insight callout
-challenge-insight-title = The Only Metric That Matters: Calendar Time
-challenge-insight-text = Commits and lines of code are proxies. What matters is <strong>days to completion</strong>. Can 1,000 agents working in parallel beat 100 agents? Does your orchestration framework maintain productivity as you scale? This benchmark will tell you.
+# Why VibeSQL section
+home-why-title = Why VibeSQL?
+home-hybrid-title = Hybrid Storage
+home-hybrid-text = Both row and columnar storage in one engine. Row format for fast point lookups and OLTP. Columnar format for analytical scans with vectorized execution. No need to choose.
+home-speed-title = Speed Over Storage
+home-speed-text = Deliberately trades disk space for query performance. Redundant storage layouts, aggressive caching, and precomputed indexes mean smaller databases run as fast as possible.
+home-rust-title = Pure Rust, Zero Unsafe
+home-rust-text = Written entirely in safe Rust. No C dependencies, no FFI, no unsafe blocks. Compiles to native binaries and WebAssembly from the same codebase.
 
-# The Challenge section
-challenge-section-title = The Challenge
-challenge-objective-title = Objective
-challenge-objective-text = Build a SQL database engine from scratch that passes the <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest suite</a>. This is the same test suite used to validate SQLite, DuckDB, and other production databases.
-challenge-success-title = Success Criteria
-challenge-success-pass-rate = 100% pass rate on SQLLogicTest suite
-challenge-success-assertions = ~6 million individual test assertions
-challenge-success-files = All 622 test files passing
-# Execution Boundary Rule
-challenge-rule-boundary-title = The Rule: Execution Boundary
-challenge-rule-boundary-text = Existing database systems may be studied, benchmarked, and used for external analysis, but they must never cross the execution boundary of your submitted system.
-challenge-rule-outside-title = Outside the Boundary (Allowed)
-challenge-rule-study = Study source code and algorithms
-challenge-rule-benchmark = Benchmark to identify slow query classes
-challenge-rule-compare = Compare query plans and behaviors
-challenge-rule-guide = Use to guide design decisions
-challenge-rule-inside-title = Inside the Boundary (Disqualified)
-challenge-rule-execute = Execute queries via existing engines
-challenge-rule-fallback = Use as fallback for unsupported features
-challenge-rule-oracle = Use as correctness oracle during tests
-challenge-rule-link = Link, embed, or invoke at runtime
-challenge-rule-test = Key test: Removing SQLite must not change whether your engine builds, runs, or passes tests.
+# Architecture section
+home-arch-title = Architecture
+home-pipeline-title = Query Pipeline
+home-pipeline-parser = <strong>Parser</strong> — Full SQL:1999 grammar, arena-allocated AST
+home-pipeline-planner = <strong>Planner</strong> — Cost-based optimizer with join reordering
+home-pipeline-executor = <strong>Executor</strong> — Vectorized execution with batch processing
+home-pipeline-storage = <strong>Storage</strong> — Hybrid row/columnar with B-tree indexes
+home-features-title = Key Features
+home-feature-window = Window functions (ROW_NUMBER, RANK, LEAD/LAG, NTILE, ...)
+home-feature-cte = Common Table Expressions (WITH, recursive CTEs)
+home-feature-subquery = Subqueries (correlated, EXISTS, IN, scalar)
+home-feature-join = Full JOIN support (INNER, LEFT, RIGHT, FULL, CROSS, NATURAL)
+home-feature-triggers = Triggers, views, foreign keys, CHECK constraints
+home-feature-wasm = WASM target with OPFS persistent storage
 
-# Do/Don't Examples
-challenge-examples-title = Do / Don't Examples
-challenge-examples-do = DO (Allowed)
-challenge-examples-dont = DON'T (Disqualified)
-challenge-do-1-title = Read SQLite source code to understand B-tree implementation
-challenge-do-1-why = Study and learn from existing implementations
-challenge-do-2-title = Run DuckDB to benchmark JOIN performance and identify optimization targets
-challenge-do-2-why = External analysis to guide your implementation
-challenge-do-3-title = Compare your query plan output against PostgreSQL's EXPLAIN
-challenge-do-3-why = Learning tool that doesn't affect your execution
-challenge-do-4-title = Use scripts that call SQLite to pre-compute expected test outputs
-challenge-do-4-why = Offline reference data, not runtime dependency
-challenge-dont-1-title = Fall back to SQLite for window functions "temporarily"
-challenge-dont-1-why = Crosses execution boundary, even if planned for removal
-challenge-dont-2-title = Run queries through SQLite to verify correctness during tests
-challenge-dont-2-why = Using as oracle means tests depend on external engine
-challenge-dont-3-title = Link against libsqlite3 for "just the parser"
-challenge-dont-3-why = Embedded dependency violates clean-room implementation
-challenge-dont-4-title = Shell out to DuckDB for complex aggregation queries
-challenge-dont-4-why = Delegation of execution, regardless of method
-challenge-faq-title = Common Question
-challenge-faq-q = Q: Can I use SQLite during development?
-challenge-faq-a = A: Yes — for reading code, benchmarking, and analysis. No — for executing queries, validating correctness, or acting as part of your system.
-
-# The Trophy section
-challenge-trophy-title = The Trophy
-challenge-trophy-name = The Vibe Coding Trophy
-challenge-trophy-desc = A physical trophy will be awarded to each record holder. The design reflects the spirit of "vibe coding" — a gold-plated wand mounted on walnut with brass nameplates.
-challenge-trophy-claim = <strong>Your name goes on the trophy</strong> when you beat the current record by at least 5%.
-challenge-rules-title = Award Rules
-challenge-rule-improve = <strong>5% improvement required</strong> — beat the previous record by at least 5% (in calendar days) to claim the trophy
-challenge-rule-public = <strong>Public repository</strong> — your code must be publicly available for verification
-challenge-rule-pass = <strong>100% pass rate</strong> — all 622 SQLLogicTest files must pass
-challenge-rule-git = <strong>Verifiable git history</strong> — first commit date to 100% pass rate determines your time
-challenge-record-title = Current Record Holder
-challenge-record-days = { $days } days
-challenge-record-name = VibeSQL (Baseline)
-challenge-record-date = October - November 2025
-challenge-record-beat = Beat this by 5%? That's <strong>24 days or less</strong> to claim the trophy.
-
-# Why This Challenge section
-challenge-why-title = Why This Challenge?
-challenge-why-objective-title = Objective Measurement
-challenge-why-objective-text = No subjective code reviews. Either the tests pass or they don't. 6 million assertions leave no room for ambiguity.
-challenge-why-complexity-title = Real Complexity
-challenge-why-complexity-text = SQL databases require parsers, optimizers, and execution engines. This isn't a toy problem—it's production-grade engineering.
-challenge-why-time-title = Time Is Truth
-challenge-why-time-text = Calendar days to completion is the ultimate metric. Does parallelizing to 1,000 agents help? Now you can find out.
+# Performance section
+home-perf-title = Performance
+home-perf-full = Full benchmarks →
+home-stat-tpch-label = TPC-H Queries Passing
+home-stat-tpch-sub = Decision support benchmark
+home-stat-conformance-label = SQLLogicTest Pass Rate
+home-stat-conformance-sub = 6M+ test assertions
+home-stat-tpcds-label = TPC-DS Queries Passing
+home-stat-tpcds-sub = Complex analytics benchmark
+home-perf-note = Benchmarked against SQLite, DuckDB, and MySQL on equivalent workloads. <a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline">See full results.</a>
 
 # Get Started section
-challenge-start-title = Get Started
-challenge-start-intro = Start from scratch in any language, or use one of our seed repos for convenience. Each seed includes the SQLLogicTest suite, a test runner, and CI workflow.
-challenge-seed-title = Seed Repos
-challenge-seed-optional = (optional)
-challenge-seed-rust-desc = Cargo build system, zero-cost abstractions, memory safety without GC.
-challenge-seed-cpp-desc = CMake build system, maximum performance, full control over memory.
-challenge-seed-go-desc = Simple toolchain, fast compilation, excellent concurrency primitives.
-challenge-seed-fork = Fork on GitHub →
-challenge-step1-title = Start Your Project
-challenge-step1-text = Create a new repo from scratch, or fork a seed above for a head start. Get the <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest suite</a>. Your first commit starts the clock.
-challenge-step2-title = Build Your Database
-challenge-step2-text = Implement a SQL parser, query executor, and storage engine. Use any AI tools—Claude, Copilot, or your own agents. Run <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> to track progress.
-challenge-step3-title = Hit 100% and Submit
-challenge-step3-text = When all 622 test files pass, open an issue at <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> with your repo link and commit hashes. Beat 25 days to join the leaderboard.
+home-start-title = Get Started
+home-demo-title = Interactive Demo
+home-demo-text = Run SQL queries in your browser. Full database engine compiled to WebAssembly with persistent storage via OPFS. No installation required.
+home-install-title = Install
+home-install-cargo = Cargo
+home-install-library = As a library
 
-# Explore VibeSQL section
-challenge-explore-title = Explore VibeSQL
-challenge-explore-demo-title = Try the Demo
-challenge-explore-demo-text = Run SQL queries in your browser using the WebAssembly build.
-challenge-explore-conformance-title = Conformance Report
-challenge-explore-conformance-text = Detailed breakdown of SQL:1999 standards compliance.
-challenge-explore-benchmarks-title = Performance Benchmarks
-challenge-explore-benchmarks-text = TPC-H, TPC-C, and other benchmarks vs SQLite and DuckDB.
+# Explore section
+home-explore-conformance-title = Conformance Report
+home-explore-conformance-text = Detailed breakdown of SQL:1999 standards compliance across 622 test files.
+home-explore-bench-title = Performance Benchmarks
+home-explore-bench-text = TPC-H, TPC-DS, TPC-C, and Sysbench results vs SQLite, DuckDB, and MySQL.
 
 # Footer
-challenge-footer = VibeSQL - SQL:1999 Database in WebAssembly
+home-footer = VibeSQL — A pure-Rust SQL database built for speed

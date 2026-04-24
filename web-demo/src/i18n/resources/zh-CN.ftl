@@ -705,91 +705,67 @@ conformance-commit = 提交：
 conformance-status = 状态：
 
 # =============================================================================
-# 挑战页面
+# 首页
 # =============================================================================
 
-# 页面标题和头部
-challenge-page-title = SQL Vibe 编码挑战 - VibeSQL
-challenge-header = SQL Vibe 编码挑战
+home-page-title = VibeSQL — 为速度而生的纯 Rust SQL 数据库
 
 # 英雄区域
-challenge-hero-title = SQL Vibe 编码挑战
-challenge-hero-subtitle = 多智能体软件开发的客观基准。从零开始构建 SQL 数据库。通过 600 万项测试。赢得奖杯。
-challenge-btn-start = 开始构建
-challenge-btn-trophy = 查看奖杯
-challenge-btn-leaderboard = 排行榜
+home-hero-title = 纯 Rust SQL 数据库<br>为速度而生
+home-hero-subtitle = VibeSQL 以存储效率换取性能。混合行+列存储、向量化执行和零 unsafe 代码。针对内存可容纳的数据集优化。
+home-hero-subtext = 符合 SQL:1999 标准。支持原生运行、WebAssembly 和嵌入式库。
+home-btn-demo = 在浏览器中体验
+home-btn-github = GitHub
+home-btn-crates = crates.io
 
-# 关键洞察提示
-challenge-insight-title = 唯一重要的指标：日历时间
-challenge-insight-text = 提交次数和代码行数只是代理指标。真正重要的是<strong>完成所需的天数</strong>。1000 个智能体并行工作能否击败 100 个智能体？您的编排框架能否在扩展时保持生产力？这个基准测试会告诉您答案。
+# 为什么选择 VibeSQL 部分
+home-why-title = 为什么选择 VibeSQL？
+home-hybrid-title = 混合存储
+home-hybrid-text = 一个引擎同时具备行存储和列存储。行格式用于快速点查询和 OLTP，列格式用于向量化执行的分析扫描。无需做选择。
+home-speed-title = 速度优先于存储
+home-speed-text = 有意以磁盘空间换取查询性能。冗余存储布局、积极缓存和预计算索引确保小型数据库以最快速度运行。
+home-rust-title = 纯 Rust，零 unsafe
+home-rust-text = 完全使用安全 Rust 编写。无 C 依赖、无 FFI、无 unsafe 代码块。同一代码库可编译为原生二进制文件和 WebAssembly。
 
-# 挑战部分
-challenge-section-title = 挑战内容
-challenge-objective-title = 目标
-challenge-objective-text = 从零开始构建一个能够通过 <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest 套件</a>的 SQL 数据库引擎。这是用于验证 SQLite、DuckDB 和其他生产数据库的同一个测试套件。
-challenge-success-title = 成功标准
-challenge-success-pass-rate = SQLLogicTest 套件 100% 通过率
-challenge-success-assertions = 约 600 万个独立测试断言
-challenge-success-files = 全部 622 个测试文件通过
-challenge-constraints-title = 约束条件
-challenge-constraint-parser = <strong>禁止使用现有 SQL 解析器库</strong> — 必须自行构建解析器
-challenge-constraint-engine = <strong>禁止使用现有查询引擎</strong> — 必须从零实现执行引擎
-challenge-constraint-libs = <strong>禁止使用数据库专用库</strong> — 只能使用通用库
-challenge-allowed-title = 允许使用
-challenge-allowed-lang = 任何编程语言
-challenge-allowed-ai = 任何 AI 编排框架
-challenge-allowed-human = 人工干预（无限制）
-challenge-allowed-libs = 通用库（数据结构、I/O 等）
+# 架构部分
+home-arch-title = 架构
+home-pipeline-title = 查询管道
+home-pipeline-parser = <strong>解析器</strong> — 完整的 SQL:1999 语法，Arena 分配的 AST
+home-pipeline-planner = <strong>规划器</strong> — 支持连接重排序的基于代价的优化器
+home-pipeline-executor = <strong>执行器</strong> — 支持批处理的向量化执行
+home-pipeline-storage = <strong>存储</strong> — 带 B-tree 索引的混合行/列存储
+home-features-title = 核心特性
+home-feature-window = 窗口函数（ROW_NUMBER、RANK、LEAD/LAG、NTILE、...）
+home-feature-cte = 公共表表达式（WITH、递归 CTE）
+home-feature-subquery = 子查询（相关子查询、EXISTS、IN、标量子查询）
+home-feature-join = 完整的 JOIN 支持（INNER、LEFT、RIGHT、FULL、CROSS、NATURAL）
+home-feature-triggers = 触发器、视图、外键、CHECK 约束
+home-feature-wasm = 支持 OPFS 持久存储的 WASM 目标
 
-# 奖杯部分
-challenge-trophy-title = 奖杯
-challenge-trophy-name = Vibe 编码奖杯
-challenge-trophy-desc = 每位记录保持者都将获得一座实体奖杯。设计体现了"Vibe 编码"的精神 — 镀金魔杖安装在胡桃木底座上，配有黄铜铭牌。
-challenge-trophy-claim = 当您以至少 5% 的优势打破当前记录时，<strong>您的名字将刻在奖杯上</strong>。
-challenge-rules-title = 获奖规则
-challenge-rule-improve = <strong>需要 5% 的改进</strong> — 必须比之前的记录快至少 5%（以日历天数计）才能获得奖杯
-challenge-rule-public = <strong>公开仓库</strong> — 您的代码必须公开可供验证
-challenge-rule-pass = <strong>100% 通过率</strong> — 全部 622 个 SQLLogicTest 文件必须通过
-challenge-rule-git = <strong>可验证的 git 历史</strong> — 从首次提交到 100% 通过率的时间决定您的成绩
-challenge-record-title = 当前记录保持者
-challenge-record-days = { $days } 天
-challenge-record-name = VibeSQL（基准线）
-challenge-record-date = 2025 年 10 月 - 11 月
-challenge-record-beat = 想超越 5%？这意味着需要在 <strong>24 天或更短时间内</strong>完成才能获得奖杯。
+# 性能部分
+home-perf-title = 性能
+home-perf-full = 完整基准测试 →
+home-stat-tpch-label = TPC-H 查询通过数
+home-stat-tpch-sub = 决策支持基准测试
+home-stat-conformance-label = SQLLogicTest 通过率
+home-stat-conformance-sub = 超过 600 万项测试断言
+home-stat-tpcds-label = TPC-DS 查询通过数
+home-stat-tpcds-sub = 复杂分析基准测试
+home-perf-note = 在等效工作负载下与 SQLite、DuckDB 和 MySQL 进行基准测试对比。<a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline">查看完整结果。</a>
 
-# 为什么选择这个挑战
-challenge-why-title = 为什么选择这个挑战？
-challenge-why-objective-title = 客观衡量
-challenge-why-objective-text = 没有主观的代码审查。测试要么通过，要么不通过。600 万个断言不留任何模糊空间。
-challenge-why-complexity-title = 真实复杂度
-challenge-why-complexity-text = SQL 数据库需要解析器、优化器和执行引擎。这不是玩具问题 — 这是生产级工程。
-challenge-why-time-title = 时间即真理
-challenge-why-time-text = 完成所需的日历天数是终极指标。并行化到 1000 个智能体有帮助吗？现在您可以找到答案。
+# 快速开始部分
+home-start-title = 快速开始
+home-demo-title = 交互式演示
+home-demo-text = 在浏览器中运行 SQL 查询。完整的数据库引擎编译为 WebAssembly，通过 OPFS 实现持久存储。无需安装。
+home-install-title = 安装
+home-install-cargo = Cargo
+home-install-library = 作为库使用
 
-# 开始部分
-challenge-start-title = 开始
-challenge-start-intro = 使用任何语言从零开始，或使用我们的种子仓库获得便利。每个种子仓库都包含 SQLLogicTest 套件、测试运行器和 CI 工作流。
-challenge-seed-title = 种子仓库
-challenge-seed-optional = （可选）
-challenge-seed-rust-desc = Cargo 构建系统，零成本抽象，无 GC 的内存安全。
-challenge-seed-cpp-desc = CMake 构建系统，极致性能，完全控制内存。
-challenge-seed-go-desc = 简单的工具链，快速编译，出色的并发原语。
-challenge-seed-fork = 在 GitHub 上 Fork →
-challenge-step1-title = 启动您的项目
-challenge-step1-text = 从零创建新仓库，或 fork 上面的种子仓库快速开始。获取 <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">SQLLogicTest 套件</a>。您的首次提交开始计时。
-challenge-step2-title = 构建您的数据库
-challenge-step2-text = 实现 SQL 解析器、查询执行器和存储引擎。使用任何 AI 工具 — Claude、Copilot 或您自己的智能体。运行 <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> 跟踪进度。
-challenge-step3-title = 达到 100% 并提交
-challenge-step3-text = 当全部 622 个测试文件通过后，在 <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> 创建 issue，附上您的仓库链接和提交哈希。在 25 天内完成即可进入排行榜。
-
-# 探索 VibeSQL 部分
-challenge-explore-title = 探索 VibeSQL
-challenge-explore-demo-title = 试用演示
-challenge-explore-demo-text = 使用 WebAssembly 构建在浏览器中运行 SQL 查询。
-challenge-explore-conformance-title = 符合性报告
-challenge-explore-conformance-text = SQL:1999 标准符合性的详细分析。
-challenge-explore-benchmarks-title = 性能基准测试
-challenge-explore-benchmarks-text = TPC-H、TPC-C 及其他基准测试与 SQLite 和 DuckDB 的对比。
+# 探索部分
+home-explore-conformance-title = 合规性报告
+home-explore-conformance-text = 涵盖 622 个测试文件的 SQL:1999 标准合规性详细分析。
+home-explore-bench-title = 性能基准测试
+home-explore-bench-text = 与 SQLite、DuckDB、MySQL 对比的 TPC-H、TPC-DS、TPC-C、Sysbench 结果。
 
 # 页脚
-challenge-footer = VibeSQL - WebAssembly 中的 SQL:1999 数据库
+home-footer = VibeSQL — 为速度而生的纯 Rust SQL 数据库

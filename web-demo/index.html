@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VibeSQL - A Pure-Rust SQL Database Built for Speed</title>
+  <title data-i18n="home-page-title">VibeSQL - A Pure-Rust SQL Database Built for Speed</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <script>
     (function() {
@@ -31,24 +31,24 @@
     <!-- Hero Section -->
     <section class="bg-gradient-to-b from-blue-50 to-white dark:from-gray-900 dark:to-gray-800 py-20">
       <div class="max-w-5xl mx-auto px-4 text-center">
-        <h2 class="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-6">
+        <h2 class="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-6" data-i18n-html="home-hero-title">
           A pure-Rust SQL database<br>built for speed
         </h2>
-        <p class="text-xl text-gray-600 dark:text-gray-300 mb-4 max-w-3xl mx-auto">
+        <p class="text-xl text-gray-600 dark:text-gray-300 mb-4 max-w-3xl mx-auto" data-i18n="home-hero-subtitle">
           VibeSQL trades storage efficiency for performance. Hybrid row + columnar storage,
           vectorized execution, and zero unsafe code. Optimized for datasets that fit in memory.
         </p>
-        <p class="text-lg text-gray-500 dark:text-gray-400 mb-10 max-w-2xl mx-auto">
+        <p class="text-lg text-gray-500 dark:text-gray-400 mb-10 max-w-2xl mx-auto" data-i18n="home-hero-subtext">
           SQL:1999 compliant. Runs natively, in WebAssembly, and as an embedded library.
         </p>
         <div class="flex flex-wrap justify-center gap-4">
-          <a href="demo.html" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors">
+          <a href="demo.html" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors" data-i18n="home-btn-demo">
             Try in Browser
           </a>
-          <a href="https://github.com/rjwalters/vibesql" target="_blank" rel="noopener" class="px-6 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-semibold rounded-lg transition-colors">
+          <a href="https://github.com/rjwalters/vibesql" target="_blank" rel="noopener" class="px-6 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-semibold rounded-lg transition-colors" data-i18n="home-btn-github">
             GitHub
           </a>
-          <a href="https://crates.io/crates/vibesql" target="_blank" rel="noopener" class="px-6 py-3 border border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 text-gray-700 dark:text-gray-300 font-semibold rounded-lg transition-colors">
+          <a href="https://crates.io/crates/vibesql" target="_blank" rel="noopener" class="px-6 py-3 border border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 text-gray-700 dark:text-gray-300 font-semibold rounded-lg transition-colors" data-i18n="home-btn-crates">
             crates.io
           </a>
         </div>
@@ -60,7 +60,7 @@
 
       <!-- The Niche -->
       <section>
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8 text-center">Why VibeSQL?</h2>
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8 text-center" data-i18n="home-why-title">Why VibeSQL?</h2>
 
         <div class="grid md:grid-cols-3 gap-8">
           <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
@@ -69,10 +69,10 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2" data-i18n="home-hybrid-title">
               Hybrid Storage
             </h3>
-            <p class="text-gray-600 dark:text-gray-300">
+            <p class="text-gray-600 dark:text-gray-300" data-i18n="home-hybrid-text">
               Both row and columnar storage in one engine. Row format for fast point lookups and OLTP.
               Columnar format for analytical scans with vectorized execution. No need to choose.
             </p>
@@ -84,10 +84,10 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2" data-i18n="home-speed-title">
               Speed Over Storage
             </h3>
-            <p class="text-gray-600 dark:text-gray-300">
+            <p class="text-gray-600 dark:text-gray-300" data-i18n="home-speed-text">
               Deliberately trades disk space for query performance. Redundant storage layouts,
               aggressive caching, and precomputed indexes mean smaller databases run as fast as possible.
             </p>
@@ -99,10 +99,10 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2" data-i18n="home-rust-title">
               Pure Rust, Zero Unsafe
             </h3>
-            <p class="text-gray-600 dark:text-gray-300">
+            <p class="text-gray-600 dark:text-gray-300" data-i18n="home-rust-text">
               Written entirely in safe Rust. No C dependencies, no FFI, no unsafe blocks.
               Compiles to native binaries and WebAssembly from the same codebase.
             </p>
@@ -112,57 +112,57 @@
 
       <!-- Architecture at a Glance -->
       <section>
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8 text-center">Architecture</h2>
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8 text-center" data-i18n="home-arch-title">Architecture</h2>
 
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
           <div class="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-gray-200 dark:divide-gray-700">
             <div class="p-8">
-              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Query Pipeline</h3>
+              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4" data-i18n="home-pipeline-title">Query Pipeline</h3>
               <div class="space-y-3 text-gray-600 dark:text-gray-300">
                 <div class="flex items-center gap-3">
                   <span class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center text-sm font-bold flex-shrink-0">1</span>
-                  <span><strong>Parser</strong> &mdash; Full SQL:1999 grammar, arena-allocated AST</span>
+                  <span data-i18n-html="home-pipeline-parser"><strong>Parser</strong> &mdash; Full SQL:1999 grammar, arena-allocated AST</span>
                 </div>
                 <div class="flex items-center gap-3">
                   <span class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center text-sm font-bold flex-shrink-0">2</span>
-                  <span><strong>Planner</strong> &mdash; Cost-based optimizer with join reordering</span>
+                  <span data-i18n-html="home-pipeline-planner"><strong>Planner</strong> &mdash; Cost-based optimizer with join reordering</span>
                 </div>
                 <div class="flex items-center gap-3">
                   <span class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center text-sm font-bold flex-shrink-0">3</span>
-                  <span><strong>Executor</strong> &mdash; Vectorized execution with batch processing</span>
+                  <span data-i18n-html="home-pipeline-executor"><strong>Executor</strong> &mdash; Vectorized execution with batch processing</span>
                 </div>
                 <div class="flex items-center gap-3">
                   <span class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center text-sm font-bold flex-shrink-0">4</span>
-                  <span><strong>Storage</strong> &mdash; Hybrid row/columnar with B-tree indexes</span>
+                  <span data-i18n-html="home-pipeline-storage"><strong>Storage</strong> &mdash; Hybrid row/columnar with B-tree indexes</span>
                 </div>
               </div>
             </div>
             <div class="p-8">
-              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Key Features</h3>
+              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4" data-i18n="home-features-title">Key Features</h3>
               <ul class="space-y-2 text-gray-600 dark:text-gray-300">
                 <li class="flex items-start gap-2">
                   <span class="text-green-500 mt-1 flex-shrink-0">&#10003;</span>
-                  Window functions (ROW_NUMBER, RANK, LEAD/LAG, NTILE, ...)
+                  <span data-i18n="home-feature-window">Window functions (ROW_NUMBER, RANK, LEAD/LAG, NTILE, ...)</span>
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="text-green-500 mt-1 flex-shrink-0">&#10003;</span>
-                  Common Table Expressions (WITH, recursive CTEs)
+                  <span data-i18n="home-feature-cte">Common Table Expressions (WITH, recursive CTEs)</span>
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="text-green-500 mt-1 flex-shrink-0">&#10003;</span>
-                  Subqueries (correlated, EXISTS, IN, scalar)
+                  <span data-i18n="home-feature-subquery">Subqueries (correlated, EXISTS, IN, scalar)</span>
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="text-green-500 mt-1 flex-shrink-0">&#10003;</span>
-                  Full JOIN support (INNER, LEFT, RIGHT, FULL, CROSS, NATURAL)
+                  <span data-i18n="home-feature-join">Full JOIN support (INNER, LEFT, RIGHT, FULL, CROSS, NATURAL)</span>
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="text-green-500 mt-1 flex-shrink-0">&#10003;</span>
-                  Triggers, views, foreign keys, CHECK constraints
+                  <span data-i18n="home-feature-triggers">Triggers, views, foreign keys, CHECK constraints</span>
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="text-green-500 mt-1 flex-shrink-0">&#10003;</span>
-                  WASM target with OPFS persistent storage
+                  <span data-i18n="home-feature-wasm">WASM target with OPFS persistent storage</span>
                 </li>
               </ul>
             </div>
@@ -173,8 +173,8 @@
       <!-- Benchmark Highlights -->
       <section>
         <div class="flex items-center justify-between mb-8">
-          <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100">Performance</h2>
-          <a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">
+          <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100" data-i18n="home-perf-title">Performance</h2>
+          <a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline font-medium" data-i18n="home-perf-full">
             Full benchmarks &rarr;
           </a>
         </div>
@@ -182,22 +182,22 @@
         <div class="grid md:grid-cols-3 gap-6">
           <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 text-center">
             <div class="text-4xl font-bold text-blue-600 dark:text-blue-400 mb-2" id="stat-tpch">--</div>
-            <div class="text-gray-600 dark:text-gray-300 text-sm">TPC-H Queries Passing</div>
-            <div class="text-gray-400 dark:text-gray-500 text-xs mt-1">Decision support benchmark</div>
+            <div class="text-gray-600 dark:text-gray-300 text-sm" data-i18n="home-stat-tpch-label">TPC-H Queries Passing</div>
+            <div class="text-gray-400 dark:text-gray-500 text-xs mt-1" data-i18n="home-stat-tpch-sub">Decision support benchmark</div>
           </div>
           <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 text-center">
             <div class="text-4xl font-bold text-green-600 dark:text-green-400 mb-2" id="stat-conformance">--</div>
-            <div class="text-gray-600 dark:text-gray-300 text-sm">SQLLogicTest Pass Rate</div>
-            <div class="text-gray-400 dark:text-gray-500 text-xs mt-1">6M+ test assertions</div>
+            <div class="text-gray-600 dark:text-gray-300 text-sm" data-i18n="home-stat-conformance-label">SQLLogicTest Pass Rate</div>
+            <div class="text-gray-400 dark:text-gray-500 text-xs mt-1" data-i18n="home-stat-conformance-sub">6M+ test assertions</div>
           </div>
           <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 text-center">
             <div class="text-4xl font-bold text-purple-600 dark:text-purple-400 mb-2" id="stat-tpcds">--</div>
-            <div class="text-gray-600 dark:text-gray-300 text-sm">TPC-DS Queries Passing</div>
-            <div class="text-gray-400 dark:text-gray-500 text-xs mt-1">Complex analytics benchmark</div>
+            <div class="text-gray-600 dark:text-gray-300 text-sm" data-i18n="home-stat-tpcds-label">TPC-DS Queries Passing</div>
+            <div class="text-gray-400 dark:text-gray-500 text-xs mt-1" data-i18n="home-stat-tpcds-sub">Complex analytics benchmark</div>
           </div>
         </div>
 
-        <p class="text-center text-gray-500 dark:text-gray-400 text-sm mt-4">
+        <p class="text-center text-gray-500 dark:text-gray-400 text-sm mt-4" data-i18n-html="home-perf-note">
           Benchmarked against SQLite, DuckDB, and MySQL on equivalent workloads.
           <a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline">See full results.</a>
         </p>
@@ -205,7 +205,7 @@
 
       <!-- Try It / Quick Start -->
       <section>
-        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8 text-center">Get Started</h2>
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-8 text-center" data-i18n="home-start-title">Get Started</h2>
 
         <div class="grid md:grid-cols-2 gap-8">
           <!-- Try in Browser -->
@@ -216,11 +216,11 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                 </svg>
               </div>
-              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400">
+              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400" data-i18n="home-demo-title">
                 Interactive Demo
               </h3>
             </div>
-            <p class="text-gray-600 dark:text-gray-300">
+            <p class="text-gray-600 dark:text-gray-300" data-i18n="home-demo-text">
               Run SQL queries in your browser. Full database engine compiled to WebAssembly
               with persistent storage via OPFS. No installation required.
             </p>
@@ -234,17 +234,17 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
                 </svg>
               </div>
-              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100">
+              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100" data-i18n="home-install-title">
                 Install
               </h3>
             </div>
             <div class="space-y-3">
               <div>
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Cargo</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1" data-i18n="home-install-cargo">Cargo</div>
                 <code class="block bg-gray-100 dark:bg-gray-900 rounded px-3 py-2 text-sm font-mono text-gray-800 dark:text-gray-200">cargo install vibesql-cli</code>
               </div>
               <div>
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">As a library</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1" data-i18n="home-install-library">As a library</div>
                 <code class="block bg-gray-100 dark:bg-gray-900 rounded px-3 py-2 text-sm font-mono text-gray-800 dark:text-gray-200">cargo add vibesql</code>
               </div>
             </div>
@@ -256,18 +256,18 @@
       <section>
         <div class="grid md:grid-cols-2 gap-6">
           <a href="conformance.html" class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 transition-colors">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2" data-i18n="home-explore-conformance-title">
               Conformance Report
             </h3>
-            <p class="text-gray-600 dark:text-gray-300">
+            <p class="text-gray-600 dark:text-gray-300" data-i18n="home-explore-conformance-text">
               Detailed breakdown of SQL:1999 standards compliance across 622 test files.
             </p>
           </a>
           <a href="benchmarks.html" class="group bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 transition-colors">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-2" data-i18n="home-explore-bench-title">
               Performance Benchmarks
             </h3>
-            <p class="text-gray-600 dark:text-gray-300">
+            <p class="text-gray-600 dark:text-gray-300" data-i18n="home-explore-bench-text">
               TPC-H, TPC-DS, TPC-C, and Sysbench results vs SQLite, DuckDB, and MySQL.
             </p>
           </a>
@@ -278,7 +278,7 @@
 
     <!-- Footer -->
     <footer class="mt-12 text-center text-sm text-gray-500 dark:text-gray-400 pb-6 space-y-1">
-      <p>VibeSQL &mdash; A pure-Rust SQL database built for speed</p>
+      <p data-i18n="home-footer">VibeSQL &mdash; A pure-Rust SQL database built for speed</p>
       <p id="build-timestamp" class="text-xs text-gray-400 dark:text-gray-500"></p>
     </footer>
   </div>

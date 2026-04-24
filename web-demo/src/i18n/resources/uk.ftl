@@ -707,94 +707,70 @@ conformance-tcl-about-title = Про тести TCL:
 conformance-tcl-about-text = Тестовий набір TCL від SQLite є канонічним тестом відповідності для сумісності з SQLite. Він тестує специфічну поведінку SQLite, особливості та граничні випадки, які можуть не покриватися стандартними наборами SQL-тестів. Високий відсоток проходження тут вказує на сильну сумісність з SQLite для сценаріїв міграції додатків.
 
 # =============================================================================
-# Challenge Page
+# Homepage
 # =============================================================================
 
-# Page title and header
-challenge-page-title = Виклик SQL Vibe Coding - VibeSQL
-challenge-header = Виклик SQL Vibe Coding
+home-page-title = VibeSQL — SQL база даних на чистому Rust, створена для швидкості
 
 # Hero section
-challenge-hero-title = Виклик SQL Vibe Coding
-challenge-hero-subtitle = Об'єктивний бенчмарк для мультиагентної розробки програмного забезпечення. Побудуйте базу даних SQL з нуля. Пройдіть 6 мільйонів тестів. Виграйте трофей.
-challenge-btn-start = Почати Будувати
-challenge-btn-trophy = Переглянути Трофей
-challenge-btn-leaderboard = Таблиця Лідерів
+home-hero-title = SQL база даних на чистому Rust,<br>створена для швидкості
+home-hero-subtitle = VibeSQL жертвує ефективністю зберігання заради продуктивності. Гібридне рядкове та колонкове сховище, векторизоване виконання і нуль unsafe-коду. Оптимізовано для наборів даних, що поміщаються в пам'яті.
+home-hero-subtext = Відповідає SQL:1999. Працює нативно, у WebAssembly та як вбудована бібліотека.
+home-btn-demo = Спробувати у браузері
+home-btn-github = GitHub
+home-btn-crates = crates.io
 
-# Key Insight callout
-challenge-insight-title = Єдина Метрика, Що Має Значення: Календарний Час
-challenge-insight-text = Коміти та рядки коду — це лише проксі. Важливо <strong>скільки днів до завершення</strong>. Чи можуть 1000 агентів, що працюють паралельно, перемогти 100 агентів? Чи зберігає ваш фреймворк оркестрації продуктивність при масштабуванні? Цей бенчмарк вам скаже.
+# Why VibeSQL section
+home-why-title = Чому VibeSQL?
+home-hybrid-title = Гібридне сховище
+home-hybrid-text = Рядкове та колонкове сховище в одному рушії. Рядковий формат для швидких точкових запитів та OLTP. Колонковий формат для аналітичних сканувань із векторизованим виконанням. Не потрібно обирати.
+home-speed-title = Швидкість понад обсяг
+home-speed-text = Свідомо жертвує дисковим простором заради продуктивності запитів. Дублюючі схеми зберігання, агресивне кешування та попередньо обчислені індекси дозволяють невеликим базам даних працювати максимально швидко.
+home-rust-title = Чистий Rust, нуль unsafe
+home-rust-text = Повністю написаний на безпечному Rust. Без залежностей від C, без FFI, без unsafe-блоків. Компілюється в нативні бінарники та WebAssembly з однієї кодової бази.
 
-# The Challenge section
-challenge-section-title = Виклик
-challenge-objective-title = Мета
-challenge-objective-text = Побудуйте движок бази даних SQL з нуля, який пройде <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">набір SQLLogicTest</a>. Це той самий набір тестів, що використовується для валідації SQLite, DuckDB та інших продакшн баз даних.
-challenge-success-title = Критерії Успіху
-challenge-success-pass-rate = 100% успішність на наборі SQLLogicTest
-challenge-success-assertions = ~6 мільйонів індивідуальних тестових твердень
-challenge-success-files = Всі 622 тестових файли пройдено
-challenge-constraints-title = Обмеження
-challenge-constraint-parser = <strong>Жодних існуючих бібліотек SQL-парсерів</strong> — створіть власний парсер
-challenge-constraint-engine = <strong>Жодних існуючих движків запитів</strong> — реалізуйте виконання з нуля
-challenge-constraint-libs = <strong>Жодних бібліотек, специфічних для баз даних</strong> — використовуйте лише бібліотеки загального призначення
-challenge-allowed-title = Дозволено
-challenge-allowed-lang = Будь-яка мова програмування
-challenge-allowed-ai = Будь-який фреймворк AI-оркестрації
-challenge-allowed-human = Людське втручання (без обмежень)
-challenge-allowed-libs = Бібліотеки загального призначення (структури даних, I/O тощо)
+# Architecture section
+home-arch-title = Архітектура
+home-pipeline-title = Конвеєр запитів
+home-pipeline-parser = <strong>Парсер</strong> — Повна граматика SQL:1999, AST з аренною алокацією
+home-pipeline-planner = <strong>Планувальник</strong> — Оптимізатор на основі вартості з перестановкою JOIN
+home-pipeline-executor = <strong>Виконавець</strong> — Векторизоване виконання з пакетною обробкою
+home-pipeline-storage = <strong>Сховище</strong> — Гібридне рядкове/колонкове сховище з B-tree індексами
+home-features-title = Ключові можливості
+home-feature-window = Віконні функції (ROW_NUMBER, RANK, LEAD/LAG, NTILE, ...)
+home-feature-cte = Узагальнені табличні вирази (WITH, рекурсивні CTE)
+home-feature-subquery = Підзапити (корельовані, EXISTS, IN, скалярні)
+home-feature-join = Повна підтримка JOIN (INNER, LEFT, RIGHT, FULL, CROSS, NATURAL)
+home-feature-triggers = Тригери, подання, зовнішні ключі, обмеження CHECK
+home-feature-wasm = WASM-ціль із постійним сховищем OPFS
 
-# The Trophy section
-challenge-trophy-title = Трофей
-challenge-trophy-name = Трофей Vibe Coding
-challenge-trophy-desc = Фізичний трофей буде вручено кожному власнику рекорду. Дизайн відображає дух "vibe coding" — позолочений жезл, встановлений на горіховому дереві з латунними табличками.
-challenge-trophy-claim = <strong>Ваше ім'я буде на трофеї</strong>, коли ви переб'єте поточний рекорд мінімум на 5%.
-challenge-rules-title = Правила Нагородження
-challenge-rule-improve = <strong>Потрібне покращення на 5%</strong> — переб'єте попередній рекорд мінімум на 5% (у календарних днях), щоб отримати трофей
-challenge-rule-public = <strong>Публічний репозиторій</strong> — ваш код повинен бути публічно доступним для перевірки
-challenge-rule-pass = <strong>100% успішність</strong> — всі 622 файли SQLLogicTest повинні пройти
-challenge-rule-git = <strong>Перевірювана історія git</strong> — дата першого коміту до 100% успішності визначає ваш час
-challenge-record-title = Поточний Власник Рекорду
-challenge-record-days = { $days } днів
-challenge-record-name = VibeSQL (Базовий)
-challenge-record-date = Жовтень - Листопад 2025
-challenge-record-beat = Побити це на 5%? Це <strong>24 днів або менше</strong> для отримання трофею.
-
-# Why This Challenge section
-challenge-why-title = Чому Цей Виклик?
-challenge-why-objective-title = Об'єктивне Вимірювання
-challenge-why-objective-text = Жодних суб'єктивних оглядів коду. Тести або проходять, або ні. 6 мільйонів твердень не залишають місця для неоднозначності.
-challenge-why-complexity-title = Реальна Складність
-challenge-why-complexity-text = Бази даних SQL вимагають парсерів, оптимізаторів та движків виконання. Це не іграшкова проблема — це інженерія продакшн-рівня.
-challenge-why-time-title = Час — Це Правда
-challenge-why-time-text = Календарні дні до завершення — це остаточна метрика. Чи допомагає розпаралелювання до 1000 агентів? Тепер ви можете дізнатися.
+# Performance section
+home-perf-title = Продуктивність
+home-perf-full = Повні бенчмарки →
+home-stat-tpch-label = TPC-H запитів пройдено
+home-stat-tpch-sub = Бенчмарк підтримки прийняття рішень
+home-stat-conformance-label = Відсоток проходження SQLLogicTest
+home-stat-conformance-sub = 6M+ тестових тверджень
+home-stat-tpcds-label = TPC-DS запитів пройдено
+home-stat-tpcds-sub = Бенчмарк складної аналітики
+home-perf-note = Порівняння з SQLite, DuckDB та MySQL на еквівалентних навантаженнях. <a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline">Повні результати.</a>
 
 # Get Started section
-challenge-start-title = Почати
-challenge-start-intro = Почніть з нуля на будь-якій мові або використайте один з наших seed-репозиторіїв для зручності. Кожен seed включає набір SQLLogicTest, test runner та CI workflow.
-challenge-seed-title = Seed Репозиторії
-challenge-seed-optional = (опціонально)
-challenge-seed-rust-desc = Система збірки Cargo, абстракції з нульовою вартістю, безпека пам'яті без GC.
-challenge-seed-cpp-desc = Система збірки CMake, максимальна продуктивність, повний контроль над пам'яттю.
-challenge-seed-go-desc = Простий toolchain, швидка компіляція, відмінні примітиви конкурентності.
-challenge-seed-fork = Fork на GitHub →
-challenge-step1-title = Запустіть Свій Проект
-challenge-step1-text = Створіть новий репозиторій з нуля або зробіть fork seed вище для швидкого старту. Отримайте <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">набір SQLLogicTest</a>. Ваш перший коміт запускає годинник.
-challenge-step2-title = Побудуйте Свою Базу Даних
-challenge-step2-text = Реалізуйте SQL-парсер, виконавець запитів та движок зберігання. Використовуйте будь-які AI-інструменти — Claude, Copilot або власних агентів. Запустіть <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> для відстеження прогресу.
-challenge-step3-title = Досягніть 100% та Подайте
-challenge-step3-text = Коли всі 622 тестових файли пройдуть, відкрийте issue на <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> з посиланням на репозиторій та хешами комітів. Переб'єте 25 днів, щоб потрапити в таблицю лідерів.
+home-start-title = Початок роботи
+home-demo-title = Інтерактивне демо
+home-demo-text = Виконуйте SQL-запити у браузері. Повний рушій бази даних, скомпільований у WebAssembly з постійним сховищем через OPFS. Встановлення не потрібне.
+home-install-title = Встановлення
+home-install-cargo = Cargo
+home-install-library = Як бібліотека
 
-# Explore VibeSQL section
-challenge-explore-title = Досліджуйте VibeSQL
-challenge-explore-demo-title = Спробуйте Демо
-challenge-explore-demo-text = Виконуйте SQL-запити у браузері за допомогою WebAssembly збірки.
-challenge-explore-conformance-title = Звіт про Відповідність
-challenge-explore-conformance-text = Детальний аналіз відповідності стандарту SQL:1999.
-challenge-explore-benchmarks-title = Бенчмарки Продуктивності
-challenge-explore-benchmarks-text = TPC-H, TPC-C та інші бенчмарки проти SQLite та DuckDB.
+# Explore section
+home-explore-conformance-title = Звіт про відповідність
+home-explore-conformance-text = Детальна розбивка відповідності стандартам SQL:1999 по 622 тестових файлах.
+home-explore-bench-title = Бенчмарки продуктивності
+home-explore-bench-text = Результати TPC-H, TPC-DS, TPC-C та Sysbench у порівнянні з SQLite, DuckDB та MySQL.
 
 # Footer
-challenge-footer = VibeSQL - База Даних SQL:1999 у WebAssembly
+home-footer = VibeSQL — SQL база даних на чистому Rust, створена для швидкості
 
 # Navigation
 nav-challenge = Виклик SQL Vibe Coding

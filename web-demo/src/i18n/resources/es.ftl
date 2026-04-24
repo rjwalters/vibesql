@@ -727,91 +727,67 @@ conformance-commit = Commit:
 conformance-status = Estado:
 
 # =============================================================================
-# Página del Desafío
+# Página de Inicio
 # =============================================================================
 
-# Título de página y encabezado
-challenge-page-title = Desafío de Programación SQL Vibe - VibeSQL
-challenge-header = Desafío de Programación SQL Vibe
+home-page-title = VibeSQL — Una Base de Datos SQL Pura en Rust Creada para Velocidad
 
 # Sección hero
-challenge-hero-title = El Desafío de Programación SQL Vibe
-challenge-hero-subtitle = Un benchmark objetivo para el desarrollo de software multi-agente. Construye una base de datos SQL desde cero. Pasa 6 millones de pruebas. Gana el trofeo.
-challenge-btn-start = Comenzar a Construir
-challenge-btn-trophy = Ver el Trofeo
-challenge-btn-leaderboard = Clasificación
+home-hero-title = Una base de datos SQL pura en Rust<br>creada para velocidad
+home-hero-subtitle = VibeSQL sacrifica eficiencia de almacenamiento por rendimiento. Almacenamiento híbrido de filas y columnas, ejecución vectorizada y cero código unsafe. Optimizada para conjuntos de datos que caben en memoria.
+home-hero-subtext = Compatible con SQL:1999. Se ejecuta de forma nativa, en WebAssembly y como biblioteca embebida.
+home-btn-demo = Probar en el Navegador
+home-btn-github = GitHub
+home-btn-crates = crates.io
 
-# Información clave
-challenge-insight-title = La Única Métrica que Importa: Tiempo Calendario
-challenge-insight-text = Los commits y líneas de código son aproximaciones. Lo que importa son los <strong>días hasta completar</strong>. ¿Pueden 1,000 agentes trabajando en paralelo superar a 100 agentes? ¿Tu framework de orquestación mantiene la productividad al escalar? Este benchmark te lo dirá.
+# Sección por qué VibeSQL
+home-why-title = ¿Por Qué VibeSQL?
+home-hybrid-title = Almacenamiento Híbrido
+home-hybrid-text = Almacenamiento de filas y columnas en un solo motor. Formato de filas para búsquedas puntuales rápidas y OLTP. Formato columnar para escaneos analíticos con ejecución vectorizada. Sin necesidad de elegir.
+home-speed-title = Velocidad Sobre Almacenamiento
+home-speed-text = Sacrifica deliberadamente espacio en disco por rendimiento de consultas. Layouts de almacenamiento redundantes, caché agresivo e índices precomputados significan que bases de datos más pequeñas se ejecutan lo más rápido posible.
+home-rust-title = Rust Puro, Cero Unsafe
+home-rust-text = Escrito completamente en Rust seguro. Sin dependencias de C, sin FFI, sin bloques unsafe. Se compila a binarios nativos y WebAssembly desde la misma base de código.
 
-# Sección del desafío
-challenge-section-title = El Desafío
-challenge-objective-title = Objetivo
-challenge-objective-text = Construye un motor de base de datos SQL desde cero que pase la <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">suite SQLLogicTest</a>. Esta es la misma suite de pruebas usada para validar SQLite, DuckDB y otras bases de datos de producción.
-challenge-success-title = Criterios de Éxito
-challenge-success-pass-rate = 100% de tasa de aprobación en SQLLogicTest
-challenge-success-assertions = ~6 millones de aserciones de prueba individuales
-challenge-success-files = Los 622 archivos de prueba pasando
-challenge-constraints-title = Restricciones
-challenge-constraint-parser = <strong>Sin librerías de parseo SQL existentes</strong> — construye tu propio parser
-challenge-constraint-engine = <strong>Sin motores de consulta existentes</strong> — implementa la ejecución desde cero
-challenge-constraint-libs = <strong>Sin librerías específicas de bases de datos</strong> — usa solo librerías de propósito general
-challenge-allowed-title = Permitido
-challenge-allowed-lang = Cualquier lenguaje de programación
-challenge-allowed-ai = Cualquier framework de orquestación de IA
-challenge-allowed-human = Intervención humana (ilimitada)
-challenge-allowed-libs = Librerías de propósito general (estructuras de datos, I/O, etc.)
+# Sección de arquitectura
+home-arch-title = Arquitectura
+home-pipeline-title = Pipeline de Consultas
+home-pipeline-parser = <strong>Parser</strong> — Gramática SQL:1999 completa, AST con asignación en arena
+home-pipeline-planner = <strong>Planificador</strong> — Optimizador basado en costos con reordenamiento de joins
+home-pipeline-executor = <strong>Ejecutor</strong> — Ejecución vectorizada con procesamiento por lotes
+home-pipeline-storage = <strong>Almacenamiento</strong> — Híbrido filas/columnar con índices B-tree
+home-features-title = Características Principales
+home-feature-window = Funciones de ventana (ROW_NUMBER, RANK, LEAD/LAG, NTILE, ...)
+home-feature-cte = Expresiones de tabla comunes (WITH, CTEs recursivos)
+home-feature-subquery = Subconsultas (correlacionadas, EXISTS, IN, escalares)
+home-feature-join = Soporte completo de JOIN (INNER, LEFT, RIGHT, FULL, CROSS, NATURAL)
+home-feature-triggers = Triggers, vistas, claves foráneas, restricciones CHECK
+home-feature-wasm = Objetivo WASM con almacenamiento persistente OPFS
 
-# Sección del trofeo
-challenge-trophy-title = El Trofeo
-challenge-trophy-name = El Trofeo Vibe Coding
-challenge-trophy-desc = Se otorgará un trofeo físico a cada poseedor del récord. El diseño refleja el espíritu del "vibe coding" — una varita bañada en oro montada sobre nogal con placas de latón.
-challenge-trophy-claim = <strong>Tu nombre irá en el trofeo</strong> cuando superes el récord actual por al menos un 5%.
-challenge-rules-title = Reglas del Premio
-challenge-rule-improve = <strong>Se requiere 5% de mejora</strong> — supera el récord anterior por al menos 5% (en días calendario) para reclamar el trofeo
-challenge-rule-public = <strong>Repositorio público</strong> — tu código debe estar disponible públicamente para verificación
-challenge-rule-pass = <strong>100% de tasa de aprobación</strong> — los 622 archivos SQLLogicTest deben pasar
-challenge-rule-git = <strong>Historial git verificable</strong> — la fecha del primer commit hasta el 100% de aprobación determina tu tiempo
-challenge-record-title = Poseedor Actual del Récord
-challenge-record-days = { $days } días
-challenge-record-name = VibeSQL (Línea Base)
-challenge-record-date = Octubre - Noviembre 2025
-challenge-record-beat = ¿Superar esto en un 5%? Eso significa <strong>24 días o menos</strong> para reclamar el trofeo.
-
-# Sección por qué este desafío
-challenge-why-title = ¿Por Qué Este Desafío?
-challenge-why-objective-title = Medición Objetiva
-challenge-why-objective-text = Sin revisiones de código subjetivas. Las pruebas pasan o no pasan. 6 millones de aserciones no dejan espacio para ambigüedad.
-challenge-why-complexity-title = Complejidad Real
-challenge-why-complexity-text = Las bases de datos SQL requieren parsers, optimizadores y motores de ejecución. Esto no es un problema de juguete — es ingeniería de nivel producción.
-challenge-why-time-title = El Tiempo es la Verdad
-challenge-why-time-text = Los días calendario hasta completar es la métrica definitiva. ¿Paralelizar a 1,000 agentes ayuda? Ahora puedes descubrirlo.
+# Sección de rendimiento
+home-perf-title = Rendimiento
+home-perf-full = Benchmarks completos →
+home-stat-tpch-label = Consultas TPC-H Aprobadas
+home-stat-tpch-sub = Benchmark de soporte a decisiones
+home-stat-conformance-label = Tasa de Aprobación SQLLogicTest
+home-stat-conformance-sub = Más de 6M de aserciones de prueba
+home-stat-tpcds-label = Consultas TPC-DS Aprobadas
+home-stat-tpcds-sub = Benchmark de análisis complejo
+home-perf-note = Comparado con SQLite, DuckDB y MySQL en cargas de trabajo equivalentes. <a href="benchmarks.html" class="text-blue-600 dark:text-blue-400 hover:underline">Ver resultados completos.</a>
 
 # Sección comenzar
-challenge-start-title = Comenzar
-challenge-start-intro = Empieza desde cero en cualquier lenguaje, o usa uno de nuestros repositorios semilla por conveniencia. Cada semilla incluye la suite SQLLogicTest, un ejecutor de pruebas y flujo de trabajo CI.
-challenge-seed-title = Repositorios Semilla
-challenge-seed-optional = (opcional)
-challenge-seed-rust-desc = Sistema de compilación Cargo, abstracciones de costo cero, seguridad de memoria sin GC.
-challenge-seed-cpp-desc = Sistema de compilación CMake, máximo rendimiento, control total sobre la memoria.
-challenge-seed-go-desc = Herramientas simples, compilación rápida, excelentes primitivas de concurrencia.
-challenge-seed-fork = Fork en GitHub →
-challenge-step1-title = Inicia Tu Proyecto
-challenge-step1-text = Crea un nuevo repo desde cero, o haz fork de una semilla arriba para empezar rápido. Obtén la <a href="https://www.sqlite.org/sqllogictest/" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">suite SQLLogicTest</a>. Tu primer commit inicia el reloj.
-challenge-step2-title = Construye Tu Base de Datos
-challenge-step2-text = Implementa un parser SQL, ejecutor de consultas y motor de almacenamiento. Usa cualquier herramienta de IA — Claude, Copilot, o tus propios agentes. Ejecuta <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">make test</code> para seguir el progreso.
-challenge-step3-title = Alcanza el 100% y Envía
-challenge-step3-text = Cuando los 622 archivos de prueba pasen, abre un issue en <a href="https://github.com/vibesql-challenge/submissions" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener">vibesql-challenge/submissions</a> con el enlace a tu repo y hashes de commits. Supera 25 días para unirte a la clasificación.
+home-start-title = Comenzar
+home-demo-title = Demo Interactiva
+home-demo-text = Ejecuta consultas SQL en tu navegador. Motor de base de datos completo compilado a WebAssembly con almacenamiento persistente vía OPFS. Sin instalación requerida.
+home-install-title = Instalar
+home-install-cargo = Cargo
+home-install-library = Como biblioteca
 
-# Sección explorar VibeSQL
-challenge-explore-title = Explorar VibeSQL
-challenge-explore-demo-title = Probar la Demo
-challenge-explore-demo-text = Ejecuta consultas SQL en tu navegador usando la compilación WebAssembly.
-challenge-explore-conformance-title = Informe de Conformidad
-challenge-explore-conformance-text = Desglose detallado del cumplimiento de estándares SQL:1999.
-challenge-explore-benchmarks-title = Benchmarks de Rendimiento
-challenge-explore-benchmarks-text = TPC-H, TPC-C y otros benchmarks vs SQLite y DuckDB.
+# Sección explorar
+home-explore-conformance-title = Informe de Conformidad
+home-explore-conformance-text = Desglose detallado del cumplimiento de estándares SQL:1999 en 622 archivos de prueba.
+home-explore-bench-title = Benchmarks de Rendimiento
+home-explore-bench-text = Resultados de TPC-H, TPC-DS, TPC-C y Sysbench frente a SQLite, DuckDB y MySQL.
 
 # Pie de página
-challenge-footer = VibeSQL - Base de Datos SQL:1999 en WebAssembly
+home-footer = VibeSQL — Una base de datos SQL pura en Rust creada para velocidad
