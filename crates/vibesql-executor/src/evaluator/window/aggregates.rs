@@ -21,12 +21,34 @@ where
 {
     if let Some(filter_expr) = filter {
         if let Ok(filter_result) = eval_fn(filter_expr, row) {
-            matches!(filter_result, SqlValue::Boolean(true))
+            // SQLite uses general truthiness: any non-zero, non-NULL value is true
+            is_truthy_value(&filter_result)
         } else {
             false // Evaluation error = skip row
         }
     } else {
         true // No filter = include all rows
+    }
+}
+
+/// Check if a SQL value is truthy (SQLite semantics)
+fn is_truthy_value(value: &SqlValue) -> bool {
+    match value {
+        SqlValue::Boolean(b) => *b,
+        SqlValue::Null => false,
+        SqlValue::Integer(n) => *n != 0,
+        SqlValue::Smallint(n) => *n != 0,
+        SqlValue::Bigint(n) => *n != 0,
+        SqlValue::Unsigned(n) => *n != 0,
+        SqlValue::Float(f) => *f != 0.0,
+        SqlValue::Real(f) => *f != 0.0,
+        SqlValue::Double(f) => *f != 0.0,
+        SqlValue::Numeric(f) => *f != 0.0,
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            // Try parsing as number; if it parses as non-zero, it's truthy
+            s.parse::<f64>().map_or(false, |n| n != 0.0)
+        }
+        _ => false,
     }
 }
 

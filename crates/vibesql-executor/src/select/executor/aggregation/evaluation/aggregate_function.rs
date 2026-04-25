@@ -321,15 +321,14 @@ pub(super) fn evaluate(
     };
 
     // Helper closure to check if a row passes the FILTER condition
-    // Returns true if there's no filter, or if the filter evaluates to true
+    // Returns true if there's no filter, or if the filter evaluates to truthy
     let passes_filter = |row: &vibesql_storage::Row,
                          evaluator: &CombinedExpressionEvaluator|
      -> Result<bool, ExecutorError> {
         if let Some(filter_expr) = filter {
             let filter_result = evaluator.eval(filter_expr, row)?;
-            // Only rows where filter evaluates to TRUE are included
-            // NULL and FALSE are excluded (per SQL:2003 semantics)
-            Ok(matches!(filter_result, vibesql_types::SqlValue::Boolean(true)))
+            // SQLite uses general truthiness: any non-zero, non-NULL value is true
+            Ok(executor.is_truthy(&filter_result)?)
         } else {
             Ok(true)
         }

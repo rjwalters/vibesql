@@ -772,7 +772,7 @@ fn evaluate_window_function_for_partition(
                             // Apply FILTER clause
                             if let Some(filter_expr) = filter {
                                 if let Ok(fv) = agg_eval_fn(filter_expr, &partition.rows[idx]) {
-                                    if !matches!(fv, SqlValue::Boolean(true)) {
+                                    if !is_filter_truthy(&fv) {
                                         continue;
                                     }
                                 } else {
@@ -797,7 +797,7 @@ fn evaluate_window_function_for_partition(
                             // Apply FILTER clause
                             if let Some(filter_expr) = filter {
                                 if let Ok(fv) = agg_eval_fn(filter_expr, &partition.rows[idx]) {
-                                    if !matches!(fv, SqlValue::Boolean(true)) {
+                                    if !is_filter_truthy(&fv) {
                                         continue;
                                     }
                                 } else {
@@ -833,6 +833,22 @@ fn evaluate_window_function_for_partition(
     };
 
     Ok(results)
+}
+
+/// Check if a SQL value is truthy for FILTER clause (SQLite semantics)
+fn is_filter_truthy(value: &SqlValue) -> bool {
+    match value {
+        SqlValue::Boolean(b) => *b,
+        SqlValue::Null => false,
+        SqlValue::Integer(n) => *n != 0,
+        SqlValue::Smallint(n) => *n != 0,
+        SqlValue::Bigint(n) => *n != 0,
+        SqlValue::Float(f) => *f != 0.0,
+        SqlValue::Real(f) => *f != 0.0,
+        SqlValue::Double(f) => *f != 0.0,
+        SqlValue::Numeric(f) => *f != 0.0,
+        _ => false,
+    }
 }
 
 /// Convert a SqlValue to its JSON string representation
