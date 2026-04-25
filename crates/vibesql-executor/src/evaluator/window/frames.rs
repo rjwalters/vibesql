@@ -88,15 +88,19 @@ fn validate_frame_bound(bound: &FrameBound, is_start: bool) -> Result<(), String
 
         FrameBound::Preceding(offset_expr) | FrameBound::Following(offset_expr) => {
             let bound_type = if is_start { "starting" } else { "ending" };
-            match evaluate_offset_expr(offset_expr)? {
-                Some(offset) if offset < 0.0 => {
+            match evaluate_offset_expr(offset_expr) {
+                Err(_) => {
+                    // Non-constant expression (e.g., column ref) used as frame offset
+                    Err(format!("frame {} offset must be a non-negative integer", bound_type))
+                }
+                Ok(Some(offset)) if offset < 0.0 => {
                     Err(format!("frame {} offset must be a non-negative number", bound_type))
                 }
-                None => {
+                Ok(None) => {
                     // NULL, invalid string, blob - all treated as invalid numbers
                     Err(format!("frame {} offset must be a non-negative number", bound_type))
                 }
-                Some(_) => Ok(()), // Valid non-negative number
+                Ok(Some(_)) => Ok(()), // Valid non-negative number
             }
         }
     }

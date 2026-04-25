@@ -326,7 +326,7 @@ impl SelectExecutor<'_> {
 
         let predicates = folded_where
             .as_ref()
-            .and_then(|where_expr| extract_non_join_predicates(where_expr, &combined_schema))
+            .and_then(|where_expr| extract_non_join_predicates(where_expr, &combined_schema, self.database.case_sensitive_like()))
             .unwrap_or_default();
 
         let filtered_batch = if predicates.is_empty() {

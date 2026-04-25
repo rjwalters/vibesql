@@ -488,7 +488,7 @@ mod tests {
             }),
         };
 
-        let tree = extract_predicate_tree(&expr, &schema);
+        let tree = extract_predicate_tree(&expr, &schema, false);
         assert!(tree.is_some());
 
         let tree = tree.unwrap();

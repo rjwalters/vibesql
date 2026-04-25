@@ -123,7 +123,7 @@ impl ExecutionPipeline for NativeColumnarPipeline {
             let predicate = predicate.unwrap();
 
             // Extract simple predicates for SIMD filtering
-            let predicates = match extract_column_predicates(predicate, ctx.schema, false) {
+            let predicates = match extract_column_predicates(predicate, ctx.schema, ctx.database.case_sensitive_like()) {
                 Some(preds) => preds,
                 None => {
                     // Complex predicate - fall back to row filtering
@@ -151,7 +151,7 @@ impl ExecutionPipeline for NativeColumnarPipeline {
         let predicate = predicate.unwrap();
 
         // Try to extract simple predicates
-        let predicates = match extract_column_predicates(predicate, ctx.schema, false) {
+        let predicates = match extract_column_predicates(predicate, ctx.schema, ctx.database.case_sensitive_like()) {
             Some(preds) => preds,
             None => {
                 return self.fallback_filter(rows, Some(predicate), ctx);

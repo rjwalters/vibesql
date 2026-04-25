@@ -242,12 +242,7 @@ fn remap_predicate(predicate: &ColumnPredicate, column_mapping: &[usize]) -> Col
 ///
 /// Some(tree) if the expression can be converted to columnar predicates,
 /// None if the expression is too complex for columnar optimization.
-pub fn extract_predicate_tree(expr: &Expression, schema: &CombinedSchema) -> Option<PredicateTree> {
-    extract_predicate_tree_with_options(expr, schema, false)
-}
-
-/// Extract predicate tree with explicit case_sensitive_like setting
-pub fn extract_predicate_tree_with_options(
+pub fn extract_predicate_tree(
     expr: &Expression,
     schema: &CombinedSchema,
     case_sensitive_like: bool,
@@ -911,7 +906,7 @@ mod tests {
             symmetric: false,
         };
 
-        let tree = extract_predicate_tree(&expr, &schema);
+        let tree = extract_predicate_tree(&expr, &schema, false);
         assert!(tree.is_some());
 
         match tree.unwrap() {
@@ -941,7 +936,7 @@ mod tests {
             }),
         };
 
-        let tree = extract_predicate_tree(&expr, &schema);
+        let tree = extract_predicate_tree(&expr, &schema, false);
         assert!(tree.is_some());
 
         match tree.unwrap() {
@@ -970,7 +965,7 @@ mod tests {
             ))),
         };
 
-        let tree = extract_predicate_tree(&expr, &schema);
+        let tree = extract_predicate_tree(&expr, &schema, false);
         assert!(tree.is_some());
 
         match tree.unwrap() {
@@ -1007,7 +1002,7 @@ mod tests {
             negated: false,
         };
 
-        let tree = extract_predicate_tree(&expr, &schema);
+        let tree = extract_predicate_tree(&expr, &schema, false);
         assert!(tree.is_some());
 
         match tree.unwrap() {
@@ -1042,7 +1037,7 @@ mod tests {
             symmetric: false,
         };
 
-        let tree = extract_predicate_tree(&expr, &schema);
+        let tree = extract_predicate_tree(&expr, &schema, false);
         assert!(tree.is_none());
     }
 
@@ -1061,7 +1056,7 @@ mod tests {
             ))),
         };
 
-        let tree = extract_predicate_tree(&expr, &schema);
+        let tree = extract_predicate_tree(&expr, &schema, false);
         assert!(tree.is_some());
 
         match tree.unwrap() {
@@ -1102,7 +1097,7 @@ mod tests {
                 ))),
             };
 
-            let tree = extract_predicate_tree(&expr, &schema);
+            let tree = extract_predicate_tree(&expr, &schema, false);
             assert!(tree.is_some(), "Should extract predicate for operator {:?}", binary_op);
 
             match tree.unwrap() {

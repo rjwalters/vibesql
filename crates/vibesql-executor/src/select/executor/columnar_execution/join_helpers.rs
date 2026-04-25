@@ -239,9 +239,10 @@ pub(super) fn extract_equijoin_conditions(
 pub(super) fn extract_non_join_predicates(
     expr: &Expression,
     schema: &CombinedSchema,
+    case_sensitive_like: bool,
 ) -> Option<Vec<columnar::ColumnPredicate>> {
     let mut predicates = Vec::new();
-    extract_non_join_predicates_recursive(expr, schema, &mut predicates);
+    extract_non_join_predicates_recursive(expr, schema, case_sensitive_like, &mut predicates);
     if predicates.is_empty() {
         None
     } else {
@@ -252,12 +253,13 @@ pub(super) fn extract_non_join_predicates(
 fn extract_non_join_predicates_recursive(
     expr: &Expression,
     schema: &CombinedSchema,
+    case_sensitive_like: bool,
     predicates: &mut Vec<columnar::ColumnPredicate>,
 ) {
     match expr {
         Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
-            extract_non_join_predicates_recursive(left, schema, predicates);
-            extract_non_join_predicates_recursive(right, schema, predicates);
+            extract_non_join_predicates_recursive(left, schema, case_sensitive_like, predicates);
+            extract_non_join_predicates_recursive(right, schema, case_sensitive_like, predicates);
         }
         Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             // Skip column = column (join conditions)
@@ -267,13 +269,13 @@ fn extract_non_join_predicates_recursive(
                 return;
             }
             // Try to extract as column predicate
-            if let Some(pred) = columnar::extract_column_predicates(expr, schema, false) {
+            if let Some(pred) = columnar::extract_column_predicates(expr, schema, case_sensitive_like) {
                 predicates.extend(pred);
             }
         }
         _ => {
             // Try to extract other predicates
-            if let Some(pred) = columnar::extract_column_predicates(expr, schema, false) {
+            if let Some(pred) = columnar::extract_column_predicates(expr, schema, case_sensitive_like) {
                 predicates.extend(pred);
             }
         }

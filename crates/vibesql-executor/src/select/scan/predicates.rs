@@ -70,7 +70,7 @@ pub(crate) fn apply_table_local_predicates(
         if outer_row.is_none() && outer_schema.is_none() && rows.len() >= 100 {
             use crate::select::columnar::{create_filter_bitmap_tree, extract_predicate_tree};
 
-            if let Some(predicate_tree) = extract_predicate_tree(&combined_where, &schema) {
+            if let Some(predicate_tree) = extract_predicate_tree(&combined_where, &schema, database.case_sensitive_like()) {
                 // Use columnar filtering
                 let bitmap =
                     create_filter_bitmap_tree(rows.len(), &predicate_tree, |row_idx, col_idx| {
@@ -337,7 +337,7 @@ pub(crate) fn filter_and_clone_rows(
     if rows.len() >= 100 {
         use crate::select::columnar::{create_filter_bitmap_tree, extract_predicate_tree};
 
-        if let Some(predicate_tree) = extract_predicate_tree(&combined_where, &schema) {
+        if let Some(predicate_tree) = extract_predicate_tree(&combined_where, &schema, database.case_sensitive_like()) {
             // Use columnar filtering with bitmap
             let bitmap =
                 create_filter_bitmap_tree(rows.len(), &predicate_tree, |row_idx, col_idx| {

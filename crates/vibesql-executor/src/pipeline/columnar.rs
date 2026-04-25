@@ -107,7 +107,7 @@ impl ExecutionPipeline for ColumnarPipeline {
             let predicate = predicate.unwrap();
 
             // Try to extract simple predicates for SIMD filtering
-            let predicates = match extract_column_predicates(predicate, ctx.schema, false) {
+            let predicates = match extract_column_predicates(predicate, ctx.schema, ctx.database.case_sensitive_like()) {
                 Some(preds) => preds,
                 None => {
                     // Complex predicate - fall back to row-oriented filtering
@@ -143,7 +143,7 @@ impl ExecutionPipeline for ColumnarPipeline {
         let predicate = predicate.unwrap();
 
         // Try to extract simple predicates for SIMD filtering
-        let predicates = match extract_column_predicates(predicate, ctx.schema, false) {
+        let predicates = match extract_column_predicates(predicate, ctx.schema, ctx.database.case_sensitive_like()) {
             Some(preds) => preds,
             None => {
                 // Complex predicate - fall back to row-oriented filtering
