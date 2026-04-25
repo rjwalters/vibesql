@@ -69,6 +69,22 @@ pub fn partition_rows<F>(
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
 {
+    partition_rows_with_collations(rows, partition_by, &[], eval_fn)
+}
+
+/// Partition rows by PARTITION BY expressions, respecting column collations
+///
+/// `collations` maps each PARTITION BY expression index to its resolved collation.
+/// For NOCASE collation, partition keys are compared case-insensitively.
+pub fn partition_rows_with_collations<F>(
+    rows: Vec<Row>,
+    partition_by: &Option<Vec<Expression>>,
+    collations: &[Option<String>],
+    eval_fn: F,
+) -> Vec<Partition>
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     // If no PARTITION BY, return all rows in single partition
     let Some(partition_exprs) = partition_by else {
         return vec![Partition::new(rows)];
@@ -88,8 +104,25 @@ where
         // Evaluate partition expressions for this row
         let mut partition_key = Vec::new();
 
-        for expr in partition_exprs {
+        for (i, expr) in partition_exprs.iter().enumerate() {
             let value = eval_fn(expr, &row).unwrap_or(SqlValue::Null);
+            // Apply collation to partition key for case-insensitive grouping
+            let collation = collations.get(i).and_then(|c| c.as_deref());
+            if let Some(coll) = collation {
+                if coll.eq_ignore_ascii_case("nocase") {
+                    let normalized = match &value {
+                        SqlValue::Varchar(s) => {
+                            SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase()))
+                        }
+                        SqlValue::Character(s) => {
+                            SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase()))
+                        }
+                        other => other.clone(),
+                    };
+                    partition_key.push(normalized);
+                    continue;
+                }
+            }
             partition_key.push(value);
         }
 

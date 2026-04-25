@@ -374,10 +374,13 @@ where
                 }
             } else {
                 // Find the boundary row and return exclusive end
+                // If no matching row exists, return 0 (empty frame end)
                 if is_desc {
-                    find_last_row_ge_desc(partition, order_items, &target_value, eval_fn) + 1
+                    find_last_row_ge_desc(partition, order_items, &target_value, eval_fn)
+                        .map_or(0, |i| i + 1)
                 } else {
-                    find_last_row_le(partition, order_items, &target_value, eval_fn) + 1
+                    find_last_row_le(partition, order_items, &target_value, eval_fn)
+                        .map_or(0, |i| i + 1)
                 }
             }
         }
@@ -403,10 +406,13 @@ where
                 }
             } else {
                 // Find the boundary row and return exclusive end
+                // If no matching row exists, return 0 (empty frame end)
                 if is_desc {
-                    find_last_row_ge_desc(partition, order_items, &target_value, eval_fn) + 1
+                    find_last_row_ge_desc(partition, order_items, &target_value, eval_fn)
+                        .map_or(0, |i| i + 1)
                 } else {
-                    find_last_row_le(partition, order_items, &target_value, eval_fn) + 1
+                    find_last_row_le(partition, order_items, &target_value, eval_fn)
+                        .map_or(0, |i| i + 1)
                 }
             }
         }
@@ -692,17 +698,17 @@ fn find_last_row_le<F>(
     order_items: &[OrderByItem],
     target: &SqlValue,
     eval_fn: &F,
-) -> usize
+) -> Option<usize>
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
 {
     for i in (0..partition.len()).rev() {
         let val = eval_fn(&order_items[0].expr, &partition.rows[i]).unwrap_or(SqlValue::Null);
         if compare_values(&val, target) != Ordering::Greater {
-            return i;
+            return Some(i);
         }
     }
-    0
+    None
 }
 
 /// Find the first row where ORDER BY value <= target (for DESC sorted partitions)
@@ -736,17 +742,17 @@ fn find_last_row_ge_desc<F>(
     order_items: &[OrderByItem],
     target: &SqlValue,
     eval_fn: &F,
-) -> usize
+) -> Option<usize>
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
 {
     for i in (0..partition.len()).rev() {
         let val = eval_fn(&order_items[0].expr, &partition.rows[i]).unwrap_or(SqlValue::Null);
         if compare_values(&val, target) != Ordering::Less {
-            return i;
+            return Some(i);
         }
     }
-    0
+    None
 }
 
 /// Get numeric offset from expression

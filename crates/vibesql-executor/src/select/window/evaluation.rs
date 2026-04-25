@@ -17,8 +17,8 @@ use crate::{
         window::{
             calculate_frame_with_exclusion, evaluate_avg_window, evaluate_count_window,
             evaluate_group_concat_window_with_expr, evaluate_max_window, evaluate_min_window,
-            evaluate_sum_window, evaluate_total_window, partition_rows, sort_partition,
-            validate_frame, validate_range_order_by, Partition,
+            evaluate_sum_window, evaluate_total_window, partition_rows_with_collations,
+            sort_partition_with_collations, validate_frame, validate_range_order_by, Partition,
         },
         CombinedExpressionEvaluator,
     },
@@ -63,6 +63,22 @@ pub(super) fn evaluate_single_window_function(
         WindowFunctionSpec::Value { name, args } => (name.as_str(), args.as_slice(), None),
     };
 
+    // Resolve collations for PARTITION BY expressions
+    let partition_collations: Vec<Option<String>> =
+        if let Some(partition_exprs) = &win_func.window_spec.partition_by {
+            partition_exprs.iter().map(|e| evaluator.get_expression_collation(e)).collect()
+        } else {
+            Vec::new()
+        };
+
+    // Resolve collations for ORDER BY expressions
+    let order_collations: Vec<Option<String>> =
+        if let Some(order_items) = &win_func.window_spec.order_by {
+            order_items.iter().map(|item| evaluator.get_expression_collation(&item.expr)).collect()
+        } else {
+            Vec::new()
+        };
+
     // Partition rows using evaluator for column resolution
     let eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
         // Clear CSE cache before evaluating each row to prevent column values
@@ -70,7 +86,12 @@ pub(super) fn evaluate_single_window_function(
         evaluator.clear_cse_cache();
         evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
     };
-    let mut partitions = partition_rows(rows.to_vec(), &win_func.window_spec.partition_by, eval_fn);
+    let mut partitions = partition_rows_with_collations(
+        rows.to_vec(),
+        &win_func.window_spec.partition_by,
+        &partition_collations,
+        eval_fn,
+    );
 
     // Build column name map for frame calculations (RANGE/GROUPS need to resolve named columns)
     let column_map = evaluator.get_schema().build_column_name_map();
@@ -78,7 +99,7 @@ pub(super) fn evaluate_single_window_function(
         partition.column_map = column_map.clone();
     }
 
-    // Sort each partition - parallelize when beneficial
+    // Sort each partition with collation support - parallelize when beneficial
     #[cfg(feature = "parallel")]
     {
         let config = ParallelConfig::global();
@@ -86,6 +107,7 @@ pub(super) fn evaluate_single_window_function(
         // Threshold: parallelize if total rows > sort threshold AND partitions > 1
         if partitions.len() > 1 && config.should_parallelize_sort(rows.len()) {
             let order_by = &win_func.window_spec.order_by;
+            let order_colls = &order_collations;
             // Get components for thread-local evaluators
             let sort_components = evaluator.get_parallel_components();
             partitions.par_iter_mut().for_each(|partition| {
@@ -112,7 +134,7 @@ pub(super) fn evaluate_single_window_function(
                         local_evaluator.clear_cse_cache();
                         local_evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
                     };
-                sort_partition(partition, order_by, sort_eval_fn);
+                sort_partition_with_collations(partition, order_by, order_colls, sort_eval_fn);
             });
         } else {
             for partition in &mut partitions {
@@ -121,7 +143,12 @@ pub(super) fn evaluate_single_window_function(
                         evaluator.clear_cse_cache();
                         evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
                     };
-                sort_partition(partition, &win_func.window_spec.order_by, sort_eval_fn);
+                sort_partition_with_collations(
+                    partition,
+                    &win_func.window_spec.order_by,
+                    &order_collations,
+                    sort_eval_fn,
+                );
             }
         }
     }
@@ -134,7 +161,12 @@ pub(super) fn evaluate_single_window_function(
                     evaluator.clear_cse_cache();
                     evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
                 };
-            sort_partition(partition, &win_func.window_spec.order_by, sort_eval_fn);
+            sort_partition_with_collations(
+                partition,
+                &win_func.window_spec.order_by,
+                &order_collations,
+                sort_eval_fn,
+            );
         }
     }
 
@@ -180,6 +212,7 @@ pub(super) fn evaluate_single_window_function(
                         filter,
                         &win_func.window_spec.order_by,
                         &win_func.window_spec.frame,
+                        &order_collations,
                         &local_evaluator,
                     )?;
 
@@ -208,6 +241,7 @@ pub(super) fn evaluate_single_window_function(
                 args,
                 filter,
                 &win_func.window_spec,
+                &order_collations,
                 evaluator,
             )?
         }
@@ -220,6 +254,7 @@ pub(super) fn evaluate_single_window_function(
         args,
         filter,
         &win_func.window_spec,
+        &order_collations,
         evaluator,
     )?;
 
@@ -251,6 +286,7 @@ fn evaluate_partitions_sequential(
     args: &[Expression],
     filter: Option<&Expression>,
     window_spec: &vibesql_ast::WindowSpec,
+    order_collations: &[Option<String>],
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<Vec<(usize, SqlValue)>, ExecutorError> {
     let mut results_with_indices = Vec::new();
@@ -263,6 +299,7 @@ fn evaluate_partitions_sequential(
             filter,
             &window_spec.order_by,
             &window_spec.frame,
+            order_collations,
             evaluator,
         )?;
 
@@ -285,6 +322,7 @@ fn evaluate_window_function_for_partition(
     filter: Option<&Expression>,
     order_by: &Option<Vec<vibesql_ast::OrderByItem>>,
     frame_spec: &Option<vibesql_ast::WindowFrame>,
+    order_collations: &[Option<String>],
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<Vec<SqlValue>, ExecutorError> {
     // Create the eval_fn closure that uses the full evaluator
@@ -310,7 +348,12 @@ fn evaluate_window_function_for_partition(
                     function_name: "rank".to_string(),
                 });
             }
-            crate::evaluator::window::evaluate_rank(partition, order_by, &eval_fn)
+            crate::evaluator::window::evaluate_rank_with_collations(
+                partition,
+                order_by,
+                order_collations,
+                &eval_fn,
+            )
         }
         "DENSE_RANK" => {
             if !args.is_empty() {
@@ -318,7 +361,12 @@ fn evaluate_window_function_for_partition(
                     function_name: "dense_rank".to_string(),
                 });
             }
-            crate::evaluator::window::evaluate_dense_rank(partition, order_by, &eval_fn)
+            crate::evaluator::window::evaluate_dense_rank_with_collations(
+                partition,
+                order_by,
+                order_collations,
+                &eval_fn,
+            )
         }
         "PERCENT_RANK" => {
             if !args.is_empty() {
@@ -326,7 +374,29 @@ fn evaluate_window_function_for_partition(
                     function_name: "percent_rank".to_string(),
                 });
             }
-            crate::evaluator::window::evaluate_percent_rank(partition, order_by, &eval_fn)
+            // percent_rank delegates to rank internally, pass collations through
+            let ranks = crate::evaluator::window::evaluate_rank_with_collations(
+                partition,
+                order_by,
+                order_collations,
+                &eval_fn,
+            );
+            let n = partition.len();
+            if n <= 1 {
+                vec![SqlValue::Numeric(0.0); n]
+            } else {
+                let denominator = (n - 1) as f64;
+                ranks
+                    .into_iter()
+                    .map(|rank| {
+                        if let SqlValue::Integer(r) = rank {
+                            SqlValue::Numeric((r - 1) as f64 / denominator)
+                        } else {
+                            SqlValue::Numeric(0.0)
+                        }
+                    })
+                    .collect()
+            }
         }
         "CUME_DIST" => {
             if !args.is_empty() {
@@ -334,7 +404,12 @@ fn evaluate_window_function_for_partition(
                     function_name: "cume_dist".to_string(),
                 });
             }
-            crate::evaluator::window::evaluate_cume_dist(partition, order_by, &eval_fn)
+            crate::evaluator::window::evaluate_cume_dist_with_collations(
+                partition,
+                order_by,
+                order_collations,
+                &eval_fn,
+            )
         }
         "NTILE" => {
             if args.len() != 1 {
@@ -685,6 +760,63 @@ fn evaluate_window_function_for_partition(
                             agg_eval_fn,
                         )
                     }
+                    "JSON_GROUP_ARRAY" => {
+                        if args.is_empty() {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                "JSON_GROUP_ARRAY requires an argument".to_string(),
+                            ));
+                        }
+                        // Collect values in the frame and format as a JSON array
+                        let mut json_values = Vec::new();
+                        for idx in frame_indices {
+                            // Apply FILTER clause
+                            if let Some(filter_expr) = filter {
+                                if let Ok(fv) = agg_eval_fn(filter_expr, &partition.rows[idx]) {
+                                    if !matches!(fv, SqlValue::Boolean(true)) {
+                                        continue;
+                                    }
+                                } else {
+                                    continue;
+                                }
+                            }
+                            let val = agg_eval_fn(&args[0], &partition.rows[idx])
+                                .unwrap_or(SqlValue::Null);
+                            json_values.push(sql_value_to_json_string(&val));
+                        }
+                        SqlValue::Varchar(format!("[{}]", json_values.join(",")).into())
+                    }
+                    "JSON_GROUP_OBJECT" => {
+                        if args.len() < 2 {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                "JSON_GROUP_OBJECT requires two arguments".to_string(),
+                            ));
+                        }
+                        // Collect key-value pairs in the frame and format as a JSON object
+                        let mut json_entries = Vec::new();
+                        for idx in frame_indices {
+                            // Apply FILTER clause
+                            if let Some(filter_expr) = filter {
+                                if let Ok(fv) = agg_eval_fn(filter_expr, &partition.rows[idx]) {
+                                    if !matches!(fv, SqlValue::Boolean(true)) {
+                                        continue;
+                                    }
+                                } else {
+                                    continue;
+                                }
+                            }
+                            let key = agg_eval_fn(&args[0], &partition.rows[idx])
+                                .unwrap_or(SqlValue::Null);
+                            let val = agg_eval_fn(&args[1], &partition.rows[idx])
+                                .unwrap_or(SqlValue::Null);
+                            let key_str = match &key {
+                                SqlValue::Null => "null".to_string(),
+                                other => escape_json_str(&other.to_string()),
+                            };
+                            json_entries
+                                .push(format!("{}:{}", key_str, sql_value_to_json_string(&val)));
+                        }
+                        SqlValue::Varchar(format!("{{{}}}", json_entries.join(",")).into())
+                    }
                     _ => {
                         return Err(ExecutorError::UnsupportedExpression(format!(
                             "{}() may not be used as a window function",
@@ -701,4 +833,56 @@ fn evaluate_window_function_for_partition(
     };
 
     Ok(results)
+}
+
+/// Convert a SqlValue to its JSON string representation
+///
+/// Strings that are already valid JSON (objects, arrays) are embedded directly
+/// without re-quoting, matching SQLite's json_group_array behavior.
+fn sql_value_to_json_string(value: &SqlValue) -> String {
+    match value {
+        SqlValue::Null => "null".to_string(),
+        SqlValue::Boolean(b) => if *b { "true" } else { "false" }.to_string(),
+        SqlValue::Integer(i) => i.to_string(),
+        SqlValue::Bigint(i) => i.to_string(),
+        SqlValue::Smallint(i) => i.to_string(),
+        SqlValue::Unsigned(u) => u.to_string(),
+        SqlValue::Numeric(n) => n.to_string(),
+        SqlValue::Real(r) => r.to_string(),
+        SqlValue::Double(d) => d.to_string(),
+        SqlValue::Float(f) => f.to_string(),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            let trimmed = s.trim();
+            // If the string looks like a JSON object or array, embed it directly
+            if (trimmed.starts_with('{') && trimmed.ends_with('}'))
+                || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+            {
+                s.to_string()
+            } else {
+                escape_json_str(s)
+            }
+        }
+        other => escape_json_str(&other.to_string()),
+    }
+}
+
+/// Escape a string for JSON output, wrapping in double quotes
+fn escape_json_str(s: &str) -> String {
+    let mut result = String::with_capacity(s.len() + 2);
+    result.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => result.push_str("\\\""),
+            '\\' => result.push_str("\\\\"),
+            '\n' => result.push_str("\\n"),
+            '\r' => result.push_str("\\r"),
+            '\t' => result.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                result.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => result.push(c),
+        }
+    }
+    result.push('"');
+    result
 }

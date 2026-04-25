@@ -93,8 +93,17 @@ impl SelectExecutor<'_> {
             vibesql_ast::Expression::ScalarSubquery(_) | vibesql_ast::Expression::Exists { .. } => {
                 false
             }
-            // Window functions already contain aggregate-like logic
-            vibesql_ast::Expression::WindowFunction { .. } => false,
+            // Window functions may contain nested aggregates in their arguments
+            // e.g., min(sum(a)) OVER () — the sum(a) is an aggregate that must be
+            // evaluated in the aggregation path before the window function is applied
+            vibesql_ast::Expression::WindowFunction { function, .. } => {
+                let args = match function {
+                    vibesql_ast::WindowFunctionSpec::Aggregate { args, .. } => args,
+                    vibesql_ast::WindowFunctionSpec::Ranking { args, .. } => args,
+                    vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
+                };
+                args.iter().any(|arg| self.expression_has_aggregate(arg))
+            }
             // DuplicateKeyValue references a column from INSERT VALUES
             vibesql_ast::Expression::DuplicateKeyValue { .. } => false,
             // Literals, column refs, wildcards, current date/time, defaults, sequences, etc. don't

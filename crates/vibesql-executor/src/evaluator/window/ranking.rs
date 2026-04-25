@@ -8,7 +8,29 @@ use vibesql_ast::{Expression, OrderByItem};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use super::{partitioning::Partition, sorting::compare_values};
+use super::{partitioning::Partition, sorting::{compare_values, compare_values_with_collation}};
+
+/// Check if ORDER BY values differ between two rows, respecting collation
+fn order_values_differ<F>(
+    order_items: &[OrderByItem],
+    row_a: &Row,
+    row_b: &Row,
+    collations: &[Option<String>],
+    eval_fn: &F,
+) -> bool
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
+    for (i, order_item) in order_items.iter().enumerate() {
+        let val_a = eval_fn(&order_item.expr, row_a).unwrap_or(SqlValue::Null);
+        let val_b = eval_fn(&order_item.expr, row_b).unwrap_or(SqlValue::Null);
+        let collation = collations.get(i).and_then(|c| c.as_deref());
+        if compare_values_with_collation(&val_a, &val_b, collation) != Ordering::Equal {
+            return true;
+        }
+    }
+    false
+}
 
 /// Evaluate ROW_NUMBER() window function
 ///
@@ -41,6 +63,19 @@ pub fn evaluate_rank<F>(
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
 {
+    evaluate_rank_with_collations(partition, order_by, &[], eval_fn)
+}
+
+/// Evaluate RANK() with collation support for ORDER BY expressions
+pub fn evaluate_rank_with_collations<F>(
+    partition: &Partition,
+    order_by: &Option<Vec<OrderByItem>>,
+    collations: &[Option<String>],
+    eval_fn: F,
+) -> Vec<SqlValue>
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     // RANK requires ORDER BY
     if order_by.is_none() || order_by.as_ref().unwrap().is_empty() {
         // Without ORDER BY, all rows get rank 1
@@ -53,26 +88,10 @@ where
 
     for (idx, row) in partition.rows.iter().enumerate() {
         if idx > 0 {
-            // Compare current row with previous row
             let prev_row = &partition.rows[idx - 1];
-
-            // Check if ORDER BY values differ
-            let mut values_differ = false;
-            for order_item in order_items {
-                let val_curr = eval_fn(&order_item.expr, row).unwrap_or(SqlValue::Null);
-                let val_prev = eval_fn(&order_item.expr, prev_row).unwrap_or(SqlValue::Null);
-
-                if compare_values(&val_curr, &val_prev) != Ordering::Equal {
-                    values_differ = true;
-                    break;
-                }
-            }
-
-            if values_differ {
-                // New rank group - rank becomes row number (1-indexed)
+            if order_values_differ(order_items, row, prev_row, collations, &eval_fn) {
                 current_rank = (idx + 1) as i64;
             }
-            // else: same rank as previous row
         }
 
         ranks.push(SqlValue::Integer(current_rank));
@@ -101,6 +120,19 @@ pub fn evaluate_dense_rank<F>(
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
 {
+    evaluate_dense_rank_with_collations(partition, order_by, &[], eval_fn)
+}
+
+/// Evaluate DENSE_RANK() with collation support for ORDER BY expressions
+pub fn evaluate_dense_rank_with_collations<F>(
+    partition: &Partition,
+    order_by: &Option<Vec<OrderByItem>>,
+    collations: &[Option<String>],
+    eval_fn: F,
+) -> Vec<SqlValue>
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     // DENSE_RANK requires ORDER BY
     if order_by.is_none() || order_by.as_ref().unwrap().is_empty() {
         // Without ORDER BY, all rows get rank 1
@@ -113,26 +145,10 @@ where
 
     for (idx, row) in partition.rows.iter().enumerate() {
         if idx > 0 {
-            // Compare current row with previous row
             let prev_row = &partition.rows[idx - 1];
-
-            // Check if ORDER BY values differ
-            let mut values_differ = false;
-            for order_item in order_items {
-                let val_curr = eval_fn(&order_item.expr, row).unwrap_or(SqlValue::Null);
-                let val_prev = eval_fn(&order_item.expr, prev_row).unwrap_or(SqlValue::Null);
-
-                if compare_values(&val_curr, &val_prev) != Ordering::Equal {
-                    values_differ = true;
-                    break;
-                }
-            }
-
-            if values_differ {
-                // New rank group - increment rank by 1 (dense, no gaps)
+            if order_values_differ(order_items, row, prev_row, collations, &eval_fn) {
                 current_rank += 1;
             }
-            // else: same rank as previous row
         }
 
         ranks.push(SqlValue::Integer(current_rank));
@@ -215,6 +231,19 @@ pub fn evaluate_cume_dist<F>(
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
 {
+    evaluate_cume_dist_with_collations(partition, order_by, &[], eval_fn)
+}
+
+/// Evaluate CUME_DIST() with collation support for ORDER BY expressions
+pub fn evaluate_cume_dist_with_collations<F>(
+    partition: &Partition,
+    order_by: &Option<Vec<OrderByItem>>,
+    collations: &[Option<String>],
+    eval_fn: F,
+) -> Vec<SqlValue>
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     let n = partition.len();
 
     // Empty partition - shouldn't happen but handle gracefully
@@ -240,21 +269,9 @@ where
         let is_new_group = if is_last_row {
             true // Last row always ends a group
         } else {
-            // Check if next row differs from current
             let curr_row = &partition.rows[idx];
             let next_row = &partition.rows[idx + 1];
-
-            let mut differs = false;
-            for order_item in order_items {
-                let val_curr = eval_fn(&order_item.expr, curr_row).unwrap_or(SqlValue::Null);
-                let val_next = eval_fn(&order_item.expr, next_row).unwrap_or(SqlValue::Null);
-
-                if compare_values(&val_curr, &val_next) != Ordering::Equal {
-                    differs = true;
-                    break;
-                }
-            }
-            differs
+            order_values_differ(order_items, curr_row, next_row, collations, &eval_fn)
         };
 
         if is_new_group {

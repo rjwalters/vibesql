@@ -980,7 +980,15 @@ fn sql_value_to_json(value: &vibesql_types::SqlValue) -> String {
         SqlValue::Double(d) => d.to_string(),
         SqlValue::Float(f) => f.to_string(),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
-            format!("\"{}\"", escape_json_string(s))
+            let trimmed = s.trim();
+            // If the value is already a JSON object or array, embed it directly
+            if (trimmed.starts_with('{') && trimmed.ends_with('}'))
+                || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+            {
+                s.to_string()
+            } else {
+                format!("\"{}\"", escape_json_string(s))
+            }
         }
         _ => {
             // For other types, convert to string and quote

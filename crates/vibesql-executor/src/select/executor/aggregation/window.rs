@@ -192,11 +192,16 @@ fn collect_window_functions(
 /// This is called after GROUP BY processing. At this point, the result rows contain
 /// the inner values (e.g., for LEAD(x), each row has the x value).
 /// This function applies the window function over these values.
+///
+/// `group_by_exprs` contains the GROUP BY expressions. Their evaluated values are
+/// appended as hidden columns after the SELECT items in each row. This allows
+/// window ORDER BY / PARTITION BY clauses to reference GROUP BY columns.
 pub(super) fn apply_window_functions_to_aggregates(
     mut rows: Vec<Row>,
     select_list: &[SelectItem],
     database: &vibesql_storage::Database,
     window_definitions: Option<&Vec<WindowDefinition>>,
+    group_by_exprs: &[Expression],
 ) -> Result<Vec<Row>, ExecutorError> {
     let window_funcs = collect_window_functions(select_list, window_definitions)?;
 
@@ -205,8 +210,8 @@ pub(super) fn apply_window_functions_to_aggregates(
     }
 
     // Build a schema for the aggregate result rows
-    // Each column corresponds to a SELECT list item
-    let result_schema = build_aggregate_result_schema(select_list);
+    // Each column corresponds to a SELECT list item, plus hidden GROUP BY columns
+    let result_schema = build_aggregate_result_schema(select_list, group_by_exprs);
     let evaluator = CombinedExpressionEvaluator::with_database(&result_schema, database);
 
     // Process each window function
@@ -221,7 +226,7 @@ pub(super) fn apply_window_functions_to_aggregates(
         // in the aggregate result schema. Create column reference expressions.
         let partition_exprs: Option<Vec<Expression>> =
             win_func.window_spec.partition_by.as_ref().map(|exprs| {
-                exprs.iter().map(|e| map_expr_to_result_column(e, select_list)).collect::<Vec<_>>()
+                exprs.iter().map(|e| map_expr_to_result_column(e, select_list, group_by_exprs)).collect::<Vec<_>>()
             });
 
         // Partition the rows
@@ -238,7 +243,7 @@ pub(super) fn apply_window_functions_to_aggregates(
                 items
                     .iter()
                     .map(|item| vibesql_ast::OrderByItem {
-                        expr: map_expr_to_result_column(&item.expr, select_list),
+                        expr: map_expr_to_result_column(&item.expr, select_list, group_by_exprs),
                         direction: item.direction.clone(),
                         nulls_order: item.nulls_order,
                     })
@@ -280,7 +285,7 @@ pub(super) fn apply_window_functions_to_aggregates(
             let mapped_args: Vec<Expression> = win_func
                 .args
                 .iter()
-                .map(|arg| map_expr_to_result_column(arg, select_list))
+                .map(|arg| map_expr_to_result_column(arg, select_list, group_by_exprs))
                 .collect();
 
             // Evaluate the window function for each row in the partition
@@ -590,16 +595,31 @@ pub(super) fn apply_window_functions_to_aggregates(
 /// Build a schema for aggregate result rows
 ///
 /// Uses consistent column naming: col0, col1, col2, ... so column references work correctly.
-fn build_aggregate_result_schema(select_list: &[SelectItem]) -> CombinedSchema {
+/// Includes hidden columns for GROUP BY expressions (appended after SELECT items)
+/// so that window ORDER BY / PARTITION BY can reference GROUP BY columns.
+fn build_aggregate_result_schema(
+    select_list: &[SelectItem],
+    group_by_exprs: &[Expression],
+) -> CombinedSchema {
     let mut columns = Vec::new();
 
+    // SELECT list columns
     for idx in 0..select_list.len() {
-        // Use consistent naming pattern: col0, col1, col2, ...
         let column_name = format!("col{}", idx);
-
         columns.push(ColumnSchema::new(
             column_name,
-            DataType::Varchar { max_length: Some(255) }, // Placeholder type
+            DataType::Varchar { max_length: Some(255) },
+            true,
+        ));
+    }
+
+    // Hidden GROUP BY columns (these exist in the rows at positions select_list.len() + i)
+    // Use consistent col{idx} naming so make_result_col_ref() references work.
+    for i in 0..group_by_exprs.len() {
+        let column_name = format!("col{}", select_list.len() + i);
+        columns.push(ColumnSchema::new(
+            column_name,
+            DataType::Varchar { max_length: Some(255) },
             true,
         ));
     }
@@ -626,9 +646,16 @@ fn build_aggregate_result_schema(select_list: &[SelectItem]) -> CombinedSchema {
 
 /// Map an expression to a column reference in the result schema
 ///
-/// For expressions that appear in the SELECT list, we create a ColumnRef
+/// For expressions that appear in the SELECT list or GROUP BY, we create a ColumnRef
 /// that references the computed value. For others, we return the expression as-is.
-fn map_expr_to_result_column(expr: &Expression, select_list: &[SelectItem]) -> Expression {
+///
+/// GROUP BY expressions are stored as hidden columns at positions
+/// `select_list.len() + i` in the aggregate result rows.
+fn map_expr_to_result_column(
+    expr: &Expression,
+    select_list: &[SelectItem],
+    group_by_exprs: &[Expression],
+) -> Expression {
     // Helper to create a column ref for the synthetic result schema.
     // The schema uses col0, col1, col2, ... naming, so we always use that format.
     let make_result_col_ref = |idx: usize| -> Expression {
@@ -715,7 +742,46 @@ fn map_expr_to_result_column(expr: &Expression, select_list: &[SelectItem]) -> E
         }
     }
 
-    // Expression not in SELECT list - return as-is
+    // Check GROUP BY expressions (stored as hidden columns after SELECT items)
+    let select_count = select_list.len();
+    for (i, gb_expr) in group_by_exprs.iter().enumerate() {
+        if expressions_match(expr, gb_expr) {
+            return make_result_col_ref(select_count + i);
+        }
+        // Also check column name match for GROUP BY column references
+        if let Expression::ColumnRef(col_id) = expr {
+            if let Expression::ColumnRef(gb_col_id) = gb_expr {
+                if col_id
+                    .column_canonical()
+                    .eq_ignore_ascii_case(gb_col_id.column_canonical())
+                {
+                    return make_result_col_ref(select_count + i);
+                }
+            }
+        }
+    }
+
+    // Also check if the expression matches a window function's first argument in the SELECT list.
+    // The window function slot holds the pre-computed inner value (the first arg evaluated in
+    // the GROUP BY context), so if ORDER BY references the same expression, we can use that slot.
+    for (idx, item) in select_list.iter().enumerate() {
+        if let SelectItem::Expression {
+            expr: Expression::WindowFunction { function, .. },
+            ..
+        } = item
+        {
+            let win_args = match function {
+                WindowFunctionSpec::Aggregate { args, .. } => args,
+                WindowFunctionSpec::Ranking { args, .. } => args,
+                WindowFunctionSpec::Value { args, .. } => args,
+            };
+            if !win_args.is_empty() && expressions_match(expr, &win_args[0]) {
+                return make_result_col_ref(idx);
+            }
+        }
+    }
+
+    // Expression not in SELECT list or GROUP BY - return as-is
     // This might cause evaluation issues if the expression references source columns
     expr.clone()
 }

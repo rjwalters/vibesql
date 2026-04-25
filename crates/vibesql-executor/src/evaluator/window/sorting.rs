@@ -22,6 +22,21 @@ pub fn sort_partition<F>(partition: &mut Partition, order_by: &Option<Vec<OrderB
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
 {
+    sort_partition_with_collations(partition, order_by, &[], eval_fn);
+}
+
+/// Sort a partition by ORDER BY clauses, respecting column collations
+///
+/// `collations` maps each ORDER BY item index to its resolved collation (e.g., "NOCASE").
+/// If collations is shorter than order_items, missing entries default to binary collation.
+pub fn sort_partition_with_collations<F>(
+    partition: &mut Partition,
+    order_by: &Option<Vec<OrderByItem>>,
+    collations: &[Option<String>],
+    eval_fn: F,
+) where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+{
     // If no ORDER BY, keep original order
     let Some(order_items) = order_by else {
         return;
@@ -37,11 +52,12 @@ where
     // Sort indices by evaluating order expressions on the rows
     let rows = &partition.rows; // Borrow for comparison only
     indices.sort_by(|&a, &b| {
-        for order_item in order_items {
+        for (i, order_item) in order_items.iter().enumerate() {
             let val_a = eval_fn(&order_item.expr, &rows[a]).unwrap_or(SqlValue::Null);
             let val_b = eval_fn(&order_item.expr, &rows[b]).unwrap_or(SqlValue::Null);
 
-            let cmp = compare_values(&val_a, &val_b);
+            let collation = collations.get(i).and_then(|c| c.as_deref());
+            let cmp = compare_values_with_collation(&val_a, &val_b, collation);
 
             let cmp = match order_item.direction {
                 OrderDirection::Asc => cmp,
@@ -61,6 +77,31 @@ where
 
     partition.rows = indices.iter().map(|&i| old_rows[i].clone()).collect();
     partition.original_indices = indices.iter().map(|&i| old_indices[i]).collect();
+}
+
+/// Compare two SQL values with optional collation
+pub fn compare_values_with_collation(
+    a: &SqlValue,
+    b: &SqlValue,
+    collation: Option<&str>,
+) -> Ordering {
+    if let Some(coll) = collation {
+        if coll.eq_ignore_ascii_case("nocase") {
+            let a = apply_nocase(a);
+            let b = apply_nocase(b);
+            return compare_values(&a, &b);
+        }
+    }
+    compare_values(a, b)
+}
+
+/// Apply NOCASE collation by uppercasing string values
+fn apply_nocase(val: &SqlValue) -> SqlValue {
+    match val {
+        SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())),
+        SqlValue::Character(s) => SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())),
+        other => other.clone(),
+    }
 }
 
 /// Compare two SQL values for ordering

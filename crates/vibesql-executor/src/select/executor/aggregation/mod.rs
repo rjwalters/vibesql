@@ -610,24 +610,26 @@ impl SelectExecutor<'_> {
             }
         }
 
+        // Get GROUP BY expressions for ORDER BY resolution
+        let group_by_exprs: Vec<vibesql_ast::Expression> = if let Some(group_by) = &stmt.group_by {
+            get_base_expressions(group_by)
+        } else {
+            Vec::new()
+        };
+
         // Apply window functions that wrap aggregates (e.g., AVG(SUM(x)) OVER (...))
         // This must happen after GROUP BY but before ORDER BY
+        // Pass GROUP BY expressions so window ORDER BY/PARTITION BY can reference them
         let result_rows = if window::has_aggregate_window_functions(&expanded_select_list) {
             window::apply_window_functions_to_aggregates(
                 result_rows,
                 &expanded_select_list,
                 self.database,
                 stmt.window_definitions.as_ref(),
+                &group_by_exprs,
             )?
         } else {
             result_rows
-        };
-
-        // Get GROUP BY expressions for ORDER BY resolution
-        let group_by_exprs: Vec<vibesql_ast::Expression> = if let Some(group_by) = &stmt.group_by {
-            get_base_expressions(group_by)
-        } else {
-            Vec::new()
         };
 
         // Calculate count of hidden columns (GROUP BY + ORDER BY aggregates)
