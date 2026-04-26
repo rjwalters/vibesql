@@ -62,6 +62,19 @@ impl SqlExecutor {
                 // Fall back to SQL dump if that fails
                 match Database::load(&db_path) {
                     Ok(db) => db,
+                    Err(ref e) if e.to_string().contains("SQLite database detected") => {
+                        // Auto-import SQLite database
+                        let result = crate::sqlite_io::import_sqlite(&db_path)
+                            .map_err(|e| anyhow::anyhow!("Failed to import SQLite database: {}", e))?;
+                        for warning in &result.warnings {
+                            eprintln!("{}", warning);
+                        }
+                        eprintln!(
+                            "Imported SQLite database: {} tables, {} rows",
+                            result.tables_imported, result.rows_imported
+                        );
+                        result.database
+                    }
                     Err(_) => {
                         // Fall back to SQL dump loading (requires executor for parsing)
                         vibesql_executor::load_sql_dump(&db_path)

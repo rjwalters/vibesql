@@ -8,6 +8,7 @@ mod executor;
 mod formatter;
 mod repl;
 mod script;
+mod sqlite_io;
 mod util;
 
 use config::Config;
@@ -169,6 +170,30 @@ EXAMPLES:
         #[arg(long)]
         no_metadata: bool,
     },
+
+    /// Import a SQLite database into VibeSQL format
+    #[command(about = "Import a SQLite .db file into VibeSQL")]
+    Import {
+        /// Path to the SQLite .db file to import
+        #[arg(value_name = "INPUT")]
+        input: String,
+
+        /// Output path for the VibeSQL database (default: replaces .db with .vbsql)
+        #[arg(value_name = "OUTPUT")]
+        output: Option<String>,
+    },
+
+    /// Export a VibeSQL database to SQLite format
+    #[command(about = "Export a VibeSQL database to a SQLite .db file")]
+    Export {
+        /// Path to the VibeSQL database to export
+        #[arg(value_name = "INPUT")]
+        input: String,
+
+        /// Output path for the SQLite .db file
+        #[arg(value_name = "OUTPUT")]
+        output: String,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -189,6 +214,8 @@ fn main() -> anyhow::Result<()> {
             Commands::Codegen { schema, output, camel_case, no_metadata } => {
                 run_codegen(database_arg, schema, output, camel_case, no_metadata)
             }
+            Commands::Import { input, output } => run_import(&input, output.as_deref()),
+            Commands::Export { input, output } => run_export(&input, &output),
         };
     }
 
@@ -220,6 +247,59 @@ fn main() -> anyhow::Result<()> {
         repl.run()?;
     }
 
+    Ok(())
+}
+
+fn run_import(input: &str, output: Option<&str>) -> anyhow::Result<()> {
+    let result = sqlite_io::import_sqlite(input)?;
+
+    for warning in &result.warnings {
+        eprintln!("{}", warning);
+    }
+
+    // Determine output path
+    let output_path = match output {
+        Some(p) => p.to_string(),
+        None => {
+            let p = std::path::Path::new(input);
+            p.with_extension("vbsql").to_string_lossy().to_string()
+        }
+    };
+
+    // Save as VibeSQL binary format
+    result
+        .database
+        .save(&output_path)
+        .map_err(|e| anyhow::anyhow!("Failed to save database: {}", e))?;
+
+    println!(
+        "Imported {} tables ({} rows) from {}",
+        result.tables_imported, result.rows_imported, input
+    );
+    if result.tables_skipped > 0 {
+        println!("Skipped {} tables", result.tables_skipped);
+    }
+    println!("Saved to {}", output_path);
+    Ok(())
+}
+
+fn run_export(input: &str, output: &str) -> anyhow::Result<()> {
+    // Load the VibeSQL database
+    let db = vibesql_storage::Database::load(input).or_else(|_| {
+        vibesql_executor::load_sql_dump(input)
+            .map_err(|e| anyhow::anyhow!("Failed to load database: {}", e))
+    })?;
+
+    let result = sqlite_io::export_sqlite(&db, output)?;
+
+    for warning in &result.warnings {
+        eprintln!("{}", warning);
+    }
+
+    println!(
+        "Exported {} tables ({} rows) to {}",
+        result.tables_exported, result.rows_exported, output
+    );
     Ok(())
 }
 

@@ -69,6 +69,15 @@ impl crate::Database {
                         .to_string(),
                 ))
             }
+            PersistenceFormat::Sqlite => {
+                // SQLite loading requires rusqlite (in the CLI crate), so we return an error
+                // directing users to use the CLI import command
+                Err(crate::StorageError::NotImplemented(
+                    "SQLite database detected. Use `vibesql import <file.db>` to convert, \
+                     or open directly with `vibesql <file.db>` in the CLI."
+                        .to_string(),
+                ))
+            }
         }
     }
 }
@@ -84,6 +93,8 @@ pub enum PersistenceFormat {
     BinaryCompressed,
     /// JSON format (.json) - structured, tool-friendly
     Json,
+    /// SQLite database format (.db, .sqlite, .sqlite3)
+    Sqlite,
 }
 
 /// Detect persistence format from file
@@ -96,6 +107,9 @@ fn detect_format<P: AsRef<Path>>(path: P) -> Result<PersistenceFormat, crate::St
             Some("vbsqlz") => return Ok(PersistenceFormat::BinaryCompressed),
             Some("json") => return Ok(PersistenceFormat::Json),
             Some("sql") => return Ok(PersistenceFormat::Sql),
+            Some("db") | Some("sqlite") | Some("sqlite3") => {
+                return Ok(PersistenceFormat::Sqlite)
+            }
             _ => {}
         }
     }
@@ -104,6 +118,17 @@ fn detect_format<P: AsRef<Path>>(path: P) -> Result<PersistenceFormat, crate::St
     // between compressed and uncompressed binary formats
     // (save() with compression feature creates compressed content even with .vbsql extension)
     let mut file = fs::File::open(path_ref).map_err(|e| {
+        crate::StorageError::NotImplemented(format!("Failed to open file {:?}: {}", path_ref, e))
+    })?;
+
+    // Check for SQLite magic: "SQLite format 3\0" (first 16 bytes)
+    let mut sqlite_magic = [0u8; 16];
+    if file.read_exact(&mut sqlite_magic).is_ok() && &sqlite_magic == b"SQLite format 3\0" {
+        return Ok(PersistenceFormat::Sqlite);
+    }
+
+    // Reset file position
+    file = fs::File::open(path_ref).map_err(|e| {
         crate::StorageError::NotImplemented(format!("Failed to open file {:?}: {}", path_ref, e))
     })?;
 
