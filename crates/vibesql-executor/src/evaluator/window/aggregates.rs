@@ -127,6 +127,10 @@ where
 {
     let mut sum = 0.0f64;
     let mut has_value = false;
+    // Track whether any addend was a real/float so we preserve SQLite's behaviour:
+    // sum() returns INTEGER only when every input was an integer; one float input
+    // yields a REAL (Numeric) result, even if the total happens to be a whole number.
+    let mut saw_real = false;
 
     for idx in frame_indices {
         if idx >= partition.len() {
@@ -157,18 +161,22 @@ where
                 SqlValue::Numeric(n) => {
                     sum += n;
                     has_value = true;
+                    saw_real = true;
                 }
                 SqlValue::Float(n) => {
                     sum += n as f64;
                     has_value = true;
+                    saw_real = true;
                 }
                 SqlValue::Real(n) => {
                     sum += n as f64;
                     has_value = true;
+                    saw_real = true;
                 }
                 SqlValue::Double(n) => {
                     sum += n;
                     has_value = true;
+                    saw_real = true;
                 }
                 SqlValue::Null => {} // Ignore NULL
                 _ => {}              // Ignore non-numeric values
@@ -177,8 +185,9 @@ where
     }
 
     if has_value {
-        // Return Integer if sum is a whole number, otherwise Numeric
-        if sum.fract() == 0.0 && sum >= i64::MIN as f64 && sum <= i64::MAX as f64 {
+        if saw_real {
+            SqlValue::Numeric(sum)
+        } else if sum.fract() == 0.0 && sum >= i64::MIN as f64 && sum <= i64::MAX as f64 {
             SqlValue::Integer(sum as i64)
         } else {
             SqlValue::Numeric(sum)
