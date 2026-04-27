@@ -743,13 +743,15 @@ impl Parser {
         // Expect PRAGMA keyword
         self.expect_keyword(Keyword::Pragma)?;
 
-        // Parse the pragma name (may be qualified with database.pragma_name)
-        let first_ident = self.parse_identifier()?;
+        // Parse the pragma name (may be qualified with database.pragma_name).
+        // Schema names can collide with reserved keywords (e.g. PRAGMA temp.foreign_key_check),
+        // so accept a keyword in either position too.
+        let first_ident = self.parse_identifier_or_keyword()?;
 
         // Check for dot (database.pragma_name syntax)
         let (database, name) = if self.peek() == &Token::Symbol('.') {
             self.advance(); // consume '.'
-            let pragma_name = self.parse_identifier()?;
+            let pragma_name = self.parse_identifier_or_keyword()?;
             (Some(first_ident), pragma_name)
         } else {
             (None, first_ident)

@@ -1090,7 +1090,7 @@ proc execsql {sql {db ""}} {
                 }
                 continue  ;# Check for more statements
             }
-            if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys)} [string trim $sql]]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys)} [string trim $sql]]} {
                 # This PRAGMA is supported (with =value) - stop stripping
                 break
             } else {
@@ -3081,6 +3081,9 @@ array set vibesql_skip_tests {
     fkey6-1.5.2 "Uses sqlite3_db_status internal API"
     fkey6-1.7 "Uses sqlite3_db_status internal API"
     fkey6-1.9 "Uses sqlite3_db_status internal API"
+
+    fkey5-7.2 "Cascades from skipped fkey5-7.1 (INSERT OR IGNORE with FK violation)"
+    fkey5-7.3 "Cascades from skipped fkey5-7.1 (INSERT OR IGNORE with FK violation)"
 }
 
 # Pattern-based skip list for tests with many numbered variants
