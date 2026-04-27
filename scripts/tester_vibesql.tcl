@@ -196,6 +196,15 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "no such view: [string tolower $view_name]"
     }
 
+    # Cannot mutate a view without INSTEAD OF trigger:
+    #   "Unsupported expression: Cannot UPDATE view 'v1' without INSTEAD OF trigger"
+    #   "Unsupported expression: Cannot DELETE from view 'v1' without INSTEAD OF trigger"
+    #   "Unsupported expression: Cannot INSERT into view 'v1' without INSTEAD OF trigger"
+    # SQLite reports a single message for all three: "cannot modify v1 because it is a view"
+    if {[regexp -nocase {Cannot (?:UPDATE|DELETE from|INSERT into) view '([^']+)' without INSTEAD OF trigger} $error_msg -> view_name]} {
+        return "cannot modify $view_name because it is a view"
+    }
+
     # Function not found: various patterns -> "no such function: FUNCNAME"
     # Pattern: "Unsupported feature: Unknown function: XYZZY"
     if {[regexp -nocase {^Unsupported feature: Unknown function: ([A-Za-z0-9_]+)} $error_msg -> func_name]} {
