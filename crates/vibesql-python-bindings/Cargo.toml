@@ -17,7 +17,7 @@ doc = false  # Exclude from documentation builds to avoid name collision with ma
 [dependencies]
 arcstr = "1.2"
 pyo3 = { workspace = true }
-lru = "0.17"
+lru = "0.18"
 parking_lot = "0.12"
 
 # Internal crates
