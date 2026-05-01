@@ -154,8 +154,11 @@ impl Parser {
                 generated_expr = Some(Box::new(expr));
             }
 
-            // Parse optional DEFAULT clause (before COMMENT, per MySQL standard)
-            let default_value = if self.peek_keyword(Keyword::Default) {
+            // Parse optional DEFAULT clause (before COMMENT, per MySQL standard).
+            // SQLite also allows DEFAULT to appear interleaved with column constraints
+            // (e.g. `idx UNIQUE DEFAULT NULL`), so `parse_column_constraints` below may
+            // also consume a DEFAULT clause and return it via its second tuple element.
+            let mut default_value = if self.peek_keyword(Keyword::Default) {
                 self.advance(); // consume DEFAULT
                 Some(Box::new(self.parse_expression()?))
             } else {
@@ -181,8 +184,16 @@ impl Parser {
                 None
             };
 
-            // Parse column constraints (which may include NOT NULL)
-            let constraints = self.parse_column_constraints()?;
+            // Parse column constraints (which may include NOT NULL and an interleaved DEFAULT)
+            let (constraints, mid_default) = self.parse_column_constraints()?;
+            if let Some(d) = mid_default {
+                if default_value.is_some() {
+                    return Err(ParseError {
+                        message: "Multiple DEFAULT clauses for the same column".to_string(),
+                    });
+                }
+                default_value = Some(d);
+            }
 
             // Determine nullability based on constraints
             let nullable = !constraints

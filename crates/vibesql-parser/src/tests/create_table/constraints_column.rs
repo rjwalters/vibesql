@@ -519,3 +519,79 @@ fn test_parse_on_conflict_column_constraints() {
         _ => panic!("Expected CREATE TABLE statement"),
     }
 }
+
+/// Test ON DELETE/UPDATE RESTRICT (SQLite-supported referential action)
+#[test]
+fn test_parse_references_restrict() {
+    let result = Parser::parse_sql(
+        "CREATE TABLE t(a INTEGER REFERENCES p(x) ON DELETE RESTRICT ON UPDATE RESTRICT)",
+    );
+    assert!(result.is_ok(), "Should parse ON DELETE/UPDATE RESTRICT: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            match &create.columns[0].constraints[0].kind {
+                vibesql_ast::ColumnConstraintKind::References { on_delete, on_update, .. } => {
+                    assert_eq!(on_delete, &Some(vibesql_ast::ReferentialAction::Restrict));
+                    assert_eq!(on_update, &Some(vibesql_ast::ReferentialAction::Restrict));
+                }
+                _ => panic!("Expected REFERENCES constraint"),
+            }
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+/// Test that DEFAULT can appear after column constraints (SQLite grammar).
+/// Example from fkey1-8.1: `idx UNIQUE DEFAULT NULL`
+#[test]
+fn test_parse_default_after_constraint() {
+    let result = Parser::parse_sql("CREATE TABLE t(idx UNIQUE DEFAULT NULL)");
+    assert!(result.is_ok(), "Should parse DEFAULT after UNIQUE: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert_eq!(create.columns[0].constraints.len(), 1);
+            match &create.columns[0].constraints[0].kind {
+                vibesql_ast::ColumnConstraintKind::Unique { .. } => {}
+                _ => panic!("Expected UNIQUE constraint"),
+            }
+            assert!(
+                create.columns[0].default_value.is_some(),
+                "DEFAULT after UNIQUE should be captured on ColumnDef.default_value"
+            );
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+/// Test that DEFAULT can appear interleaved with multiple constraints.
+#[test]
+fn test_parse_default_interleaved_with_constraints() {
+    let result = Parser::parse_sql("CREATE TABLE t(c INT NOT NULL DEFAULT 0 CHECK(c >= 0))");
+    assert!(result.is_ok(), "Should parse interleaved DEFAULT: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert!(create.columns[0].default_value.is_some(), "DEFAULT 0 should be captured");
+            // NOT NULL + CHECK should both appear as constraints
+            assert!(create.columns[0].constraints.iter().any(
+                |c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::NotNull)
+            ));
+            assert!(create.columns[0].constraints.iter().any(
+                |c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Check(_))
+            ));
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+/// Test that providing two DEFAULT clauses for the same column is rejected.
+#[test]
+fn test_parse_default_double_rejected() {
+    let result = Parser::parse_sql("CREATE TABLE t(c INT DEFAULT 0 UNIQUE DEFAULT 1)");
+    assert!(result.is_err(), "Should reject two DEFAULT clauses on the same column");
+}
