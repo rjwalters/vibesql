@@ -87,6 +87,10 @@ pub enum ExecutorError {
     MisuseOfAliasedWindowFunction {
         alias_name: String,
     },
+    /// Row value used in scalar context (SQLite-compatible error)
+    /// e.g., HAVING (SELECT (a, b)) — a row value where a scalar is expected
+    /// Format: "row value misused"
+    RowValueMisused,
     UnsupportedExpression(String),
     UnsupportedFeature(String),
     /// SQLite-compatible error message (output as-is without prefix)
@@ -615,6 +619,10 @@ impl std::fmt::Display for ExecutorError {
             ExecutorError::MisuseOfAliasedWindowFunction { alias_name } => {
                 // SQLite-compatible error message format
                 write!(f, "misuse of aliased window function {}", alias_name)
+            }
+            ExecutorError::RowValueMisused => {
+                // SQLite-compatible error message format
+                write!(f, "row value misused")
             }
             ExecutorError::UnsupportedExpression(msg) => {
                 write!(

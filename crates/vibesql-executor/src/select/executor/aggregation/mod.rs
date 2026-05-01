@@ -153,6 +153,11 @@ impl SelectExecutor<'_> {
                     function_name: window_name,
                 });
             }
+
+            // Check for aggregates/windows inside bare scalar subqueries
+            // in HAVING (e.g. `HAVING (SELECT (a, b))` triggers row-value-misused;
+            // `HAVING (SELECT sum(x))` triggers misuse of aggregate). #5069
+            crate::select::executor::validation::validate_subquery_context_misuse(having_expr)?;
         }
 
         // Validate ORDER BY for misuse of aliased window functions (#5036)
