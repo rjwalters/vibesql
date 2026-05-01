@@ -222,8 +222,13 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::CreateTrigger(trigger_stmt) => {
-                match vibesql_executor::TriggerExecutor::create_trigger(&mut self.db, &trigger_stmt)
-                {
+                // Pass original SQL so the trigger survives SQL-dump persistence
+                // (mirrors the sql_definition handling for views above).
+                match vibesql_executor::TriggerExecutor::create_trigger_with_sql(
+                    &mut self.db,
+                    &trigger_stmt,
+                    Some(sql),
+                ) {
                     Ok(_) => {
                         result.row_count = 0; // DDL doesn't return rows
                     }

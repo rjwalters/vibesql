@@ -86,6 +86,10 @@ pub fn read_sql_dump<P: AsRef<Path>>(path: P) -> Result<String, StorageError> {
 /// - Multi-line statements
 /// - Statement termination by semicolon
 /// - String literals (preserves content within quotes)
+/// - `CREATE TRIGGER ... BEGIN ... END;` blocks where embedded semicolons inside
+///   the trigger body must NOT terminate the outer statement. We track BEGIN/END
+///   nesting depth (matched as whole-word identifiers, case-insensitively) and
+///   only honor `;` as a terminator at depth 0.
 ///
 /// # Returns
 /// A vector of SQL statement strings, trimmed and ready to parse
@@ -95,6 +99,9 @@ pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> 
     let mut in_string = false;
     let mut string_char = ' ';
     let mut escape_next = false;
+    // BEGIN/END nesting depth. While > 0, semicolons inside the trigger body do
+    // not terminate the outer statement.
+    let mut begin_depth: u32 = 0;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -123,6 +130,30 @@ pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> 
                 break;
             }
 
+            // Detect BEGIN/END as whole-word, case-insensitive identifiers when
+            // not inside a string literal. Track nesting depth so `;` inside a
+            // trigger body doesn't prematurely terminate the CREATE TRIGGER.
+            if !in_string && ch.is_ascii_alphabetic() {
+                let prev_is_ident = i > 0
+                    && (chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_');
+                if !prev_is_ident {
+                    if let Some(consumed) = match_keyword(&chars, i, "BEGIN") {
+                        begin_depth += 1;
+                        current_statement.push_str("BEGIN");
+                        i += consumed;
+                        continue;
+                    }
+                    if let Some(consumed) = match_keyword(&chars, i, "END") {
+                        if begin_depth > 0 {
+                            begin_depth -= 1;
+                        }
+                        current_statement.push_str("END");
+                        i += consumed;
+                        continue;
+                    }
+                }
+            }
+
             match ch {
                 '\\' if in_string && string_char == '\'' => {
                     current_statement.push(ch);
@@ -137,7 +168,7 @@ pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> 
                     in_string = false;
                     current_statement.push(ch);
                 }
-                ';' if !in_string => {
+                ';' if !in_string && begin_depth == 0 => {
                     current_statement.push(ch);
                     // Statement complete
                     if !current_statement.trim().is_empty() {
@@ -164,6 +195,30 @@ pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> 
     }
 
     Ok(statements)
+}
+
+/// Match a keyword (case-insensitively) at position `i` in `chars`, ensuring that the
+/// character after the keyword is not part of an identifier (so e.g. "BEGINNING" does
+/// not match "BEGIN"). Returns the number of characters consumed if matched.
+fn match_keyword(chars: &[char], i: usize, keyword: &str) -> Option<usize> {
+    let kw_chars: Vec<char> = keyword.chars().collect();
+    if i + kw_chars.len() > chars.len() {
+        return None;
+    }
+    for (k, kc) in kw_chars.iter().enumerate() {
+        if chars[i + k].to_ascii_uppercase() != *kc {
+            return None;
+        }
+    }
+    // Ensure the next character is not part of an identifier
+    let next_idx = i + kw_chars.len();
+    if next_idx < chars.len() {
+        let nc = chars[next_idx];
+        if nc.is_ascii_alphanumeric() || nc == '_' {
+            return None;
+        }
+    }
+    Some(kw_chars.len())
 }
 
 #[cfg(test)]
@@ -258,6 +313,57 @@ mod tests {
         assert_eq!(statements.len(), 1);
         assert!(statements[0].contains("'Alice'"));
         assert!(!statements[0].contains("Add first user"));
+    }
+
+    #[test]
+    fn test_parse_create_trigger_body_with_semicolons() {
+        // Trigger bodies contain BEGIN ... END; with embedded semicolons that must
+        // NOT split the outer statement.
+        let content = r#"
+CREATE TABLE t(a, b);
+CREATE TRIGGER tr AFTER INSERT ON t BEGIN
+  INSERT INTO t VALUES(99, 99);
+  UPDATE t SET b = 1 WHERE a = 0;
+END;
+INSERT INTO t VALUES(1, 1);
+"#;
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 3, "got: {:#?}", statements);
+        assert!(statements[0].contains("CREATE TABLE"));
+        assert!(statements[1].contains("CREATE TRIGGER"));
+        assert!(statements[1].contains("BEGIN"));
+        assert!(statements[1].contains("END"));
+        // Both inner statements must remain inside the trigger body
+        assert!(statements[1].contains("INSERT INTO t VALUES(99, 99)"));
+        assert!(statements[1].contains("UPDATE t SET b = 1"));
+        assert!(statements[2].contains("INSERT INTO t VALUES(1, 1)"));
+    }
+
+    #[test]
+    fn test_parse_nested_begin_end() {
+        // Nested BEGIN/END must balance correctly.
+        let content = r#"
+CREATE TRIGGER tr AFTER INSERT ON t BEGIN
+  BEGIN
+    INSERT INTO t VALUES(1);
+  END;
+  INSERT INTO t VALUES(2);
+END;
+SELECT 1;
+"#;
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 2);
+        assert!(statements[0].contains("CREATE TRIGGER"));
+        assert!(statements[1].trim().starts_with("SELECT 1"));
+    }
+
+    #[test]
+    fn test_parse_begin_keyword_does_not_match_beginning() {
+        // "BEGINNING" is an identifier, not a BEGIN keyword.
+        let content = r#"INSERT INTO t VALUES('BEGINNING');
+SELECT 1;"#;
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 2);
     }
 
     #[test]
