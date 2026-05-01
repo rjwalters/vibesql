@@ -47,6 +47,10 @@ pub(crate) fn eval_unary_op(
         (Plus, SqlValue::Character(s)) => Ok(SqlValue::Character(s.clone())),
         (Plus, SqlValue::Varchar(s)) => Ok(SqlValue::Varchar(s.clone())),
 
+        // Unary plus on BLOB - identity operation (SQLite behavior)
+        // SQLite: SELECT typeof(+x'616263') → 'blob'; SELECT quote(+x'616263') → X'616263'
+        (Plus, SqlValue::Blob(b)) => Ok(SqlValue::Blob(b.clone())),
+
         // Unary minus on text types - convert to number first (SQLite behavior)
         // SQLite converts strings to numbers before applying unary minus:
         // - Numeric strings: '-123' → Integer(-123), '-3.14' → Real(-3.14)
@@ -59,6 +63,10 @@ pub(crate) fn eval_unary_op(
                 Ok(SqlValue::Integer(-int_val))
             }
         }
+
+        // Unary minus on BLOB - SQLite coerces non-numeric BLOB to 0 then negates → Integer(0)
+        // SQLite: SELECT typeof(-x'616263') → 'integer'; SELECT -x'616263' → 0
+        (Minus, SqlValue::Blob(_)) => Ok(SqlValue::Integer(0)),
 
         // Unary NOT - logical negation
         // Per SQL standard three-valued logic:
@@ -324,6 +332,36 @@ mod tests {
             eval_unary_op(&UnaryOperator::Minus, &SqlValue::Character(arcstr::ArcStr::from("42")))
                 .unwrap(),
             SqlValue::Integer(-42)
+        );
+    }
+
+    #[test]
+    fn test_unary_plus_on_blob() {
+        // SQLite behavior: unary + on BLOB returns the BLOB unchanged (identity)
+        // Verified: SELECT typeof(+x'616263') → 'blob'; SELECT quote(+x'616263') → X'616263'
+        let bytes = vec![0x61u8, 0x62, 0x63];
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Plus, &SqlValue::Blob(bytes.clone())).unwrap(),
+            SqlValue::Blob(bytes)
+        );
+        // Empty BLOB is preserved
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Plus, &SqlValue::Blob(vec![])).unwrap(),
+            SqlValue::Blob(vec![])
+        );
+    }
+
+    #[test]
+    fn test_unary_minus_on_blob() {
+        // SQLite behavior: unary - on a non-numeric BLOB coerces to 0 then negates → Integer(0)
+        // Verified: SELECT typeof(-x'616263') → 'integer'; SELECT -x'616263' → 0
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Minus, &SqlValue::Blob(vec![0x61, 0x62, 0x63])).unwrap(),
+            SqlValue::Integer(0)
+        );
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Minus, &SqlValue::Blob(vec![])).unwrap(),
+            SqlValue::Integer(0)
         );
     }
 }
