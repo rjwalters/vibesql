@@ -64,9 +64,22 @@ pub(crate) fn eval_unary_op(
             }
         }
 
-        // Unary minus on BLOB - SQLite coerces non-numeric BLOB to 0 then negates → Integer(0)
-        // SQLite: SELECT typeof(-x'616263') → 'integer'; SELECT -x'616263' → 0
-        (Minus, SqlValue::Blob(_)) => Ok(SqlValue::Integer(0)),
+        // Unary minus on BLOB - SQLite coerces BLOB bytes → text → number, then negates.
+        // Mirrors the TEXT/Varchar branch above. Examples:
+        //   -x'313233' → -123   (bytes "123" → 123 → -123)
+        //   -x'2E35'   → -0.5   (bytes ".5"  → 0.5 → -0.5)
+        //   -x'616263' → 0      (bytes "abc" → 0)
+        //   -x''       → 0      (empty blob)
+        // SQLite rule: -x'<bytes>' === -CAST(x'<bytes>' AS TEXT)
+        (Minus, SqlValue::Blob(b)) => {
+            let s = String::from_utf8_lossy(b);
+            let (int_val, float_val, is_float) = string_to_number(&s);
+            if is_float {
+                Ok(SqlValue::Real(-float_val))
+            } else {
+                Ok(SqlValue::Integer(-int_val))
+            }
+        }
 
         // Unary NOT - logical negation
         // Per SQL standard three-valued logic:
@@ -363,5 +376,101 @@ mod tests {
             eval_unary_op(&UnaryOperator::Minus, &SqlValue::Blob(vec![])).unwrap(),
             SqlValue::Integer(0)
         );
+    }
+
+    // Issue #5098: Unary minus on BLOB must coerce numeric-string bytes via
+    // String::from_utf8_lossy + string_to_number, mirroring SQLite's rule:
+    //   -x'<bytes>' === -CAST(x'<bytes>' AS TEXT)
+
+    #[test]
+    fn unary_minus_on_numeric_blob_returns_integer() {
+        // x'313233' → bytes "123" → 123 → -123
+        let blob = SqlValue::Blob(b"123".to_vec());
+        let result = eval_unary_op(&UnaryOperator::Minus, &blob).unwrap();
+        assert_eq!(result, SqlValue::Integer(-123));
+    }
+
+    #[test]
+    fn unary_minus_on_decimal_blob_returns_real() {
+        // x'2E35' → bytes ".5" → 0.5 → -0.5
+        let blob = SqlValue::Blob(b".5".to_vec());
+        let result = eval_unary_op(&UnaryOperator::Minus, &blob).unwrap();
+        assert_eq!(result, SqlValue::Real(-0.5));
+    }
+
+    #[test]
+    fn unary_minus_on_exponent_blob_returns_real() {
+        // x'31653530' → bytes "1e50" → 1e50 → -1e50
+        let blob = SqlValue::Blob(b"1e50".to_vec());
+        let result = eval_unary_op(&UnaryOperator::Minus, &blob).unwrap();
+        match result {
+            SqlValue::Real(f) => {
+                assert!(
+                    (f + 1e50).abs() / 1e50 < 1e-12,
+                    "Expected ~-1e50, got {}",
+                    f
+                );
+            }
+            other => panic!("Expected Real, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn unary_minus_on_non_numeric_blob_returns_integer_zero() {
+        // x'616263' → bytes "abc" → 0 → 0 (no regression on PR #5090's like3 fixes)
+        let blob = SqlValue::Blob(b"abc".to_vec());
+        let result = eval_unary_op(&UnaryOperator::Minus, &blob).unwrap();
+        assert_eq!(result, SqlValue::Integer(0));
+    }
+
+    #[test]
+    fn unary_minus_on_empty_blob_returns_integer_zero() {
+        // x'' → empty bytes → 0 → 0
+        let blob = SqlValue::Blob(vec![]);
+        let result = eval_unary_op(&UnaryOperator::Minus, &blob).unwrap();
+        assert_eq!(result, SqlValue::Integer(0));
+    }
+
+    #[test]
+    fn unary_minus_on_blob_extracts_numeric_prefix() {
+        // x'31323378' → bytes "123x" → prefix "123" → 123 → -123
+        let blob = SqlValue::Blob(b"123abc".to_vec());
+        let result = eval_unary_op(&UnaryOperator::Minus, &blob).unwrap();
+        assert_eq!(result, SqlValue::Integer(-123));
+    }
+
+    // Edge cases requested in the issue Test Plan:
+
+    #[test]
+    fn unary_minus_on_blob_with_leading_whitespace() {
+        // x'20313233' → bytes " 123" → 123 → -123 (string_to_number handles leading whitespace)
+        let blob = SqlValue::Blob(b" 123".to_vec());
+        let result = eval_unary_op(&UnaryOperator::Minus, &blob).unwrap();
+        assert_eq!(result, SqlValue::Integer(-123));
+    }
+
+    #[test]
+    fn unary_minus_on_blob_with_negative_prefix() {
+        // x'2D313233' → bytes "-123" → -123, then unary minus → +123
+        let blob = SqlValue::Blob(b"-123".to_vec());
+        let result = eval_unary_op(&UnaryOperator::Minus, &blob).unwrap();
+        assert_eq!(result, SqlValue::Integer(123));
+    }
+
+    #[test]
+    fn unary_minus_on_blob_with_invalid_utf8() {
+        // x'FF' → invalid UTF-8 byte; from_utf8_lossy substitutes U+FFFD,
+        // which is non-numeric, so the result is Integer(0).
+        let blob = SqlValue::Blob(vec![0xFFu8]);
+        let result = eval_unary_op(&UnaryOperator::Minus, &blob).unwrap();
+        assert_eq!(result, SqlValue::Integer(0));
+    }
+
+    #[test]
+    fn unary_minus_on_blob_with_negative_decimal() {
+        // x'2D2E35' → bytes "-.5" → -0.5, then unary minus → +0.5
+        let blob = SqlValue::Blob(b"-.5".to_vec());
+        let result = eval_unary_op(&UnaryOperator::Minus, &blob).unwrap();
+        assert_eq!(result, SqlValue::Real(0.5));
     }
 }
