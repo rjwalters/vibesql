@@ -1022,6 +1022,13 @@ impl SelectExecutor<'_> {
         // Add outer context for correlated subqueries (#2998)
         if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
             exec_ctx = exec_ctx.with_outer_context(outer_row, outer_schema);
+        } else if let Some(proc_ctx) = self.procedural_context {
+            // Procedural variables in WHERE / SELECT (e.g. stored function bodies)
+            exec_ctx = exec_ctx.with_procedural_context(proc_ctx);
+        } else if let Some(trigger_ctx) = self.trigger_context {
+            // Issue #5082: thread trigger context so OLD/NEW pseudo-vars resolve in
+            // the synthetic SELECT used by UPDATE…FROM inside trigger bodies.
+            exec_ctx = exec_ctx.with_trigger_context(trigger_ctx);
         }
         // Add CTE context if available
         if !cte_results.is_empty() {

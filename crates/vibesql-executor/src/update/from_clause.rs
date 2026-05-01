@@ -44,11 +44,17 @@ pub struct UpdateFromMatch {
 /// 1. Joins the target table with all FROM tables
 /// 2. Computes SET expression values as part of the SELECT
 /// 3. Returns the target row index and computed values for each match
+///
+/// `trigger_context` (issue #5082, Bucket B of #5073): when the enclosing UPDATE
+/// is running inside a trigger body, the trigger context is threaded into the
+/// synthetic SELECT so `OLD.col` / `NEW.col` references in SET / WHERE clauses
+/// can be resolved against the firing row. `None` for top-level UPDATE…FROM.
 pub fn execute_update_from_join(
     stmt: &UpdateStmt,
     from_clauses: &[FromClause],
     database: &Database,
     target_schema: &TableSchema,
+    trigger_context: Option<&crate::trigger_execution::TriggerContext<'_>>,
 ) -> Result<UpdateFromJoinResult, ExecutorError> {
     let target_table_name = &target_schema.name;
     let target_alias = stmt.alias.clone();
@@ -97,9 +103,19 @@ pub fn execute_update_from_join(
     }
 
     // Add each SET expression to be computed in the join context
+    //
+    // Issue #5082: when running inside a trigger body, pre-resolve any OLD/NEW
+    // pseudo-variable references in SET expressions to literals using the
+    // firing row. This avoids needing to thread trigger context through the
+    // entire scan/join expression-evaluation stack — the synthetic SELECT
+    // sees only literal values plus column refs from the joined tables.
     for (i, assignment) in stmt.assignments.iter().enumerate() {
+        let expr = match trigger_context {
+            Some(ctx) => substitute_pseudo_vars(&assignment.value, ctx)?,
+            None => assignment.value.clone(),
+        };
         select_list.push(SelectItem::Expression {
-            expr: assignment.value.clone(),
+            expr,
             alias: Some(format!("__set_{}__", i)),
             source_text: None,
         });
@@ -123,10 +139,15 @@ pub fn execute_update_from_join(
     }
 
     // Build WHERE clause from UPDATE's WHERE clause
-    let where_clause = stmt.where_clause.as_ref().and_then(|wc| match wc {
-        WhereClause::Condition(expr) => Some(expr.clone()),
-        WhereClause::CurrentOf(_) => None, // Not supported with UPDATE FROM
-    });
+    // Issue #5082: pre-resolve OLD/NEW pseudo-variables to literals when running
+    // inside a trigger body (see comment on SET expressions above).
+    let where_clause = match stmt.where_clause.as_ref() {
+        Some(WhereClause::Condition(expr)) => match trigger_context {
+            Some(ctx) => Some(substitute_pseudo_vars(expr, ctx)?),
+            None => Some(expr.clone()),
+        },
+        _ => None,
+    };
 
     // Build the synthetic SELECT statement
     let select_stmt = SelectStmt {
@@ -148,7 +169,13 @@ pub fn execute_update_from_join(
     };
 
     // Execute the SELECT
-    let executor = crate::SelectExecutor::new(database);
+    // Issue #5082: when running inside a trigger body, thread the trigger context
+    // into the synthetic SELECT so OLD.col / NEW.col references in SET / WHERE
+    // resolve against the firing row.
+    let executor = match trigger_context {
+        Some(ctx) => crate::SelectExecutor::new_with_trigger_context(database, ctx),
+        None => crate::SelectExecutor::new(database),
+    };
     let rows = executor.execute(&select_stmt)?;
 
     // Build a map from identifier values to SET values
@@ -347,6 +374,228 @@ pub fn apply_update_from_matches(
     }
 
     Ok(updates)
+}
+
+/// Recursively substitute `OLD.col` / `NEW.col` pseudo-variable references in
+/// `expr` with the corresponding literal values from `trigger_context`.
+///
+/// This is the substitution pass used by `UPDATE … FROM …` inside trigger
+/// bodies (issue #5082, Bucket B of #5073). Pre-resolving the pseudo-variables
+/// to literals lets the synthetic SELECT execute through the normal scan/join
+/// pipeline without needing trigger context to be threaded through every
+/// scan-level evaluator constructor.
+///
+/// Subqueries inside the expression are walked recursively but the SelectStmt
+/// itself is left structurally intact — only `Expression::PseudoVariable` nodes
+/// are rewritten to `Expression::Literal`.
+fn substitute_pseudo_vars(
+    expr: &Expression,
+    trigger_context: &crate::trigger_execution::TriggerContext<'_>,
+) -> Result<Expression, ExecutorError> {
+    use vibesql_ast::CaseWhen;
+    Ok(match expr {
+        Expression::PseudoVariable { pseudo_table, column } => {
+            let value = trigger_context.resolve_pseudo_var(*pseudo_table, column)?;
+            Expression::Literal(value)
+        }
+        Expression::Literal(_)
+        | Expression::Placeholder(_)
+        | Expression::NumberedPlaceholder(_)
+        | Expression::NamedPlaceholder(_)
+        | Expression::ColumnRef(_)
+        | Expression::Wildcard
+        | Expression::CurrentDate
+        | Expression::CurrentTime { .. }
+        | Expression::CurrentTimestamp { .. }
+        | Expression::Default
+        | Expression::DuplicateKeyValue { .. }
+        | Expression::NextValue { .. }
+        | Expression::SessionVariable { .. } => expr.clone(),
+
+        Expression::BinaryOp { op, left, right } => Expression::BinaryOp {
+            op: op.clone(),
+            left: Box::new(substitute_pseudo_vars(left, trigger_context)?),
+            right: Box::new(substitute_pseudo_vars(right, trigger_context)?),
+        },
+        Expression::Conjunction(children) => Expression::Conjunction(
+            children
+                .iter()
+                .map(|c| substitute_pseudo_vars(c, trigger_context))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Expression::Disjunction(children) => Expression::Disjunction(
+            children
+                .iter()
+                .map(|c| substitute_pseudo_vars(c, trigger_context))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
+            op: op.clone(),
+            expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
+        },
+        Expression::Function { name, args, character_unit } => Expression::Function {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|a| substitute_pseudo_vars(a, trigger_context))
+                .collect::<Result<Vec<_>, _>>()?,
+            character_unit: character_unit.clone(),
+        },
+        Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
+            Expression::AggregateFunction {
+                name: name.clone(),
+                distinct: *distinct,
+                args: args
+                    .iter()
+                    .map(|a| substitute_pseudo_vars(a, trigger_context))
+                    .collect::<Result<Vec<_>, _>>()?,
+                order_by: order_by.clone(),
+                filter: match filter {
+                    Some(f) => Some(Box::new(substitute_pseudo_vars(f, trigger_context)?)),
+                    None => None,
+                },
+            }
+        }
+        Expression::IsNull { expr: inner, negated } => Expression::IsNull {
+            expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
+            negated: *negated,
+        },
+        Expression::IsDistinctFrom { left, right, negated } => Expression::IsDistinctFrom {
+            left: Box::new(substitute_pseudo_vars(left, trigger_context)?),
+            right: Box::new(substitute_pseudo_vars(right, trigger_context)?),
+            negated: *negated,
+        },
+        Expression::IsTruthValue { expr: inner, truth_value, negated } => {
+            Expression::IsTruthValue {
+                expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
+                truth_value: *truth_value,
+                negated: *negated,
+            }
+        }
+        Expression::Case { operand, when_clauses, else_result } => Expression::Case {
+            operand: match operand {
+                Some(o) => Some(Box::new(substitute_pseudo_vars(o, trigger_context)?)),
+                None => None,
+            },
+            when_clauses: when_clauses
+                .iter()
+                .map(|w| {
+                    Ok::<CaseWhen, ExecutorError>(CaseWhen {
+                        conditions: w
+                            .conditions
+                            .iter()
+                            .map(|c| substitute_pseudo_vars(c, trigger_context))
+                            .collect::<Result<Vec<_>, _>>()?,
+                        result: substitute_pseudo_vars(&w.result, trigger_context)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            else_result: match else_result {
+                Some(e) => Some(Box::new(substitute_pseudo_vars(e, trigger_context)?)),
+                None => None,
+            },
+        },
+        // Subqueries: leave SelectStmt intact (it can reference OLD/NEW too,
+        // but resolving those would require walking the entire SELECT tree;
+        // SQLite's behavior for OLD/NEW inside subqueries within UPDATE…FROM
+        // matches our existing single-table evaluator behavior, which is OK
+        // because correlated subqueries inside a trigger body still go
+        // through the per-row evaluator that has trigger context).
+        Expression::ScalarSubquery(_) | Expression::Exists { .. } => expr.clone(),
+        Expression::In { expr: inner, subquery, negated } => Expression::In {
+            expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
+            subquery: subquery.clone(),
+            negated: *negated,
+        },
+        Expression::InList { expr: inner, values, negated } => Expression::InList {
+            expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
+            values: values
+                .iter()
+                .map(|v| substitute_pseudo_vars(v, trigger_context))
+                .collect::<Result<Vec<_>, _>>()?,
+            negated: *negated,
+        },
+        Expression::Between { expr: inner, low, high, negated, symmetric } => {
+            Expression::Between {
+                expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
+                low: Box::new(substitute_pseudo_vars(low, trigger_context)?),
+                high: Box::new(substitute_pseudo_vars(high, trigger_context)?),
+                negated: *negated,
+                symmetric: *symmetric,
+            }
+        }
+        Expression::Cast { expr: inner, data_type } => Expression::Cast {
+            expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
+            data_type: data_type.clone(),
+        },
+        Expression::Position { substring, string, character_unit } => Expression::Position {
+            substring: Box::new(substitute_pseudo_vars(substring, trigger_context)?),
+            string: Box::new(substitute_pseudo_vars(string, trigger_context)?),
+            character_unit: character_unit.clone(),
+        },
+        Expression::Trim { position, removal_char, string } => Expression::Trim {
+            position: position.clone(),
+            removal_char: match removal_char {
+                Some(r) => Some(Box::new(substitute_pseudo_vars(r, trigger_context)?)),
+                None => None,
+            },
+            string: Box::new(substitute_pseudo_vars(string, trigger_context)?),
+        },
+        Expression::Extract { field, expr: inner } => Expression::Extract {
+            field: field.clone(),
+            expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
+        },
+        Expression::Like { expr: inner, pattern, negated, escape } => Expression::Like {
+            expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
+            pattern: Box::new(substitute_pseudo_vars(pattern, trigger_context)?),
+            negated: *negated,
+            escape: match escape {
+                Some(e) => Some(Box::new(substitute_pseudo_vars(e, trigger_context)?)),
+                None => None,
+            },
+        },
+        Expression::Glob { expr: inner, pattern, negated, escape } => Expression::Glob {
+            expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
+            pattern: Box::new(substitute_pseudo_vars(pattern, trigger_context)?),
+            negated: *negated,
+            escape: match escape {
+                Some(e) => Some(Box::new(substitute_pseudo_vars(e, trigger_context)?)),
+                None => None,
+            },
+        },
+        Expression::QuantifiedComparison { expr: inner, op, quantifier, subquery } => {
+            Expression::QuantifiedComparison {
+                expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
+                op: op.clone(),
+                quantifier: quantifier.clone(),
+                subquery: subquery.clone(),
+            }
+        }
+        Expression::Interval { value, unit, leading_precision, fractional_precision } => {
+            Expression::Interval {
+                value: Box::new(substitute_pseudo_vars(value, trigger_context)?),
+                unit: unit.clone(),
+                leading_precision: *leading_precision,
+                fractional_precision: *fractional_precision,
+            }
+        }
+        Expression::WindowFunction { .. } => expr.clone(),
+        Expression::MatchAgainst { columns, search_modifier, mode } => Expression::MatchAgainst {
+            columns: columns.clone(),
+            search_modifier: Box::new(substitute_pseudo_vars(search_modifier, trigger_context)?),
+            mode: mode.clone(),
+        },
+        Expression::RowValueConstructor(values) => Expression::RowValueConstructor(
+            values
+                .iter()
+                .map(|v| substitute_pseudo_vars(v, trigger_context))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Expression::Collate { expr: inner, collation } => Expression::Collate {
+            expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
+            collation: collation.clone(),
+        },
+    })
 }
 
 /// Normalize integer types to ensure consistent comparison in HashMaps

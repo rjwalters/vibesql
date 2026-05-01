@@ -197,6 +197,9 @@ impl SelectExecutor<'_> {
                 ctx = ctx.with_outer_context(outer_row, outer_schema);
             } else if let Some(proc_ctx) = self.procedural_context {
                 ctx = ctx.with_procedural_context(proc_ctx);
+            } else if let Some(trigger_ctx) = self.trigger_context {
+                // Issue #5082: forward trigger context for OLD/NEW resolution
+                ctx = ctx.with_trigger_context(trigger_ctx);
             }
             if let Some(cte_ctx) = cte_ctx {
                 ctx = ctx.with_cte_context(cte_ctx);
@@ -312,6 +315,9 @@ impl SelectExecutor<'_> {
             ctx = ctx.with_outer_context(outer_row, outer_schema);
         } else if let Some(proc_ctx) = self.procedural_context {
             ctx = ctx.with_procedural_context(proc_ctx);
+        } else if let Some(trigger_ctx) = self.trigger_context {
+            // Issue #5082: forward trigger context for OLD/NEW resolution
+            ctx = ctx.with_trigger_context(trigger_ctx);
         }
         if let Some(cte_ctx) = cte_ctx {
             ctx = ctx.with_cte_context(cte_ctx);

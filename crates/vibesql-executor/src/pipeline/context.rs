@@ -41,6 +41,9 @@ pub struct ExecutionContext<'a> {
     pub outer_rows: Option<&'a [vibesql_storage::Row]>,
     /// Optional procedural context for stored procedures/functions
     pub procedural_context: Option<&'a procedural::ExecutionContext>,
+    /// Optional trigger context for OLD/NEW pseudo-variable resolution inside trigger bodies
+    /// (e.g. UPDATE…FROM in a trigger body referencing NEW.x / OLD.x — issue #5082)
+    pub trigger_context: Option<&'a crate::trigger_execution::TriggerContext<'a>>,
     /// Optional CTE context for WITH clause results
     pub cte_context: Option<&'a HashMap<String, CteResult>>,
     /// Optional window function mapping
@@ -61,6 +64,7 @@ impl<'a> ExecutionContext<'a> {
             outer_schema: None,
             outer_rows: None,
             procedural_context: None,
+            trigger_context: None,
             cte_context: None,
             window_mapping: None,
         }
@@ -106,6 +110,23 @@ impl<'a> ExecutionContext<'a> {
         self
     }
 
+    /// Add trigger context for OLD/NEW pseudo-variable resolution.
+    ///
+    /// Used by the synthetic SELECT inside `UPDATE … FROM …` when running inside
+    /// a trigger body so that `OLD.col` / `NEW.col` resolve against the firing
+    /// row (issue #5082).
+    ///
+    /// # Arguments
+    /// * `trigger_ctx` - The trigger execution context
+    #[must_use]
+    pub fn with_trigger_context(
+        mut self,
+        trigger_ctx: &'a crate::trigger_execution::TriggerContext<'a>,
+    ) -> Self {
+        self.trigger_context = Some(trigger_ctx);
+        self
+    }
+
     /// Add CTE context for WITH clause results.
     ///
     /// # Arguments
@@ -145,6 +166,24 @@ impl<'a> ExecutionContext<'a> {
     /// If outer_rows is set, it will be propagated to the evaluator for outer-correlated
     /// aggregates (issue #4930).
     pub fn create_evaluator(&self) -> CombinedExpressionEvaluator<'a> {
+        // Trigger context takes priority — used by the synthetic SELECT inside
+        // UPDATE…FROM running inside a trigger body so OLD/NEW resolve correctly
+        // (issue #5082). Trigger context is mutually exclusive with procedural
+        // context (a trigger body cannot run inside a stored procedure body), but
+        // we still allow it to compose with outer_rows, set below.
+        if let Some(trigger_ctx) = self.trigger_context {
+            let mut evaluator =
+                CombinedExpressionEvaluator::with_database_and_trigger_context(
+                    self.schema,
+                    self.database,
+                    trigger_ctx,
+                );
+            if let Some(outer_rows) = self.outer_rows {
+                evaluator.set_outer_rows(outer_rows);
+            }
+            return evaluator;
+        }
+
         // Use the most complete constructor and set optional fields
         // We match on the combination of optional fields to call the right constructor
         // This is temporary until we refactor CombinedExpressionEvaluator itself
