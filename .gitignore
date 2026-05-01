@@ -48,6 +48,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!.loom/scripts/lib/
 lib64/
 parts/
 sdist/
