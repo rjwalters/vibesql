@@ -1093,6 +1093,356 @@ fn find_aliased_window_misuse_in_order_by(
     }
 }
 
+/// Check if an expression contains any column reference (recursively).
+///
+/// Used by `validate_subquery_context_misuse` to determine whether an
+/// aggregate inside a bare (FROM-less) scalar subquery references columns
+/// from the outer scope — those references are what make the aggregate a
+/// "misuse" of the outer aggregation context.
+fn expression_contains_column_ref(expr: &Expression) -> bool {
+    match expr {
+        Expression::ColumnRef(_) => true,
+        Expression::BinaryOp { left, right, .. } => {
+            expression_contains_column_ref(left) || expression_contains_column_ref(right)
+        }
+        Expression::UnaryOp { expr, .. } => expression_contains_column_ref(expr),
+        Expression::IsNull { expr, .. } => expression_contains_column_ref(expr),
+        Expression::IsDistinctFrom { left, right, .. } => {
+            expression_contains_column_ref(left) || expression_contains_column_ref(right)
+        }
+        Expression::IsTruthValue { expr, .. } => expression_contains_column_ref(expr),
+        Expression::Cast { expr, .. } => expression_contains_column_ref(expr),
+        Expression::Function { args, .. }
+        | Expression::AggregateFunction { args, .. } => {
+            args.iter().any(expression_contains_column_ref)
+        }
+        Expression::Like { expr, pattern, .. } => {
+            expression_contains_column_ref(expr) || expression_contains_column_ref(pattern)
+        }
+        Expression::Between { expr, low, high, .. } => {
+            expression_contains_column_ref(expr)
+                || expression_contains_column_ref(low)
+                || expression_contains_column_ref(high)
+        }
+        Expression::InList { expr, values, .. } => {
+            expression_contains_column_ref(expr) || values.iter().any(expression_contains_column_ref)
+        }
+        Expression::In { expr, .. } => expression_contains_column_ref(expr),
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|e| expression_contains_column_ref(e))
+                || when_clauses.iter().any(|w| {
+                    w.conditions.iter().any(expression_contains_column_ref)
+                        || expression_contains_column_ref(&w.result)
+                })
+                || else_result.as_ref().is_some_and(|e| expression_contains_column_ref(e))
+        }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            children.iter().any(expression_contains_column_ref)
+        }
+        Expression::RowValueConstructor(children) => {
+            children.iter().any(expression_contains_column_ref)
+        }
+        Expression::Position { substring, string, .. } => {
+            expression_contains_column_ref(substring) || expression_contains_column_ref(string)
+        }
+        Expression::Trim { removal_char, string, .. } => {
+            removal_char.as_ref().is_some_and(|e| expression_contains_column_ref(e))
+                || expression_contains_column_ref(string)
+        }
+        Expression::Extract { expr, .. } => expression_contains_column_ref(expr),
+        Expression::Interval { value, .. } => expression_contains_column_ref(value),
+        Expression::QuantifiedComparison { expr, .. } => expression_contains_column_ref(expr),
+        // Subqueries have their own scope — don't recurse
+        Expression::ScalarSubquery(_) | Expression::Exists { .. } => false,
+        // Window function: only check args, not the OVER clause
+        Expression::WindowFunction { function, .. } => {
+            let args = match function {
+                vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
+            };
+            args.iter().any(expression_contains_column_ref)
+        }
+        _ => false,
+    }
+}
+
+/// Find the first aggregate function whose args/order_by/filter reference a
+/// column. Returns the function name if found, None otherwise.
+///
+/// This is used inside bare (FROM-less) scalar subqueries: any column there
+/// is necessarily an outer reference, so an aggregate referencing one is a
+/// misuse of the outer aggregation context.
+fn find_outer_referencing_aggregate(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::AggregateFunction { name, args, order_by, filter, .. } => {
+            let arg_refs = args.iter().any(expression_contains_column_ref);
+            let order_refs = order_by.as_ref().is_some_and(|items| {
+                items.iter().any(|item| expression_contains_column_ref(&item.expr))
+            });
+            let filter_refs =
+                filter.as_ref().is_some_and(|f| expression_contains_column_ref(f));
+            if arg_refs || order_refs || filter_refs {
+                return Some(name.to_string());
+            }
+            // Recurse into args in case there's a deeper aggregate
+            for arg in args {
+                if let Some(found) = find_outer_referencing_aggregate(arg) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Expression::Function { name, args, .. } => {
+            if is_aggregate_function(name.as_str()) {
+                let upper = name.to_uppercase();
+                let is_scalar_minmax =
+                    matches!(upper.as_str(), "MIN" | "MAX") && args.len() > 1;
+                if !is_scalar_minmax {
+                    let arg_refs = args.iter().any(expression_contains_column_ref);
+                    if arg_refs {
+                        return Some(name.to_string());
+                    }
+                }
+            }
+            for arg in args {
+                if let Some(found) = find_outer_referencing_aggregate(arg) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Expression::BinaryOp { left, right, .. } => find_outer_referencing_aggregate(left)
+            .or_else(|| find_outer_referencing_aggregate(right)),
+        Expression::UnaryOp { expr, .. } => find_outer_referencing_aggregate(expr),
+        Expression::Cast { expr, .. } => find_outer_referencing_aggregate(expr),
+        Expression::IsNull { expr, .. } => find_outer_referencing_aggregate(expr),
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                if let Some(found) = find_outer_referencing_aggregate(op) {
+                    return Some(found);
+                }
+            }
+            for w in when_clauses {
+                for cond in &w.conditions {
+                    if let Some(found) = find_outer_referencing_aggregate(cond) {
+                        return Some(found);
+                    }
+                }
+                if let Some(found) = find_outer_referencing_aggregate(&w.result) {
+                    return Some(found);
+                }
+            }
+            if let Some(else_expr) = else_result {
+                find_outer_referencing_aggregate(else_expr)
+            } else {
+                None
+            }
+        }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for c in children {
+                if let Some(found) = find_outer_referencing_aggregate(c) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Expression::Between { expr, low, high, .. } => find_outer_referencing_aggregate(expr)
+            .or_else(|| find_outer_referencing_aggregate(low))
+            .or_else(|| find_outer_referencing_aggregate(high)),
+        Expression::InList { expr, values, .. } => {
+            if let Some(found) = find_outer_referencing_aggregate(expr) {
+                return Some(found);
+            }
+            for v in values {
+                if let Some(found) = find_outer_referencing_aggregate(v) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Expression::In { expr, .. } => find_outer_referencing_aggregate(expr),
+        Expression::Like { expr, pattern, .. } => find_outer_referencing_aggregate(expr)
+            .or_else(|| find_outer_referencing_aggregate(pattern)),
+        // Don't recurse into nested scalar subqueries here — those are validated
+        // by separate calls to validate_subquery_context_misuse.
+        Expression::ScalarSubquery(_) | Expression::Exists { .. } => None,
+        _ => None,
+    }
+}
+
+/// Detect aggregate / row-value misuse inside *bare* scalar subqueries.
+///
+/// SQLite has a special rule: when a scalar subquery has no FROM clause and
+/// its body contains an aggregate function whose argument or FILTER references
+/// an *outer* column, the aggregate implicitly borrows the outer aggregation
+/// context. SQLite reports this as `"misuse of aggregate: X()"`.
+///
+/// Examples that trigger this rule:
+/// - `WHERE (SELECT AVG(0) FILTER(WHERE outer.c))`  → "misuse of aggregate: AVG()"
+/// - `ntile((SELECT sum(x))) OVER (...)`             → "misuse of aggregate: sum()"
+///
+/// Additionally, when a bare scalar subquery's sole projection is a
+/// `RowValueConstructor` with multiple elements, that's `RowValueMisused`
+/// (a row value where a scalar is required).
+///
+/// Note: pure *window* functions inside bare scalar subqueries are NOT flagged
+/// here — SQLite allows them (they are evaluated row-by-row against the outer
+/// scope). Misuse for window functions is detected through other paths
+/// (WHERE-clause walker, GROUP BY positional refs, etc.).
+///
+/// This walker is meant to be called on expressions appearing in the outer
+/// scope — typically WHERE, HAVING, ORDER BY, or arguments to outer functions.
+/// It deliberately does NOT recurse into scalar subqueries that have a FROM
+/// clause (those have their own aggregation context and are validated
+/// independently).
+///
+/// To preserve SQLite's exact error text (which uses the function name as
+/// originally written by the user), we walk the inner expression and report
+/// the first such aggregate's name.
+pub fn validate_subquery_context_misuse(expr: &Expression) -> Result<(), ExecutorError> {
+    match expr {
+        Expression::ScalarSubquery(stmt) => {
+            // Only "bare" subqueries (no FROM) re-borrow the outer context.
+            if stmt.from.is_none() {
+                // Check for row value misuse (sole projection is a row value
+                // constructor with multiple elements).
+                if stmt.select_list.len() == 1 {
+                    if let SelectItem::Expression {
+                        expr: Expression::RowValueConstructor(items),
+                        ..
+                    } = &stmt.select_list[0]
+                    {
+                        if items.len() > 1 {
+                            return Err(ExecutorError::RowValueMisused);
+                        }
+                    }
+                }
+
+                // Check each projection for an aggregate function. We only
+                // flag aggregates whose body references something outside the
+                // bare subquery's own scope (i.e., references a column — the
+                // bare subquery has no tables, so any column is an outer ref).
+                for item in &stmt.select_list {
+                    if let SelectItem::Expression { expr: inner, .. } = item {
+                        if let Some(name) = find_outer_referencing_aggregate(inner) {
+                            return Err(ExecutorError::MisuseOfAggregateContext {
+                                function_name: name,
+                            });
+                        }
+                    }
+                }
+
+                // Recurse into nested expressions inside the bare subquery's
+                // SELECT list as well — e.g. (SELECT (SELECT sum(x)))
+                for item in &stmt.select_list {
+                    if let SelectItem::Expression { expr: inner, .. } = item {
+                        validate_subquery_context_misuse(inner)?;
+                    }
+                }
+            }
+            Ok(())
+        }
+        // For non-subquery expressions, recurse into their children. We do
+        // NOT recurse into AggregateFunction / WindowFunction children here —
+        // those are checked by their own dedicated validators which understand
+        // the surrounding context (FILTER, ORDER BY, etc.).
+        Expression::BinaryOp { left, right, .. } => {
+            validate_subquery_context_misuse(left)?;
+            validate_subquery_context_misuse(right)
+        }
+        Expression::UnaryOp { expr, .. } => validate_subquery_context_misuse(expr),
+        Expression::IsNull { expr, .. } => validate_subquery_context_misuse(expr),
+        Expression::IsDistinctFrom { left, right, .. } => {
+            validate_subquery_context_misuse(left)?;
+            validate_subquery_context_misuse(right)
+        }
+        Expression::IsTruthValue { expr, .. } => validate_subquery_context_misuse(expr),
+        Expression::Cast { expr, .. } => validate_subquery_context_misuse(expr),
+        Expression::Like { expr, pattern, .. } => {
+            validate_subquery_context_misuse(expr)?;
+            validate_subquery_context_misuse(pattern)
+        }
+        Expression::Between { expr, low, high, .. } => {
+            validate_subquery_context_misuse(expr)?;
+            validate_subquery_context_misuse(low)?;
+            validate_subquery_context_misuse(high)
+        }
+        Expression::InList { expr, values, .. } => {
+            validate_subquery_context_misuse(expr)?;
+            for v in values {
+                validate_subquery_context_misuse(v)?;
+            }
+            Ok(())
+        }
+        Expression::In { expr, .. } => validate_subquery_context_misuse(expr),
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                validate_subquery_context_misuse(op)?;
+            }
+            for w in when_clauses {
+                for cond in &w.conditions {
+                    validate_subquery_context_misuse(cond)?;
+                }
+                validate_subquery_context_misuse(&w.result)?;
+            }
+            if let Some(else_expr) = else_result {
+                validate_subquery_context_misuse(else_expr)?;
+            }
+            Ok(())
+        }
+        Expression::Function { args, .. } => {
+            for arg in args {
+                validate_subquery_context_misuse(arg)?;
+            }
+            Ok(())
+        }
+        Expression::AggregateFunction { args, filter, order_by, .. } => {
+            for arg in args {
+                validate_subquery_context_misuse(arg)?;
+            }
+            if let Some(f) = filter {
+                validate_subquery_context_misuse(f)?;
+            }
+            if let Some(items) = order_by {
+                for item in items {
+                    validate_subquery_context_misuse(&item.expr)?;
+                }
+            }
+            Ok(())
+        }
+        Expression::WindowFunction { function, .. } => {
+            // Only recurse into the function's arguments — the OVER clause has
+            // its own context and may legally contain aggregates / nested
+            // subqueries (window functions are evaluated AFTER aggregation).
+            let args = match function {
+                vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
+            };
+            for a in args {
+                validate_subquery_context_misuse(a)?;
+            }
+            Ok(())
+        }
+        Expression::QuantifiedComparison { expr, .. } => validate_subquery_context_misuse(expr),
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children {
+                validate_subquery_context_misuse(child)?;
+            }
+            Ok(())
+        }
+        Expression::RowValueConstructor(children) => {
+            for child in children {
+                validate_subquery_context_misuse(child)?;
+            }
+            Ok(())
+        }
+        // Leaf expressions and EXISTS (which has its own scope) — nothing to check
+        _ => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use vibesql_ast::{BinaryOperator, ColumnIdentifier, FunctionIdentifier, UnaryOperator};
@@ -1471,5 +1821,150 @@ mod tests {
         assert!(aliases.contains("m")); // min(f1) AS m is an aggregate alias
         assert!(!aliases.contains("col2")); // f2 AS col2 is NOT an aggregate alias
         assert!(aliases.contains("m2")); // coalesce(min(f1)+5, 11) contains an aggregate
+    }
+
+    // Helper to build a bare scalar subquery with a given SELECT list.
+    fn make_bare_subquery(select_list: Vec<SelectItem>) -> Expression {
+        Expression::ScalarSubquery(Box::new(vibesql_ast::SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list,
+            into_table: None,
+            into_variables: None,
+            from: None,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: None,
+        }))
+    }
+
+    #[test]
+    fn test_subquery_misuse_aggregate_with_outer_filter_ref() {
+        // (SELECT AVG(0) FILTER(WHERE outer_col)) — bare subquery, FILTER ref outer col
+        // Expected: misuse of aggregate: AVG()
+        let inner_agg = Expression::AggregateFunction {
+            name: FunctionIdentifier::new("AVG"),
+            distinct: false,
+            args: vec![Expression::Literal(SqlValue::Integer(0))],
+            order_by: None,
+            filter: Some(Box::new(Expression::ColumnRef(ColumnIdentifier::simple(
+                "outer_col", false,
+            )))),
+        };
+        let subquery = make_bare_subquery(vec![SelectItem::Expression {
+            expr: inner_agg,
+            alias: None,
+            source_text: None,
+        }]);
+
+        let result = validate_subquery_context_misuse(&subquery);
+        match result {
+            Err(ExecutorError::MisuseOfAggregateContext { function_name }) => {
+                assert_eq!(function_name, "AVG");
+            }
+            other => panic!("expected MisuseOfAggregateContext(AVG), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_subquery_misuse_aggregate_with_outer_arg_ref() {
+        // (SELECT sum(x)) — bare subquery, sum's arg is an outer column ref
+        // Expected: misuse of aggregate: sum()
+        let inner_agg = Expression::AggregateFunction {
+            name: FunctionIdentifier::new("sum"),
+            distinct: false,
+            args: vec![Expression::ColumnRef(ColumnIdentifier::simple("x", false))],
+            order_by: None,
+            filter: None,
+        };
+        let subquery = make_bare_subquery(vec![SelectItem::Expression {
+            expr: inner_agg,
+            alias: None,
+            source_text: None,
+        }]);
+
+        let result = validate_subquery_context_misuse(&subquery);
+        match result {
+            Err(ExecutorError::MisuseOfAggregateContext { function_name }) => {
+                assert_eq!(function_name, "sum");
+            }
+            other => panic!("expected MisuseOfAggregateContext(sum), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_subquery_misuse_aggregate_with_constant_args_does_not_fire() {
+        // (SELECT sum(0)) — bare subquery whose aggregate has no column refs.
+        // Should NOT error (no outer reference).
+        let inner_agg = Expression::AggregateFunction {
+            name: FunctionIdentifier::new("sum"),
+            distinct: false,
+            args: vec![Expression::Literal(SqlValue::Integer(0))],
+            order_by: None,
+            filter: None,
+        };
+        let subquery = make_bare_subquery(vec![SelectItem::Expression {
+            expr: inner_agg,
+            alias: None,
+            source_text: None,
+        }]);
+
+        let result = validate_subquery_context_misuse(&subquery);
+        assert!(result.is_ok(), "constant aggregate in bare subquery should be OK");
+    }
+
+    #[test]
+    fn test_subquery_row_value_misused() {
+        // (SELECT (a, b)) — bare subquery returning a row value where a scalar
+        // is expected. Expected: row value misused.
+        let row_value = Expression::RowValueConstructor(vec![
+            Expression::ColumnRef(ColumnIdentifier::simple("a", false)),
+            Expression::ColumnRef(ColumnIdentifier::simple("b", false)),
+        ]);
+        let subquery = make_bare_subquery(vec![SelectItem::Expression {
+            expr: row_value,
+            alias: None,
+            source_text: None,
+        }]);
+
+        let result = validate_subquery_context_misuse(&subquery);
+        assert!(matches!(result, Err(ExecutorError::RowValueMisused)));
+    }
+
+    #[test]
+    fn test_subquery_window_function_does_not_fire() {
+        // (SELECT count(a) OVER ()) — bare subquery with a window function
+        // referencing outer column. SQLite allows this; we should NOT flag it.
+        let inner_window = Expression::WindowFunction {
+            function: vibesql_ast::WindowFunctionSpec::Aggregate {
+                name: FunctionIdentifier::new("count"),
+                args: vec![Expression::ColumnRef(ColumnIdentifier::simple("a", false))],
+                filter: None,
+            },
+            over: vibesql_ast::WindowSpec {
+                base_window_name: None,
+                partition_by: None,
+                order_by: None,
+                frame: None,
+            },
+        };
+        let subquery = make_bare_subquery(vec![SelectItem::Expression {
+            expr: inner_window,
+            alias: None,
+            source_text: None,
+        }]);
+
+        let result = validate_subquery_context_misuse(&subquery);
+        assert!(
+            result.is_ok(),
+            "window function in bare subquery should not be flagged, got {:?}",
+            result
+        );
     }
 }

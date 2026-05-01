@@ -66,6 +66,26 @@ impl SelectExecutor<'_> {
         // SELECT (SELECT count(x) FROM t35b) FROM t35a; is valid in SQLite.
         super::validation::validate_aggregate_subquery_outer_refs(stmt, self.database)?;
 
+        // Validate bare scalar subqueries in the SELECT list / ORDER BY for
+        // misuse of aggregate / window / row-value (#5069). A "bare" scalar
+        // subquery (no FROM) re-borrows the outer aggregation context, so any
+        // aggregate inside it is a misuse of the outer scope.
+        // Examples:
+        //   SELECT ntile((SELECT sum(x))) OVER (ORDER BY x) FROM t1;
+        //     → "misuse of aggregate: sum()"
+        //   ... ORDER BY (SELECT (a, b))
+        //     → "row value misused"
+        for item in &stmt.select_list {
+            if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                super::validation::validate_subquery_context_misuse(expr)?;
+            }
+        }
+        if let Some(order_by) = stmt.order_by.as_deref() {
+            for item in order_by {
+                super::validation::validate_subquery_context_misuse(&item.expr)?;
+            }
+        }
+
         #[cfg(feature = "profile-q6")]
         let execute_start = std::time::Instant::now();
 

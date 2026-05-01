@@ -286,13 +286,15 @@ proc translate_error_to_sqlite {vibesql_error} {
     # VibeSQL now produces these exact formats, so pass through if already correct:
 
     # "misuse of aggregate: X()" - for execution context errors (ORDER BY, etc.)
+    # SQLite preserves the function-name case as written in the SQL, so pass through verbatim.
     if {[regexp -nocase {^misuse of aggregate:\s*([A-Za-z_]+)\(\)$} $error_msg -> func_name]} {
-        return "misuse of aggregate: [string tolower $func_name]()"
+        return "misuse of aggregate: ${func_name}()"
     }
 
     # "misuse of aggregate function X()" - for name resolution errors (nested aggregates, WHERE)
+    # SQLite preserves the function-name case as written in the SQL, so pass through verbatim.
     if {[regexp -nocase {^misuse of aggregate function\s*([A-Za-z_]+)\(\)$} $error_msg -> func_name]} {
-        return "misuse of aggregate function [string tolower $func_name]()"
+        return "misuse of aggregate function ${func_name}()"
     }
 
     # "misuse of aliased aggregate X" - for aliased aggregate misuse in HAVING
