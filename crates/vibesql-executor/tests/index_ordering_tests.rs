@@ -89,6 +89,7 @@ fn test_index_ordering() {
             direction: OrderDirection::Asc,
             prefix_length: None,
         }],
+        where_clause: None,
     };
 
     vibesql_executor::IndexExecutor::execute(&create_index_stmt, &mut db).unwrap();

@@ -111,12 +111,18 @@ impl Parser {
         // Expect closing parenthesis
         self.expect_token(Token::RParen)?;
 
+        // Optional WHERE clause for partial indexes (SQLite syntax).
+        // Storage support is pending; we only capture the expression so
+        // downstream validation can reject window functions in the predicate.
+        let where_clause = self.parse_optional_index_where_clause()?;
+
         Ok(vibesql_ast::CreateIndexStmt {
             if_not_exists,
             index_name,
             table_name,
             index_type: vibesql_ast::IndexType::BTree { unique: false },
             columns,
+            where_clause,
         })
     }
 
@@ -220,6 +226,7 @@ impl Parser {
             table_name,
             index_type: vibesql_ast::IndexType::IVFFlat { metric, lists },
             columns,
+            where_clause: None,
         })
     }
 
@@ -344,7 +351,25 @@ impl Parser {
             table_name,
             index_type: vibesql_ast::IndexType::Hnsw { metric, m, ef_construction },
             columns,
+            where_clause: None,
         })
+    }
+
+    /// Parse the optional `WHERE <expr>` clause that follows the column list
+    /// in a CREATE INDEX statement (SQLite partial-index syntax).
+    ///
+    /// Returns `Ok(None)` when no WHERE keyword is present so callers can use
+    /// this helper unconditionally.
+    fn parse_optional_index_where_clause(
+        &mut self,
+    ) -> Result<Option<Box<vibesql_ast::Expression>>, ParseError> {
+        if self.peek_keyword(Keyword::Where) {
+            self.advance(); // consume WHERE
+            let expr = self.parse_expression()?;
+            Ok(Some(Box::new(expr)))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Parse a positive integer value
@@ -632,12 +657,20 @@ impl Parser {
         // Expect closing parenthesis
         self.expect_token(Token::RParen)?;
 
+        // Optional WHERE clause for partial indexes (e.g. UNIQUE partial indexes
+        // in SQLite). FULLTEXT/SPATIAL indexes do not support WHERE in their
+        // standard syntax, but accepting the clause here keeps the validation
+        // path unified — downstream layers can still reject unsupported
+        // combinations.
+        let where_clause = self.parse_optional_index_where_clause()?;
+
         Ok(vibesql_ast::CreateIndexStmt {
             if_not_exists,
             index_name,
             table_name,
             index_type,
             columns,
+            where_clause,
         })
     }
 

@@ -196,6 +196,13 @@ pub struct CreateIndexStmt {
     pub table_name: String,
     pub index_type: IndexType,
     pub columns: Vec<IndexColumn>,
+    /// Optional WHERE clause for partial indexes (SQLite syntax).
+    ///
+    /// Storage of partial-index WHERE expressions is not yet implemented;
+    /// the parser captures the expression so semantic validation (e.g.
+    /// rejecting window functions in the predicate) can run before
+    /// execution falls back to an "unsupported" error. See issue #5091.
+    pub where_clause: Option<Box<Expression>>,
 }
 
 /// Index type specification

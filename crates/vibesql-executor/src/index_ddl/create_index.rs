@@ -56,6 +56,7 @@ impl CreateIndexExecutor {
     ///         direction: OrderDirection::Asc,
     ///         prefix_length: None,
     ///     }],
+    ///     where_clause: None,
     /// };
     ///
     /// let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -72,6 +73,18 @@ impl CreateIndexExecutor {
 
         // Validate the CREATE INDEX statement
         let validation = validate_create_index(stmt, database)?;
+
+        // Partial indexes (CREATE INDEX … WHERE …) are not yet supported beyond
+        // parsing and validation (see #5091). Validation has already run any
+        // semantic checks against the predicate (e.g. rejecting window functions
+        // with the SQLite-compatible "misuse of window function" error); if we
+        // get here with a WHERE clause attached, the predicate was syntactically
+        // legal but storage support is still missing.
+        if stmt.where_clause.is_some() {
+            return Err(ExecutorError::UnsupportedFeature(
+                "partial indexes (CREATE INDEX ... WHERE) are not yet supported".to_string(),
+            ));
+        }
 
         // Dispatch to appropriate index creation based on type
         match &stmt.index_type {
@@ -191,6 +204,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -219,6 +233,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -248,6 +263,7 @@ mod tests {
                     prefix_length: None,
                 },
             ],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -269,6 +285,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         // First creation succeeds
@@ -295,6 +312,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -317,6 +335,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -339,6 +358,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -366,6 +386,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
         CreateIndexExecutor::execute(&stmt, &mut db).unwrap();
 
@@ -380,6 +401,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
         let result = CreateIndexExecutor::execute(&stmt_with_if_not_exists, &mut db);
         assert!(result.is_ok());
@@ -402,6 +424,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&index_stmt, &mut db);
@@ -433,6 +456,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&index_stmt, &mut db);
@@ -509,6 +533,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -537,6 +562,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -562,6 +588,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -588,6 +615,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -621,6 +649,7 @@ mod tests {
                     prefix_length: None,
                 },
             ],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -646,6 +675,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         // First creation
@@ -722,6 +752,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -763,6 +794,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -796,6 +828,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -847,6 +880,7 @@ mod tests {
                 },
                 OrderDirection::Asc,
             )],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -928,6 +962,7 @@ mod tests {
                 },
                 OrderDirection::Asc,
             )],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -967,6 +1002,7 @@ mod tests {
                 },
                 OrderDirection::Asc,
             )],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -993,6 +1029,7 @@ mod tests {
                 },
                 OrderDirection::Asc,
             )],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -1021,6 +1058,7 @@ mod tests {
                 },
                 OrderDirection::Asc,
             )],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
@@ -1060,6 +1098,7 @@ mod tests {
                 },
                 OrderDirection::Asc,
             )],
+            where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
