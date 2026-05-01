@@ -3910,7 +3910,7 @@ proc match_regex_pattern {result expected} {
 # Returns 1 if supported, 0 if not
 proc check_single_capability {cap} {
     # Capabilities we don't support (unsupported_caps means NOT supported)
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab fts3 fts4 fts5 datetime datetime_time datetime_funcs trigger conflict}
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab fts3 fts4 fts5 datetime datetime_time datetime_funcs trigger conflict hiddencolumns}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0
