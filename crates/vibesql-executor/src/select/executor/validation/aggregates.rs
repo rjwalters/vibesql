@@ -1443,6 +1443,206 @@ pub fn validate_subquery_context_misuse(expr: &Expression) -> Result<(), Executo
     }
 }
 
+/// Recursively validate that no SELECT statement (the given one or any nested
+/// subquery) has a GROUP BY whose expression — directly or after positional
+/// resolution against its own SELECT list — is a window function.
+///
+/// SQLite reports this as `"misuse of window function X()"` at *prepare* time,
+/// before any rows are fetched, so it must be detected during query
+/// preparation rather than only at the execution path of the inner SELECT.
+///
+/// The check fires both on the GROUP BY expression as written and on its
+/// alias-resolved form so that `GROUP BY 1` referring to a window-function
+/// SELECT item (window1.test 47.2) is also caught.
+pub fn validate_group_by_window_misuse(stmt: &vibesql_ast::SelectStmt) -> Result<(), ExecutorError> {
+    // 1. Check this statement's own GROUP BY for window misuse, with
+    //    positional/alias resolution against its SELECT list.
+    if let Some(ref group_by_clause) = stmt.group_by {
+        for (term_index, group_expr) in group_by_clause.all_expressions().iter().enumerate() {
+            if let Some(window_name) = find_window_function_in_expression(group_expr) {
+                return Err(ExecutorError::MisuseOfWindowFunction { function_name: window_name });
+            }
+            let resolved = crate::select::grouping::resolve_group_by_alias(
+                group_expr,
+                &stmt.select_list,
+                term_index,
+            )?;
+            if let Some(window_name) = find_window_function_in_expression(&resolved) {
+                return Err(ExecutorError::MisuseOfWindowFunction { function_name: window_name });
+            }
+        }
+    }
+
+    // 2. Recurse into all expressions of this statement to find nested SELECTs.
+    for item in &stmt.select_list {
+        if let SelectItem::Expression { expr, .. } = item {
+            walk_expr_for_subquery_group_by(expr)?;
+        }
+    }
+    if let Some(where_expr) = stmt.where_clause.as_ref() {
+        walk_expr_for_subquery_group_by(where_expr)?;
+    }
+    if let Some(having_expr) = stmt.having.as_ref() {
+        walk_expr_for_subquery_group_by(having_expr)?;
+    }
+    if let Some(group_by) = stmt.group_by.as_ref() {
+        for expr in group_by.all_expressions() {
+            walk_expr_for_subquery_group_by(expr)?;
+        }
+    }
+    if let Some(order_by) = stmt.order_by.as_ref() {
+        for item in order_by {
+            walk_expr_for_subquery_group_by(&item.expr)?;
+        }
+    }
+
+    // 3. Recurse into FROM clause subqueries (derived tables, JOINs).
+    if let Some(from) = stmt.from.as_ref() {
+        walk_from_for_subquery_group_by(from)?;
+    }
+
+    // 4. Recurse into CTEs.
+    if let Some(ctes) = stmt.with_clause.as_ref() {
+        for cte in ctes {
+            validate_group_by_window_misuse(&cte.query)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Walk an expression tree, finding nested ScalarSubquery / Exists subqueries
+/// and validating their GROUP BY clauses for window-function misuse.
+fn walk_expr_for_subquery_group_by(expr: &Expression) -> Result<(), ExecutorError> {
+    match expr {
+        Expression::ScalarSubquery(stmt) => validate_group_by_window_misuse(stmt),
+        Expression::Exists { subquery, .. } => validate_group_by_window_misuse(subquery),
+        Expression::BinaryOp { left, right, .. } => {
+            walk_expr_for_subquery_group_by(left)?;
+            walk_expr_for_subquery_group_by(right)
+        }
+        Expression::UnaryOp { expr, .. } => walk_expr_for_subquery_group_by(expr),
+        Expression::IsNull { expr, .. } => walk_expr_for_subquery_group_by(expr),
+        Expression::IsDistinctFrom { left, right, .. } => {
+            walk_expr_for_subquery_group_by(left)?;
+            walk_expr_for_subquery_group_by(right)
+        }
+        Expression::IsTruthValue { expr, .. } => walk_expr_for_subquery_group_by(expr),
+        Expression::Cast { expr, .. } => walk_expr_for_subquery_group_by(expr),
+        Expression::Like { expr, pattern, .. } => {
+            walk_expr_for_subquery_group_by(expr)?;
+            walk_expr_for_subquery_group_by(pattern)
+        }
+        Expression::Between { expr, low, high, .. } => {
+            walk_expr_for_subquery_group_by(expr)?;
+            walk_expr_for_subquery_group_by(low)?;
+            walk_expr_for_subquery_group_by(high)
+        }
+        Expression::InList { expr, values, .. } => {
+            walk_expr_for_subquery_group_by(expr)?;
+            for v in values {
+                walk_expr_for_subquery_group_by(v)?;
+            }
+            Ok(())
+        }
+        Expression::In { expr, subquery, .. } => {
+            walk_expr_for_subquery_group_by(expr)?;
+            validate_group_by_window_misuse(subquery)
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                walk_expr_for_subquery_group_by(op)?;
+            }
+            for w in when_clauses {
+                for cond in &w.conditions {
+                    walk_expr_for_subquery_group_by(cond)?;
+                }
+                walk_expr_for_subquery_group_by(&w.result)?;
+            }
+            if let Some(else_expr) = else_result {
+                walk_expr_for_subquery_group_by(else_expr)?;
+            }
+            Ok(())
+        }
+        Expression::Function { args, .. } => {
+            for arg in args {
+                walk_expr_for_subquery_group_by(arg)?;
+            }
+            Ok(())
+        }
+        Expression::AggregateFunction { args, filter, order_by, .. } => {
+            for arg in args {
+                walk_expr_for_subquery_group_by(arg)?;
+            }
+            if let Some(f) = filter {
+                walk_expr_for_subquery_group_by(f)?;
+            }
+            if let Some(items) = order_by {
+                for item in items {
+                    walk_expr_for_subquery_group_by(&item.expr)?;
+                }
+            }
+            Ok(())
+        }
+        Expression::WindowFunction { function, .. } => {
+            let args = match function {
+                vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
+            };
+            for a in args {
+                walk_expr_for_subquery_group_by(a)?;
+            }
+            Ok(())
+        }
+        Expression::QuantifiedComparison { expr, subquery, .. } => {
+            walk_expr_for_subquery_group_by(expr)?;
+            validate_group_by_window_misuse(subquery)
+        }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children {
+                walk_expr_for_subquery_group_by(child)?;
+            }
+            Ok(())
+        }
+        Expression::RowValueConstructor(children) => {
+            for child in children {
+                walk_expr_for_subquery_group_by(child)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Walk a FROM clause to find nested SELECT statements (derived tables, JOINs).
+fn walk_from_for_subquery_group_by(
+    from: &vibesql_ast::FromClause,
+) -> Result<(), ExecutorError> {
+    match from {
+        vibesql_ast::FromClause::Table { .. } => Ok(()),
+        vibesql_ast::FromClause::Join { left, right, condition, .. } => {
+            walk_from_for_subquery_group_by(left)?;
+            walk_from_for_subquery_group_by(right)?;
+            if let Some(expr) = condition {
+                walk_expr_for_subquery_group_by(expr)?;
+            }
+            Ok(())
+        }
+        vibesql_ast::FromClause::Subquery { query, .. } => {
+            validate_group_by_window_misuse(query)
+        }
+        vibesql_ast::FromClause::Values { rows, .. } => {
+            for row in rows {
+                for expr in row {
+                    walk_expr_for_subquery_group_by(expr)?;
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use vibesql_ast::{BinaryOperator, ColumnIdentifier, FunctionIdentifier, UnaryOperator};
@@ -1966,5 +2166,186 @@ mod tests {
             "window function in bare subquery should not be flagged, got {:?}",
             result
         );
+    }
+
+    // ----- validate_group_by_window_misuse (#5093) -----
+
+    /// Build a SELECT statement with a single FROM table reference and a given
+    /// SELECT list / WHERE / GROUP BY for testing.
+    fn make_select(
+        select_list: Vec<SelectItem>,
+        from_table: Option<&str>,
+        where_clause: Option<Expression>,
+        group_by: Option<vibesql_ast::GroupByClause>,
+    ) -> vibesql_ast::SelectStmt {
+        vibesql_ast::SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list,
+            into_table: None,
+            into_variables: None,
+            from: from_table.map(|name| vibesql_ast::FromClause::Table {
+                name: name.to_string(),
+                alias: None,
+                column_aliases: None,
+                quoted: false,
+            }),
+            where_clause,
+            group_by,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: None,
+        }
+    }
+
+    fn make_window_sum_a() -> Expression {
+        Expression::WindowFunction {
+            function: vibesql_ast::WindowFunctionSpec::Aggregate {
+                name: FunctionIdentifier::new("sum"),
+                args: vec![Expression::ColumnRef(ColumnIdentifier::simple("a", false))],
+                filter: None,
+            },
+            over: vibesql_ast::WindowSpec {
+                base_window_name: None,
+                partition_by: None,
+                order_by: None,
+                frame: None,
+            },
+        }
+    }
+
+    #[test]
+    fn test_group_by_positional_resolves_to_window_function() {
+        // SELECT sum(a) OVER() FROM t1 GROUP BY 1
+        // Position 1 in select list is a window function — must error.
+        let stmt = make_select(
+            vec![SelectItem::Expression {
+                expr: make_window_sum_a(),
+                alias: None,
+                source_text: None,
+            }],
+            Some("t1"),
+            None,
+            Some(vibesql_ast::GroupByClause::Simple(vec![Expression::Literal(
+                SqlValue::Integer(1),
+            )])),
+        );
+
+        let result = validate_group_by_window_misuse(&stmt);
+        match result {
+            Err(ExecutorError::MisuseOfWindowFunction { function_name }) => {
+                assert_eq!(function_name, "sum");
+            }
+            other => panic!("expected MisuseOfWindowFunction(sum), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_group_by_positional_non_window_does_not_fire() {
+        // SELECT a FROM t1 GROUP BY 1
+        // Position 1 is a plain column — must NOT error.
+        let stmt = make_select(
+            vec![SelectItem::Expression {
+                expr: Expression::ColumnRef(ColumnIdentifier::simple("a", false)),
+                alias: None,
+                source_text: None,
+            }],
+            Some("t1"),
+            None,
+            Some(vibesql_ast::GroupByClause::Simple(vec![Expression::Literal(
+                SqlValue::Integer(1),
+            )])),
+        );
+
+        assert!(validate_group_by_window_misuse(&stmt).is_ok());
+    }
+
+    #[test]
+    fn test_group_by_alias_resolves_to_window_function() {
+        // SELECT sum(a) OVER() AS w FROM t1 GROUP BY w
+        // Alias 'w' refers to a window function — must error.
+        let stmt = make_select(
+            vec![SelectItem::Expression {
+                expr: make_window_sum_a(),
+                alias: Some("w".to_string()),
+                source_text: None,
+            }],
+            Some("t1"),
+            None,
+            Some(vibesql_ast::GroupByClause::Simple(vec![Expression::ColumnRef(
+                ColumnIdentifier::simple("w", false),
+            )])),
+        );
+
+        let result = validate_group_by_window_misuse(&stmt);
+        match result {
+            Err(ExecutorError::MisuseOfWindowFunction { function_name }) => {
+                assert_eq!(function_name, "sum");
+            }
+            other => panic!("expected MisuseOfWindowFunction(sum), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_group_by_window_in_nested_subquery() {
+        // window1.test 47.2 shape:
+        // SELECT 234 FROM t2 WHERE k=1 OR (SELECT k FROM t2 WHERE
+        //     (SELECT sum(a) OVER() FROM t1 GROUP BY 1));
+        // The deepest subquery's GROUP BY 1 resolves to a window function.
+        let inner_subquery = Expression::ScalarSubquery(Box::new(make_select(
+            vec![SelectItem::Expression {
+                expr: make_window_sum_a(),
+                alias: None,
+                source_text: None,
+            }],
+            Some("t1"),
+            None,
+            Some(vibesql_ast::GroupByClause::Simple(vec![Expression::Literal(
+                SqlValue::Integer(1),
+            )])),
+        )));
+
+        let middle_subquery = Expression::ScalarSubquery(Box::new(make_select(
+            vec![SelectItem::Expression {
+                expr: Expression::ColumnRef(ColumnIdentifier::simple("k", false)),
+                alias: None,
+                source_text: None,
+            }],
+            Some("t2"),
+            Some(inner_subquery),
+            None,
+        )));
+
+        let outer = make_select(
+            vec![SelectItem::Expression {
+                expr: Expression::Literal(SqlValue::Integer(234)),
+                alias: None,
+                source_text: None,
+            }],
+            Some("t2"),
+            Some(Expression::Disjunction(vec![
+                Expression::BinaryOp {
+                    op: BinaryOperator::Equal,
+                    left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("k", false))),
+                    right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+                },
+                middle_subquery,
+            ])),
+            None,
+        );
+
+        let result = validate_group_by_window_misuse(&outer);
+        match result {
+            Err(ExecutorError::MisuseOfWindowFunction { function_name }) => {
+                assert_eq!(function_name, "sum");
+            }
+            other => {
+                panic!("expected MisuseOfWindowFunction(sum) from nested subquery, got {:?}", other)
+            }
+        }
     }
 }

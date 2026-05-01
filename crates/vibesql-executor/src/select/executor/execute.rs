@@ -86,6 +86,15 @@ impl SelectExecutor<'_> {
             }
         }
 
+        // Validate GROUP BY clauses across this statement and all nested
+        // subqueries for window-function misuse, including positional
+        // (`GROUP BY 1`) and alias references that resolve to a window
+        // function in the subquery's SELECT list (#5093, window1.test 47.2).
+        // SQLite raises this at prepare time, so we must walk subqueries
+        // here rather than relying on per-SELECT execution paths (the
+        // outer WHERE may short-circuit before the inner SELECT executes).
+        super::validation::validate_group_by_window_misuse(stmt)?;
+
         #[cfg(feature = "profile-q6")]
         let execute_start = std::time::Instant::now();
 
