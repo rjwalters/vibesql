@@ -3750,10 +3750,12 @@ proc do_eqp_test {name sql expected} {
     set eqp_sql "EXPLAIN QUERY PLAN $sql"
 
     if {[catch {
-        # Use execsql directly since db is our proc alias
+        # Use execsql directly since db is our proc alias.
+        # execsql returns one item per output row; preserve newlines so the
+        # multi-line tree (QUERY PLAN header + |--/`-- entries) stays intact.
+        # Whitespace gets normalized below before glob matching.
         set rows [execsql $eqp_sql]
-        set result [join $rows " "]
-        set result [string trim $result]
+        set result [join $rows "\n"]
     } err]} {
         # Query execution error
         incr test_results(failed)
@@ -3769,16 +3771,28 @@ proc do_eqp_test {name sql expected} {
         set expected_clean [string range $expected_clean 1 end-1]
     }
 
-    # Perform glob matching on the full result
-    if {[string match $expected_clean $result]} {
+    # Normalize whitespace in both expected and actual so cosmetic formatting
+    # differences (newlines vs spaces, indentation) don't cause spurious failures.
+    # SQLite's own tester normalizes EQP output before comparison; do the same:
+    # collapse all whitespace runs (including newlines) to a single space, then trim.
+    regsub -all {\s+} $expected_clean " " expected_norm
+    set expected_norm [string trim $expected_norm]
+    regsub -all {\s+} $result " " result_norm
+    set result_norm [string trim $result_norm]
+
+    # Perform glob matching on the normalized full result
+    if {[string match $expected_norm $result_norm]} {
         incr test_results(passed)
         return
     }
 
-    # Try matching against each line of the result
+    # Fallback: match against each (raw) line of the result, trimmed.
+    # This preserves backwards compatibility with single-line expected patterns
+    # that previously matched against a particular row.
     foreach line [split $result "\n"] {
         set line [string trim $line]
-        if {[string match $expected_clean $line]} {
+        if {[string match $expected_clean $line] || \
+            [string match $expected_norm $line]} {
             incr test_results(passed)
             return
         }
@@ -3786,10 +3800,10 @@ proc do_eqp_test {name sql expected} {
 
     # Failed to match
     incr test_results(failed)
-    lappend test_results(failures) [list $name "EQP mismatch. Expected: '$expected_clean', Got: '$result'"]
+    lappend test_results(failures) [list $name "EQP mismatch. Expected: '$expected_norm', Got: '$result_norm'"]
     puts "! $name FAILED (EQP pattern mismatch)"
-    puts "  EQP Expected: '$expected_clean'"
-    puts "  EQP Got:      '$result'"
+    puts "  EQP Expected: '$expected_norm'"
+    puts "  EQP Got:      '$result_norm'"
 }
 
 proc do_realnum_test {name script expected} {
