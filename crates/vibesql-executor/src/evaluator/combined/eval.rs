@@ -1150,6 +1150,24 @@ impl CombinedExpressionEvaluator<'_> {
             // TODO: Full collation support - for now just evaluate the inner expression
             vibesql_ast::Expression::Collate { expr, .. } => self.eval(expr, row),
 
+            // Pseudo-variable (OLD.column, NEW.column in triggers)
+            // Resolved against the trigger context if one was threaded into this evaluator
+            // (e.g. for the synthetic SELECT used by UPDATE...FROM inside a trigger body, #5082).
+            vibesql_ast::Expression::PseudoVariable { pseudo_table, column } => {
+                if let Some(ctx) = self.trigger_context {
+                    ctx.resolve_pseudo_var(*pseudo_table, column)
+                } else {
+                    Err(ExecutorError::UnsupportedExpression(format!(
+                        "Pseudo-variable {}.{} is only valid within trigger bodies",
+                        match pseudo_table {
+                            vibesql_ast::PseudoTable::Old => "OLD",
+                            vibesql_ast::PseudoTable::New => "NEW",
+                        },
+                        column
+                    )))
+                }
+            }
+
             // Unsupported expressions
             _ => Err(ExecutorError::UnsupportedExpression(format!("{:?}", expr))),
         }

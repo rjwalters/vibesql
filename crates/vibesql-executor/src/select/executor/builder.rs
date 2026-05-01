@@ -25,6 +25,10 @@ pub struct SelectExecutor<'a> {
     pub(super) outer_rows: Option<&'a [vibesql_storage::Row]>,
     /// Procedural context for stored procedure/function variable resolution
     pub(super) procedural_context: Option<&'a crate::procedural::ExecutionContext>,
+    /// Trigger context for OLD/NEW pseudo-variable resolution.
+    /// Set when a SELECT runs inside a trigger body (e.g. the synthetic SELECT
+    /// used by UPDATE…FROM inside a trigger body, #5082).
+    pub(super) trigger_context: Option<&'a crate::trigger_execution::TriggerContext<'a>>,
     /// CTE (Common Table Expression) context for accessing WITH clause results
     /// Enables scalar subqueries to reference CTEs defined in the outer query
     pub(super) cte_context: Option<&'a HashMap<String, super::super::cte::CteResult>>,
@@ -77,6 +81,7 @@ impl<'a> SelectExecutor<'a> {
             outer_schema: None,
             outer_rows: None,
             procedural_context: None,
+            trigger_context: None,
             cte_context: None,
             subquery_depth: 0,
             memory_used_bytes: Cell::new(0),
@@ -111,6 +116,7 @@ impl<'a> SelectExecutor<'a> {
             outer_schema: Some(outer_schema),
             outer_rows: None,
             procedural_context: None,
+            trigger_context: None,
             cte_context: None,
             subquery_depth: 0,
             memory_used_bytes: Cell::new(0),
@@ -133,6 +139,7 @@ impl<'a> SelectExecutor<'a> {
             outer_schema: None,
             outer_rows: None,
             procedural_context: None,
+            trigger_context: None,
             cte_context: None,
             subquery_depth: parent_depth + 1,
             memory_used_bytes: Cell::new(0),
@@ -174,6 +181,7 @@ impl<'a> SelectExecutor<'a> {
             outer_schema: Some(outer_schema),
             outer_rows: None,
             procedural_context: None,
+            trigger_context: None,
             cte_context: None,
             subquery_depth: parent_depth + 1,
             memory_used_bytes: Cell::new(0),
@@ -198,6 +206,38 @@ impl<'a> SelectExecutor<'a> {
             outer_schema: None,
             outer_rows: None,
             procedural_context: Some(procedural_context),
+            trigger_context: None,
+            cte_context: None,
+            subquery_depth: 0,
+            memory_used_bytes: Cell::new(0),
+            memory_warning_logged: Cell::new(false),
+            start_time: Instant::now(),
+            timeout_seconds: crate::limits::MAX_QUERY_EXECUTION_SECONDS,
+            aggregate_cache: OnceCell::new(),
+            arena: OnceCell::new(),
+            pivot_group: RefCell::new(None),
+            aggregate_representative_row_idx: RefCell::new(None),
+        }
+    }
+
+    /// Create a new SELECT executor with trigger context for OLD/NEW pseudo-variable
+    /// resolution.
+    ///
+    /// Used by the synthetic SELECT inside `UPDATE … FROM …` when the UPDATE is
+    /// running inside a trigger body, so that `OLD.col` / `NEW.col` references in
+    /// the WHERE clause and SET expressions can resolve against the firing row.
+    /// (Issue #5082, Bucket B of #5073.)
+    pub fn new_with_trigger_context(
+        database: &'a vibesql_storage::Database,
+        trigger_context: &'a crate::trigger_execution::TriggerContext<'a>,
+    ) -> Self {
+        SelectExecutor {
+            database,
+            outer_row: None,
+            outer_schema: None,
+            outer_rows: None,
+            procedural_context: None,
+            trigger_context: Some(trigger_context),
             cte_context: None,
             subquery_depth: 0,
             memory_used_bytes: Cell::new(0),
@@ -224,6 +264,7 @@ impl<'a> SelectExecutor<'a> {
             outer_schema: None,
             outer_rows: None,
             procedural_context: None,
+            trigger_context: None,
             cte_context: Some(cte_context),
             subquery_depth: parent_depth + 1,
             memory_used_bytes: Cell::new(0),
@@ -252,6 +293,7 @@ impl<'a> SelectExecutor<'a> {
             outer_schema: Some(outer_schema),
             outer_rows: None,
             procedural_context: None,
+            trigger_context: None,
             cte_context: Some(cte_context),
             subquery_depth: parent_depth + 1,
             memory_used_bytes: Cell::new(0),
@@ -281,6 +323,7 @@ impl<'a> SelectExecutor<'a> {
             outer_schema: Some(outer_schema),
             outer_rows: Some(outer_rows),
             procedural_context: None,
+            trigger_context: None,
             cte_context: None,
             subquery_depth: parent_depth + 1,
             memory_used_bytes: Cell::new(0),
@@ -310,6 +353,7 @@ impl<'a> SelectExecutor<'a> {
             outer_schema: Some(outer_schema),
             outer_rows: Some(outer_rows),
             procedural_context: None,
+            trigger_context: None,
             cte_context: Some(cte_context),
             subquery_depth: parent_depth + 1,
             memory_used_bytes: Cell::new(0),
@@ -429,6 +473,7 @@ impl<'a> SelectExecutor<'a> {
         self.outer_row = None;
         self.outer_schema = None;
         self.procedural_context = None;
+        self.trigger_context = None;
         self.cte_context = None;
 
         // Reset arena if it was initialized (clears offset, keeps buffer allocation)
