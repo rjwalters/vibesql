@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 # Loom Worktree Helper Script
 # Safely creates and manages git worktrees for agent development
@@ -37,6 +37,24 @@ print_warning() {
     echo -e "${YELLOW}⚠ $1${NC}"
 }
 
+# Function to fetch latest changes from origin/main
+# Uses fetch-only approach to avoid conflicts with worktrees that have main checked out
+fetch_latest_main() {
+    if [[ "$JSON_OUTPUT" != "true" ]]; then
+        print_info "Fetching latest changes from origin/main..."
+    fi
+
+    if git fetch origin main 2>/dev/null; then
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_success "Fetched latest origin/main"
+        fi
+    else
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_warning "Could not fetch origin/main (continuing with local state)"
+        fi
+    fi
+}
+
 # Function to check if we're in a worktree
 check_if_in_worktree() {
     local git_dir=$(git rev-parse --git-common-dir 2>/dev/null)
@@ -52,7 +70,6 @@ check_if_in_worktree() {
 # Function to get current worktree info
 get_worktree_info() {
     if check_if_in_worktree; then
-        local current_dir=$(pwd)
         local worktree_path=$(git rev-parse --show-toplevel)
         local branch=$(git rev-parse --abbrev-ref HEAD)
 
@@ -102,10 +119,29 @@ Examples:
 Safety Features:
   ✓ Detects if already in a worktree
   ✓ Uses sandbox-safe path (.loom/worktrees/)
+  ✓ Pulls latest origin/main before creating worktree
   ✓ Automatically creates branch from main
   ✓ Prevents nested worktrees
   ✓ Non-interactive (safe for AI agents)
   ✓ Reuses existing branches automatically
+  ✓ Symlinks node_modules from main (avoids pnpm install)
+  ✓ Symlinks .mcp.json from main (MCP config visible in worktrees)
+  ✓ Runs project-specific hooks after creation
+  ✓ Stashes/restores local changes during pull
+
+Project-Specific Hooks:
+  Create .loom/hooks/post-worktree.sh to run custom setup after worktree creation.
+  This file is NOT overwritten by Loom upgrades.
+
+  The hook receives three arguments:
+    \$1 - Absolute path to the new worktree
+    \$2 - Branch name (e.g., feature/issue-42)
+    \$3 - Issue number
+
+  Example hook (.loom/hooks/post-worktree.sh):
+    #!/bin/bash
+    cd "\$1"
+    pnpm install  # or: lake exe cache get, pip install -e ., etc.
 
 Resuming Abandoned Work:
   If an agent abandoned work on issue #42, a new agent can resume:
@@ -202,27 +238,6 @@ if check_if_in_worktree; then
         if [[ "$JSON_OUTPUT" != "true" ]]; then
             print_success "Switched to main workspace"
         fi
-
-        # Check if we're on main branch, if not switch to it
-        CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-        if [[ "$CURRENT_BRANCH" != "main" ]]; then
-            if [[ "$JSON_OUTPUT" != "true" ]]; then
-                print_info "Switching from $CURRENT_BRANCH to main branch..."
-            fi
-            if git checkout main 2>/dev/null; then
-                if [[ "$JSON_OUTPUT" != "true" ]]; then
-                    print_success "Switched to main branch"
-                fi
-            else
-                if [[ "$JSON_OUTPUT" == "true" ]]; then
-                    echo '{"error": "Failed to switch to main branch"}'
-                else
-                    print_error "Failed to switch to main branch"
-                    print_info "Please manually run: git checkout main"
-                fi
-                exit 1
-            fi
-        fi
     else
         if [[ "$JSON_OUTPUT" == "true" ]]; then
             echo '{"error": "Failed to change to main workspace", "mainWorkspace": "'"$MAIN_WORKSPACE"'"}'
@@ -237,27 +252,29 @@ if check_if_in_worktree; then
     fi
 fi
 
-# Check if submodules are initialized in main workspace
-if [[ "$JSON_OUTPUT" != "true" ]]; then
-    print_info "Checking submodules in main workspace..."
+# Prune orphaned worktree references before any worktree operations
+# This cleans up stale references when worktree directories were deleted externally (e.g., rm -rf)
+# Without this, subsequent worktree operations or `gh pr checkout` can fail
+PRUNE_OUTPUT=$(git worktree prune --dry-run --verbose 2>/dev/null || true)
+if [[ -n "$PRUNE_OUTPUT" ]]; then
+    # There are orphaned references to prune
+    if [[ "$JSON_OUTPUT" != "true" ]]; then
+        print_info "Pruning orphaned worktree references..."
+    fi
+    if git worktree prune 2>/dev/null; then
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_success "Pruned orphaned worktree references"
+        fi
+    else
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_warning "Failed to prune worktrees (continuing anyway)"
+        fi
+    fi
 fi
 
-# Check for uninitialized submodules (lines starting with '-')
-UNINIT_SUBMODULES=$(git submodule status | grep '^-' | wc -l | tr -d ' ')
-if [[ "$UNINIT_SUBMODULES" -gt 0 ]]; then
-    if [[ "$JSON_OUTPUT" == "true" ]]; then
-        echo '{"error": "Submodules not initialized in main workspace"}'
-    else
-        print_error "Found $UNINIT_SUBMODULES uninitialized submodule(s) in main workspace"
-        echo ""
-        print_info "Worktree creation requires submodules to be initialized in main first."
-        print_info "Please run:"
-        echo "  git submodule update --init --recursive"
-        echo ""
-        print_info "Then try creating the worktree again."
-    fi
-    exit 1
-fi
+# Fetch latest changes from origin/main before creating the worktree
+# Uses fetch-only to avoid conflicts with worktrees that have main checked out
+fetch_latest_main
 
 # Determine branch name
 if [[ -n "$CUSTOM_BRANCH" ]]; then
@@ -275,10 +292,49 @@ if [[ -d "$WORKTREE_PATH" ]]; then
 
     # Check if it's registered with git
     if git worktree list | grep -q "$WORKTREE_PATH"; then
-        print_info "Worktree is registered with git"
-        echo ""
-        print_info "To use this worktree: cd $WORKTREE_PATH"
-        exit 0
+        # Check if worktree is stale: no commits ahead of main and behind main
+        local_commits_ahead=$(git -C "$WORKTREE_PATH" rev-list --count "origin/main..HEAD" 2>/dev/null) || local_commits_ahead="0"
+        local_commits_behind=$(git -C "$WORKTREE_PATH" rev-list --count "HEAD..origin/main" 2>/dev/null) || local_commits_behind="0"
+        local_uncommitted=$(git -C "$WORKTREE_PATH" status --porcelain 2>/dev/null) || local_uncommitted=""
+
+        if [[ "$local_commits_ahead" -gt 0 || -n "$local_uncommitted" ]]; then
+            # Worktree has real work - preserve it
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_info "Worktree is registered with git"
+                if [[ "$local_commits_ahead" -gt 0 ]]; then
+                    print_info "Worktree has $local_commits_ahead commit(s) ahead of main - preserving existing work"
+                elif [[ -n "$local_uncommitted" ]]; then
+                    print_info "Worktree has uncommitted changes - preserving existing work"
+                fi
+                echo ""
+                print_info "To use this worktree: cd $WORKTREE_PATH"
+            fi
+            exit 0
+        else
+            # Stale worktree: no commits ahead, no uncommitted changes
+            # Reset in place instead of removing (avoids CWD corruption)
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_warning "Stale worktree detected (0 commits ahead, $local_commits_behind behind main, no uncommitted changes)"
+                print_info "Resetting worktree in place to origin/main..."
+            fi
+
+            if git -C "$WORKTREE_PATH" fetch origin main 2>/dev/null && \
+               git -C "$WORKTREE_PATH" reset --hard origin/main 2>/dev/null; then
+                if [[ "$JSON_OUTPUT" != "true" ]]; then
+                    print_success "Stale worktree reset to origin/main"
+                    echo ""
+                    print_info "To use this worktree: cd $WORKTREE_PATH"
+                fi
+                exit 0
+            else
+                if [[ "$JSON_OUTPUT" != "true" ]]; then
+                    print_warning "Could not reset stale worktree (continuing to use as-is)"
+                    echo ""
+                    print_info "To use this worktree: cd $WORKTREE_PATH"
+                fi
+                exit 0
+            fi
+        fi
     else
         print_error "Directory exists but is not a registered worktree"
         echo ""
@@ -304,7 +360,7 @@ else
     if [[ "$JSON_OUTPUT" != "true" ]]; then
         print_info "Creating new branch from main"
     fi
-    CREATE_ARGS=("$WORKTREE_PATH" "-b" "$BRANCH_NAME" "main")
+    CREATE_ARGS=("$WORKTREE_PATH" "-b" "$BRANCH_NAME" "origin/main")
 fi
 
 # Create the worktree
@@ -315,63 +371,157 @@ if [[ "$JSON_OUTPUT" != "true" ]]; then
     echo ""
 fi
 
-if git worktree add "${CREATE_ARGS[@]}"; then
+# Helper: attempt recovery when feature branch is checked out in the main worktree.
+# This happens when a previous builder manually checked out feature/issue-N in the
+# main workspace and left it there.  Git refuses to create a new worktree for that
+# branch: "fatal: 'feature/issue-N' is already used by worktree at '<main-path>'"
+#
+# Recovery strategy:
+#   1. Detect the "already used by worktree at" pattern in stderr
+#   2. Confirm the conflicting worktree is the main workspace (not a feature worktree)
+#   3. If main workspace is clean: auto-switch it back to main and retry
+#   4. If main workspace has uncommitted changes: emit an actionable error message
+_handle_feature_branch_in_main_worktree() {
+    local error_output="$1"
+    local branch="$2"
+
+    # Only act on the specific "already used by worktree at" error
+    if ! echo "$error_output" | grep -q "is already used by worktree at"; then
+        return 1  # Not this error — caller should fail normally
+    fi
+
+    # Extract the conflicting worktree path from the error message
+    # Example: "fatal: 'feature/issue-2853' is already used by worktree at '/Users/rwalters/GitHub/loom'"
+    local conflict_path
+    conflict_path=$(echo "$error_output" | grep -o "is already used by worktree at '[^']*'" | sed "s/is already used by worktree at '//;s/'$//")
+
+    if [[ -z "$conflict_path" ]]; then
+        # Could not parse path — emit a generic actionable message (human-readable only)
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_error "Cannot create worktree: branch '$branch' is already checked out in another worktree."
+            echo ""
+            echo "  The branch is in use elsewhere. To free it, find the worktree with:"
+            echo "    git worktree list"
+            echo "  Then switch that worktree to main:"
+            echo "    cd <worktree-path> && git checkout main"
+        fi
+        return 0  # Handled (with human-readable message), no retry possible
+    fi
+
+    # Determine the main workspace path
+    local main_workspace
+    main_workspace=$(git rev-parse --git-common-dir 2>/dev/null)
+    main_workspace=$(dirname "$main_workspace" 2>/dev/null)
+
+    # Resolve both paths to absolute for comparison
+    local abs_conflict abs_main
+    abs_conflict=$(cd "$conflict_path" 2>/dev/null && pwd) || abs_conflict="$conflict_path"
+    abs_main=$(cd "$main_workspace" 2>/dev/null && pwd) || abs_main="$main_workspace"
+
+    if [[ "$abs_conflict" != "$abs_main" ]]; then
+        # Conflicting worktree is not the main workspace — it's a different issue worktree.
+        # This is unusual but can happen. Emit actionable guidance without auto-recovery.
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_error "Cannot create worktree for branch '$branch':"
+            echo "  Branch is already checked out at: $conflict_path"
+            echo ""
+            echo "  To fix:"
+            echo "    cd $conflict_path && git checkout main"
+        fi
+        return 0  # Handled (with error message), no retry
+    fi
+
+    # The conflict is in the main workspace. Check for uncommitted changes.
+    local uncommitted
+    uncommitted=$(git -C "$abs_conflict" status --porcelain 2>/dev/null)
+
+    if [[ -n "$uncommitted" ]]; then
+        # Main workspace has uncommitted changes — cannot auto-recover safely
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_error "Cannot create worktree for issue #$ISSUE_NUMBER: branch '$branch'"
+            echo "  is already checked out at '$abs_conflict' (main worktree)."
+            echo ""
+            echo "  The main worktree has uncommitted changes — cannot auto-switch."
+            echo "  To fix manually:"
+            echo "    cd $abs_conflict"
+            echo "    git stash  # or commit your changes"
+            echo "    git checkout main"
+            echo "  Then rerun: ./.loom/scripts/worktree.sh $ISSUE_NUMBER"
+        fi
+        return 0  # Handled (with error message), no retry
+    fi
+
+    # Main workspace is clean — auto-switch to main and signal caller to retry
+    if [[ "$JSON_OUTPUT" != "true" ]]; then
+        print_warning "Branch '$branch' is checked out in the main worktree."
+        print_info "Main worktree is clean — auto-switching to main branch..."
+    fi
+
+    if git -C "$abs_conflict" checkout main 2>/dev/null; then
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_success "Main worktree switched to main branch"
+        fi
+        return 2  # Signal: auto-recovered, caller should retry
+    else
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_error "Failed to switch main worktree to main branch."
+            echo "  To fix manually:"
+            echo "    cd $abs_conflict && git checkout main"
+            echo "  Then rerun: ./.loom/scripts/worktree.sh $ISSUE_NUMBER"
+        fi
+        return 0  # Handled (with error message), no retry
+    fi
+}
+
+_try_worktree_add() {
+    # Capture stderr separately so we can inspect it on failure while still
+    # showing stdout (git progress messages like "Preparing worktree...") to user.
+    local stderr_file
+    stderr_file=$(mktemp /tmp/loom-worktree-stderr-$$-XXXXXX)
+
+    git worktree add "${CREATE_ARGS[@]}" 2>"$stderr_file"
+    local exit_code=$?
+
+    if [[ $exit_code -eq 0 ]]; then
+        rm -f "$stderr_file"
+        return 0
+    fi
+
+    local worktree_error
+    worktree_error=$(cat "$stderr_file")
+    rm -f "$stderr_file"
+
+    # Attempt recovery for the "feature branch in main worktree" case.
+    # Wrap in a subshell result capture to safely handle non-zero returns
+    # without triggering set -e (we use exit code 2 as a retry signal).
+    local recovery_code=0
+    _handle_feature_branch_in_main_worktree "$worktree_error" "$BRANCH_NAME" && recovery_code=0 || recovery_code=$?
+
+    if [[ $recovery_code -eq 2 ]]; then
+        # Auto-recovered: retry worktree creation once
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_info "Retrying worktree creation..."
+        fi
+        git worktree add "${CREATE_ARGS[@]}"
+        return $?
+    fi
+
+    if [[ $recovery_code -eq 1 ]]; then
+        # _handle_feature_branch_in_main_worktree returned 1 (not this error type)
+        # Print the original git error since nothing else has
+        echo "$worktree_error" >&2
+    fi
+    # recovery_code == 0 means error was handled and message already printed
+    return 1
+}
+
+
+if _try_worktree_add; then
     # Get absolute path to worktree
     ABS_WORKTREE_PATH=$(cd "$WORKTREE_PATH" && pwd)
 
-    # Initialize submodules in the new worktree with references to main workspace
-    # This uses --reference to share objects, avoiding network downloads
-    if [[ "$JSON_OUTPUT" != "true" ]]; then
-        print_info "Initializing submodules in worktree (sharing objects with main)..."
-    fi
-
-    # Initialize each submodule with reference to main workspace's module storage
-    SUBMODULE_EXIT_CODE=0
-    (
-        cd "$ABS_WORKTREE_PATH"
-        MAIN_GIT_DIR=$(git rev-parse --git-common-dir)
-
-        # Get list of uninitialized submodules
-        git submodule status | grep '^-' | awk '{print $2}' | while read submod_path; do
-            ref_path="$MAIN_GIT_DIR/modules/$submod_path"
-
-            if [[ -d "$ref_path" ]]; then
-                # Use reference to share objects with main workspace
-                timeout 30 git submodule update --init --reference "$ref_path" -- "$submod_path" > /dev/null 2>&1
-            else
-                # No reference available, initialize normally
-                timeout 30 git submodule update --init -- "$submod_path" > /dev/null 2>&1
-            fi
-
-            if [[ $? -ne 0 ]]; then
-                exit 1
-            fi
-        done
-    )
-    SUBMODULE_EXIT_CODE=$?
-
-    if [[ $SUBMODULE_EXIT_CODE -ne 0 ]]; then
-        if [[ "$JSON_OUTPUT" == "true" ]]; then
-            echo '{"success": false, "error": "Submodule initialization failed or timed out", "exitCode": '"$SUBMODULE_EXIT_CODE"'}'
-        else
-            print_error "Submodule initialization failed or timed out (exit code: $SUBMODULE_EXIT_CODE)"
-            echo ""
-            print_info "This usually means:"
-            echo "  1. Submodules aren't initialized in main workspace"
-            echo "  2. Network issues preventing submodule clone"
-            echo "  3. Submodule URLs are inaccessible"
-            echo ""
-            print_info "To fix:"
-            echo "  1. Return to main workspace: cd $MAIN_WORKSPACE"
-            echo "  2. Initialize submodules: git submodule update --init --recursive"
-            echo "  3. Try creating the worktree again"
-            echo ""
-            print_info "Cleaning up partially created worktree..."
-        fi
-        # Clean up the worktree since submodule init failed
-        git worktree remove "$WORKTREE_PATH" --force > /dev/null 2>&1
-        exit 1
-    fi
+    # Set git hooks path so .githooks/ works in worktrees (no npx/husky needed)
+    git -C "$ABS_WORKTREE_PATH" config core.hooksPath .githooks
 
     # Store return-to directory if provided
     if [[ -n "$RETURN_TO_DIR" ]]; then
@@ -379,6 +529,120 @@ if git worktree add "${CREATE_ARGS[@]}"; then
         echo "$ABS_RETURN_TO" > "$ABS_WORKTREE_PATH/.loom-return-to"
         if [[ "$JSON_OUTPUT" != "true" ]]; then
             print_info "Stored return directory: $ABS_RETURN_TO"
+        fi
+    fi
+
+    # Initialize submodules with reference to main workspace (for object sharing)
+    # This is much faster than downloading from network and saves disk space
+    MAIN_GIT_DIR=$(git rev-parse --git-common-dir 2>/dev/null)
+    UNINIT_SUBMODULES=$(cd "$ABS_WORKTREE_PATH" && git submodule status 2>/dev/null | grep '^-' | wc -l | tr -d ' ')
+
+    if [[ "$UNINIT_SUBMODULES" -gt 0 ]]; then
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_info "Initializing $UNINIT_SUBMODULES submodule(s) with shared objects..."
+        fi
+
+        cd "$ABS_WORKTREE_PATH"
+
+        # Process each uninitialized submodule
+        git submodule status | grep '^-' | awk '{print $2}' | while read -r submod_path; do
+            ref_path="$MAIN_GIT_DIR/modules/$submod_path"
+
+            if [[ -d "$ref_path" ]]; then
+                # Use reference to share objects with main workspace (fast, no network)
+                if ! timeout 30 git submodule update --init --reference "$ref_path" -- "$submod_path" 2>/dev/null; then
+                    echo "SUBMODULE_FAILED" > /tmp/loom-submodule-status-$$
+                fi
+            else
+                # No reference available, initialize normally (may need network)
+                if ! timeout 30 git submodule update --init -- "$submod_path" 2>/dev/null; then
+                    echo "SUBMODULE_FAILED" > /tmp/loom-submodule-status-$$
+                fi
+            fi
+        done
+
+        # Check if any submodule failed
+        if [[ -f "/tmp/loom-submodule-status-$$" ]]; then
+            rm -f "/tmp/loom-submodule-status-$$"
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_warning "Some submodules failed to initialize (worktree still created)"
+                print_info "You may need to run: git submodule update --init --recursive"
+            fi
+        else
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_success "Submodules initialized with shared objects"
+            fi
+        fi
+
+        # Return to original directory
+        cd - > /dev/null
+    fi
+
+    # Symlink node_modules from main workspace if available
+    # This avoids expensive pnpm install on every worktree (30-60s savings)
+    MAIN_WORKSPACE_DIR=$(git rev-parse --show-toplevel 2>/dev/null)
+    MAIN_NODE_MODULES="$MAIN_WORKSPACE_DIR/node_modules"
+    WORKTREE_NODE_MODULES="$ABS_WORKTREE_PATH/node_modules"
+    WORKTREE_PACKAGE_JSON="$ABS_WORKTREE_PATH/package.json"
+
+    if [[ -d "$MAIN_NODE_MODULES" && -f "$WORKTREE_PACKAGE_JSON" && ! -e "$WORKTREE_NODE_MODULES" ]]; then
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_info "Symlinking node_modules from main workspace..."
+        fi
+
+        if ln -s "$MAIN_NODE_MODULES" "$WORKTREE_NODE_MODULES" 2>/dev/null; then
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_success "node_modules symlinked (skipping pnpm install)"
+            fi
+        else
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_warning "Could not symlink node_modules (will install on first build)"
+            fi
+        fi
+    fi
+
+    # Symlink .mcp.json from main workspace if available
+    # .mcp.json is gitignored so it's invisible from worktree git roots,
+    # which prevents Claude Code from discovering MCP server config
+    MAIN_MCP_JSON="$MAIN_WORKSPACE_DIR/.mcp.json"
+    WORKTREE_MCP_JSON="$ABS_WORKTREE_PATH/.mcp.json"
+
+    if [[ -f "$MAIN_MCP_JSON" && ! -e "$WORKTREE_MCP_JSON" ]]; then
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_info "Symlinking .mcp.json from main workspace..."
+        fi
+
+        if ln -s "$MAIN_MCP_JSON" "$WORKTREE_MCP_JSON" 2>/dev/null; then
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_success ".mcp.json symlinked"
+            fi
+        else
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_warning "Could not symlink .mcp.json"
+            fi
+        fi
+    fi
+
+    # Run project-specific post-worktree hook if it exists
+    # This allows projects to add custom setup steps (e.g., pnpm install, lake exe cache get)
+    # The hook is stored in .loom/hooks/ which is NOT overwritten by Loom upgrades
+    # Note: MAIN_WORKSPACE_DIR is already set by node_modules symlink section above
+    POST_WORKTREE_HOOK="$MAIN_WORKSPACE_DIR/.loom/hooks/post-worktree.sh"
+    if [[ -x "$POST_WORKTREE_HOOK" ]]; then
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_info "Running project-specific post-worktree hook..."
+        fi
+
+        # Run the hook from the new worktree directory
+        # Pass: worktree path, branch name, issue number
+        if (cd "$ABS_WORKTREE_PATH" && "$POST_WORKTREE_HOOK" "$ABS_WORKTREE_PATH" "$BRANCH_NAME" "$ISSUE_NUMBER"); then
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_success "Post-worktree hook completed"
+            fi
+        else
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_warning "Post-worktree hook failed (worktree still created)"
+            fi
         fi
     fi
 
@@ -401,8 +665,7 @@ if git worktree add "${CREATE_ARGS[@]}"; then
 else
     if [[ "$JSON_OUTPUT" == "true" ]]; then
         echo '{"success": false, "error": "Failed to create worktree"}'
-    else
-        print_error "Failed to create worktree"
     fi
+    # Human-readable error already printed by _try_worktree_add / _handle_feature_branch_in_main_worktree
     exit 1
 fi

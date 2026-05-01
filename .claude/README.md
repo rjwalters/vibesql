@@ -7,6 +7,7 @@ This directory contains Claude Code configuration for the Loom project.
 - **`settings.json`**: Team-wide permissions and settings (committed to git)
 - **`settings.local.json`**: Personal preferences (gitignored, create if needed)
 - **`../.mcp.json`**: MCP server configuration (at project root, committed to git)
+- **`agents/`**: Custom subagent definitions for Loom roles (see below)
 
 ## Pre-approved Commands
 
@@ -98,43 +99,41 @@ Interact with the Loom application UI and state:
 
 **Note**: When you first open the project, Claude Code will prompt you to approve these MCP servers. You can also enable them automatically by setting `"enableAllProjectMcpServers": true` in your `.claude/settings.local.json`.
 
-## Subagents
+## Slash Commands
 
-The `agents/` directory contains Claude Code subagents that are automatically invoked based on task descriptions. Each subagent is specialized for a specific role in the Loom development workflow.
+The `commands/` directory contains slash commands that define Loom roles. Each command file contains the complete role definition - there's no indirection to separate role files.
 
-### Available Subagents
+### Available Commands
 
-| Agent | Description | Tools | Model |
-|-------|-------------|-------|-------|
-| **builder** | Implements features for `loom:issue` issues and creates PRs | Full (Write, Edit, TodoWrite) | Sonnet |
-| **judge** | Reviews PRs with `loom:review-requested` label | Read-only | Sonnet |
-| **curator** | Enhances issues and marks them as `loom:curated` | Read-only | Sonnet |
-| **architect** | Creates architectural proposals with `loom:architect` | Full (can write docs) | Opus |
-| **hermit** | Identifies bloat and creates simplification issues | Read-only | Sonnet |
-| **doctor** | Addresses PR feedback and resolves conflicts | Full (fixes PRs) | Sonnet |
-| **guide** | Triages issues and applies `loom:urgent` to top 3 | Read-only | Sonnet |
-| **driver** | General shell environment for ad-hoc tasks | Full | Sonnet |
+| Command | Role | Purpose |
+|---------|------|---------|
+| `/builder` | Builder | Implements features for `loom:issue` issues and creates PRs |
+| `/judge` | Judge | Reviews PRs with `loom:review-requested` label |
+| `/curator` | Curator | Enhances issues and marks them as `loom:curated` |
+| `/architect` | Architect | Creates architectural proposals with `loom:architect` |
+| `/hermit` | Hermit | Identifies bloat and creates simplification issues |
+| `/doctor` | Doctor | Addresses PR feedback and resolves conflicts |
+| `/guide` | Guide | Triages issues and applies `loom:urgent` to top 3 |
+| `/champion` | Champion | Auto-merges approved PRs with `loom:pr` label |
+| `/loom help` | Help | Comprehensive help guide with sub-topics (roles, workflow, commands, etc.) |
 
-### How Subagents Work
+### How Slash Commands Work
 
-**Automatic Invocation**: Claude Code automatically selects and invokes the appropriate subagent based on your task description. For example:
-- "Review PR #123" → Invokes the **judge** subagent
-- "Implement issue #456" → Invokes the **builder** subagent
-- "Find unused dependencies" → Invokes the **hermit** subagent
+**Manual Invocation**: Use slash commands to assume a role:
+```bash
+/builder    # Assume Builder role, find and implement a loom:issue
+/judge      # Assume Judge role, review a PR with loom:review-requested
+/loom help  # Show comprehensive Loom help guide
+```
 
-**YAML Frontmatter**: Each subagent file has frontmatter defining:
-- `name` - Agent identifier
-- `description` - When Claude should invoke this agent (critical for auto-selection)
-- `tools` - Allowed tools (restricts capabilities for safety)
-- `model` - Which model to use (sonnet or opus)
-
-**Tool Restrictions**:
-- **Read-only agents** (judge, curator, hermit, guide): Can read code and create issues/comments but cannot modify files
-- **Write-enabled agents** (builder, doctor, architect, driver): Can modify files, create commits, and push changes
+Each slash command contains the complete role definition, including:
+1. The role's purpose and responsibilities
+2. Workflow guidelines and label transitions
+3. Instructions for completing ONE iteration of the role's task
 
 ### Agent Roles in Workflow
 
-The subagents work together following the label-based workflow:
+The roles work together following the label-based workflow:
 
 1. **architect** scans codebase → creates proposals with `loom:architect`
 2. **User approves** → adds `loom:issue` label
@@ -146,24 +145,76 @@ The subagents work together following the label-based workflow:
 8. **doctor** fixes feedback → transitions back to `loom:review-requested`
 9. **User merges** → issue auto-closes
 
-### Creating Custom Subagents
+### Creating Custom Commands
 
-To create a custom subagent:
+To create a custom slash command:
 
-1. Create `defaults/.claude/agents/your-agent.md`
-2. Add YAML frontmatter:
-   ```yaml
-   ---
-   name: your-agent
-   description: Clear description of when to invoke this agent
-   tools: Bash, Read, Grep, Glob, Task
-   model: sonnet
-   ---
-   ```
-3. Write agent instructions below frontmatter
-4. Claude Code will automatically detect and use it
+1. Create `.claude/commands/your-command.md` (or `.claude/commands/your-namespace/command.md`) with the complete role definition
+2. Include role purpose, workflow guidelines, and iteration instructions
+3. Use it with `/your-command` (or `/your-namespace/command`)
 
-See the [Claude Code subagent documentation](https://docs.claude.com/en/docs/claude-code/agents) for more details.
+**Note**: `.loom/roles/` contains symlinks to `.claude/commands/loom/` for Tauri App compatibility. The single source of truth for all Loom role definitions is `.claude/commands/loom/`.
+
+## Custom Subagents
+
+The `agents/` directory contains custom subagent definitions for Loom roles. These subagents can be used with Claude Code's Task tool for spawning role-specific agents with fresh context.
+
+### Available Subagents
+
+| Subagent | Model | Purpose |
+|----------|-------|---------|
+| `loom-shepherd` | sonnet | Single-issue lifecycle orchestration (Layer 1) |
+| `loom-daemon` | sonnet | System orchestration, work generation (Layer 2) |
+| `loom-builder` | opus | Implement features and fixes |
+| `loom-judge` | opus | Review pull requests |
+| `loom-curator` | sonnet | Enhance and organize issues |
+| `loom-doctor` | sonnet | Fix bugs and address PR feedback |
+| `loom-champion` | sonnet | Evaluate proposals, auto-merge PRs |
+| `loom-architect` | opus | Create architectural proposals |
+| `loom-hermit` | sonnet | Identify simplification opportunities |
+| `loom-guide` | sonnet | Prioritize and triage issues |
+| `loom-auditor` | sonnet | Verify runtime behavior of built software |
+
+### How Subagents Work
+
+Subagents are specialized AI assistants that run in their own context window. Each has:
+- Custom system prompt referencing the role definition in `.loom/roles/`
+- Specific tool access appropriate for the role
+- Model selection optimized for the task complexity
+
+**Using Subagents with Task**:
+
+The Loom Shepherd (or daemon) can spawn subagents for each phase:
+
+```python
+# Spawn builder subagent with fresh context
+# Note: subagent_type is always "general-purpose" - role selection
+# happens via the slash command in the prompt (e.g., "/builder 123")
+result = Task(
+    description="Builder phase for issue #123",
+    prompt="/builder 123",
+    subagent_type="general-purpose",
+    run_in_background=False
+)
+```
+
+**Benefits**:
+- **Fresh context**: Each subagent starts clean, avoiding context pollution
+- **Role isolation**: Subagents focus on their specific task
+- **Cost control**: Use faster/cheaper models for simpler roles (sonnet vs opus)
+- **Better observability**: Clear which role is running
+
+### Subagents vs Slash Commands
+
+| Feature | Slash Commands | Subagents |
+|---------|----------------|-----------|
+| Context | Shared with main conversation | Isolated, fresh context |
+| Invocation | `/builder 123` | `Task(subagent_type="general-purpose", prompt="/builder 123")` |
+| Use case | Manual orchestration | Automated orchestration |
+| Visibility | In main conversation | Spawned as separate task |
+
+**Use slash commands** for manual orchestration mode where you want direct control.
+**Use subagents** for automated orchestration where shepherds coordinate roles with fresh context per phase.
 
 ## Documentation
 
