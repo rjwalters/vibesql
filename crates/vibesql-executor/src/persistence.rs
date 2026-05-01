@@ -10,7 +10,7 @@ use vibesql_storage::Database;
 
 use crate::{
     CreateIndexExecutor, CreateTableExecutor, ExecutorError, InsertExecutor, RoleExecutor,
-    SchemaExecutor, UpdateExecutor, ViewExecutor,
+    SchemaExecutor, TriggerExecutor, UpdateExecutor, ViewExecutor,
 };
 
 /// Load database from SQL dump file
@@ -113,6 +113,14 @@ fn execute_statement_for_load(
             // Store original SQL for sqlite_master compatibility
             view_stmt.sql_definition = Some(original_sql.to_string());
             ViewExecutor::execute_create_view(&view_stmt, db)?;
+        }
+        vibesql_ast::Statement::CreateTrigger(trigger_stmt) => {
+            // Preserve the original SQL on the catalog TriggerDefinition so that
+            // a subsequent save_sql_dump can re-emit the trigger verbatim. Without
+            // this, triggers would survive one round-trip (because we just executed
+            // CREATE TRIGGER) but would be lost on the *next* save because the
+            // catalog entry would have no sql_definition.
+            TriggerExecutor::create_trigger_with_sql(db, &trigger_stmt, Some(original_sql))?;
         }
         vibesql_ast::Statement::CreateRole(role_stmt) => {
             RoleExecutor::execute_create_role(&role_stmt, db)?;
