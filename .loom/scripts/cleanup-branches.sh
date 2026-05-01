@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Loom Branch Cleanup Script - Remove feature branches for closed issues
 #
 # This script automatically cleans up stale feature branches by checking
@@ -17,7 +17,15 @@
 
 set -e  # Exit on error
 
+# Use loom-forge for forge-agnostic issue/PR operations (supports GitHub + Gitea)
+if command -v loom-forge &>/dev/null; then
+    FORGE="loom-forge"
+else
+    FORGE="gh"
+fi
+
 # Colors
+# shellcheck disable=SC2034  # Color palette - not all colors used in every script
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -62,7 +70,7 @@ for branch in $branches; do
     ((checked++))
 
     # Check issue status
-    status=$(gh issue view "$issue_num" --json state --jq .state 2>/dev/null || echo "NOT_FOUND")
+    status=$($FORGE issue view "$issue_num" --json state --jq .state 2>/dev/null || echo "NOT_FOUND")
 
     if [[ "$status" == "CLOSED" ]]; then
         echo -e "${GREEN}✓${NC} Issue #$issue_num is CLOSED - deleting $branch"
