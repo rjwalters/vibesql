@@ -742,6 +742,41 @@ impl CompiledPredicate {
                 s.trim().parse::<f64>().map(|x| Self::apply_range_op(x, op, *y)).ok()
             }
 
+            // BLOB vs BLOB - bytewise comparison (SQLite memcmp semantics)
+            (SqlValue::Blob(x), SqlValue::Blob(y)) => Some(Self::apply_range_op(x, op, y)),
+
+            // BLOB vs TEXT - SQLite type ordering: TEXT < BLOB (no coercion)
+            (SqlValue::Blob(_), SqlValue::Varchar(_) | SqlValue::Character(_)) => {
+                // BLOB > TEXT, so any > / >= is true; any < / <= is false
+                Some(matches!(op, RangeOp::GreaterThan | RangeOp::GreaterThanOrEqual))
+            }
+            (SqlValue::Varchar(_) | SqlValue::Character(_), SqlValue::Blob(_)) => {
+                // TEXT < BLOB, so any < / <= is true; any > / >= is false
+                Some(matches!(op, RangeOp::LessThan | RangeOp::LessThanOrEqual))
+            }
+
+            // BLOB vs Numeric - SQLite type ordering: Numeric < BLOB (no coercion)
+            (
+                SqlValue::Blob(_),
+                SqlValue::Integer(_)
+                | SqlValue::Smallint(_)
+                | SqlValue::Bigint(_)
+                | SqlValue::Float(_)
+                | SqlValue::Real(_)
+                | SqlValue::Double(_)
+                | SqlValue::Numeric(_),
+            ) => Some(matches!(op, RangeOp::GreaterThan | RangeOp::GreaterThanOrEqual)),
+            (
+                SqlValue::Integer(_)
+                | SqlValue::Smallint(_)
+                | SqlValue::Bigint(_)
+                | SqlValue::Float(_)
+                | SqlValue::Real(_)
+                | SqlValue::Double(_)
+                | SqlValue::Numeric(_),
+                SqlValue::Blob(_),
+            ) => Some(matches!(op, RangeOp::LessThan | RangeOp::LessThanOrEqual)),
+
             // Type mismatch - fall back to None (needs full evaluation)
             _ => None,
         }
@@ -919,5 +954,82 @@ mod tests {
             &SqlValue::Integer(85),
         );
         assert_eq!(result, Some(true), "Real(678.28) > Integer(85) should be true");
+    }
+
+    #[test]
+    fn test_compare_range_blob_vs_blob() {
+        // BLOB vs BLOB - bytewise comparison (SQLite memcmp semantics)
+        // Verified: SELECT x'616263' >= x'6162' → 1
+        let abc = SqlValue::Blob(vec![0x61, 0x62, 0x63]);
+        let ab = SqlValue::Blob(vec![0x61, 0x62]);
+        assert_eq!(
+            CompiledPredicate::compare_range(&abc, RangeOp::GreaterThanOrEqual, &ab),
+            Some(true)
+        );
+        assert_eq!(
+            CompiledPredicate::compare_range(&ab, RangeOp::LessThan, &abc),
+            Some(true)
+        );
+        assert_eq!(
+            CompiledPredicate::compare_range(&abc, RangeOp::LessThan, &ab),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn test_compare_range_blob_vs_text() {
+        // SQLite type ordering: TEXT < BLOB
+        // Verified: SELECT 'abc' >= x'6162' → 0; SELECT x'616263' >= 'abc' → 1
+        let blob = SqlValue::Blob(vec![0x61, 0x62]);
+        let text = SqlValue::Varchar(arcstr::ArcStr::from("abc"));
+
+        // BLOB > TEXT
+        assert_eq!(
+            CompiledPredicate::compare_range(&blob, RangeOp::GreaterThan, &text),
+            Some(true)
+        );
+        assert_eq!(
+            CompiledPredicate::compare_range(&blob, RangeOp::GreaterThanOrEqual, &text),
+            Some(true)
+        );
+        assert_eq!(
+            CompiledPredicate::compare_range(&blob, RangeOp::LessThan, &text),
+            Some(false)
+        );
+        // TEXT < BLOB
+        assert_eq!(
+            CompiledPredicate::compare_range(&text, RangeOp::LessThan, &blob),
+            Some(true)
+        );
+        assert_eq!(
+            CompiledPredicate::compare_range(&text, RangeOp::GreaterThanOrEqual, &blob),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn test_compare_range_blob_vs_numeric() {
+        // SQLite type ordering: Numeric < BLOB (no coercion across storage classes)
+        let blob = SqlValue::Blob(vec![0x00]);
+        // BLOB > Integer
+        assert_eq!(
+            CompiledPredicate::compare_range(&blob, RangeOp::GreaterThan, &SqlValue::Integer(99)),
+            Some(true)
+        );
+        // Integer < BLOB
+        assert_eq!(
+            CompiledPredicate::compare_range(&SqlValue::Integer(99), RangeOp::LessThan, &blob),
+            Some(true)
+        );
+        // Real < BLOB
+        assert_eq!(
+            CompiledPredicate::compare_range(&SqlValue::Real(0.5), RangeOp::LessThanOrEqual, &blob),
+            Some(true)
+        );
+        // BLOB not less than Numeric
+        assert_eq!(
+            CompiledPredicate::compare_range(&blob, RangeOp::LessThan, &SqlValue::Real(0.5)),
+            Some(false)
+        );
     }
 }

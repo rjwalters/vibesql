@@ -1,12 +1,52 @@
 //! Set operations (UNION, INTERSECT, EXCEPT) for SELECT queries
 
-use std::collections::{HashMap, HashSet};
+use std::{cmp::Ordering, collections::{HashMap, HashSet}};
 
-use super::helpers::apply_distinct;
 use crate::errors::ExecutorError;
 
+/// Canonicalize a single SqlValue for set-operation comparison.
+///
+/// SQLite treats UNION/INTERSECT/EXCEPT as following storage-class affinity:
+/// values with the same numeric magnitude compare equal regardless of which
+/// concrete numeric variant (Integer / Real / Numeric / Float / Double) they
+/// hold. Without canonicalization, `Real(30.0)` and `Numeric(30.0)` would
+/// compare via type-tag fallback and produce non-deterministic ordering — and
+/// would also fail to deduplicate against each other.
+///
+/// Canonicalization rules:
+/// - All exact integer types collapse to `Bigint`.
+/// - All inexact numeric types (`Real`, `Float`, `Double`, `Numeric`) collapse
+///   to `Numeric(f64)`. If the value is a finite whole number, it further
+///   collapses to `Bigint` so e.g. `Real(30.0)` matches `Integer(30)`.
+/// - All other values are returned unchanged.
+fn canonicalize_numeric(val: &vibesql_types::SqlValue) -> vibesql_types::SqlValue {
+    use vibesql_types::SqlValue;
+
+    fn float_to_canonical(f: f64) -> SqlValue {
+        if f.is_finite() && f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+            SqlValue::Bigint(f as i64)
+        } else {
+            SqlValue::Numeric(f)
+        }
+    }
+
+    match val {
+        SqlValue::Integer(n) => SqlValue::Bigint(*n),
+        SqlValue::Smallint(n) => SqlValue::Bigint(*n as i64),
+        SqlValue::Bigint(n) => SqlValue::Bigint(*n),
+        SqlValue::Unsigned(n) => SqlValue::Bigint(*n as i64),
+        SqlValue::Real(f) => float_to_canonical(*f as f64),
+        SqlValue::Float(f) => float_to_canonical(*f as f64),
+        SqlValue::Double(f) => float_to_canonical(*f),
+        SqlValue::Numeric(f) => float_to_canonical(*f),
+        _ => val.clone(),
+    }
+}
+
 /// Normalize a row's values for comparison based on column collations.
-/// This applies collation transformations (e.g., case folding for NOCASE).
+/// This applies collation transformations (e.g., case folding for NOCASE)
+/// AND canonicalizes numeric storage classes so that cross-type numerics
+/// (e.g., Real(30.0) vs Numeric(30.0)) compare equal during dedup and sort.
 fn normalize_row_for_comparison(
     values: &[vibesql_types::SqlValue],
     collations: &[Option<String>],
@@ -27,7 +67,7 @@ fn normalize_row_for_comparison(
                         SqlValue::Character(s) => {
                             SqlValue::Character(ArcStr::from(s.to_uppercase()))
                         }
-                        _ => val.clone(),
+                        _ => canonicalize_numeric(val),
                     }
                 }
                 Some("RTRIM") => {
@@ -39,13 +79,33 @@ fn normalize_row_for_comparison(
                         SqlValue::Character(s) => {
                             SqlValue::Character(ArcStr::from(s.trim_end().to_string()))
                         }
-                        _ => val.clone(),
+                        _ => canonicalize_numeric(val),
                     }
                 }
-                _ => val.clone(), // BINARY or default - no transformation
+                // BINARY or default: still canonicalize numerics so cross-type
+                // numerics compare equal (matches SQLite storage-class affinity).
+                _ => canonicalize_numeric(val),
             }
         })
         .collect()
+}
+
+/// Compare two normalized rows lexicographically.
+///
+/// Used to sort UNION results after dedup. Falls back to type-tag ordering for
+/// truly incomparable values via `SqlValue::cmp`.
+fn compare_normalized_rows(
+    a: &[vibesql_types::SqlValue],
+    b: &[vibesql_types::SqlValue],
+) -> Ordering {
+    let len = a.len().min(b.len());
+    for i in 0..len {
+        let ord = a[i].cmp(&b[i]);
+        if ord != Ordering::Equal {
+            return ord;
+        }
+    }
+    a.len().cmp(&b.len())
 }
 
 /// Apply a set operation (UNION, INTERSECT, EXCEPT) to two result sets
@@ -79,8 +139,6 @@ pub(super) fn apply_set_operation(
         }
     }
 
-    let has_collations = collations.iter().any(|c| c.is_some());
-
     match set_op.op {
         vibesql_ast::SetOperator::Union => {
             if set_op.all {
@@ -89,23 +147,25 @@ pub(super) fn apply_set_operation(
                 result.extend(right);
                 Ok(result)
             } else {
-                // UNION (DISTINCT): combine, remove duplicates, and sort
-                // Use collation-aware deduplication when collations are specified
+                // UNION (DISTINCT): combine, remove duplicates, and sort.
+                // Use normalized keys (collation + numeric canonicalization) for both
+                // dedup and sorting so that cross-type numerics (e.g. Real(30.0) and
+                // Numeric(30.0) produced by sum() OVER()) are treated as equal and
+                // sort by their numeric magnitude.
                 let mut result = left;
                 result.extend(right);
 
-                if has_collations {
-                    // Deduplicate using normalized keys
-                    let mut seen = HashSet::new();
-                    result.retain(|row| {
-                        let key = normalize_row_for_comparison(&row.values, collations);
-                        seen.insert(key)
-                    });
-                } else {
-                    result = apply_distinct(result);
-                }
+                let mut seen = HashSet::new();
+                result.retain(|row| {
+                    let key = normalize_row_for_comparison(&row.values, collations);
+                    seen.insert(key)
+                });
 
-                result.sort_by(|a, b| a.values.cmp(&b.values));
+                result.sort_by(|a, b| {
+                    let ka = normalize_row_for_comparison(&a.values, collations);
+                    let kb = normalize_row_for_comparison(&b.values, collations);
+                    compare_normalized_rows(&ka, &kb)
+                });
                 Ok(result)
             }
         }
@@ -116,22 +176,14 @@ pub(super) fn apply_set_operation(
                 // Count occurrences in right side (using normalized keys)
                 let mut right_counts = HashMap::new();
                 for row in &right {
-                    let key = if has_collations {
-                        normalize_row_for_comparison(&row.values, collations)
-                    } else {
-                        row.values.to_vec()
-                    };
+                    let key = normalize_row_for_comparison(&row.values, collations);
                     *right_counts.entry(key).or_insert(0) += 1;
                 }
 
                 // For each left row, if it appears in right, include it and decrement count
                 let mut result = Vec::new();
                 for row in left {
-                    let key = if has_collations {
-                        normalize_row_for_comparison(&row.values, collations)
-                    } else {
-                        row.values.to_vec()
-                    };
+                    let key = normalize_row_for_comparison(&row.values, collations);
                     if let Some(count) = right_counts.get_mut(&key) {
                         if *count > 0 {
                             result.push(row);
@@ -144,23 +196,13 @@ pub(super) fn apply_set_operation(
                 // INTERSECT (DISTINCT): return unique rows that appear in both
                 let right_set: HashSet<_> = right
                     .iter()
-                    .map(|row| {
-                        if has_collations {
-                            normalize_row_for_comparison(&row.values, collations)
-                        } else {
-                            row.values.to_vec()
-                        }
-                    })
+                    .map(|row| normalize_row_for_comparison(&row.values, collations))
                     .collect();
 
                 let mut result = Vec::new();
                 let mut seen = HashSet::new();
                 for row in left {
-                    let key = if has_collations {
-                        normalize_row_for_comparison(&row.values, collations)
-                    } else {
-                        row.values.to_vec()
-                    };
+                    let key = normalize_row_for_comparison(&row.values, collations);
                     if right_set.contains(&key) && seen.insert(key) {
                         result.push(row);
                     }
@@ -175,22 +217,14 @@ pub(super) fn apply_set_operation(
                 // Count occurrences in right side (using normalized values for comparison)
                 let mut right_counts = HashMap::new();
                 for row in &right {
-                    let key = if has_collations {
-                        normalize_row_for_comparison(&row.values, collations)
-                    } else {
-                        row.values.to_vec()
-                    };
+                    let key = normalize_row_for_comparison(&row.values, collations);
                     *right_counts.entry(key).or_insert(0) += 1;
                 }
 
                 // For each left row, if it doesn't appear in right (or count exhausted), include it
                 let mut result = Vec::new();
                 for row in left {
-                    let key = if has_collations {
-                        normalize_row_for_comparison(&row.values, collations)
-                    } else {
-                        row.values.to_vec()
-                    };
+                    let key = normalize_row_for_comparison(&row.values, collations);
                     match right_counts.get_mut(&key) {
                         None => {
                             // Row not in right side, include it
@@ -209,26 +243,16 @@ pub(super) fn apply_set_operation(
                 Ok(result)
             } else {
                 // EXCEPT (DISTINCT): return unique rows from left that don't appear in right
-                // Use normalized values for comparison when collations are specified
+                // Use normalized values for comparison
                 let right_set: HashSet<_> = right
                     .iter()
-                    .map(|row| {
-                        if has_collations {
-                            normalize_row_for_comparison(&row.values, collations)
-                        } else {
-                            row.values.to_vec()
-                        }
-                    })
+                    .map(|row| normalize_row_for_comparison(&row.values, collations))
                     .collect();
 
                 let mut result = Vec::new();
                 let mut seen = HashSet::new();
                 for row in left {
-                    let key = if has_collations {
-                        normalize_row_for_comparison(&row.values, collations)
-                    } else {
-                        row.values.to_vec()
-                    };
+                    let key = normalize_row_for_comparison(&row.values, collations);
                     if !right_set.contains(&key) && seen.insert(key) {
                         result.push(row);
                     }

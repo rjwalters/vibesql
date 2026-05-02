@@ -101,15 +101,14 @@ pub enum PersistenceFormat {
 fn detect_format<P: AsRef<Path>>(path: P) -> Result<PersistenceFormat, crate::StorageError> {
     let path_ref = path.as_ref();
 
-    // For .vbsqlz, we know it's compressed
-    if let Some(ext) = path_ref.extension() {
-        match ext.to_str() {
-            Some("vbsqlz") => return Ok(PersistenceFormat::BinaryCompressed),
-            Some("json") => return Ok(PersistenceFormat::Json),
-            Some("sql") => return Ok(PersistenceFormat::Sql),
-            Some("db") | Some("sqlite") | Some("sqlite3") => {
-                return Ok(PersistenceFormat::Sqlite)
-            }
+    // Format hints from extension. Non-SQLite extensions are trusted; SQLite-style
+    // extensions (.db/.sqlite/.sqlite3) require a magic-number check below, since
+    // VibeSQL also writes SQL dumps to .db when the user passes `--database X.db`.
+    if let Some(ext) = path_ref.extension().and_then(|e| e.to_str()) {
+        match ext {
+            "vbsqlz" => return Ok(PersistenceFormat::BinaryCompressed),
+            "json" => return Ok(PersistenceFormat::Json),
+            "sql" => return Ok(PersistenceFormat::Sql),
             _ => {}
         }
     }

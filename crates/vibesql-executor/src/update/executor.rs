@@ -184,6 +184,7 @@ pub(super) fn execute_internal(
             table_name,
             has_triggers,
             &pk_indices,
+            trigger_context,
         );
     }
 
@@ -1058,9 +1059,13 @@ fn execute_update_from(
     table_name: &str,
     has_triggers: bool,
     pk_indices: &Option<Vec<usize>>,
+    trigger_context: Option<&crate::trigger_execution::TriggerContext<'_>>,
 ) -> Result<usize, ExecutorError> {
     // Execute the join and get matched rows with computed SET values
-    let join_result = execute_update_from_join(stmt, from_clauses, database, schema)?;
+    // Issue #5082: pass trigger_context so the synthetic SELECT can resolve
+    // OLD/NEW pseudo-variables when this UPDATE runs inside a trigger body.
+    let join_result =
+        execute_update_from_join(stmt, from_clauses, database, schema, trigger_context)?;
 
     // Fire BEFORE STATEMENT triggers if needed
     if has_triggers {

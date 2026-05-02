@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 # Loom Worktree Return Helper Script
 # Returns from an issue worktree to the terminal worktree that created it

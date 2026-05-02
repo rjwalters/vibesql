@@ -96,6 +96,26 @@ fn evaluate_limit_offset_expr_raw(
 ) -> Result<i64, crate::ExecutorError> {
     use crate::evaluator::ExpressionEvaluator;
 
+    // Pre-validate column references in LIMIT/OFFSET expressions (#5092).
+    // LIMIT/OFFSET expressions are evaluated against an empty row/schema, so
+    // any column reference is unresolvable. SQLite reports this as
+    // "no such column: X". This pre-check must run BEFORE the evaluator,
+    // otherwise the evaluator's WindowFunction / AggregateFunction arms can
+    // fire first and produce a misleading "misuse of window function ..."
+    // error for queries like:
+    //   SELECT count(*) FROM t1 LIMIT nth_value(x, 1) OVER ();
+    // The unresolved column `x` should be reported before any window-misuse
+    // diagnosis runs.
+    let mut col_refs = Vec::new();
+    crate::select::executor::validation::extract_column_refs(expr, &mut col_refs);
+    if let Some(first) = col_refs.into_iter().next() {
+        let column_ref = match first.table {
+            Some(t) => format!("{}.{}", t, first.column),
+            None => first.column,
+        };
+        return Err(crate::ExecutorError::NoSuchColumn { column_ref });
+    }
+
     // Create empty schema and row for expression evaluation
     let empty_schema = vibesql_catalog::TableSchema::new("".to_string(), vec![]);
     let evaluator = ExpressionEvaluator::with_database(&empty_schema, database);

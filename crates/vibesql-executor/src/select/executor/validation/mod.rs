@@ -22,8 +22,9 @@ use std::collections::HashSet;
 // Re-export public validation functions
 pub use aggregates::{
     check_aggregate_arg_count, find_aggregate_in_expression, find_window_function_in_expression,
-    validate_aggregate_arguments, validate_having_aliased_aggregates,
-    validate_no_nested_aggregates, validate_order_by_aliased_window_functions,
+    validate_aggregate_arguments, validate_group_by_window_misuse,
+    validate_having_aliased_aggregates, validate_no_nested_aggregates,
+    validate_order_by_aliased_window_functions, validate_subquery_context_misuse,
 };
 pub use column_refs::{extract_column_refs, validate_column_ref};
 pub use join_limits::validate_join_table_limit;
@@ -128,6 +129,12 @@ pub fn validate_select_columns_with_context(
         if let Some(window_name) = find_window_function_in_expression(where_expr) {
             return Err(ExecutorError::MisuseOfWindowFunction { function_name: window_name });
         }
+
+        // Check for aggregates/windows inside bare scalar subqueries in WHERE
+        // (e.g. `WHERE (SELECT AVG(0) FILTER(WHERE outer.c))`). The bare
+        // subquery has no FROM clause so its aggregate borrows the outer
+        // aggregation context, which SQLite reports as a misuse.
+        validate_subquery_context_misuse(where_expr)?;
     }
 
     // Validate SELECT list column references (only procedure variables allowed)

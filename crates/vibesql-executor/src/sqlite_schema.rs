@@ -557,6 +557,7 @@ mod tests {
                 " BEGIN INSERT INTO audit VALUES (NEW.id); END".to_string(),
             ),
             enabled: true,
+            sql_definition: None,
         };
 
         let sql = generate_create_trigger_sql(&trigger);
@@ -580,6 +581,7 @@ mod tests {
             when_condition: None,
             triggered_action: TriggerAction::RawSql(" BEGIN SELECT 1; END".to_string()),
             enabled: true,
+            sql_definition: None,
         };
 
         let sql = generate_create_trigger_sql(&trigger);
@@ -603,6 +605,7 @@ mod tests {
                 " BEGIN DELETE FROM base_table WHERE id = OLD.id; END".to_string(),
             ),
             enabled: true,
+            sql_definition: None,
         };
 
         let sql = generate_create_trigger_sql(&trigger);

@@ -30,13 +30,19 @@ pub(super) fn validate_where_clause_subqueries(
     use vibesql_ast::Expression;
 
     match expr {
-        Expression::In { subquery, .. } => {
-            // Validate that the subquery returns exactly 1 column (scalar subquery requirement)
+        Expression::In { expr: lhs, subquery, .. } => {
+            // For row-value LHS, the subquery must return the same number of columns
+            // as the row value's arity (SQL:1999 Section 8.4). For scalar LHS, the
+            // subquery must return exactly 1 column.
             // Issue #3562: Pass CTE context so CTEs can be resolved
+            let expected = match lhs.as_ref() {
+                Expression::RowValueConstructor(elements) => elements.len(),
+                _ => 1,
+            };
             let column_count = compute_select_list_column_count(subquery, database, cte_results)?;
-            if column_count != 1 {
+            if column_count != expected {
                 return Err(ExecutorError::SubqueryColumnCountMismatch {
-                    expected: 1,
+                    expected,
                     actual: column_count,
                 });
             }
