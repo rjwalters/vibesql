@@ -1006,6 +1006,351 @@ fn find_aliased_window_misuse_in_order_by(
     }
 }
 
+/// Validate ORDER BY for misuse of aggregates that are correlated to the outer
+/// scope when the outer query is a window-aggregate query.
+///
+/// **Mirrors SQLite's rule** at `src/window.c::disallowAggregatesInOrderByCb`
+/// (invoked from `sqlite3WindowRewrite` when the SELECT is not a regular
+/// aggregate query — i.e. has windows but no GROUP BY/HAVING/aggregate
+/// SELECT items). SQLite walks the ORDER BY (recursing through subqueries)
+/// looking for `TK_AGG_FUNCTION` nodes whose `pAggInfo` is null — that is,
+/// aggregate references that resolved to the *outer* scope rather than the
+/// nested subquery's own scope. Such an aggregate is reported as
+/// `"misuse of aggregate: <name>()"`.
+///
+/// We approximate the resolver's behaviour: an aggregate inside a scalar
+/// subquery is "correlated to the outer window query" iff it has at least
+/// one column-argument that
+///   - is unqualified or refers to an outer table, AND
+///   - does not resolve against the nested subquery's own FROM clause, AND
+///   - resolves against the outer schema.
+///
+/// Test case 61.4.3 (must error):
+/// ```sql
+/// SELECT sum(a) OVER (ORDER BY a) FROM t1
+/// ORDER BY (SELECT sum(a) FROM t2)   -- t2 has no column 'a'; 'a' is t1.a (outer)
+/// ```
+///
+/// Test case 61.4.4 (must NOT error):
+/// ```sql
+/// SELECT sum(a) OVER (ORDER BY a) FROM t1
+/// ORDER BY (SELECT sum(y) FROM t2)   -- 'y' is t2.y, fully local to subquery
+/// ```
+///
+/// The walker only fires when the outer SELECT contains a window function;
+/// non-window queries already validate ORDER BY through other paths.
+pub fn validate_window_query_order_by_aggregates(
+    order_by: Option<&[vibesql_ast::OrderByItem]>,
+    select_list: &[SelectItem],
+    outer_schema: &CombinedSchema,
+    database: &vibesql_storage::Database,
+) -> Result<(), ExecutorError> {
+    let Some(order_items) = order_by else {
+        return Ok(());
+    };
+
+    // Rule only applies to window-aggregate queries (has window function in
+    // SELECT list). Plain aggregate or scalar queries use other validators.
+    let has_window = select_list.iter().any(|item| match item {
+        SelectItem::Expression { expr, .. } => expression_contains_window_function(expr),
+        _ => false,
+    });
+    if !has_window {
+        return Ok(());
+    }
+
+    for item in order_items {
+        if let Some(name) = find_outer_correlated_agg_in_order_by_subquery(
+            &item.expr,
+            outer_schema,
+            database,
+        ) {
+            return Err(ExecutorError::MisuseOfAggregateContext { function_name: name });
+        }
+    }
+
+    Ok(())
+}
+
+/// Walk an ORDER BY expression looking for scalar subqueries whose body
+/// contains an aggregate function correlated to the outer (window) query.
+fn find_outer_correlated_agg_in_order_by_subquery(
+    expr: &Expression,
+    outer_schema: &CombinedSchema,
+    database: &vibesql_storage::Database,
+) -> Option<String> {
+    match expr {
+        Expression::ScalarSubquery(stmt) => {
+            // Build the set of column names visible inside the subquery's own
+            // FROM clause. If we cannot determine it (e.g. nested subquery in
+            // FROM), fall through to None — be conservative and don't flag
+            // anything we can't prove correlated.
+            let inner_columns = collect_from_clause_column_names(
+                stmt.from.as_ref(),
+                database,
+            )?;
+
+            // Walk the subquery's SELECT list looking for aggregate functions
+            // whose column args resolve to the outer scope.
+            for item in &stmt.select_list {
+                if let SelectItem::Expression { expr: inner, .. } = item {
+                    if let Some(name) = find_outer_correlated_aggregate(
+                        inner,
+                        &inner_columns,
+                        outer_schema,
+                    ) {
+                        return Some(name);
+                    }
+                }
+            }
+            None
+        }
+        // Recurse through composite expressions in ORDER BY (an ORDER BY
+        // expression may e.g. add a constant to a subquery: `(SELECT sum(a)
+        // FROM t2) + 1`).
+        Expression::BinaryOp { left, right, .. } => {
+            find_outer_correlated_agg_in_order_by_subquery(left, outer_schema, database)
+                .or_else(|| {
+                    find_outer_correlated_agg_in_order_by_subquery(right, outer_schema, database)
+                })
+        }
+        Expression::UnaryOp { expr, .. } => {
+            find_outer_correlated_agg_in_order_by_subquery(expr, outer_schema, database)
+        }
+        Expression::Cast { expr, .. } => {
+            find_outer_correlated_agg_in_order_by_subquery(expr, outer_schema, database)
+        }
+        Expression::Function { args, .. } => {
+            for arg in args {
+                if let Some(name) =
+                    find_outer_correlated_agg_in_order_by_subquery(arg, outer_schema, database)
+                {
+                    return Some(name);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Collect column names visible inside a FROM clause by looking up each
+/// referenced table in the catalog. Returns `None` if the FROM contains a
+/// subquery / VALUES / unknown table — in those cases we conservatively skip
+/// the check rather than risk a false positive.
+fn collect_from_clause_column_names(
+    from: Option<&vibesql_ast::FromClause>,
+    database: &vibesql_storage::Database,
+) -> Option<HashSet<String>> {
+    let mut columns = HashSet::new();
+    let from = from?;
+    if collect_from_columns_recursive(from, database, &mut columns) {
+        Some(columns)
+    } else {
+        None
+    }
+}
+
+fn collect_from_columns_recursive(
+    from: &vibesql_ast::FromClause,
+    database: &vibesql_storage::Database,
+    columns: &mut HashSet<String>,
+) -> bool {
+    use vibesql_ast::FromClause;
+    match from {
+        FromClause::Table { name, .. } => {
+            // Strip any schema qualifier ("main.t" → "t").
+            let table_name = name.rsplit_once('.').map(|(_, t)| t).unwrap_or(name.as_str());
+            if let Some(table) = database.get_table(table_name) {
+                for col in &table.schema.columns {
+                    columns.insert(col.name.to_lowercase());
+                }
+                true
+            } else {
+                // Unknown table — bail out and skip the check.
+                false
+            }
+        }
+        FromClause::Join { left, right, .. } => {
+            collect_from_columns_recursive(left, database, columns)
+                && collect_from_columns_recursive(right, database, columns)
+        }
+        // Subqueries / VALUES in FROM: too complex to resolve here. Bail.
+        FromClause::Subquery { .. } | FromClause::Values { .. } => false,
+    }
+}
+
+/// Recursively search an expression for an aggregate function whose column
+/// arguments resolve to the outer scope rather than the inner subquery's FROM.
+///
+/// Returns the function name of the first such aggregate found.
+fn find_outer_correlated_aggregate(
+    expr: &Expression,
+    inner_columns: &HashSet<String>,
+    outer_schema: &CombinedSchema,
+) -> Option<String> {
+    match expr {
+        Expression::AggregateFunction { name, args, order_by, filter, .. } => {
+            if aggregate_args_correlate_outer(args, order_by.as_deref(), filter.as_deref(), inner_columns, outer_schema) {
+                return Some(name.to_string());
+            }
+            // Recurse into args in case there's a deeper aggregate (which
+            // would itself be a separate validation issue).
+            for arg in args {
+                if let Some(found) =
+                    find_outer_correlated_aggregate(arg, inner_columns, outer_schema)
+                {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Expression::Function { name, args, .. } => {
+            if is_aggregate_function(name.as_str()) {
+                let upper = name.to_uppercase();
+                let is_scalar_minmax =
+                    matches!(upper.as_str(), "MIN" | "MAX") && args.len() > 1;
+                if !is_scalar_minmax {
+                    if args.iter().any(|a| {
+                        column_ref_resolves_to_outer(a, inner_columns, outer_schema)
+                    }) {
+                        return Some(name.to_string());
+                    }
+                }
+            }
+            for arg in args {
+                if let Some(found) =
+                    find_outer_correlated_aggregate(arg, inner_columns, outer_schema)
+                {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            find_outer_correlated_aggregate(left, inner_columns, outer_schema)
+                .or_else(|| find_outer_correlated_aggregate(right, inner_columns, outer_schema))
+        }
+        Expression::UnaryOp { expr, .. } => {
+            find_outer_correlated_aggregate(expr, inner_columns, outer_schema)
+        }
+        Expression::Cast { expr, .. } => {
+            find_outer_correlated_aggregate(expr, inner_columns, outer_schema)
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                if let Some(found) = find_outer_correlated_aggregate(op, inner_columns, outer_schema) {
+                    return Some(found);
+                }
+            }
+            for w in when_clauses {
+                for cond in &w.conditions {
+                    if let Some(found) = find_outer_correlated_aggregate(cond, inner_columns, outer_schema) {
+                        return Some(found);
+                    }
+                }
+                if let Some(found) =
+                    find_outer_correlated_aggregate(&w.result, inner_columns, outer_schema)
+                {
+                    return Some(found);
+                }
+            }
+            if let Some(else_expr) = else_result {
+                find_outer_correlated_aggregate(else_expr, inner_columns, outer_schema)
+            } else {
+                None
+            }
+        }
+        // Don't recurse into nested scalar subqueries — those have their own
+        // scope and are validated separately.
+        _ => None,
+    }
+}
+
+/// True if the column references inside an aggregate's args/order_by/filter
+/// resolve to the outer schema rather than the subquery's own FROM columns.
+fn aggregate_args_correlate_outer(
+    args: &[Expression],
+    order_by: Option<&[vibesql_ast::OrderByItem]>,
+    filter: Option<&Expression>,
+    inner_columns: &HashSet<String>,
+    outer_schema: &CombinedSchema,
+) -> bool {
+    let arg_correlated = args
+        .iter()
+        .any(|a| column_ref_resolves_to_outer(a, inner_columns, outer_schema));
+    let order_correlated = order_by.is_some_and(|items| {
+        items
+            .iter()
+            .any(|i| column_ref_resolves_to_outer(&i.expr, inner_columns, outer_schema))
+    });
+    let filter_correlated = filter.is_some_and(|f| {
+        column_ref_resolves_to_outer(f, inner_columns, outer_schema)
+    });
+    arg_correlated || order_correlated || filter_correlated
+}
+
+/// True if the expression contains at least one ColumnRef that resolves to
+/// the outer scope but not the inner subquery's own FROM columns.
+///
+/// "Resolves to outer" means: the column name is present in `outer_schema`
+/// AND not present in `inner_columns`. A qualified reference whose table
+/// name is not visible in the inner scope but whose name is in `outer_schema`
+/// also counts as outer-correlated.
+fn column_ref_resolves_to_outer(
+    expr: &Expression,
+    inner_columns: &HashSet<String>,
+    outer_schema: &CombinedSchema,
+) -> bool {
+    match expr {
+        Expression::ColumnRef(col_id) => {
+            let col_name = col_id.column_canonical().to_lowercase();
+            // If the inner scope has this column, the reference is local.
+            if inner_columns.contains(&col_name) {
+                return false;
+            }
+            // Otherwise it must resolve to the outer scope to be a "misuse"
+            // (an unresolvable reference would be reported elsewhere).
+            outer_schema.has_column(&col_name)
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            column_ref_resolves_to_outer(left, inner_columns, outer_schema)
+                || column_ref_resolves_to_outer(right, inner_columns, outer_schema)
+        }
+        Expression::UnaryOp { expr, .. } => {
+            column_ref_resolves_to_outer(expr, inner_columns, outer_schema)
+        }
+        Expression::Cast { expr, .. } => {
+            column_ref_resolves_to_outer(expr, inner_columns, outer_schema)
+        }
+        Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
+            args.iter().any(|a| column_ref_resolves_to_outer(a, inner_columns, outer_schema))
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|e| {
+                column_ref_resolves_to_outer(e, inner_columns, outer_schema)
+            }) || when_clauses.iter().any(|w| {
+                w.conditions
+                    .iter()
+                    .any(|c| column_ref_resolves_to_outer(c, inner_columns, outer_schema))
+                    || column_ref_resolves_to_outer(&w.result, inner_columns, outer_schema)
+            }) || else_result.as_ref().is_some_and(|e| {
+                column_ref_resolves_to_outer(e, inner_columns, outer_schema)
+            })
+        }
+        Expression::IsNull { expr, .. } => {
+            column_ref_resolves_to_outer(expr, inner_columns, outer_schema)
+        }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            children
+                .iter()
+                .any(|c| column_ref_resolves_to_outer(c, inner_columns, outer_schema))
+        }
+        // Don't recurse into nested subqueries — their scope is independent.
+        _ => false,
+    }
+}
+
 /// Check if an expression contains any column reference (recursively).
 ///
 /// Used by `validate_subquery_context_misuse` to determine whether an

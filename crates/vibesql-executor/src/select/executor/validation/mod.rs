@@ -25,6 +25,7 @@ pub use aggregates::{
     validate_aggregate_arguments, validate_group_by_window_misuse,
     validate_having_aliased_aggregates, validate_no_nested_aggregates,
     validate_order_by_aliased_window_functions, validate_subquery_context_misuse,
+    validate_window_query_order_by_aggregates,
 };
 pub use column_refs::{extract_column_refs, validate_column_ref};
 pub use join_limits::validate_join_table_limit;

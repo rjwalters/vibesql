@@ -167,6 +167,17 @@ impl SelectExecutor<'_> {
             &stmt.select_list,
         )?;
 
+        // Validate ORDER BY for misuse of outer-correlated aggregates inside
+        // scalar subqueries when the outer query is a window-aggregate query.
+        // Mirrors SQLite's `disallowAggregatesInOrderByCb` walker. (#5094)
+        // e.g., SELECT sum(a) OVER(...) FROM t1 ORDER BY (SELECT sum(a) FROM t2)
+        crate::select::executor::validation::validate_window_query_order_by_aggregates(
+            stmt.order_by.as_deref(),
+            &stmt.select_list,
+            &from_result.schema,
+            self.database,
+        )?;
+
         // Validate GROUP BY clause for misuse of window functions (#4985, #5093)
         // Window functions are not allowed in GROUP BY expressions.
         // For positional/alias GROUP BY references (e.g., `GROUP BY 1`), resolve against
