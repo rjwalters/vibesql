@@ -175,6 +175,26 @@ impl ExpressionEvaluator<'_> {
         }
     }
 
+    /// Check if a SqlValue is numeric (INTEGER, REAL, or NUMERIC storage class).
+    ///
+    /// Used by `apply_affinity_for_comparison` to detect numeric values produced by
+    /// non-literal expressions (e.g., aggregate function results like `count(*)`,
+    /// arithmetic like `1+1`, scalar subqueries) so that TEXT-affinity coercion
+    /// applies to them, mirroring SQLite's affinity rules.
+    fn is_numeric_value(val: &SqlValue) -> bool {
+        matches!(
+            val,
+            SqlValue::Integer(_)
+                | SqlValue::Smallint(_)
+                | SqlValue::Bigint(_)
+                | SqlValue::Unsigned(_)
+                | SqlValue::Float(_)
+                | SqlValue::Real(_)
+                | SqlValue::Double(_)
+                | SqlValue::Numeric(_)
+        )
+    }
+
     /// Try to convert a string SqlValue to a numeric SqlValue.
     /// Returns the original value if the string doesn't look like a number.
     /// This implements SQLite's NUMERIC affinity coercion rules.
@@ -214,11 +234,18 @@ impl ExpressionEvaluator<'_> {
         let left_affinity = self.get_expression_affinity(left_expr);
         let right_affinity = self.get_expression_affinity(right_expr);
 
-        // Case 1: Left is TEXT column, right is numeric literal
-        // SQLite converts numeric literals to text for comparison with TEXT columns.
+        // Case 1: Left is TEXT column, right is a non-column numeric value.
+        // SQLite converts numeric values to text for comparison with TEXT columns.
+        // This applies to numeric literals AND non-column numeric expressions
+        // (aggregates like count(*), arithmetic like 1+1, function calls, scalar subqueries).
+        // It does NOT apply to column refs (those have a column affinity, even if NONE);
+        // TEXT-column vs NONE-column produces strict type-class inequality per whereB.test.
         // Floats must preserve their decimal representation (10.0 → "10.0", not "10")
         // so that TEXT '10' != REAL 10.0 (different string representations).
-        if left_affinity == Some(TypeAffinity::Text) && self.is_numeric_literal(right_expr) {
+        if left_affinity == Some(TypeAffinity::Text)
+            && right_affinity.is_none()
+            && Self::is_numeric_value(&right_val)
+        {
             let right_as_text = match &right_val {
                 SqlValue::Integer(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
                 SqlValue::Smallint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
@@ -241,9 +268,12 @@ impl ExpressionEvaluator<'_> {
             return (left_val, right_as_text);
         }
 
-        // Case 2: Right is TEXT column, left is numeric literal
+        // Case 2: Right is TEXT column, left is a non-column numeric value.
         // Same as Case 1 but symmetric - floats must preserve decimal representation.
-        if right_affinity == Some(TypeAffinity::Text) && self.is_numeric_literal(left_expr) {
+        if right_affinity == Some(TypeAffinity::Text)
+            && left_affinity.is_none()
+            && Self::is_numeric_value(&left_val)
+        {
             let left_as_text = match &left_val {
                 SqlValue::Integer(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
                 SqlValue::Smallint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
