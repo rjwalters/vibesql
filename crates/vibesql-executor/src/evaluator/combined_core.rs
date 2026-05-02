@@ -31,6 +31,9 @@ pub struct CombinedExpressionEvaluator<'a> {
     pub(super) window_mapping: Option<&'a HashMap<WindowFunctionKey, usize>>,
     /// Procedural context for stored procedure/function variable resolution
     pub(super) procedural_context: Option<&'a crate::procedural::ExecutionContext>,
+    /// Trigger context for OLD/NEW pseudo-variable resolution inside trigger bodies
+    /// (e.g. UPDATE...FROM in a trigger body referencing NEW.x / OLD.x)
+    pub(super) trigger_context: Option<&'a crate::trigger_execution::TriggerContext<'a>>,
     /// CTE (Common Table Expression) context for accessing WITH clause results
     pub(super) cte_context: Option<&'a HashMap<String, crate::select::cte::CteResult>>,
     /// Cache for column lookups to avoid repeated schema traversals
@@ -69,6 +72,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_context: None,
             window_mapping: None,
             procedural_context: None,
+            trigger_context: None,
             cte_context: None,
             column_cache: RefCell::new(HashMap::new()),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
@@ -94,6 +98,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_context: None,
             window_mapping: None,
             procedural_context: None,
+            trigger_context: None,
             cte_context: None,
             column_cache: RefCell::new(HashMap::new()),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
@@ -122,6 +127,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_context: None,
             window_mapping: None,
             procedural_context: None,
+            trigger_context: None,
             cte_context: None,
             column_cache: RefCell::new(HashMap::new()),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
@@ -148,6 +154,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_context: None,
             window_mapping: Some(window_mapping),
             procedural_context: None,
+            trigger_context: None,
             cte_context: None,
             column_cache: RefCell::new(HashMap::new()),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
@@ -177,6 +184,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_context: None,
             window_mapping: Some(window_mapping),
             procedural_context: None,
+            trigger_context: None,
             cte_context: None,
             column_cache: RefCell::new(HashMap::new()),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
@@ -204,6 +212,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_context: None,
             window_mapping: Some(window_mapping),
             procedural_context: None,
+            trigger_context: None,
             cte_context: Some(cte_context),
             column_cache: RefCell::new(HashMap::new()),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
@@ -230,6 +239,38 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_context: None,
             window_mapping: None,
             procedural_context: Some(procedural_context),
+            trigger_context: None,
+            cte_context: None,
+            column_cache: RefCell::new(HashMap::new()),
+            subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
+            depth: 0,
+            cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
+            enable_cse: super::caching::is_cse_enabled(),
+            correlation_cache: Rc::new(RefCell::new(HashMap::new())),
+            subquery_hash_cache: Rc::new(RefCell::new(HashMap::new())),
+        }
+    }
+
+    /// Create a new combined expression evaluator with database and trigger context
+    ///
+    /// Used by the synthetic SELECT inside `UPDATE … FROM …` when the UPDATE is
+    /// running inside a trigger body, so that `OLD.col` / `NEW.col` references in
+    /// the WHERE clause and SET expressions can be resolved against the firing row.
+    pub(crate) fn with_database_and_trigger_context(
+        schema: &'a CombinedSchema,
+        database: &'a vibesql_storage::Database,
+        trigger_context: &'a crate::trigger_execution::TriggerContext<'a>,
+    ) -> Self {
+        CombinedExpressionEvaluator {
+            schema,
+            database: Some(database),
+            outer_row: None,
+            outer_schema: None,
+            outer_rows: None,
+            outer_context: None,
+            window_mapping: None,
+            procedural_context: None,
+            trigger_context: Some(trigger_context),
             cte_context: None,
             column_cache: RefCell::new(HashMap::new()),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
@@ -256,6 +297,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_context: None,
             window_mapping: None,
             procedural_context: None,
+            trigger_context: None,
             cte_context: Some(cte_context),
             column_cache: RefCell::new(HashMap::new()),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
@@ -284,6 +326,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_context: None,
             window_mapping: None,
             procedural_context: None,
+            trigger_context: None,
             cte_context: Some(cte_context),
             column_cache: RefCell::new(HashMap::new()),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
@@ -312,6 +355,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_context: None,
             window_mapping: None,
             procedural_context: Some(procedural_context),
+            trigger_context: None,
             cte_context: Some(cte_context),
             column_cache: RefCell::new(HashMap::new()),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
@@ -399,6 +443,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_context: self.outer_context,
             window_mapping: self.window_mapping,
             procedural_context: self.procedural_context,
+            trigger_context: self.trigger_context,
             cte_context: self.cte_context,
             // Share the column cache between parent and child evaluators
             column_cache: RefCell::new(self.column_cache.borrow().clone()),
@@ -430,6 +475,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_context: self.outer_context,
             window_mapping: self.window_mapping,
             procedural_context: self.procedural_context,
+            trigger_context: self.trigger_context,
             cte_context: self.cte_context,
             column_cache: RefCell::new(HashMap::new()),
             subquery_cache: self.subquery_cache.clone(),
@@ -537,6 +583,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             outer_context: None,
             window_mapping,
             procedural_context: None,
+            trigger_context: None,
             cte_context,
             column_cache: RefCell::new(HashMap::new()),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),

@@ -113,6 +113,19 @@ impl CombinedExpressionEvaluator<'_> {
         ))?;
         let sql_mode = database.sql_mode();
 
+        // Handle row value IN subquery: (a, b) IN (SELECT x, y FROM t)
+        // SQL:1999 Section 8.4 - Row value left-hand side requires the subquery's
+        // column count to match the row arity, and matching is done element-wise.
+        if let vibesql_ast::Expression::RowValueConstructor(expr_elements) = expr {
+            return self.eval_row_value_in_subquery(
+                expr_elements,
+                subquery,
+                negated,
+                row,
+                database,
+            );
+        }
+
         // Evaluate the left-hand expression
         let expr_val = self.eval(expr, row)?;
 
@@ -218,13 +231,13 @@ impl CombinedExpressionEvaluator<'_> {
                         // actually references columns from the outer scope (e.g.,
                         // unqualified column refs in nested derived tables).
                         // Retry with outer context for column resolution.
-                        let merged_schema =
-                            if !self.schema.table_schemas.is_empty() || self.outer_schema.is_some()
-                            {
-                                Some(build_merged_outer_schema(self.schema, self.outer_schema))
-                            } else {
-                                None
-                            };
+                        let merged_schema = if !self.schema.table_schemas.is_empty()
+                            || self.outer_schema.is_some()
+                        {
+                            Some(build_merged_outer_schema(self.schema, self.outer_schema))
+                        } else {
+                            None
+                        };
 
                         let merged_row = if merged_schema.is_some() {
                             Some(build_merged_outer_row(row, self.outer_row))
@@ -237,18 +250,11 @@ impl CombinedExpressionEvaluator<'_> {
                         {
                             if let Some(cte_ctx) = self.cte_context {
                                 crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
-                                    database,
-                                    outer_row,
-                                    schema,
-                                    cte_ctx,
-                                    self.depth,
+                                    database, outer_row, schema, cte_ctx, self.depth,
                                 )
                             } else {
                                 crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                                    database,
-                                    outer_row,
-                                    schema,
-                                    self.depth,
+                                    database, outer_row, schema, self.depth,
                                 )
                             }
                         } else if let Some(cte_ctx) = self.cte_context {
@@ -263,11 +269,7 @@ impl CombinedExpressionEvaluator<'_> {
                         let column_count = if !rows.is_empty() {
                             rows[0].values.len()
                         } else {
-                            compute_select_list_column_count(
-                                subquery,
-                                database,
-                                self.cte_context,
-                            )?
+                            compute_select_list_column_count(subquery, database, self.cte_context)?
                         };
 
                         if column_count != 1 {
@@ -374,6 +376,167 @@ impl CombinedExpressionEvaluator<'_> {
 
         // For correlated subqueries, use linear search (they change each time)
         eval_in_linear(&expr_val, &rows, negated, sql_mode, left_affinity, subquery_affinity)
+    }
+
+    /// Evaluate row value IN subquery: `(a, b) IN (SELECT x, y FROM t)`
+    ///
+    /// SQL:1999 Section 8.4: Row value IN predicate
+    /// A row value matches if it equals any row from the subquery, with matching
+    /// performed element-wise (lhs[i] = rhs[i] for all i).
+    ///
+    /// Behavior:
+    /// - The subquery must produce exactly the same number of columns as the row
+    ///   value's arity; otherwise returns SubqueryColumnCountMismatch.
+    /// - NULL semantics follow SQL three-valued logic. Any NULL on either side of
+    ///   an element comparison makes the row's match UNKNOWN. If no row matches
+    ///   exactly and any NULL was seen, the result is NULL.
+    /// - Empty subquery results: `(...) IN ()` is FALSE, `(...) NOT IN ()` is TRUE.
+    fn eval_row_value_in_subquery(
+        &self,
+        expr_elements: &[vibesql_ast::Expression],
+        subquery: &vibesql_ast::SelectStmt,
+        negated: bool,
+        row: &vibesql_storage::Row,
+        database: &vibesql_storage::Database,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        use vibesql_types::SqlValue;
+
+        let expected_columns = expr_elements.len();
+
+        // Empty row values are not allowed
+        if expected_columns == 0 {
+            return Err(ExecutorError::UnsupportedExpression(
+                "Empty row value constructors are not allowed".to_string(),
+            ));
+        }
+
+        // Evaluate all elements of the left row value
+        let mut expr_values = Vec::with_capacity(expected_columns);
+        let mut has_null_element = false;
+        for elem_expr in expr_elements {
+            let val = self.eval(elem_expr, row)?;
+            if matches!(val, SqlValue::Null) {
+                has_null_element = true;
+            }
+            expr_values.push(val);
+        }
+
+        // Execute the subquery. We always run with outer/CTE context available
+        // because correlated row-value IN subqueries are common (and the cost of
+        // building the merged context is negligible for these queries).
+        let merged_schema = if !self.schema.table_schemas.is_empty() || self.outer_schema.is_some()
+        {
+            Some(build_merged_outer_schema(self.schema, self.outer_schema))
+        } else {
+            None
+        };
+        let merged_row = if merged_schema.is_some() {
+            Some(build_merged_outer_row(row, self.outer_row))
+        } else {
+            None
+        };
+
+        let select_executor =
+            if let (Some(ref schema), Some(ref outer_row)) = (&merged_schema, &merged_row) {
+                if let Some(cte_ctx) = self.cte_context {
+                    crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
+                        database, outer_row, schema, cte_ctx, self.depth,
+                    )
+                } else {
+                    crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                        database, outer_row, schema, self.depth,
+                    )
+                }
+            } else if let Some(cte_ctx) = self.cte_context {
+                crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+            } else {
+                crate::select::SelectExecutor::new_with_depth(database, self.depth)
+            };
+
+        let rows = select_executor.execute(subquery)?;
+
+        // Validate column count - must match the row value arity
+        let column_count = if !rows.is_empty() {
+            rows[0].values.len()
+        } else {
+            compute_select_list_column_count(subquery, database, self.cte_context)?
+        };
+
+        if column_count != expected_columns {
+            return Err(ExecutorError::SubqueryColumnCountMismatch {
+                expected: expected_columns,
+                actual: column_count,
+            });
+        }
+
+        // Empty subquery result: (...) IN () = FALSE, (...) NOT IN () = TRUE
+        if rows.is_empty() {
+            return Ok(SqlValue::Boolean(negated));
+        }
+
+        let sql_mode = database.sql_mode();
+        let mut found_null_in_subquery = false;
+
+        // Compare with each row from the subquery using element-wise equality
+        for subquery_row in &rows {
+            let mut all_equal = true;
+            let mut has_null_comparison = false;
+
+            for (i, expr_val) in expr_values.iter().enumerate() {
+                let subquery_val = subquery_row
+                    .get(i)
+                    .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: i })?;
+
+                // NULL on either side propagates as UNKNOWN for this element
+                if matches!(expr_val, SqlValue::Null) || matches!(subquery_val, SqlValue::Null) {
+                    has_null_comparison = true;
+                    if matches!(subquery_val, SqlValue::Null) {
+                        found_null_in_subquery = true;
+                    }
+                    continue;
+                }
+
+                let eq_result = ExpressionEvaluator::eval_binary_op_static(
+                    expr_val,
+                    &vibesql_ast::BinaryOperator::Equal,
+                    subquery_val,
+                    sql_mode.clone(),
+                )?;
+
+                match eq_result {
+                    SqlValue::Boolean(true) => {
+                        // Equal at this position - continue
+                    }
+                    SqlValue::Boolean(false) => {
+                        // Not equal - this row can't match
+                        all_equal = false;
+                        break;
+                    }
+                    SqlValue::Null => {
+                        has_null_comparison = true;
+                    }
+                    _ => {
+                        return Err(ExecutorError::TypeError(format!(
+                            "Comparison returned non-boolean: {:?}",
+                            eq_result
+                        )));
+                    }
+                }
+            }
+
+            if all_equal && !has_null_comparison {
+                // Found an exact match
+                return Ok(SqlValue::Boolean(!negated));
+            }
+        }
+
+        // No exact match found
+        if has_null_element || found_null_in_subquery {
+            // Any NULL involvement makes the result UNKNOWN
+            Ok(SqlValue::Null)
+        } else {
+            Ok(SqlValue::Boolean(negated))
+        }
     }
 }
 

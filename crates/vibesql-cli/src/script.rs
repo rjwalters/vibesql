@@ -385,9 +385,12 @@ fn parse_statements(script: &str) -> Vec<String> {
         if !in_string && ch == ';' {
             current_statement.push(ch); // Include the semicolon
             if begin_depth == 0 {
-                // Only split if we're not inside a BEGIN...END block
+                // Only split if we're not inside a BEGIN...END block.
+                // SQLite treats consecutive semicolons (";;") and bare ";" as
+                // empty statements (no-ops); reject anything that is purely
+                // whitespace + semicolons so we don't pass it to the parser.
                 let trimmed = current_statement.trim();
-                if !trimmed.is_empty() {
+                if !trimmed.is_empty() && trimmed.chars().any(|c| c != ';' && !c.is_whitespace()) {
                     statements.push(trimmed.to_string());
                 }
                 current_statement.clear();
@@ -461,6 +464,24 @@ mod tests {
     #[test]
     fn test_parse_empty_script() {
         let script = "";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_consecutive_semicolons() {
+        // SQLite treats `;;` and bare `;` as no-ops (empty statements).
+        // We should not pass them to the parser.
+        let script = "CREATE TABLE t1 (a INT);; SELECT 1;";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "CREATE TABLE t1 (a INT);");
+        assert_eq!(stmts[1], "SELECT 1;");
+    }
+
+    #[test]
+    fn test_parse_only_semicolons() {
+        let script = ";;;";
         let stmts = parse_statements(script);
         assert_eq!(stmts.len(), 0);
     }

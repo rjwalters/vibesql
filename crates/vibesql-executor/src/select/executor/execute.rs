@@ -66,6 +66,35 @@ impl SelectExecutor<'_> {
         // SELECT (SELECT count(x) FROM t35b) FROM t35a; is valid in SQLite.
         super::validation::validate_aggregate_subquery_outer_refs(stmt, self.database)?;
 
+        // Validate bare scalar subqueries in the SELECT list / ORDER BY for
+        // misuse of aggregate / window / row-value (#5069). A "bare" scalar
+        // subquery (no FROM) re-borrows the outer aggregation context, so any
+        // aggregate inside it is a misuse of the outer scope.
+        // Examples:
+        //   SELECT ntile((SELECT sum(x))) OVER (ORDER BY x) FROM t1;
+        //     → "misuse of aggregate: sum()"
+        //   ... ORDER BY (SELECT (a, b))
+        //     → "row value misused"
+        for item in &stmt.select_list {
+            if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                super::validation::validate_subquery_context_misuse(expr)?;
+            }
+        }
+        if let Some(order_by) = stmt.order_by.as_deref() {
+            for item in order_by {
+                super::validation::validate_subquery_context_misuse(&item.expr)?;
+            }
+        }
+
+        // Validate GROUP BY clauses across this statement and all nested
+        // subqueries for window-function misuse, including positional
+        // (`GROUP BY 1`) and alias references that resolve to a window
+        // function in the subquery's SELECT list (#5093, window1.test 47.2).
+        // SQLite raises this at prepare time, so we must walk subqueries
+        // here rather than relying on per-SELECT execution paths (the
+        // outer WHERE may short-circuit before the inner SELECT executes).
+        super::validation::validate_group_by_window_misuse(stmt)?;
+
         #[cfg(feature = "profile-q6")]
         let execute_start = std::time::Instant::now();
 
@@ -1002,6 +1031,13 @@ impl SelectExecutor<'_> {
         // Add outer context for correlated subqueries (#2998)
         if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
             exec_ctx = exec_ctx.with_outer_context(outer_row, outer_schema);
+        } else if let Some(proc_ctx) = self.procedural_context {
+            // Procedural variables in WHERE / SELECT (e.g. stored function bodies)
+            exec_ctx = exec_ctx.with_procedural_context(proc_ctx);
+        } else if let Some(trigger_ctx) = self.trigger_context {
+            // Issue #5082: thread trigger context so OLD/NEW pseudo-vars resolve in
+            // the synthetic SELECT used by UPDATE…FROM inside trigger bodies.
+            exec_ctx = exec_ctx.with_trigger_context(trigger_ctx);
         }
         // Add CTE context if available
         if !cte_results.is_empty() {

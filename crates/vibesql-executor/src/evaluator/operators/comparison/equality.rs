@@ -234,4 +234,42 @@ mod tests {
             SqlValue::Boolean(false)
         );
     }
+
+    #[test]
+    fn test_blob_vs_text_type_ordering() {
+        // SQLite type ordering: TEXT < BLOB
+        // 'abc' < x'6162' (TEXT is less than any BLOB)
+        // Equality across storage classes is always false.
+        // Verified: SELECT 'abc' = x'616263' → 0
+        let text = SqlValue::Varchar(arcstr::ArcStr::from("abc"));
+        let blob = SqlValue::Blob(vec![0x61, 0x62, 0x63]);
+        assert_eq!(equal(&text, &blob).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(equal(&blob, &text).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(not_equal(&text, &blob).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(not_equal(&blob, &text).unwrap(), SqlValue::Boolean(true));
+    }
+
+    #[test]
+    fn test_blob_vs_numeric_type_ordering() {
+        // SQLite type ordering: INTEGER/REAL < BLOB
+        // Numeric storage class is never equal to BLOB storage class.
+        let blob = SqlValue::Blob(vec![0x01]);
+        assert_eq!(equal(&SqlValue::Integer(1), &blob).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(equal(&blob, &SqlValue::Integer(1)).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(equal(&SqlValue::Real(1.0), &blob).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(equal(&blob, &SqlValue::Real(1.0)).unwrap(), SqlValue::Boolean(false));
+    }
+
+    #[test]
+    fn test_blob_vs_blob_bytewise() {
+        // BLOB vs BLOB: SQLite uses memcmp/bytewise comparison
+        // Verified: SELECT x'616263' = x'616263' → 1
+        let a = SqlValue::Blob(vec![0x61, 0x62, 0x63]);
+        let b = SqlValue::Blob(vec![0x61, 0x62, 0x63]);
+        assert_eq!(equal(&a, &b).unwrap(), SqlValue::Boolean(true));
+
+        let c = SqlValue::Blob(vec![0x61, 0x62]);
+        assert_eq!(equal(&a, &c).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(not_equal(&a, &c).unwrap(), SqlValue::Boolean(true));
+    }
 }

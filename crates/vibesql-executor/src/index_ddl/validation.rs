@@ -111,9 +111,14 @@ fn validate_no_window_functions_in_index(stmt: &CreateIndexStmt) -> Result<(), E
         }
     }
 
-    // Note: Partial indexes (WHERE clause in CREATE INDEX) are not yet supported in the parser,
-    // so we don't need to validate window functions in the WHERE clause.
-    // When partial index support is added, validation should be added here.
+    // Check the partial-index WHERE clause for window-function misuse (#5091).
+    // Window functions are never legal here, even when the rest of the
+    // partial-index pipeline is unimplemented.
+    if let Some(where_expr) = &stmt.where_clause {
+        if let Some(window_name) = crate::select::find_window_function_in_expression(where_expr) {
+            return Err(ExecutorError::MisuseOfWindowFunction { function_name: window_name });
+        }
+    }
 
     Ok(())
 }

@@ -64,8 +64,15 @@ impl SqlExecutor {
                     Ok(db) => db,
                     Err(ref e) if e.to_string().contains("SQLite database detected") => {
                         // Auto-import SQLite database
-                        let result = crate::sqlite_io::import_sqlite(&db_path)
-                            .map_err(|e| anyhow::anyhow!("Failed to import SQLite database: {}", e))?;
+                        let result = crate::sqlite_io::import_sqlite(&db_path).map_err(|e| {
+                            anyhow::anyhow!(
+                                "Failed to read binary SQLite database at {}: {}. \
+                                 If this file is a VibeSQL SQL dump, rename it with a .sql extension \
+                                 to load it in SQL dump format.",
+                                db_path,
+                                e
+                            )
+                        })?;
                         for warning in &result.warnings {
                             eprintln!("{}", warning);
                         }
@@ -215,8 +222,13 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::CreateTrigger(trigger_stmt) => {
-                match vibesql_executor::TriggerExecutor::create_trigger(&mut self.db, &trigger_stmt)
-                {
+                // Pass original SQL so the trigger survives SQL-dump persistence
+                // (mirrors the sql_definition handling for views above).
+                match vibesql_executor::TriggerExecutor::create_trigger_with_sql(
+                    &mut self.db,
+                    &trigger_stmt,
+                    Some(sql),
+                ) {
                     Ok(_) => {
                         result.row_count = 0; // DDL doesn't return rows
                     }
@@ -1012,7 +1024,37 @@ impl SqlExecutor {
             "fkid".to_string(),
         ];
 
-        let mut rows = Vec::new();
+        // Schema-qualified pragma handling. VibeSQL only carries a single schema today,
+        // so:
+        //   PRAGMA <unknown>.foreign_key_check;            -> return empty (no tables in that schema)
+        //   PRAGMA <unknown>.foreign_key_check(table);     -> error "no such table: <schema>.<table>"
+        // "main" and the current schema both refer to the only available schema.
+        let current_schema = self.db.catalog.get_current_schema().to_string();
+        if let Some(ref schema) = stmt.database {
+            let is_current = schema.eq_ignore_ascii_case(&current_schema)
+                || schema.eq_ignore_ascii_case("main");
+            if !is_current {
+                let table_part = match &stmt.value {
+                    Some(vibesql_ast::PragmaValue::Identifier(name)) => Some(name.clone()),
+                    Some(vibesql_ast::PragmaValue::String(name)) => Some(name.clone()),
+                    _ => None,
+                };
+                if let Some(t) = table_part {
+                    anyhow::bail!("no such table: {}.{}", schema, t);
+                }
+                return Ok(QueryResult {
+                    columns,
+                    rows: Vec::new(),
+                    row_count: 0,
+                    execution_time_ms: None,
+                    message: None,
+                });
+            }
+        }
+
+        // Tuple is (table, rowid_or_null, parent, fk_id). None rowid means WITHOUT ROWID,
+        // which SQLite reports as NULL.
+        let mut rows: Vec<(String, Option<i64>, String, usize)> = Vec::new();
         let table_name = match &stmt.value {
             Some(vibesql_ast::PragmaValue::Identifier(name)) => Some(name.clone()),
             Some(vibesql_ast::PragmaValue::String(name)) => Some(name.clone()),
@@ -1027,9 +1069,13 @@ impl SqlExecutor {
         };
 
         for tbl_name in &tables_to_check {
-            let fk_constraints =
+            let (fk_constraints, rowid_alias_idx, without_rowid) =
                 if let Some(schema) = self.db.catalog.get_table(tbl_name) {
-                    schema.foreign_keys.clone()
+                    (
+                        schema.foreign_keys.clone(),
+                        schema.rowid_alias_column,
+                        schema.without_rowid,
+                    )
                 } else {
                     continue;
                 };
@@ -1053,7 +1099,45 @@ impl SqlExecutor {
                 continue;
             };
 
+            // Compute SQLite-compatible rowid for each child row.
+            // - WITHOUT ROWID tables: report NULL rowid
+            // - INTEGER PRIMARY KEY tables: rowid is the IPK column value
+            // - Other tables: rowid is the 1-based physical index (storage starts at 0)
+            let row_with_rowid: Vec<(Option<i64>, &vibesql_storage::Row)> = child_rows
+                .iter()
+                .map(|(phys_idx, row)| {
+                    if without_rowid {
+                        return (None, row);
+                    }
+                    let rowid = match rowid_alias_idx
+                        .and_then(|idx| row.values.get(idx))
+                    {
+                        Some(vibesql_types::SqlValue::Integer(v)) => *v,
+                        _ => (*phys_idx as i64) + 1,
+                    };
+                    (Some(rowid), row)
+                })
+                .collect();
+
             for (fk_id, fk) in fk_constraints.iter().enumerate() {
+                // Get parent column collations so we can match SQLite's FK comparison rules
+                // (numeric coercion + parent-column collation, e.g. NOCASE).
+                let parent_column_collations: Vec<Option<String>> = if let Some(parent_schema) =
+                    self.db.catalog.get_table(&fk.parent_table)
+                {
+                    fk.parent_column_indices
+                        .iter()
+                        .map(|&idx| {
+                            parent_schema
+                                .columns
+                                .get(idx)
+                                .and_then(|c| c.collation.clone())
+                        })
+                        .collect()
+                } else {
+                    vec![None; fk.parent_column_indices.len()]
+                };
+
                 // Get parent table data
                 let parent_qualified = format!(
                     "{}.{}",
@@ -1074,20 +1158,30 @@ impl SqlExecutor {
                             .map(|(_, row)| row.clone())
                             .collect()
                     } else {
-                        // Parent table doesn't exist - all rows are violations
-                        for (row_id, _) in &child_rows {
-                            rows.push(vec![
-                                Some(tbl_name.clone()),
-                                Some(row_id.to_string()),
-                                Some(fk.parent_table.clone()),
-                                Some(fk_id.to_string()),
-                            ]);
+                        // Parent table doesn't exist - every row whose FK columns are all
+                        // non-NULL is a violation. NULL FK values never violate (matches SQLite).
+                        for (rowid, child_row) in &row_with_rowid {
+                            let any_null = fk.column_indices.iter().any(|&idx| {
+                                matches!(
+                                    child_row.values.get(idx),
+                                    Some(vibesql_types::SqlValue::Null) | None
+                                )
+                            });
+                            if any_null {
+                                continue;
+                            }
+                            rows.push((
+                                tbl_name.clone(),
+                                *rowid,
+                                fk.parent_table.clone(),
+                                fk_id,
+                            ));
                         }
                         continue;
                     };
 
                 // Check each child row against parent rows
-                for (row_id, child_row) in &child_rows {
+                for (rowid, child_row) in &row_with_rowid {
                     let child_values: Vec<_> = fk
                         .column_indices
                         .iter()
@@ -1110,31 +1204,119 @@ impl SqlExecutor {
 
                     // Check if matching parent row exists
                     let found = parent_rows.iter().any(|parent_row| {
-                        fk.parent_column_indices.iter().zip(child_values.iter()).all(
-                            |(&parent_idx, child_val)| {
+                        fk.parent_column_indices
+                            .iter()
+                            .zip(child_values.iter())
+                            .enumerate()
+                            .all(|(i, (&parent_idx, child_val))| {
                                 if parent_idx < parent_row.values.len() {
-                                    &parent_row.values[parent_idx] == *child_val
+                                    fk_values_equal(
+                                        child_val,
+                                        &parent_row.values[parent_idx],
+                                        parent_column_collations
+                                            .get(i)
+                                            .and_then(|c| c.as_deref()),
+                                    )
                                 } else {
                                     false
                                 }
-                            },
-                        )
+                            })
                     });
 
                     if !found {
-                        rows.push(vec![
-                            Some(tbl_name.clone()),
-                            Some(row_id.to_string()),
-                            Some(fk.parent_table.clone()),
-                            Some(fk_id.to_string()),
-                        ]);
+                        rows.push((
+                            tbl_name.clone(),
+                            *rowid,
+                            fk.parent_table.clone(),
+                            fk_id,
+                        ));
                     }
                 }
             }
         }
 
-        let row_count = rows.len();
-        Ok(QueryResult { columns, rows, row_count, execution_time_ms: None, message: None })
+        // Sort violations by (table, rowid, fk_id) so output matches SQLite's btree order.
+        rows.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(a.1.cmp(&b.1))
+                .then(a.3.cmp(&b.3))
+        });
+
+        let final_rows: Vec<Vec<Option<String>>> = rows
+            .into_iter()
+            .map(|(t, rid, p, fk)| {
+                vec![
+                    Some(t),
+                    rid.map(|v| v.to_string()),
+                    Some(p),
+                    Some(fk.to_string()),
+                ]
+            })
+            .collect();
+
+        let row_count = final_rows.len();
+        Ok(QueryResult {
+            columns,
+            rows: final_rows,
+            row_count,
+            execution_time_ms: None,
+            message: None,
+        })
+    }
+}
+
+/// SQLite-style equality for FOREIGN KEY comparisons.
+///
+/// SQLite considers a child value to match a parent value when:
+/// - they are equal under VibeSQL's strict typed equality, OR
+/// - both can be coerced to the same numeric value (e.g. INTEGER 88 == TEXT "88"), OR
+/// - both are textual and equal under the parent column's collation (e.g. NOCASE).
+fn fk_values_equal(
+    child: &vibesql_types::SqlValue,
+    parent: &vibesql_types::SqlValue,
+    parent_collation: Option<&str>,
+) -> bool {
+    if child == parent {
+        return true;
+    }
+    if let (Some(c), Some(p)) = (sql_value_as_f64(child), sql_value_as_f64(parent)) {
+        if c == p {
+            return true;
+        }
+    }
+    if let (Some(c), Some(p)) = (sql_value_as_text(child), sql_value_as_text(parent)) {
+        match parent_collation.map(|s| s.to_ascii_lowercase()) {
+            Some(ref name) if name == "nocase" => return c.eq_ignore_ascii_case(p),
+            Some(ref name) if name == "rtrim" => {
+                return c.trim_end_matches(' ') == p.trim_end_matches(' ');
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn sql_value_as_f64(v: &vibesql_types::SqlValue) -> Option<f64> {
+    use vibesql_types::SqlValue::*;
+    match v {
+        Integer(i) => Some(*i as f64),
+        Smallint(i) => Some(*i as f64),
+        Bigint(i) => Some(*i as f64),
+        Unsigned(i) => Some(*i as f64),
+        Float(f) => Some(*f as f64),
+        Real(r) => Some(*r as f64),
+        Double(d) | Numeric(d) => Some(*d),
+        Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Character(s) | Varchar(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+fn sql_value_as_text(v: &vibesql_types::SqlValue) -> Option<&str> {
+    use vibesql_types::SqlValue::*;
+    match v {
+        Character(s) | Varchar(s) => Some(s.as_str()),
+        _ => None,
     }
 }
 
