@@ -443,6 +443,7 @@ mod tests {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             }],
+            where_clause: None,
         };
         CreateIndexExecutor::execute(&index1_stmt, &mut db).unwrap();
 
@@ -456,6 +457,7 @@ mod tests {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             }],
+            where_clause: None,
         };
         CreateIndexExecutor::execute(&index2_stmt, &mut db).unwrap();
 
@@ -531,6 +533,7 @@ mod tests {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             }],
+            where_clause: None,
         };
         CreateIndexExecutor::execute(&index_stmt, &mut db).unwrap();
 

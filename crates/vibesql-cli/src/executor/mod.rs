@@ -64,8 +64,15 @@ impl SqlExecutor {
                     Ok(db) => db,
                     Err(ref e) if e.to_string().contains("SQLite database detected") => {
                         // Auto-import SQLite database
-                        let result = crate::sqlite_io::import_sqlite(&db_path)
-                            .map_err(|e| anyhow::anyhow!("Failed to import SQLite database: {}", e))?;
+                        let result = crate::sqlite_io::import_sqlite(&db_path).map_err(|e| {
+                            anyhow::anyhow!(
+                                "Failed to read binary SQLite database at {}: {}. \
+                                 If this file is a VibeSQL SQL dump, rename it with a .sql extension \
+                                 to load it in SQL dump format.",
+                                db_path,
+                                e
+                            )
+                        })?;
                         for warning in &result.warnings {
                             eprintln!("{}", warning);
                         }
@@ -215,8 +222,13 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::CreateTrigger(trigger_stmt) => {
-                match vibesql_executor::TriggerExecutor::create_trigger(&mut self.db, &trigger_stmt)
-                {
+                // Pass original SQL so the trigger survives SQL-dump persistence
+                // (mirrors the sql_definition handling for views above).
+                match vibesql_executor::TriggerExecutor::create_trigger_with_sql(
+                    &mut self.db,
+                    &trigger_stmt,
+                    Some(sql),
+                ) {
                     Ok(_) => {
                         result.row_count = 0; // DDL doesn't return rows
                     }

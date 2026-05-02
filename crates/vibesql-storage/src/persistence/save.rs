@@ -473,6 +473,41 @@ impl Database {
         writeln!(writer)
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
+        // Export triggers
+        //
+        // Triggers must be emitted *after* views so that INSTEAD OF triggers (which
+        // require their target view to already exist) can be reconstructed when the
+        // dump is reloaded. We can only round-trip triggers whose original SQL text
+        // was preserved on creation; without that text we have no way to reproduce
+        // the BEGIN ... END action body, so we skip with a comment instead of writing
+        // garbage that would fail to parse on reload.
+        writeln!(writer, "-- Triggers")
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        for trigger_name in self.catalog.list_triggers() {
+            if let Some(trigger_def) = self.catalog.get_trigger(&trigger_name) {
+                match trigger_def.sql_definition.as_ref() {
+                    Some(sql) => {
+                        let sql = sql.trim_end_matches(';').trim();
+                        writeln!(writer, "{};", sql).map_err(|e| {
+                            StorageError::NotImplemented(format!("Write error: {}", e))
+                        })?;
+                    }
+                    None => {
+                        writeln!(
+                            writer,
+                            "-- Skipped trigger '{}' (no preserved SQL text)",
+                            trigger_def.name
+                        )
+                        .map_err(|e| {
+                            StorageError::NotImplemented(format!("Write error: {}", e))
+                        })?;
+                    }
+                }
+            }
+        }
+        writeln!(writer)
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
         writeln!(writer, "-- End of dump")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 

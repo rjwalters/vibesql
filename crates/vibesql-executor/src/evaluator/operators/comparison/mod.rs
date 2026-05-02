@@ -220,6 +220,7 @@ where
             Integer(_) | Smallint(_) | Bigint(_) | Float(_) | Real(_) | Double(_) | Numeric(_)
         )
     };
+    let is_blob = |v: &SqlValue| matches!(v, Blob(_));
 
     // SQLite type ordering: INTEGER/REAL < TEXT
     // No coercion - different storage classes are NOT equal
@@ -233,7 +234,30 @@ where
         return Ok(Boolean(predicate(std::cmp::Ordering::Greater)));
     }
 
+    // SQLite type ordering: NULL < INTEGER/REAL < TEXT < BLOB
+    // BLOB is greater than any non-BLOB storage class.
+    // Verified: SELECT 'abc' >= x'6162' → 0, SELECT x'616263' >= 'abc' → 1
+    if is_string(left) && is_blob(right) {
+        // TEXT < BLOB
+        return Ok(Boolean(predicate(std::cmp::Ordering::Less)));
+    }
+    if is_blob(left) && is_string(right) {
+        // BLOB > TEXT
+        return Ok(Boolean(predicate(std::cmp::Ordering::Greater)));
+    }
+    if is_numeric(left) && is_blob(right) {
+        // Numeric < BLOB
+        return Ok(Boolean(predicate(std::cmp::Ordering::Less)));
+    }
+    if is_blob(left) && is_numeric(right) {
+        // BLOB > Numeric
+        return Ok(Boolean(predicate(std::cmp::Ordering::Greater)));
+    }
+
     match (left, right) {
+        // BLOB vs BLOB - bytewise comparison (SQLite memcmp behavior)
+        (Blob(a), Blob(b)) => Ok(Boolean(predicate(a.cmp(b)))),
+
         // Integer comparisons
         (Integer(a), Integer(b)) => Ok(Boolean(predicate(a.cmp(b)))),
 

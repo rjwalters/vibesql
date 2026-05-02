@@ -1,6 +1,33 @@
 {
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": ".loom/hooks/guard-destructive.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": ".loom/hooks/skill-router.sh",
+            "type": "command"
+          },
+          {
+            "command": ".loom/hooks/methodology-inject.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ]
+  },
   "permissions": {
-    "defaultMode": "acceptEdits",
     "allow": [
       "Read",
       "Write",
@@ -164,7 +191,16 @@
       "Bash(GIT_EDITOR=:*)",
       "Bash(SKIP_SLOW=:*)",
       "Bash(VALIDATE=:*)",
-      "Bash(SAVE_ONLY=:*)"
-    ]
+      "Bash(SAVE_ONLY=:*)",
+      "Bash(./.loom/scripts/**:*)",
+      "Bash(convert:*)",
+      "Bash(magick:*)",
+      "Bash(iconutil:*)",
+      "Bash(jot:*)",
+      "Bash(shuf:*)",
+      "Read(/tmp/**)",
+      "Write(/tmp/**)"
+    ],
+    "defaultMode": "acceptEdits"
   }
 }

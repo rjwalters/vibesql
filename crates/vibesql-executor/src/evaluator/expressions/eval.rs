@@ -30,6 +30,32 @@ fn format_float_for_text_comparison(n: f64) -> String {
     }
 }
 
+/// Find an *explicit* COLLATE clause anywhere within the expression's
+/// "collation propagation tree".
+///
+/// SQLite's rule (datatype3 §7.1) is that an explicit `COLLATE` clause inside
+/// any operand of a binary operator beats the column-derived (inherited)
+/// collation of the other operand. We walk through compound expressions that
+/// propagate collation (BinaryOp, UnaryOp, single-arg Function/Aggregate)
+/// looking specifically for a `Collate` node — column-level collations are
+/// *not* considered explicit and are deliberately ignored here.
+fn explicit_collation_of(expr: &vibesql_ast::Expression) -> Option<String> {
+    match expr {
+        vibesql_ast::Expression::Collate { collation, .. } => Some(collation.clone()),
+        vibesql_ast::Expression::BinaryOp { left, right, .. } => {
+            explicit_collation_of(left).or_else(|| explicit_collation_of(right))
+        }
+        vibesql_ast::Expression::UnaryOp { expr, .. } => explicit_collation_of(expr),
+        vibesql_ast::Expression::AggregateFunction { args, .. } if args.len() == 1 => {
+            explicit_collation_of(&args[0])
+        }
+        vibesql_ast::Expression::Function { args, .. } if args.len() == 1 => {
+            explicit_collation_of(&args[0])
+        }
+        _ => None,
+    }
+}
+
 impl ExpressionEvaluator<'_> {
     /// Get the SQLite type affinity of an expression if it's a column reference.
     ///
@@ -65,16 +91,17 @@ impl ExpressionEvaluator<'_> {
 
     /// Get the effective collation for an expression.
     ///
-    /// Returns the collation from:
-    /// 1. Explicit COLLATE clause (highest priority)
-    /// 2. Column-level collation from CREATE TABLE definition
-    /// 3. None (use default binary collation)
-    ///
-    /// SQLite documentation states:
-    /// "A column's collating function can be specified using the COLLATE clause
-    /// in the column definition within the CREATE TABLE statement."
-    ///
-    /// Explicit COLLATE in the query overrides column-level collation.
+    /// Implements SQLite's collation propagation rules
+    /// (see https://sqlite.org/datatype3.html#collation):
+    /// 1. Explicit COLLATE clause has highest priority and propagates outward
+    ///    through compound expressions.
+    /// 2. Column references inherit the column's declared collation.
+    /// 3. Binary operators (including `||`): if either operand has an *explicit*
+    ///    COLLATE, that wins. Otherwise the left operand's collation is used,
+    ///    falling back to the right operand's.
+    /// 4. Unary operators and single-argument functions / aggregates inherit
+    ///    collation from their operand.
+    /// 5. Otherwise, no collation (use default BINARY).
     pub(super) fn get_expression_collation(
         &self,
         expr: &vibesql_ast::Expression,
@@ -90,6 +117,28 @@ impl ExpressionEvaluator<'_> {
                 } else {
                     None
                 }
+            }
+            // Binary operator: explicit COLLATE on either operand wins, else
+            // inherit from the left operand (SQLite rule).
+            vibesql_ast::Expression::BinaryOp { left, right, .. } => {
+                if let Some(c) = explicit_collation_of(left) {
+                    return Some(c);
+                }
+                if let Some(c) = explicit_collation_of(right) {
+                    return Some(c);
+                }
+                self.get_expression_collation(left)
+                    .or_else(|| self.get_expression_collation(right))
+            }
+            // Unary operator: inherit from operand.
+            vibesql_ast::Expression::UnaryOp { expr, .. } => self.get_expression_collation(expr),
+            // Aggregate function with a single argument: inherit from argument.
+            vibesql_ast::Expression::AggregateFunction { args, .. } if args.len() == 1 => {
+                self.get_expression_collation(&args[0])
+            }
+            // Scalar function with a single argument: inherit from argument.
+            vibesql_ast::Expression::Function { args, .. } if args.len() == 1 => {
+                self.get_expression_collation(&args[0])
             }
             // Other expressions don't have intrinsic collation
             _ => None,
@@ -124,6 +173,26 @@ impl ExpressionEvaluator<'_> {
             }
             _ => false,
         }
+    }
+
+    /// Check if a SqlValue is numeric (INTEGER, REAL, or NUMERIC storage class).
+    ///
+    /// Used by `apply_affinity_for_comparison` to detect numeric values produced by
+    /// non-literal expressions (e.g., aggregate function results like `count(*)`,
+    /// arithmetic like `1+1`, scalar subqueries) so that TEXT-affinity coercion
+    /// applies to them, mirroring SQLite's affinity rules.
+    fn is_numeric_value(val: &SqlValue) -> bool {
+        matches!(
+            val,
+            SqlValue::Integer(_)
+                | SqlValue::Smallint(_)
+                | SqlValue::Bigint(_)
+                | SqlValue::Unsigned(_)
+                | SqlValue::Float(_)
+                | SqlValue::Real(_)
+                | SqlValue::Double(_)
+                | SqlValue::Numeric(_)
+        )
     }
 
     /// Try to convert a string SqlValue to a numeric SqlValue.
@@ -165,11 +234,18 @@ impl ExpressionEvaluator<'_> {
         let left_affinity = self.get_expression_affinity(left_expr);
         let right_affinity = self.get_expression_affinity(right_expr);
 
-        // Case 1: Left is TEXT column, right is numeric literal
-        // SQLite converts numeric literals to text for comparison with TEXT columns.
+        // Case 1: Left is TEXT column, right is a non-column numeric value.
+        // SQLite converts numeric values to text for comparison with TEXT columns.
+        // This applies to numeric literals AND non-column numeric expressions
+        // (aggregates like count(*), arithmetic like 1+1, function calls, scalar subqueries).
+        // It does NOT apply to column refs (those have a column affinity, even if NONE);
+        // TEXT-column vs NONE-column produces strict type-class inequality per whereB.test.
         // Floats must preserve their decimal representation (10.0 → "10.0", not "10")
         // so that TEXT '10' != REAL 10.0 (different string representations).
-        if left_affinity == Some(TypeAffinity::Text) && self.is_numeric_literal(right_expr) {
+        if left_affinity == Some(TypeAffinity::Text)
+            && right_affinity.is_none()
+            && Self::is_numeric_value(&right_val)
+        {
             let right_as_text = match &right_val {
                 SqlValue::Integer(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
                 SqlValue::Smallint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
@@ -192,9 +268,12 @@ impl ExpressionEvaluator<'_> {
             return (left_val, right_as_text);
         }
 
-        // Case 2: Right is TEXT column, left is numeric literal
+        // Case 2: Right is TEXT column, left is a non-column numeric value.
         // Same as Case 1 but symmetric - floats must preserve decimal representation.
-        if right_affinity == Some(TypeAffinity::Text) && self.is_numeric_literal(left_expr) {
+        if right_affinity == Some(TypeAffinity::Text)
+            && left_affinity.is_none()
+            && Self::is_numeric_value(&left_val)
+        {
             let left_as_text = match &left_val {
                 SqlValue::Integer(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
                 SqlValue::Smallint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
