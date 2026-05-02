@@ -1,72 +1,55 @@
 # Loom Role Definitions
 
-This directory contains role definition templates for different terminal roles in Loom.
+This directory contains role definitions for Loom terminal configurations.
 
-## ⚠️ Important: Source of Truth
+## Source of Truth
 
-**This directory is the single source of truth for all Loom role definitions.**
+**The single source of truth for all Loom role definitions is `.claude/commands/loom/*.md`.**
 
-- **Edit role files HERE** (in `defaults/roles/*.md`)
-- **Do NOT edit** `.claude/agents/*.md` files directly - they are auto-generated
-- **After editing**, run `pnpm generate:agents` to regenerate Claude Code agent files
+This directory contains:
+- **Symlinks** (`*.md`) pointing to `../.claude/commands/loom/*.md` for Tauri App compatibility
+- **Metadata files** (`*.json`) with default settings for each role
 
-### Why This Pattern?
+### Why Symlinks?
 
-Claude Code agents cannot reference external files - they must be self-contained. To solve this:
+- **Claude Code CLI** uses `.claude/commands/loom/` for slash commands (e.g., `/loom/builder`, `/loom/loom`)
+- **Tauri App** reads role files from `.loom/roles/` for terminal configuration
+- Symlinks ensure both access the same content - single source of truth
 
-1. **Source**: `defaults/roles/*.md` (edit these)
-2. **Generate**: Run `pnpm generate:agents`
-3. **Result**: `.claude/agents/*.md` (YAML frontmatter + role content)
+### Editing Roles
 
-This prevents duplication errors and ensures `.loom/roles/` is always the authoritative source.
+To edit a role definition:
+1. Edit the file in `.claude/commands/loom/<role>.md`
+2. The symlink in `roles/<role>.md` automatically reflects changes
+3. Both CLI and Tauri App get the updated content
 
-## Available Prompts
+## Available Roles
 
-Each prompt consists of two files:
-- **`.md`** - The role definition text (markdown format)
-- **`.json`** - Metadata with default settings (optional)
+| Role | Purpose | Autonomous |
+|------|---------|------------|
+| `architect` | System architecture proposals | 15min |
+| `builder` | Feature implementation | Manual |
+| `champion` | Proposal evaluation and PR auto-merge | 10min |
+| `curator` | Issue enhancement | 5min |
+| `doctor` | Bug fixes and PR feedback | Manual |
+| `driver` | Plain shell environment | Manual |
+| `guide` | Issue triage and prioritization | 15min |
+| `hermit` | Code simplification proposals | 15min |
+| `judge` | Code review | 5min |
+| `loom` | Layer 2 daemon orchestration | 1min |
+| `shepherd` | Layer 1 issue lifecycle orchestration | Manual |
 
-### Prompt Roles
+## Metadata Files (*.json)
 
-- **`default.md`** - Plain shell environment, no specialized role
-- **`worker.md`** - General development worker for features, bugs, and refactoring
-- **`reviewer.md`** - Code review specialist for thorough PR reviews
-- **`architect.md`** - System architecture and technical decision making
-- **`curator.md`** - Issue maintenance and quality improvement
-- **`critic.md`** - Critical analysis and architectural review specialist
-- **`fixer.md`** - Bug fixing and PR maintenance specialist
-- **`triage.md`** - Issue prioritization and focus management
+Each role can have an optional JSON metadata file with default settings:
 
-## Usage
-
-When configuring a terminal role in the Terminal Settings modal, select a prompt file from the dropdown. The prompt will be loaded and the `{{workspace}}` variable will be replaced with your workspace path.
-
-## Creating Custom Prompts
-
-You can add your own prompt files to `.loom/roles/` in any workspace. All `.md` files will automatically appear in the prompt selection dropdown.
-
-### Prompt File Structure
-
-Each prompt can have two files:
-
-**`my-prompt.md`** (required) - The role definition text
-```markdown
-# My Custom Role
-
-You are a specialist in {{workspace}} repository...
-
-## Your Role
-...
-```
-
-**`my-prompt.json`** (optional) - Metadata with default settings
 ```json
 {
-  "name": "My Custom Role",
-  "description": "Brief description of what this role does",
-  "defaultInterval": 300000,
-  "defaultIntervalPrompt": "The prompt to send at each interval...",
-  "autonomousRecommended": true,
+  "name": "Builder",
+  "description": "Implements features and fixes",
+  "defaultInterval": 0,
+  "defaultIntervalPrompt": "",
+  "autonomousRecommended": false,
   "suggestedWorkerType": "claude"
 }
 ```
@@ -80,24 +63,69 @@ You are a specialist in {{workspace}} repository...
 - **`autonomousRecommended`** (boolean): Whether autonomous mode is recommended
 - **`suggestedWorkerType`** (string): "claude" or "codex"
 
-When a user selects a prompt from the dropdown, if a metadata file exists, the form fields will be pre-populated with these defaults.
+## Creating Custom Roles
+
+To create a custom role:
+
+1. Create `.claude/commands/loom/my-role.md` with the full role definition
+2. Optionally create `roles/my-role.json` with metadata
+3. Use it via `/loom/my-role` in CLI or select in Tauri App terminal settings
+
+### Role File Structure
+
+```markdown
+# My Custom Role
+
+You are a specialist in {{workspace}} repository...
+
+## Your Role
+- Primary responsibility
+- Secondary responsibility
+
+## Workflow
+1. First step
+2. Second step
+
+## Guidelines
+- Best practices
+- Working style
+
+## Completion
+
+**Work completion is detected automatically.**
+
+When you complete your task (apply appropriate end-state labels), the orchestration
+layer detects this and terminates the session automatically. No explicit exit command is needed.
+```
+
+### Completion Detection
+
+Worker completion is detected automatically through **phase contracts** - the orchestration layer validates that the expected end-state has been achieved (e.g., correct labels applied) and terminates the session.
+
+**How it works:**
+1. Shepherds spawn worker agents (builder, judge, doctor, curator) for each phase
+2. `validate-phase.sh` checks for phase-specific completion criteria:
+   - **Curator**: `loom:curated` label on issue
+   - **Builder**: PR with `loom:review-requested` label linked to issue
+   - **Judge**: `loom:pr` or `loom:changes-requested` label on PR
+   - **Doctor**: `loom:review-requested` label after fixes
+3. When the phase contract is satisfied, the session terminates automatically
+4. Idle detection provides a fallback if the agent becomes unresponsive
+
+**Benefits of automatic detection:**
+- No ambiguity about what "completion" means (it's defined by labels)
+- Agents don't need to execute shell commands to signal completion
+- Consistent behavior across all worker roles
 
 ### Template Variables
 
 - `{{workspace}}` - Replaced with the absolute path to the workspace directory
 
-### Prompt Structure
+## Default vs Workspace Roles
 
-A good prompt should include:
+When installed to a target repository:
+- `defaults/.claude/commands/loom/*.md` → copied to `.claude/commands/loom/`
+- `defaults/roles/*.md` (symlinks) → copied as files to `.loom/roles/`
+- `defaults/roles/*.json` → copied to `.loom/roles/`
 
-1. **Role Definition**: Clear description of the terminal's purpose
-2. **Responsibilities**: What tasks this role handles
-3. **Guidelines**: Best practices and working style
-4. **Examples**: Sample workflows or outputs (when helpful)
-
-## Default vs Workspace Prompts
-
-- **`defaults/roles/`** (this directory): Committed to git, serves as examples and fallbacks
-- **`.loom/roles/`** (in each workspace): Gitignored, workspace-specific customizations
-
-When a prompt file exists in both locations, the workspace version takes precedence.
+The installation process dereferences symlinks, so target repos get regular files (not symlinks).

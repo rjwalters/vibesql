@@ -451,6 +451,7 @@ mod tests {
             when_condition: None,
             triggered_action: TriggerAction::RawSql("".to_string()),
             enabled: true,
+            sql_definition: None,
         };
         catalog.create_trigger(trigger).unwrap();
 
@@ -491,6 +492,7 @@ mod tests {
             when_condition: None,
             triggered_action: TriggerAction::RawSql("".to_string()),
             enabled: true,
+            sql_definition: None,
         };
         catalog.create_trigger(trigger).unwrap();
 
@@ -523,6 +525,7 @@ mod tests {
                 when_condition: None,
                 triggered_action: TriggerAction::RawSql("".to_string()),
                 enabled: true,
+                sql_definition: None,
             };
             catalog.create_trigger(trigger).unwrap();
         }
@@ -564,6 +567,7 @@ mod tests {
             when_condition: None,
             triggered_action: TriggerAction::RawSql("".to_string()),
             enabled: true,
+            sql_definition: None,
         };
         let trigger2 = TriggerDefinition {
             name: "tr2".to_string(),
@@ -574,6 +578,7 @@ mod tests {
             when_condition: None,
             triggered_action: TriggerAction::RawSql("".to_string()),
             enabled: true,
+            sql_definition: None,
         };
         catalog.create_trigger(trigger1).unwrap();
         catalog.create_trigger(trigger2).unwrap();

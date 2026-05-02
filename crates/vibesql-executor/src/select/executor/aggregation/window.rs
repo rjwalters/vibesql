@@ -309,13 +309,33 @@ pub(super) fn apply_window_functions_to_aggregates(
                             };
 
                         let value = match win_func.func_name.to_uppercase().as_str() {
-                            "COUNT" => evaluate_count_window(
-                                partition,
-                                frame_indices,
-                                Some(&arg_expr),
-                                None,
-                                inner_eval_fn,
-                            ),
+                            "COUNT" => {
+                                // COUNT(*) or COUNT() should count all rows in the
+                                // frame (passing `None`). Only when there is a real
+                                // argument do we delegate to the synthetic
+                                // `arg_expr` referencing the post-aggregation result
+                                // column. Mirrors the non-aggregate path in
+                                // crates/vibesql-executor/src/select/window/evaluation.rs.
+                                let count_arg = if win_func.args.is_empty()
+                                    || matches!(&win_func.args[0], Expression::Wildcard)
+                                    || matches!(
+                                        &win_func.args[0],
+                                        Expression::ColumnRef(col_id)
+                                            if col_id.column_canonical() == "*"
+                                    )
+                                {
+                                    None // COUNT(*) / COUNT() - count all rows
+                                } else {
+                                    Some(&arg_expr)
+                                };
+                                evaluate_count_window(
+                                    partition,
+                                    frame_indices,
+                                    count_arg,
+                                    None,
+                                    inner_eval_fn,
+                                )
+                            }
                             "SUM" => evaluate_sum_window(
                                 partition,
                                 frame_indices,

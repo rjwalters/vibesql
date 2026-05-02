@@ -120,6 +120,25 @@ impl Parser {
         }
     }
 
+    /// Parse an identifier or any keyword. Used for SQL positions where the grammar
+    /// permits a name and the keyword/identifier distinction does not matter
+    /// (e.g. PRAGMA schema/name parts: `PRAGMA temp.foreign_key_check`).
+    pub(super) fn parse_identifier_or_keyword(&mut self) -> Result<String, ParseError> {
+        match self.peek() {
+            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                let identifier = name.clone();
+                self.advance();
+                Ok(identifier)
+            }
+            Token::Keyword { keyword: kw, .. } => {
+                let name = kw.to_string().to_lowercase();
+                self.advance();
+                Ok(name)
+            }
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
+        }
+    }
+
     /// Parse an identifier or keyword as an alias name.
     /// In SQL, keywords can be used as aliases after AS (e.g., `d_year AS year`).
     /// This is standard SQL behavior supported by most databases.

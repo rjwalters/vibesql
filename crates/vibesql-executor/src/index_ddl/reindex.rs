@@ -147,6 +147,7 @@ mod tests {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             }],
+            where_clause: None,
         };
         CreateIndexExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -173,6 +174,7 @@ mod tests {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
             }],
+            where_clause: None,
         };
         CreateIndexExecutor::execute(&create_stmt, &mut db).unwrap();
 

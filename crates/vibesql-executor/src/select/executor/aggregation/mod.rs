@@ -22,7 +22,7 @@ use crate::{
         filter::apply_where_filter_combined_auto,
         grouping::{
             expand_group_by_clause, get_base_expressions, group_rows,
-            resolve_base_expressions_aliases, resolve_grouping_set_aliases,
+            resolve_base_expressions_aliases, resolve_group_by_alias, resolve_grouping_set_aliases,
             resolve_having_aliases_with_values, GroupingContext,
         },
         helpers::{apply_distinct, apply_limit_offset},
@@ -153,6 +153,11 @@ impl SelectExecutor<'_> {
                     function_name: window_name,
                 });
             }
+
+            // Check for aggregates/windows inside bare scalar subqueries
+            // in HAVING (e.g. `HAVING (SELECT (a, b))` triggers row-value-misused;
+            // `HAVING (SELECT sum(x))` triggers misuse of aggregate). #5069
+            crate::select::executor::validation::validate_subquery_context_misuse(having_expr)?;
         }
 
         // Validate ORDER BY for misuse of aliased window functions (#5036)
@@ -162,13 +167,32 @@ impl SelectExecutor<'_> {
             &stmt.select_list,
         )?;
 
-        // Validate GROUP BY clause for misuse of window functions (#4985)
-        // Window functions are not allowed in GROUP BY expressions
+        // Validate GROUP BY clause for misuse of window functions (#4985, #5093)
+        // Window functions are not allowed in GROUP BY expressions.
+        // For positional/alias GROUP BY references (e.g., `GROUP BY 1`), resolve against
+        // the SELECT list and re-check the resolved expression so positional references
+        // to window-function SELECT items also surface the misuse error.
         if let Some(ref group_by_clause) = stmt.group_by {
-            for group_expr in group_by_clause.all_expressions() {
+            for (term_index, group_expr) in group_by_clause.all_expressions().iter().enumerate() {
+                // 1. Direct check on the GROUP BY expression as written.
                 if let Some(window_name) =
                     crate::select::executor::validation::find_window_function_in_expression(
                         group_expr,
+                    )
+                {
+                    return Err(crate::errors::ExecutorError::MisuseOfWindowFunction {
+                        function_name: window_name,
+                    });
+                }
+
+                // 2. Resolve positional/alias references against SELECT list and re-check.
+                //    Catches `GROUP BY 1` referencing a window-function SELECT item, e.g.
+                //    `SELECT sum(a) OVER() FROM t1 GROUP BY 1` (window1.test 47.2).
+                let resolved =
+                    resolve_group_by_alias(group_expr, &stmt.select_list, term_index)?;
+                if let Some(window_name) =
+                    crate::select::executor::validation::find_window_function_in_expression(
+                        &resolved,
                     )
                 {
                     return Err(crate::errors::ExecutorError::MisuseOfWindowFunction {
@@ -192,6 +216,9 @@ impl SelectExecutor<'_> {
                 ctx = ctx.with_outer_context(outer_row, outer_schema);
             } else if let Some(proc_ctx) = self.procedural_context {
                 ctx = ctx.with_procedural_context(proc_ctx);
+            } else if let Some(trigger_ctx) = self.trigger_context {
+                // Issue #5082: forward trigger context for OLD/NEW resolution
+                ctx = ctx.with_trigger_context(trigger_ctx);
             }
             if let Some(cte_ctx) = cte_ctx {
                 ctx = ctx.with_cte_context(cte_ctx);
@@ -307,6 +334,9 @@ impl SelectExecutor<'_> {
             ctx = ctx.with_outer_context(outer_row, outer_schema);
         } else if let Some(proc_ctx) = self.procedural_context {
             ctx = ctx.with_procedural_context(proc_ctx);
+        } else if let Some(trigger_ctx) = self.trigger_context {
+            // Issue #5082: forward trigger context for OLD/NEW resolution
+            ctx = ctx.with_trigger_context(trigger_ctx);
         }
         if let Some(cte_ctx) = cte_ctx {
             ctx = ctx.with_cte_context(cte_ctx);

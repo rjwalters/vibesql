@@ -1,6 +1,35 @@
 {
   "version": "2",
   "offlineMode": false,
+  "forge": {
+    "type": "auto",
+    "gitea": {
+      "api_url": null,
+      "known_hosts": []
+    }
+  },
+  "health_monitoring": {
+    "enabled": true,
+    "collect_interval_minutes": 5,
+    "retention_hours": 24,
+    "thresholds": {
+      "throughput_decline_percent": 50,
+      "queue_growth_count": 5,
+      "stuck_agent_minutes": 10,
+      "error_rate_percent": 20
+    },
+    "alerts": {
+      "enabled": true,
+      "auto_acknowledge_after_hours": 24
+    }
+  },
+  "reflection": {
+    "enabled": true,
+    "auto_create_issues": false,
+    "min_session_duration": 300,
+    "upstream_repo": "rjwalters/loom",
+    "categories": ["bug", "enhancement", "documentation"]
+  },
   "terminals": [
     {
       "id": "terminal-1",

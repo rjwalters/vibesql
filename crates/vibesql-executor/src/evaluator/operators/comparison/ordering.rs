@@ -285,4 +285,56 @@ mod tests {
             SqlValue::Boolean(true)
         );
     }
+
+    #[test]
+    fn test_text_vs_blob_ordering() {
+        // SQLite type ordering: TEXT < BLOB
+        // Verified: SELECT 'abc' >= x'6162' → 0; SELECT x'616263' >= 'abc' → 1
+        let text = SqlValue::Varchar(arcstr::ArcStr::from("abc"));
+        let blob = SqlValue::Blob(vec![0x61, 0x62]);
+
+        // 'abc' < x'6162' → true (TEXT < BLOB)
+        assert_eq!(less_than(&text, &blob).unwrap(), SqlValue::Boolean(true));
+        // 'abc' >= x'6162' → false
+        assert_eq!(greater_than_or_equal(&text, &blob).unwrap(), SqlValue::Boolean(false));
+        // x'6162' > 'abc' → true (BLOB > TEXT)
+        assert_eq!(greater_than(&blob, &text).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(greater_than_or_equal(&blob, &text).unwrap(), SqlValue::Boolean(true));
+        // Character (CHAR) behaves like Varchar (TEXT storage class)
+        let chr = SqlValue::Character(arcstr::ArcStr::from("abc"));
+        assert_eq!(less_than(&chr, &blob).unwrap(), SqlValue::Boolean(true));
+    }
+
+    #[test]
+    fn test_numeric_vs_blob_ordering() {
+        // SQLite type ordering: INTEGER/REAL < BLOB
+        let blob = SqlValue::Blob(vec![0x00]);
+        assert_eq!(less_than(&SqlValue::Integer(99), &blob).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(greater_than(&blob, &SqlValue::Integer(99)).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(less_than(&SqlValue::Real(0.5), &blob).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(greater_than(&blob, &SqlValue::Real(0.5)).unwrap(), SqlValue::Boolean(true));
+    }
+
+    #[test]
+    fn test_blob_vs_blob_ordering_bytewise() {
+        // BLOB vs BLOB: SQLite uses memcmp (bytewise lex order)
+        // Verified: SELECT x'616263' >= x'6162' → 1 (longer prefix-equal blob is greater)
+        let abc = SqlValue::Blob(vec![0x61, 0x62, 0x63]);
+        let ab = SqlValue::Blob(vec![0x61, 0x62]);
+        assert_eq!(greater_than(&abc, &ab).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(greater_than_or_equal(&abc, &ab).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(less_than(&ab, &abc).unwrap(), SqlValue::Boolean(true));
+
+        // Differing byte: 0x61 < 0x62
+        let a = SqlValue::Blob(vec![0x61]);
+        let b = SqlValue::Blob(vec![0x62]);
+        assert_eq!(less_than(&a, &b).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(greater_than(&b, &a).unwrap(), SqlValue::Boolean(true));
+
+        // Equal blobs
+        let equal_a = SqlValue::Blob(vec![0x01, 0x02]);
+        let equal_b = SqlValue::Blob(vec![0x01, 0x02]);
+        assert_eq!(greater_than_or_equal(&equal_a, &equal_b).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(less_than_or_equal(&equal_a, &equal_b).unwrap(), SqlValue::Boolean(true));
+    }
 }

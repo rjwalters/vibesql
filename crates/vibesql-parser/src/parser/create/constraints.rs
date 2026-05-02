@@ -273,7 +273,7 @@ impl Parser {
         Ok(Some(vibesql_ast::ConstraintDeferral { is_deferrable, initially_deferred }))
     }
 
-    /// Parse a single referential action (NO ACTION, CASCADE, SET NULL, SET DEFAULT)
+    /// Parse a single referential action (NO ACTION, CASCADE, RESTRICT, SET NULL, SET DEFAULT)
     fn parse_referential_action(&mut self) -> Result<vibesql_ast::ReferentialAction, ParseError> {
         if self.peek_keyword(Keyword::No) {
             self.advance(); // consume NO
@@ -282,6 +282,9 @@ impl Parser {
         } else if self.peek_keyword(Keyword::Cascade) {
             self.advance(); // consume CASCADE
             Ok(vibesql_ast::ReferentialAction::Cascade)
+        } else if self.peek_keyword(Keyword::Restrict) {
+            self.advance(); // consume RESTRICT
+            Ok(vibesql_ast::ReferentialAction::Restrict)
         } else if self.peek_keyword(Keyword::Set) {
             self.advance(); // consume SET
             if self.peek_keyword(Keyword::Null) {
@@ -295,16 +298,27 @@ impl Parser {
             }
         } else {
             Err(ParseError {
-                message: "Expected NO ACTION, CASCADE, SET NULL, or SET DEFAULT".to_string(),
+                message: "Expected NO ACTION, CASCADE, RESTRICT, SET NULL, or SET DEFAULT"
+                    .to_string(),
             })
         }
     }
 
     /// Parse column-level constraints (PRIMARY KEY, UNIQUE, CHECK, REFERENCES)
+    ///
+    /// Returns the list of parsed constraints plus an optional `DEFAULT` expression
+    /// encountered mid-stream. SQLite grammar allows DEFAULT to appear interleaved
+    /// with column constraints in any order (e.g., `idx UNIQUE DEFAULT NULL`), so
+    /// callers should treat the returned default as additional output and merge it
+    /// with any DEFAULT clause parsed before the constraint list.
     pub(in crate::parser) fn parse_column_constraints(
         &mut self,
-    ) -> Result<Vec<vibesql_ast::ColumnConstraint>, ParseError> {
+    ) -> Result<
+        (Vec<vibesql_ast::ColumnConstraint>, Option<Box<vibesql_ast::Expression>>),
+        ParseError,
+    > {
         let mut constraints = Vec::new();
+        let mut default_value: Option<Box<vibesql_ast::Expression>> = None;
 
         loop {
             // Check for optional CONSTRAINT keyword
@@ -327,6 +341,23 @@ impl Parser {
             };
 
             match self.peek() {
+                Token::Keyword { keyword: Keyword::Default, .. } => {
+                    // DEFAULT clause may appear interleaved with column constraints
+                    // (SQLite grammar). Capture the expression and continue parsing.
+                    if name.is_some() {
+                        return Err(ParseError {
+                            message: "DEFAULT cannot follow CONSTRAINT name".to_string(),
+                        });
+                    }
+                    self.advance(); // consume DEFAULT
+                    let expr = self.parse_expression()?;
+                    if default_value.is_some() {
+                        return Err(ParseError {
+                            message: "Multiple DEFAULT clauses for the same column".to_string(),
+                        });
+                    }
+                    default_value = Some(Box::new(expr));
+                }
                 Token::Keyword { keyword: Keyword::Null, .. } => {
                     // MySQL allows standalone NULL keyword to explicitly indicate nullable column
                     // (which is the default anyway), so we just consume it and skip it
@@ -463,7 +494,7 @@ impl Parser {
             }
         }
 
-        Ok(constraints)
+        Ok((constraints, default_value))
     }
 
     /// Parse table-level constraints (PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK)

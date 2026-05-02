@@ -810,3 +810,82 @@ fn test_window_function_avg_sum_with_frame() {
         panic!("Expected SELECT statement");
     }
 }
+
+/// Regression test for the post-aggregate COUNT() OVER () dispatch bug.
+///
+/// Before the fix, `aggregation/window.rs` always passed a synthetic
+/// `Some(&col{select_index})` argument to `evaluate_count_window`, even for
+/// `COUNT()` / `COUNT(*)`. The synthetic placeholder column held the window
+/// function's own (still-NULL) output slot at evaluation time, so
+/// `COUNT(non-null)` returned 0 on every row.
+///
+/// Mirrors SQLite's `window1.test` test 64.3.
+#[test]
+fn test_count_no_arg_window_with_group_by() {
+    use vibesql_storage::Row;
+    let mut db = Database::new();
+
+    let schema = TableSchema::new(
+        "T1".to_string(),
+        vec![
+            ColumnSchema::new("A".to_string(), DataType::Integer, false),
+            ColumnSchema::new(
+                "B".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                false,
+            ),
+        ],
+    );
+    db.create_table(schema).unwrap();
+
+    let table = db.get_table_mut("T1").unwrap();
+    for (i, s) in ["abcd", "BCDE", "cdef", "DEFG"].iter().enumerate() {
+        table
+            .insert(Row::new(vec![
+                SqlValue::Integer((i + 1) as i64),
+                SqlValue::Varchar(arcstr::ArcStr::from(*s)),
+            ]))
+            .unwrap();
+    }
+
+    let executor = SelectExecutor::new(&db);
+
+    // COUNT() OVER () with GROUP BY rowid - the window fires after grouping.
+    // Each of the 4 grouped rows should see count = 4.
+    let query = "SELECT count() OVER (), a FROM t1 GROUP BY a ORDER BY a";
+    let stmt = Parser::parse_sql(query).unwrap();
+
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let rows = executor.execute(&select_stmt).unwrap();
+        assert_eq!(rows.len(), 4);
+        for row in &rows {
+            assert_eq!(
+                row.values[0],
+                SqlValue::Integer(4),
+                "COUNT() OVER () with GROUP BY must count all aggregated rows, got {:?}",
+                row.values[0]
+            );
+        }
+    } else {
+        panic!("Expected SELECT statement");
+    }
+
+    // COUNT(*) OVER () should behave identically.
+    let executor = SelectExecutor::new(&db);
+    let query = "SELECT count(*) OVER (), a FROM t1 GROUP BY a ORDER BY a";
+    let stmt = Parser::parse_sql(query).unwrap();
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let rows = executor.execute(&select_stmt).unwrap();
+        assert_eq!(rows.len(), 4);
+        for row in &rows {
+            assert_eq!(
+                row.values[0],
+                SqlValue::Integer(4),
+                "COUNT(*) OVER () with GROUP BY must count all aggregated rows, got {:?}",
+                row.values[0]
+            );
+        }
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}

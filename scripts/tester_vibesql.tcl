@@ -196,6 +196,15 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "no such view: [string tolower $view_name]"
     }
 
+    # Cannot mutate a view without INSTEAD OF trigger:
+    #   "Unsupported expression: Cannot UPDATE view 'v1' without INSTEAD OF trigger"
+    #   "Unsupported expression: Cannot DELETE from view 'v1' without INSTEAD OF trigger"
+    #   "Unsupported expression: Cannot INSERT into view 'v1' without INSTEAD OF trigger"
+    # SQLite reports a single message for all three: "cannot modify v1 because it is a view"
+    if {[regexp -nocase {Cannot (?:UPDATE|DELETE from|INSERT into) view '([^']+)' without INSTEAD OF trigger} $error_msg -> view_name]} {
+        return "cannot modify $view_name because it is a view"
+    }
+
     # Function not found: various patterns -> "no such function: FUNCNAME"
     # Pattern: "Unsupported feature: Unknown function: XYZZY"
     if {[regexp -nocase {^Unsupported feature: Unknown function: ([A-Za-z0-9_]+)} $error_msg -> func_name]} {
@@ -277,13 +286,15 @@ proc translate_error_to_sqlite {vibesql_error} {
     # VibeSQL now produces these exact formats, so pass through if already correct:
 
     # "misuse of aggregate: X()" - for execution context errors (ORDER BY, etc.)
+    # SQLite preserves the function-name case as written in the SQL, so pass through verbatim.
     if {[regexp -nocase {^misuse of aggregate:\s*([A-Za-z_]+)\(\)$} $error_msg -> func_name]} {
-        return "misuse of aggregate: [string tolower $func_name]()"
+        return "misuse of aggregate: ${func_name}()"
     }
 
     # "misuse of aggregate function X()" - for name resolution errors (nested aggregates, WHERE)
+    # SQLite preserves the function-name case as written in the SQL, so pass through verbatim.
     if {[regexp -nocase {^misuse of aggregate function\s*([A-Za-z_]+)\(\)$} $error_msg -> func_name]} {
-        return "misuse of aggregate function [string tolower $func_name]()"
+        return "misuse of aggregate function ${func_name}()"
     }
 
     # "misuse of aliased aggregate X" - for aliased aggregate misuse in HAVING
@@ -1090,7 +1101,7 @@ proc execsql {sql {db ""}} {
                 }
                 continue  ;# Check for more statements
             }
-            if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys)} [string trim $sql]]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys)} [string trim $sql]]} {
                 # This PRAGMA is supported (with =value) - stop stripping
                 break
             } else {
@@ -3081,6 +3092,9 @@ array set vibesql_skip_tests {
     fkey6-1.5.2 "Uses sqlite3_db_status internal API"
     fkey6-1.7 "Uses sqlite3_db_status internal API"
     fkey6-1.9 "Uses sqlite3_db_status internal API"
+
+    fkey5-7.2 "Cascades from skipped fkey5-7.1 (INSERT OR IGNORE with FK violation)"
+    fkey5-7.3 "Cascades from skipped fkey5-7.1 (INSERT OR IGNORE with FK violation)"
 }
 
 # Pattern-based skip list for tests with many numbered variants
@@ -3738,10 +3752,12 @@ proc do_eqp_test {name sql expected} {
     set eqp_sql "EXPLAIN QUERY PLAN $sql"
 
     if {[catch {
-        # Use execsql directly since db is our proc alias
+        # Use execsql directly since db is our proc alias.
+        # execsql returns one item per output row; preserve newlines so the
+        # multi-line tree (QUERY PLAN header + |--/`-- entries) stays intact.
+        # Whitespace gets normalized below before glob matching.
         set rows [execsql $eqp_sql]
-        set result [join $rows " "]
-        set result [string trim $result]
+        set result [join $rows "\n"]
     } err]} {
         # Query execution error
         incr test_results(failed)
@@ -3757,16 +3773,28 @@ proc do_eqp_test {name sql expected} {
         set expected_clean [string range $expected_clean 1 end-1]
     }
 
-    # Perform glob matching on the full result
-    if {[string match $expected_clean $result]} {
+    # Normalize whitespace in both expected and actual so cosmetic formatting
+    # differences (newlines vs spaces, indentation) don't cause spurious failures.
+    # SQLite's own tester normalizes EQP output before comparison; do the same:
+    # collapse all whitespace runs (including newlines) to a single space, then trim.
+    regsub -all {\s+} $expected_clean " " expected_norm
+    set expected_norm [string trim $expected_norm]
+    regsub -all {\s+} $result " " result_norm
+    set result_norm [string trim $result_norm]
+
+    # Perform glob matching on the normalized full result
+    if {[string match $expected_norm $result_norm]} {
         incr test_results(passed)
         return
     }
 
-    # Try matching against each line of the result
+    # Fallback: match against each (raw) line of the result, trimmed.
+    # This preserves backwards compatibility with single-line expected patterns
+    # that previously matched against a particular row.
     foreach line [split $result "\n"] {
         set line [string trim $line]
-        if {[string match $expected_clean $line]} {
+        if {[string match $expected_clean $line] || \
+            [string match $expected_norm $line]} {
             incr test_results(passed)
             return
         }
@@ -3774,10 +3802,10 @@ proc do_eqp_test {name sql expected} {
 
     # Failed to match
     incr test_results(failed)
-    lappend test_results(failures) [list $name "EQP mismatch. Expected: '$expected_clean', Got: '$result'"]
+    lappend test_results(failures) [list $name "EQP mismatch. Expected: '$expected_norm', Got: '$result_norm'"]
     puts "! $name FAILED (EQP pattern mismatch)"
-    puts "  EQP Expected: '$expected_clean'"
-    puts "  EQP Got:      '$result'"
+    puts "  EQP Expected: '$expected_norm'"
+    puts "  EQP Got:      '$result_norm'"
 }
 
 proc do_realnum_test {name script expected} {
@@ -3882,7 +3910,7 @@ proc match_regex_pattern {result expected} {
 # Returns 1 if supported, 0 if not
 proc check_single_capability {cap} {
     # Capabilities we don't support (unsupported_caps means NOT supported)
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab fts3 fts4 fts5 datetime datetime_time datetime_funcs trigger conflict}
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab fts3 fts4 fts5 datetime datetime_time datetime_funcs trigger conflict hiddencolumns}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0

@@ -56,6 +56,7 @@ fn test_create_spatial_index_basic() {
             direction: OrderDirection::Asc,
             prefix_length: None,
         }],
+        where_clause: None,
     };
 
     let result = CreateIndexExecutor::execute(&create_index_stmt, &mut db);
@@ -131,6 +132,7 @@ fn test_spatial_index_multiple_columns_error() {
                 prefix_length: None,
             },
         ],
+        where_clause: None,
     };
 
     let result = CreateIndexExecutor::execute(&create_index_stmt, &mut db);
@@ -188,6 +190,7 @@ fn test_drop_spatial_index() {
             direction: OrderDirection::Asc,
             prefix_length: None,
         }],
+        where_clause: None,
     };
 
     CreateIndexExecutor::execute(&create_index_stmt, &mut db).unwrap();
@@ -253,6 +256,7 @@ fn test_spatial_index_if_not_exists() {
             direction: OrderDirection::Asc,
             prefix_length: None,
         }],
+        where_clause: None,
     };
 
     CreateIndexExecutor::execute(&create_index_stmt, &mut db).unwrap();
@@ -268,6 +272,7 @@ fn test_spatial_index_if_not_exists() {
             direction: OrderDirection::Asc,
             prefix_length: None,
         }],
+        where_clause: None,
     };
 
     let result = CreateIndexExecutor::execute(&create_index_stmt2, &mut db);

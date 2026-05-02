@@ -14,10 +14,29 @@ use crate::errors::ExecutorError;
 pub struct TriggerExecutor;
 
 impl TriggerExecutor {
-    /// Execute a CREATE TRIGGER statement
+    /// Execute a CREATE TRIGGER statement.
+    ///
+    /// This is a convenience wrapper around [`TriggerExecutor::create_trigger_with_sql`]
+    /// that does not preserve the original SQL text. Triggers created via this path
+    /// will not survive SQL-dump persistence round-trips.
     pub fn create_trigger(
         db: &mut Database,
         stmt: &CreateTriggerStmt,
+    ) -> Result<String, ExecutorError> {
+        Self::create_trigger_with_sql(db, stmt, None)
+    }
+
+    /// Execute a CREATE TRIGGER statement, optionally preserving the original SQL text
+    /// for SQL-dump persistence.
+    ///
+    /// When `original_sql` is `Some`, the SQL is stored on the catalog
+    /// [`TriggerDefinition`] so it can be re-emitted verbatim by `save_sql_dump`.
+    /// This is the path used by the CLI / Python / WASM frontends, which are the
+    /// only callers that have access to the original textual SQL.
+    pub fn create_trigger_with_sql(
+        db: &mut Database,
+        stmt: &CreateTriggerStmt,
+        original_sql: Option<&str>,
     ) -> Result<String, ExecutorError> {
         // INSTEAD OF triggers can only be created on views
         // BEFORE and AFTER triggers can only be created on tables
@@ -36,16 +55,28 @@ impl TriggerExecutor {
             }
         }
 
-        // Create trigger definition from statement
-        let trigger = TriggerDefinition::new(
-            stmt.trigger_name.clone(),
-            stmt.timing.clone(),
-            stmt.event.clone(),
-            stmt.table_name.clone(),
-            stmt.granularity.clone(),
-            stmt.when_condition.clone(),
-            stmt.triggered_action.clone(),
-        );
+        // Create trigger definition from statement, preserving original SQL when available
+        let trigger = match original_sql {
+            Some(sql) => TriggerDefinition::new_with_sql(
+                stmt.trigger_name.clone(),
+                stmt.timing.clone(),
+                stmt.event.clone(),
+                stmt.table_name.clone(),
+                stmt.granularity.clone(),
+                stmt.when_condition.clone(),
+                stmt.triggered_action.clone(),
+                sql.to_string(),
+            ),
+            None => TriggerDefinition::new(
+                stmt.trigger_name.clone(),
+                stmt.timing.clone(),
+                stmt.event.clone(),
+                stmt.table_name.clone(),
+                stmt.granularity.clone(),
+                stmt.when_condition.clone(),
+                stmt.triggered_action.clone(),
+            ),
+        };
 
         // Store in catalog
         db.catalog.create_trigger(trigger)?;

@@ -552,3 +552,76 @@ fn test_create_index_nested_function_no_parens() {
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }
 }
+
+// Partial-index WHERE clause parsing (issue #5091).
+//
+// SQLite supports `CREATE INDEX ... WHERE <predicate>` for partial indexes.
+// The parser captures the predicate expression so downstream validation can
+// reject misuses (e.g. window functions in the predicate).
+
+#[test]
+fn test_create_index_with_where_clause() {
+    let sql = "CREATE INDEX idx ON t(a) WHERE b > 5";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.index_name, "idx");
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(stmt.where_clause.is_some(), "expected WHERE clause to be parsed");
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_without_where_clause_keeps_none() {
+    let sql = "CREATE INDEX idx ON t(a)";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert!(stmt.where_clause.is_none(), "WHERE clause should default to None");
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_unique_index_with_where_clause() {
+    // SQLite allows partial UNIQUE indexes.
+    let sql = "CREATE UNIQUE INDEX idx ON t(a) WHERE b IS NOT NULL";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            match &stmt.index_type {
+                vibesql_ast::IndexType::BTree { unique } => assert!(*unique),
+                other => panic!("Expected BTree(unique=true), got: {:?}", other),
+            }
+            assert!(stmt.where_clause.is_some(), "expected WHERE clause to be parsed");
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_with_window_function_in_where_rejected_at_validation() {
+    // The parser itself accepts the WHERE expression — semantic rejection of
+    // window functions happens in the executor's validation layer (see issue
+    // #5091, test window1-11.1). Verify the AST captures the call so that
+    // `find_window_function_in_expression` has something to walk.
+    let sql = "CREATE INDEX idx ON t(a) WHERE sum(b) OVER ()";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert!(stmt.where_clause.is_some(), "expected WHERE clause to be parsed");
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
