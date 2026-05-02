@@ -35,6 +35,32 @@ fn format_float_for_text_comparison(n: f64) -> String {
     }
 }
 
+/// Find an *explicit* COLLATE clause anywhere within the expression's
+/// "collation propagation tree".
+///
+/// SQLite's rule (datatype3 §7.1) is that an explicit `COLLATE` clause inside
+/// any operand of a binary operator beats the column-derived (inherited)
+/// collation of the other operand. We walk through compound expressions that
+/// propagate collation (BinaryOp, UnaryOp, single-arg Function/Aggregate)
+/// looking specifically for a `Collate` node — column-level collations are
+/// *not* considered explicit and are deliberately ignored here.
+pub(super) fn explicit_collation_of(expr: &vibesql_ast::Expression) -> Option<String> {
+    match expr {
+        vibesql_ast::Expression::Collate { collation, .. } => Some(collation.clone()),
+        vibesql_ast::Expression::BinaryOp { left, right, .. } => {
+            explicit_collation_of(left).or_else(|| explicit_collation_of(right))
+        }
+        vibesql_ast::Expression::UnaryOp { expr, .. } => explicit_collation_of(expr),
+        vibesql_ast::Expression::AggregateFunction { args, .. } if args.len() == 1 => {
+            explicit_collation_of(&args[0])
+        }
+        vibesql_ast::Expression::Function { args, .. } if args.len() == 1 => {
+            explicit_collation_of(&args[0])
+        }
+        _ => None,
+    }
+}
+
 impl CombinedExpressionEvaluator<'_> {
     /// Get the SQLite type affinity of an expression if it's a column reference.
     ///
@@ -85,10 +111,17 @@ impl CombinedExpressionEvaluator<'_> {
 
     /// Get the effective collation for an expression.
     ///
-    /// Returns the collation from:
-    /// 1. Explicit COLLATE clause (highest priority)
-    /// 2. Column-level collation from CREATE TABLE definition
-    /// 3. None (use default binary collation)
+    /// Implements SQLite's collation propagation rules
+    /// (see https://sqlite.org/datatype3.html#collation):
+    /// 1. Explicit COLLATE clause has highest priority and propagates outward
+    ///    through compound expressions.
+    /// 2. Column references inherit the column's declared collation.
+    /// 3. Binary operators (including `||`): if either operand has an *explicit*
+    ///    COLLATE, that wins. Otherwise the left operand's collation is used,
+    ///    falling back to the right operand's.
+    /// 4. Unary operators and single-argument functions / aggregates inherit
+    ///    collation from their operand.
+    /// 5. Otherwise, no collation (use default BINARY).
     pub(crate) fn get_expression_collation(
         &self,
         expr: &vibesql_ast::Expression,
@@ -117,6 +150,30 @@ impl CombinedExpressionEvaluator<'_> {
                     }
                 }
                 None
+            }
+            // Binary operator: explicit COLLATE on either operand wins, else
+            // inherit from the left operand (SQLite rule).
+            vibesql_ast::Expression::BinaryOp { left, right, .. } => {
+                if let Some(c) = explicit_collation_of(left) {
+                    return Some(c);
+                }
+                if let Some(c) = explicit_collation_of(right) {
+                    return Some(c);
+                }
+                self.get_expression_collation(left)
+                    .or_else(|| self.get_expression_collation(right))
+            }
+            // Unary operator: inherit from operand.
+            vibesql_ast::Expression::UnaryOp { expr, .. } => self.get_expression_collation(expr),
+            // Aggregate function with a single argument: inherit from argument.
+            // (Multi-arg aggregates have no well-defined inherited collation.)
+            vibesql_ast::Expression::AggregateFunction { args, .. } if args.len() == 1 => {
+                self.get_expression_collation(&args[0])
+            }
+            // Scalar function with a single argument: inherit from argument.
+            // (Multi-arg functions have no well-defined inherited collation.)
+            vibesql_ast::Expression::Function { args, .. } if args.len() == 1 => {
+                self.get_expression_collation(&args[0])
             }
             // Other expressions don't have intrinsic collation
             _ => None,

@@ -242,9 +242,23 @@ impl SelectExecutor<'_> {
         let result_evaluator =
             CombinedExpressionEvaluator::with_database(&result_schema, self.database);
 
-        // Evaluate ORDER BY expressions and attach sort keys to rows
-        type SortKey =
-            (vibesql_types::SqlValue, vibesql_ast::OrderDirection, Option<vibesql_ast::NullsOrder>);
+        // Evaluate ORDER BY expressions and attach sort keys to rows.
+        //
+        // SortKey tuple: (value, direction, nulls_order, collation).
+        //
+        // The collation is captured from the *original* ORDER BY expression
+        // (before alias / aggregate-column resolution rewrites it into a
+        // ColumnRef into the result schema), so that explicit `COLLATE` clauses
+        // and propagated collations from compound expressions like
+        // `max(b COLLATE nocase) || ''` are honored. See
+        // `CombinedExpressionEvaluator::get_expression_collation` for the
+        // propagation rules.
+        type SortKey = (
+            vibesql_types::SqlValue,
+            vibesql_ast::OrderDirection,
+            Option<vibesql_ast::NullsOrder>,
+            Option<String>,
+        );
         let mut rows_with_keys: Vec<(vibesql_storage::Row, Vec<SortKey>)> = Vec::new();
         for row in rows {
             // Clear CSE cache before evaluating each row to prevent column values
@@ -253,6 +267,20 @@ impl SelectExecutor<'_> {
 
             let mut sort_keys = Vec::new();
             for (term_index, order_item) in order_by.iter().enumerate() {
+                // Capture the effective collation from the ORIGINAL order-by
+                // expression first, before resolution rewrites it into a
+                // ColumnRef (which loses any inner COLLATE clauses).
+                //
+                // We use `result_evaluator` here for convenience — explicit
+                // `COLLATE` clauses are matched by AST shape, not by column
+                // lookup, so an evaluator over the result schema is sufficient
+                // for the collation-propagation rules implemented in
+                // `get_expression_collation`. (Column-declared collations on
+                // raw source columns referenced inside the ORDER BY would not
+                // be visible here, but those are unaffected by this fix.)
+                let order_collation =
+                    result_evaluator.get_expression_collation(&order_item.expr);
+
                 // Resolve ORDER BY expression to result schema column names
                 // For aggregates, we need ColumnRef expressions to look up computed values
                 // in the result schema, not re-evaluate aggregate expressions
@@ -272,17 +300,24 @@ impl SelectExecutor<'_> {
                 );
 
                 let key_value = result_evaluator.eval(&resolved_expr, &row)?;
-                sort_keys.push((key_value, order_item.direction.clone(), order_item.nulls_order));
+                sort_keys.push((
+                    key_value,
+                    order_item.direction.clone(),
+                    order_item.nulls_order,
+                    order_collation,
+                ));
             }
             rows_with_keys.push((row, sort_keys));
         }
 
         // Sort using the sort keys with NULLS FIRST/LAST handling
         rows_with_keys.sort_by(|(_, keys_a), (_, keys_b)| {
-            use crate::select::grouping::compare_sql_values;
+            use crate::select::grouping::compare_sql_values_with_collation;
             use vibesql_types::SqlValue;
 
-            for ((val_a, dir, nulls_order), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, nulls_order, collation), (val_b, _, _, _)) in
+                keys_a.iter().zip(keys_b.iter())
+            {
                 // Handle NULLS FIRST/LAST
                 let (a_is_null, b_is_null) =
                     (matches!(val_a, SqlValue::Null), matches!(val_b, SqlValue::Null));
@@ -312,9 +347,14 @@ impl SelectExecutor<'_> {
                     };
                 }
 
+                let collation_str = collation.as_deref();
                 let cmp = match dir {
-                    vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
-                    vibesql_ast::OrderDirection::Desc => compare_sql_values(val_a, val_b).reverse(),
+                    vibesql_ast::OrderDirection::Asc => {
+                        compare_sql_values_with_collation(val_a, val_b, collation_str)
+                    }
+                    vibesql_ast::OrderDirection::Desc => {
+                        compare_sql_values_with_collation(val_a, val_b, collation_str).reverse()
+                    }
                 };
 
                 if cmp != std::cmp::Ordering::Equal {
