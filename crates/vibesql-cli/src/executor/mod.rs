@@ -1120,23 +1120,36 @@ impl SqlExecutor {
                 .collect();
 
             for (fk_id, fk) in fk_constraints.iter().enumerate() {
+                // Mismatch check: if the parent table exists but lacks a key
+                // (PRIMARY KEY / UNIQUE constraint / non-partial UNIQUE INDEX)
+                // covering the FK columns, raise the SQLite-compatible error.
+                // Matches `do_catchsql_test 11.1` in fkey5.test.
+                if let Some((child, parent)) =
+                    vibesql_executor::foreign_key_check::detect_fk_mismatch(
+                        &self.db,
+                        tbl_name,
+                        fk,
+                    )
+                {
+                    anyhow::bail!(
+                        "foreign key mismatch - \"{}\" referencing \"{}\"",
+                        child,
+                        parent
+                    );
+                }
+
                 // Get parent column collations so we can match SQLite's FK comparison rules
                 // (numeric coercion + parent-column collation, e.g. NOCASE).
-                let parent_column_collations: Vec<Option<String>> = if let Some(parent_schema) =
-                    self.db.catalog.get_table(&fk.parent_table)
-                {
-                    fk.parent_column_indices
-                        .iter()
-                        .map(|&idx| {
-                            parent_schema
-                                .columns
-                                .get(idx)
-                                .and_then(|c| c.collation.clone())
-                        })
-                        .collect()
-                } else {
-                    vec![None; fk.parent_column_indices.len()]
-                };
+                // Use the shared resolver so post-reload placeholder indices
+                // do not skew which parent columns we read from.
+                let parent_column_collations: Vec<Option<String>> =
+                    vibesql_executor::foreign_key_check::parent_collations_for_fk(
+                        &self.db, fk,
+                    );
+                let resolved_parent_indices =
+                    vibesql_executor::foreign_key_check::resolved_parent_indices_for_fk(
+                        &self.db, fk,
+                    );
 
                 // Get parent table data
                 let parent_qualified = format!(
@@ -1204,13 +1217,13 @@ impl SqlExecutor {
 
                     // Check if matching parent row exists
                     let found = parent_rows.iter().any(|parent_row| {
-                        fk.parent_column_indices
+                        resolved_parent_indices
                             .iter()
                             .zip(child_values.iter())
                             .enumerate()
                             .all(|(i, (&parent_idx, child_val))| {
                                 if parent_idx < parent_row.values.len() {
-                                    fk_values_equal(
+                                    vibesql_executor::foreign_key_check::fk_values_equal(
                                         child_val,
                                         &parent_row.values[parent_idx],
                                         parent_column_collations
@@ -1262,61 +1275,6 @@ impl SqlExecutor {
             execution_time_ms: None,
             message: None,
         })
-    }
-}
-
-/// SQLite-style equality for FOREIGN KEY comparisons.
-///
-/// SQLite considers a child value to match a parent value when:
-/// - they are equal under VibeSQL's strict typed equality, OR
-/// - both can be coerced to the same numeric value (e.g. INTEGER 88 == TEXT "88"), OR
-/// - both are textual and equal under the parent column's collation (e.g. NOCASE).
-fn fk_values_equal(
-    child: &vibesql_types::SqlValue,
-    parent: &vibesql_types::SqlValue,
-    parent_collation: Option<&str>,
-) -> bool {
-    if child == parent {
-        return true;
-    }
-    if let (Some(c), Some(p)) = (sql_value_as_f64(child), sql_value_as_f64(parent)) {
-        if c == p {
-            return true;
-        }
-    }
-    if let (Some(c), Some(p)) = (sql_value_as_text(child), sql_value_as_text(parent)) {
-        match parent_collation.map(|s| s.to_ascii_lowercase()) {
-            Some(ref name) if name == "nocase" => return c.eq_ignore_ascii_case(p),
-            Some(ref name) if name == "rtrim" => {
-                return c.trim_end_matches(' ') == p.trim_end_matches(' ');
-            }
-            _ => {}
-        }
-    }
-    false
-}
-
-fn sql_value_as_f64(v: &vibesql_types::SqlValue) -> Option<f64> {
-    use vibesql_types::SqlValue::*;
-    match v {
-        Integer(i) => Some(*i as f64),
-        Smallint(i) => Some(*i as f64),
-        Bigint(i) => Some(*i as f64),
-        Unsigned(i) => Some(*i as f64),
-        Float(f) => Some(*f as f64),
-        Real(r) => Some(*r as f64),
-        Double(d) | Numeric(d) => Some(*d),
-        Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Character(s) | Varchar(s) => s.trim().parse::<f64>().ok(),
-        _ => None,
-    }
-}
-
-fn sql_value_as_text(v: &vibesql_types::SqlValue) -> Option<&str> {
-    use vibesql_types::SqlValue::*;
-    match v {
-        Character(s) | Varchar(s) => Some(s.as_str()),
-        _ => None,
     }
 }
 

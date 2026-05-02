@@ -145,6 +145,14 @@ pub enum ExecutorError {
         to: String,
     },
     ConstraintViolation(String),
+    /// FOREIGN KEY references a parent column set that is not covered by a
+    /// PRIMARY KEY, UNIQUE constraint, or non-partial UNIQUE INDEX in the
+    /// parent table (SQLite-compatible error). Format:
+    /// `foreign key mismatch - "<child>" referencing "<parent>"`
+    ForeignKeyMismatch {
+        child: String,
+        parent: String,
+    },
     MultiplePrimaryKeys,
     CannotDropColumn(String),
     ConstraintNotFound {
@@ -735,6 +743,10 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::ConstraintViolation(msg) => {
                 write!(f, "{}", vibe_msg!("executor-constraint-violation", message = msg.as_str()))
+            }
+            ExecutorError::ForeignKeyMismatch { child, parent } => {
+                // SQLite-compatible error format from fkey.c::sqlite3FkLocateIndex.
+                write!(f, "foreign key mismatch - \"{}\" referencing \"{}\"", child, parent)
             }
             ExecutorError::MultiplePrimaryKeys => {
                 write!(f, "{}", vibe_msg!("executor-multiple-primary-keys"))
