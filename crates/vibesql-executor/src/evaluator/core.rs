@@ -117,25 +117,39 @@ pub(crate) fn values_are_equal(
         (Character(a), Varchar(b)) | (Varchar(a), Character(b)) => a == b,
         (Boolean(a), Boolean(b)) => a == b,
 
-        // SQLite compatibility: Boolean/Integer comparisons
-        // In SQLite, FALSE == 0 and TRUE == non-zero
+        // SQLite compatibility: Boolean/Integer comparisons.
+        //
+        // SQLite has no separate boolean storage class — TRUE is stored as the
+        // integer 1 and FALSE as the integer 0. For binary `=` and binary `IS`
+        // (IS NOT DISTINCT FROM) semantics, TRUE must therefore compare equal
+        // only to the literal integer 1, not to any non-zero integer. The
+        // truth-value operator `IS TRUE` (handled separately in
+        // expressions/eval.rs) is the only place where non-zero integers are
+        // treated as truthy — that operator must not be conflated with `=` or
+        // binary `IS` here.
+        //
+        // Examples (binary IS / =):
+        //   500 IS TRUE  -> false  (500 != 1)
+        //   1   IS TRUE  -> true   (1 == 1)
+        //   0   IS FALSE -> true   (0 == 0)
+        //   2   IS TRUE  -> false  (2 != 1)
         (Boolean(b), Integer(i)) | (Integer(i), Boolean(b)) => {
             if *b {
-                *i != 0
+                *i == 1
             } else {
                 *i == 0
             }
         }
         (Boolean(b), Bigint(i)) | (Bigint(i), Boolean(b)) => {
             if *b {
-                *i != 0
+                *i == 1
             } else {
                 *i == 0
             }
         }
         (Boolean(b), Smallint(i)) | (Smallint(i), Boolean(b)) => {
             if *b {
-                *i != 0
+                *i == 1
             } else {
                 *i == 0
             }
