@@ -889,3 +889,65 @@ fn test_count_no_arg_window_with_group_by() {
         panic!("Expected SELECT statement");
     }
 }
+
+/// Regression test for issue #5106: window OVER (ORDER BY <aggregate>)
+///
+/// When a window's ORDER BY references an aggregate output (e.g.
+/// `ORDER BY max(c)` after a GROUP BY), the running aggregate must be applied in
+/// the order produced by the aggregate expression, not the entire post-aggregate
+/// row set. Previously the window evaluator could not resolve the aggregate
+/// reference inside OVER(...) so the ORDER BY was effectively ignored, producing
+/// a constant value per row instead of the running aggregate.
+///
+/// Mirrors window4.test test 4.2.
+#[test]
+fn test_window_order_by_references_aggregate_5106() {
+    let mut db = Database::new();
+
+    let schema = TableSchema::new(
+        "TTT".to_string(),
+        vec![
+            ColumnSchema::new("B".to_string(), DataType::Integer, false),
+            ColumnSchema::new("C".to_string(), DataType::Integer, false),
+        ],
+    );
+    db.create_table(schema).unwrap();
+
+    let table = db.get_table_mut("TTT").unwrap();
+    use vibesql_storage::Row;
+    table.insert(Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(1)])).unwrap();
+    table.insert(Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(2)])).unwrap();
+    table.insert(Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(3)])).unwrap();
+
+    let executor = SelectExecutor::new(&db);
+    let query = "SELECT max(b) OVER (ORDER BY max(c)) FROM ttt GROUP BY b";
+    let stmt = Parser::parse_sql(query).unwrap();
+
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let rows = executor.execute(&select_stmt).unwrap();
+        // Default RANGE frame is UNBOUNDED PRECEDING TO CURRENT ROW.
+        // Groups (b=1,c=1), (b=2,c=2), (b=3,c=3); ordered by max(c) ASC.
+        // Running max(b) = 1, 2, 3.
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows[0].values[0],
+            SqlValue::Integer(1),
+            "Window ORDER BY max(c) ignored: row 0 expected 1, got {:?}",
+            rows[0].values[0]
+        );
+        assert_eq!(
+            rows[1].values[0],
+            SqlValue::Integer(2),
+            "Window ORDER BY max(c) ignored: row 1 expected 2, got {:?}",
+            rows[1].values[0]
+        );
+        assert_eq!(
+            rows[2].values[0],
+            SqlValue::Integer(3),
+            "Window ORDER BY max(c) ignored: row 2 expected 3, got {:?}",
+            rows[2].values[0]
+        );
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
