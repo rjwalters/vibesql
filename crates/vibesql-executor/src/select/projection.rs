@@ -286,7 +286,14 @@ pub(crate) fn project_row_combined(
     Ok(result)
 }
 
-/// Evaluate an expression, checking for window functions first
+/// Evaluate an expression, checking for window functions first.
+///
+/// Strategy: if the expression contains any window function (anywhere in its
+/// tree), recursively substitute every `WindowFunction` node with the
+/// pre-computed value (as a literal) and evaluate the rewritten expression.
+/// This handles arbitrarily nested expressions like
+/// `count() OVER () LIKE lead(x) OVER (...)` (issue #5095) without needing a
+/// special case per Expression variant.
 pub(super) fn evaluate_expression_with_windows(
     expr: &vibesql_ast::Expression,
     row: &vibesql_storage::Row,
@@ -295,74 +302,57 @@ pub(super) fn evaluate_expression_with_windows(
 ) -> Result<vibesql_types::SqlValue, crate::errors::ExecutorError> {
     use vibesql_ast::Expression;
 
-    match expr {
-        Expression::WindowFunction { function, over } => {
-            // Look up the pre-computed value for this window function
-            let key = WindowFunctionKey::from_expression(function, over);
-            if let Some(&col_idx) = window_mapping.get(&key) {
-                // Extract the pre-computed value from the appended column
-                let value = row.values.get(col_idx).cloned().ok_or({
-                    crate::errors::ExecutorError::ColumnIndexOutOfBounds { index: col_idx }
-                })?;
-                Ok(value)
-            } else {
-                Err(crate::errors::ExecutorError::UnsupportedExpression(format!(
-                    "Window function not found in mapping: {:?}",
-                    expr
-                )))
-            }
-        }
-        Expression::BinaryOp { left, right, op } => {
-            // For expressions containing window functions in binary operations,
-            // we need to recursively substitute window function values
-            let left_substituted = substitute_window_functions(left, row, window_mapping)?;
-            let right_substituted = substitute_window_functions(right, row, window_mapping)?;
-
-            // Build a new binary expression with substituted values and evaluate it
-            let new_expr = Expression::BinaryOp {
-                left: Box::new(left_substituted),
-                right: Box::new(right_substituted),
-                op: *op,
-            };
-            evaluator.eval(&new_expr, row)
-        }
-        Expression::UnaryOp { expr: inner, op } => {
-            // Similar substitution for unary operations
-            let inner_substituted = substitute_window_functions(inner, row, window_mapping)?;
-            let new_expr = Expression::UnaryOp { expr: Box::new(inner_substituted), op: *op };
-            evaluator.eval(&new_expr, row)
-        }
-        Expression::Case { .. } => {
-            // Substitute window functions in CASE expressions before evaluating
-            let substituted = substitute_window_functions(expr, row, window_mapping)?;
-            evaluator.eval(&substituted, row)
-        }
-        Expression::Function { .. } => {
-            // Substitute window functions in function arguments before evaluating
-            let substituted = substitute_window_functions(expr, row, window_mapping)?;
-            evaluator.eval(&substituted, row)
-        }
-        Expression::IsNull { expr: inner, negated } => {
-            // Substitute window functions in IS NULL expressions
-            let inner_substituted = substitute_window_functions(inner, row, window_mapping)?;
-            let new_expr =
-                Expression::IsNull { expr: Box::new(inner_substituted), negated: *negated };
-            evaluator.eval(&new_expr, row)
-        }
-        _ => {
-            // For non-window expressions, use the regular evaluator
-            evaluator.eval(expr, row)
+    // Fast path: top-level window function lookup.
+    if let Expression::WindowFunction { function, over } = expr {
+        let key = WindowFunctionKey::from_expression(function, over);
+        if let Some(&col_idx) = window_mapping.get(&key) {
+            let value = row.values.get(col_idx).cloned().ok_or({
+                crate::errors::ExecutorError::ColumnIndexOutOfBounds { index: col_idx }
+            })?;
+            return Ok(value);
+        } else {
+            return Err(crate::errors::ExecutorError::UnsupportedExpression(format!(
+                "Window function not found in mapping: {:?}",
+                expr
+            )));
         }
     }
+
+    // General path: substitute any nested window functions with literals,
+    // then evaluate the rewritten tree.
+    let substituted = substitute_window_functions(expr, row, window_mapping)?;
+    evaluator.eval(&substituted, row)
 }
 
-/// Substitute window function expressions with literal values from pre-computed results
+/// Substitute window function expressions with literal values from
+/// pre-computed results.
+///
+/// Recurses through every variant that wraps a sub-expression in the *outer*
+/// scope. Subquery-bearing variants (`ScalarSubquery`, `Exists`,
+/// `In { subquery }`, `QuantifiedComparison`) are intentionally not
+/// descended into: a window inside a subquery belongs to the subquery's own
+/// scope, not the outer SELECT's mapping. The OVER clause of a
+/// `WindowFunction` is also not traversed for the same reason.
+///
+/// If a variant is missed, the regular evaluator will eventually encounter a
+/// `WindowFunction` node it cannot resolve and emit a false-positive
+/// "misuse of window function" error (issue #5095).
 fn substitute_window_functions(
     expr: &vibesql_ast::Expression,
     row: &vibesql_storage::Row,
     window_mapping: &HashMap<WindowFunctionKey, usize>,
 ) -> Result<vibesql_ast::Expression, crate::errors::ExecutorError> {
     use vibesql_ast::Expression;
+
+    // Helper: substitute over an Option<Box<Expression>>.
+    let sub_opt_box = |opt: &Option<Box<Expression>>,
+                       row: &vibesql_storage::Row,
+                       wm: &HashMap<WindowFunctionKey, usize>|
+     -> Result<Option<Box<Expression>>, crate::errors::ExecutorError> {
+        opt.as_ref()
+            .map(|e| substitute_window_functions(e, row, wm).map(Box::new))
+            .transpose()
+    };
 
     match expr {
         Expression::WindowFunction { function, over } => {
@@ -389,6 +379,20 @@ fn substitute_window_functions(
                 op: *op,
             })
         }
+        Expression::Conjunction(exprs) => {
+            let subs: Result<Vec<_>, _> = exprs
+                .iter()
+                .map(|e| substitute_window_functions(e, row, window_mapping))
+                .collect();
+            Ok(Expression::Conjunction(subs?))
+        }
+        Expression::Disjunction(exprs) => {
+            let subs: Result<Vec<_>, _> = exprs
+                .iter()
+                .map(|e| substitute_window_functions(e, row, window_mapping))
+                .collect();
+            Ok(Expression::Disjunction(subs?))
+        }
         Expression::UnaryOp { expr: inner, op } => {
             let inner_sub = substitute_window_functions(inner, row, window_mapping)?;
             Ok(Expression::UnaryOp { expr: Box::new(inner_sub), op: *op })
@@ -402,6 +406,37 @@ fn substitute_window_functions(
                 name: name.clone(),
                 args: substituted_args?,
                 character_unit: character_unit.clone(),
+            })
+        }
+        Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
+            let substituted_args: Result<Vec<_>, _> = args
+                .iter()
+                .map(|arg| substitute_window_functions(arg, row, window_mapping))
+                .collect();
+            let substituted_order_by = order_by
+                .as_ref()
+                .map(|items| {
+                    items
+                        .iter()
+                        .map(|item| {
+                            substitute_window_functions(&item.expr, row, window_mapping).map(
+                                |e| vibesql_ast::OrderByItem {
+                                    expr: e,
+                                    direction: item.direction.clone(),
+                                    nulls_order: item.nulls_order,
+                                },
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?;
+            let substituted_filter = sub_opt_box(filter, row, window_mapping)?;
+            Ok(Expression::AggregateFunction {
+                name: name.clone(),
+                distinct: *distinct,
+                args: substituted_args?,
+                order_by: substituted_order_by,
+                filter: substituted_filter,
             })
         }
         Expression::Case { operand, when_clauses, else_result } => {
@@ -450,7 +485,126 @@ fn substitute_window_functions(
             let inner_sub = substitute_window_functions(inner, row, window_mapping)?;
             Ok(Expression::IsNull { expr: Box::new(inner_sub), negated: *negated })
         }
-        // For all other expressions (literals, column refs, etc.), no substitution needed
+        Expression::IsDistinctFrom { left, right, negated } => {
+            let left_sub = substitute_window_functions(left, row, window_mapping)?;
+            let right_sub = substitute_window_functions(right, row, window_mapping)?;
+            Ok(Expression::IsDistinctFrom {
+                left: Box::new(left_sub),
+                right: Box::new(right_sub),
+                negated: *negated,
+            })
+        }
+        Expression::IsTruthValue { expr: inner, truth_value, negated } => {
+            let inner_sub = substitute_window_functions(inner, row, window_mapping)?;
+            Ok(Expression::IsTruthValue {
+                expr: Box::new(inner_sub),
+                truth_value: *truth_value, // TruthValue: Copy
+                negated: *negated,
+            })
+        }
+        Expression::Cast { expr: inner, data_type } => {
+            let inner_sub = substitute_window_functions(inner, row, window_mapping)?;
+            Ok(Expression::Cast { expr: Box::new(inner_sub), data_type: data_type.clone() })
+        }
+        Expression::Like { expr: inner, pattern, negated, escape } => {
+            let inner_sub = substitute_window_functions(inner, row, window_mapping)?;
+            let pattern_sub = substitute_window_functions(pattern, row, window_mapping)?;
+            let escape_sub = sub_opt_box(escape, row, window_mapping)?;
+            Ok(Expression::Like {
+                expr: Box::new(inner_sub),
+                pattern: Box::new(pattern_sub),
+                negated: *negated,
+                escape: escape_sub,
+            })
+        }
+        Expression::Glob { expr: inner, pattern, negated, escape } => {
+            let inner_sub = substitute_window_functions(inner, row, window_mapping)?;
+            let pattern_sub = substitute_window_functions(pattern, row, window_mapping)?;
+            let escape_sub = sub_opt_box(escape, row, window_mapping)?;
+            Ok(Expression::Glob {
+                expr: Box::new(inner_sub),
+                pattern: Box::new(pattern_sub),
+                negated: *negated,
+                escape: escape_sub,
+            })
+        }
+        Expression::InList { expr: inner, values, negated } => {
+            let inner_sub = substitute_window_functions(inner, row, window_mapping)?;
+            let value_subs: Result<Vec<_>, _> = values
+                .iter()
+                .map(|v| substitute_window_functions(v, row, window_mapping))
+                .collect();
+            Ok(Expression::InList {
+                expr: Box::new(inner_sub),
+                values: value_subs?,
+                negated: *negated,
+            })
+        }
+        Expression::In { expr: inner, subquery, negated } => {
+            // Only the LHS is in the outer scope; the subquery has its own scope
+            // and will be re-planned independently.
+            let inner_sub = substitute_window_functions(inner, row, window_mapping)?;
+            Ok(Expression::In {
+                expr: Box::new(inner_sub),
+                subquery: subquery.clone(),
+                negated: *negated,
+            })
+        }
+        Expression::QuantifiedComparison { expr: inner, op, quantifier, subquery } => {
+            // Only the LHS is in the outer scope.
+            let inner_sub = substitute_window_functions(inner, row, window_mapping)?;
+            Ok(Expression::QuantifiedComparison {
+                expr: Box::new(inner_sub),
+                op: op.clone(),
+                quantifier: quantifier.clone(),
+                subquery: subquery.clone(),
+            })
+        }
+        Expression::Between { expr: inner, low, high, negated, symmetric } => {
+            let inner_sub = substitute_window_functions(inner, row, window_mapping)?;
+            let low_sub = substitute_window_functions(low, row, window_mapping)?;
+            let high_sub = substitute_window_functions(high, row, window_mapping)?;
+            Ok(Expression::Between {
+                expr: Box::new(inner_sub),
+                low: Box::new(low_sub),
+                high: Box::new(high_sub),
+                negated: *negated,
+                symmetric: *symmetric,
+            })
+        }
+        Expression::Position { substring, string, character_unit } => {
+            let substring_sub = substitute_window_functions(substring, row, window_mapping)?;
+            let string_sub = substitute_window_functions(string, row, window_mapping)?;
+            Ok(Expression::Position {
+                substring: Box::new(substring_sub),
+                string: Box::new(string_sub),
+                character_unit: character_unit.clone(),
+            })
+        }
+        Expression::Trim { position, removal_char, string } => {
+            let removal_sub = sub_opt_box(removal_char, row, window_mapping)?;
+            let string_sub = substitute_window_functions(string, row, window_mapping)?;
+            Ok(Expression::Trim {
+                position: position.clone(),
+                removal_char: removal_sub,
+                string: Box::new(string_sub),
+            })
+        }
+        Expression::Extract { field, expr: inner } => {
+            let inner_sub = substitute_window_functions(inner, row, window_mapping)?;
+            Ok(Expression::Extract { field: field.clone(), expr: Box::new(inner_sub) })
+        }
+        Expression::Interval { value, unit, leading_precision, fractional_precision } => {
+            let value_sub = substitute_window_functions(value, row, window_mapping)?;
+            Ok(Expression::Interval {
+                value: Box::new(value_sub),
+                unit: unit.clone(),
+                leading_precision: *leading_precision,
+                fractional_precision: *fractional_precision,
+            })
+        }
+        // Subquery-bearing and leaf expressions are returned unchanged. A
+        // window inside a subquery belongs to the subquery's own scope.
         _ => Ok(expr.clone()),
     }
 }

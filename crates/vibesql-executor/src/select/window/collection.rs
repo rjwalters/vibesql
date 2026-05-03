@@ -104,7 +104,21 @@ pub(super) fn collect_window_functions(
     Ok(window_functions)
 }
 
-/// Recursively collect window functions from an expression
+/// Recursively collect window functions from an expression.
+///
+/// We must descend into every variant that wraps a sub-expression which can
+/// legally contain a top-level window function. If a variant is missed, the
+/// window evaluator (`combined/eval.rs`) will fail to find the window in
+/// `window_mapping` and emit a false-positive
+/// `MisuseOfWindowFunction` (issue #5095).
+///
+/// We intentionally do NOT descend into `ScalarSubquery`, `In { subquery }`,
+/// `Exists`, or `QuantifiedComparison` — windows inside those subqueries
+/// belong to the subquery's own scope and are collected when that SELECT is
+/// planned. We also do not descend into the OVER clause itself
+/// (`WindowFunction.over`) because windows nested inside an OVER clause's
+/// PARTITION BY / ORDER BY are evaluated as part of the outer window's frame
+/// computation, not as separate top-level windows.
 fn collect_from_expression(
     expr: &Expression,
     select_index: usize,
@@ -133,12 +147,37 @@ fn collect_from_expression(
             collect_from_expression(left, select_index, window_map, window_functions)?;
             collect_from_expression(right, select_index, window_map, window_functions)?;
         }
+        Expression::Conjunction(exprs) | Expression::Disjunction(exprs) => {
+            for e in exprs {
+                collect_from_expression(e, select_index, window_map, window_functions)?;
+            }
+        }
         Expression::UnaryOp { expr, .. } => {
             collect_from_expression(expr, select_index, window_map, window_functions)?;
         }
         Expression::Function { args, .. } => {
             for arg in args {
                 collect_from_expression(arg, select_index, window_map, window_functions)?;
+            }
+        }
+        Expression::AggregateFunction { args, order_by, filter, .. } => {
+            // A regular aggregate's arguments cannot contain a window function
+            // per SQL spec, but recursing here is harmless and future-proof.
+            for arg in args {
+                collect_from_expression(arg, select_index, window_map, window_functions)?;
+            }
+            if let Some(items) = order_by {
+                for item in items {
+                    collect_from_expression(
+                        &item.expr,
+                        select_index,
+                        window_map,
+                        window_functions,
+                    )?;
+                }
+            }
+            if let Some(f) = filter {
+                collect_from_expression(f, select_index, window_map, window_functions)?;
             }
         }
         Expression::Case { operand, when_clauses, else_result } => {
@@ -158,6 +197,62 @@ fn collect_from_expression(
         Expression::IsNull { expr, .. } => {
             collect_from_expression(expr, select_index, window_map, window_functions)?;
         }
+        Expression::IsDistinctFrom { left, right, .. } => {
+            collect_from_expression(left, select_index, window_map, window_functions)?;
+            collect_from_expression(right, select_index, window_map, window_functions)?;
+        }
+        Expression::IsTruthValue { expr, .. } => {
+            collect_from_expression(expr, select_index, window_map, window_functions)?;
+        }
+        Expression::Cast { expr, .. } => {
+            collect_from_expression(expr, select_index, window_map, window_functions)?;
+        }
+        Expression::Like { expr, pattern, escape, .. }
+        | Expression::Glob { expr, pattern, escape, .. } => {
+            collect_from_expression(expr, select_index, window_map, window_functions)?;
+            collect_from_expression(pattern, select_index, window_map, window_functions)?;
+            if let Some(esc) = escape {
+                collect_from_expression(esc, select_index, window_map, window_functions)?;
+            }
+        }
+        Expression::InList { expr, values, .. } => {
+            collect_from_expression(expr, select_index, window_map, window_functions)?;
+            for v in values {
+                collect_from_expression(v, select_index, window_map, window_functions)?;
+            }
+        }
+        Expression::In { expr, .. } => {
+            // Only the LHS is in the outer scope; the subquery has its own scope.
+            collect_from_expression(expr, select_index, window_map, window_functions)?;
+        }
+        Expression::QuantifiedComparison { expr, .. } => {
+            // Only the LHS is in the outer scope; the subquery has its own scope.
+            collect_from_expression(expr, select_index, window_map, window_functions)?;
+        }
+        Expression::Between { expr, low, high, .. } => {
+            collect_from_expression(expr, select_index, window_map, window_functions)?;
+            collect_from_expression(low, select_index, window_map, window_functions)?;
+            collect_from_expression(high, select_index, window_map, window_functions)?;
+        }
+        Expression::Position { substring, string, .. } => {
+            collect_from_expression(substring, select_index, window_map, window_functions)?;
+            collect_from_expression(string, select_index, window_map, window_functions)?;
+        }
+        Expression::Trim { removal_char, string, .. } => {
+            if let Some(rc) = removal_char {
+                collect_from_expression(rc, select_index, window_map, window_functions)?;
+            }
+            collect_from_expression(string, select_index, window_map, window_functions)?;
+        }
+        Expression::Extract { expr, .. } => {
+            collect_from_expression(expr, select_index, window_map, window_functions)?;
+        }
+        Expression::Interval { value, .. } => {
+            collect_from_expression(value, select_index, window_map, window_functions)?;
+        }
+        // Leaves and subquery-bearing variants we deliberately do not descend
+        // into. Subquery variants (ScalarSubquery, Exists) have their own
+        // scope; literal/column/placeholder/etc. variants have no children.
         _ => {}
     }
     Ok(())
