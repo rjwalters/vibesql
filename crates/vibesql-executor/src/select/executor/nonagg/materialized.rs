@@ -68,6 +68,17 @@ impl SelectExecutor<'_> {
             &stmt.select_list,
         )?;
 
+        // Validate ORDER BY for misuse of outer-correlated aggregates inside
+        // scalar subqueries when the outer query is a window-aggregate query.
+        // Mirrors SQLite's `disallowAggregatesInOrderByCb` walker. (#5094)
+        // e.g., SELECT sum(a) OVER(...) FROM t1 ORDER BY (SELECT sum(a) FROM t2)
+        super::super::validation::validate_window_query_order_by_aggregates(
+            stmt.order_by.as_deref(),
+            &stmt.select_list,
+            &from_result.schema,
+            self.database,
+        )?;
+
         // Phase D: Use iterator-based execution for simple queries
         // This provides memory efficiency and early termination for LIMIT queries
         if Self::can_use_iterator_execution(stmt) {
