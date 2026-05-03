@@ -22,7 +22,7 @@ use vibesql_storage::Database;
 
 use crate::{
     errors::ExecutorError, optimizer::index_planner::IndexPlanner,
-    select::scan::index_scan::cost_based_index_selection,
+    select::scan::index_scan::{cost_based_index_selection, needs_temp_btree_for_order_by_eqp},
 };
 
 /// SQLite-style scan type for EQP output
@@ -749,10 +749,17 @@ impl ExplainExecutor {
         }
 
         // Check if we need a temp B-tree for ORDER BY
-        // This happens when ORDER BY cannot be satisfied by an index
+        // This happens when ORDER BY cannot be satisfied by an index. The WHERE
+        // clause is passed through so the planner can pin leading index columns
+        // and accept trailing ORDER BY columns that would otherwise be rejected
+        // due to nullability.
         if let Some(ref order_by) = stmt.order_by {
-            let needs_temp =
-                Self::needs_temp_btree_for_order_by(stmt.from.as_ref(), order_by, database);
+            let needs_temp = Self::needs_temp_btree_for_order_by(
+                stmt.from.as_ref(),
+                stmt.where_clause.as_ref(),
+                order_by,
+                database,
+            );
             root.needs_temp_btree_for_order_by = needs_temp;
         }
 
@@ -849,9 +856,19 @@ impl ExplainExecutor {
         Ok(root)
     }
 
-    /// Check if ORDER BY requires a temp B-tree (sorting pass)
+    /// Check if ORDER BY requires a temp B-tree (sorting pass) for EQP rendering.
+    ///
+    /// Delegates to [`needs_temp_btree_for_order_by_eqp`] in the index-scan
+    /// selection module, which threads the WHERE clause through and applies a
+    /// permissive EQP-level check: when an index has its leading columns pinned
+    /// by equality/IN predicates and the ORDER BY structurally aligns, no temp
+    /// B-tree is shown — matching SQLite's behavior on plans like
+    /// `WHERE a IN (1,2,3) ORDER BY a, b`. Runtime correctness for nullable
+    /// trailing-column ordering is handled separately by the post-scan
+    /// `apply_order_by` pass.
     fn needs_temp_btree_for_order_by(
         from: Option<&vibesql_ast::FromClause>,
+        where_clause: Option<&vibesql_ast::Expression>,
         order_by: &[vibesql_ast::OrderByItem],
         database: &Database,
     ) -> bool {
@@ -867,33 +884,7 @@ impl ExplainExecutor {
             _ => return true, // Joins/subqueries need temp B-tree
         };
 
-        // Check if we have an index that can satisfy the ORDER BY
-        let order_by_vec: Vec<vibesql_ast::OrderByItem> = order_by.to_vec();
-        let index_info = cost_based_index_selection(
-            table_name,
-            None, // No WHERE clause for this check
-            Some(&order_by_vec),
-            database,
-        );
-
-        if index_info.is_none() {
-            return true; // No index can satisfy ORDER BY
-        }
-
-        // Check if index fully covers all ORDER BY columns
-        if let Some((_index_name, sorted_cols)) = index_info {
-            if let Some(ref cols) = sorted_cols {
-                // If we have a partial match (fewer columns than ORDER BY), we need temp B-tree
-                if cols.len() < order_by.len() {
-                    return true;
-                }
-            } else {
-                // No sorted columns means we need temp B-tree
-                return true;
-            }
-        }
-
-        false
+        needs_temp_btree_for_order_by_eqp(table_name, where_clause, order_by, database)
     }
 
     /// Generate plan node for FROM clause

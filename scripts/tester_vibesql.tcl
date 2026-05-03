@@ -3557,10 +3557,10 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses nth_value() (not yet implemented)"]
     }
 
-    # NULLS FIRST/LAST - SQL:2003 null ordering not yet supported
-    if {[regexp -nocase {NULLS\s+(FIRST|LAST)} $script]} {
-        return [list 1 "uses NULLS FIRST/LAST (not yet supported)"]
-    }
+    # Note: NULLS FIRST/LAST (SQL:2003 null ordering) IS supported by VibeSQL's
+    # executor (see crates/vibesql-executor/src/select/order/). The skip that
+    # previously matched this pattern was removed when the runtime support
+    # landed; do not re-add it.
 
     return [list 0 ""]
 }
