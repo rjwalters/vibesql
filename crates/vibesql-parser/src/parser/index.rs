@@ -813,6 +813,13 @@ impl Parser {
                 self.advance();
                 Ok(vibesql_ast::PragmaValue::Identifier(ident))
             }
+            Token::DelimitedIdentifier(ident) => {
+                // Accept double-quoted/bracketed/backtick identifiers as PRAGMA
+                // arguments, e.g. `PRAGMA table_info("weird name")` or
+                // `PRAGMA table_info="""1"` (a table named `"1`).
+                self.advance();
+                Ok(vibesql_ast::PragmaValue::Identifier(ident))
+            }
             Token::Keyword { keyword: kw, .. } => {
                 // Allow keywords like ON, OFF, TRUE, FALSE as identifiers
                 self.advance();

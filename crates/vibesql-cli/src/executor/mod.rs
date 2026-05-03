@@ -33,6 +33,71 @@ pub struct QueryResult {
 
 use crate::util::is_memory_database;
 
+/// Render a VibeSQL DataType as a SQLite-flavor declared type string suitable
+/// for `PRAGMA table_info`. SQLite preserves the original CREATE TABLE text,
+/// but VibeSQL doesn't track the literal declaration, so we map back to the
+/// canonical SQLite spelling (`INTEGER`, `REAL`, `TEXT`, `BLOB`, ...).
+fn sqlite_declared_type(
+    data_type: &vibesql_types::DataType,
+    is_exact_integer_type: bool,
+) -> String {
+    use vibesql_types::DataType;
+    match data_type {
+        DataType::Integer => {
+            // SQLite preserves the spelling: only literal "INTEGER" is the
+            // rowid-alias-eligible affinity. We use is_exact_integer_type to
+            // distinguish "INT" (mapped to Integer with is_exact=false) from
+            // the canonical "INTEGER".
+            if is_exact_integer_type {
+                "INTEGER".to_string()
+            } else {
+                "INT".to_string()
+            }
+        }
+        DataType::Smallint => "SMALLINT".to_string(),
+        DataType::Bigint => "BIGINT".to_string(),
+        DataType::Unsigned => "BIGINT UNSIGNED".to_string(),
+        DataType::Numeric { precision, scale } => format!("NUMERIC({},{})", precision, scale),
+        DataType::Decimal { precision, scale } => format!("DECIMAL({},{})", precision, scale),
+        DataType::Float { precision } => format!("FLOAT({})", precision),
+        DataType::Real => "REAL".to_string(),
+        DataType::DoublePrecision => "DOUBLE PRECISION".to_string(),
+        DataType::Character { length } => format!("CHAR({})", length),
+        DataType::Varchar { max_length } => match max_length {
+            Some(len) => format!("VARCHAR({})", len),
+            None => "TEXT".to_string(),
+        },
+        DataType::CharacterLargeObject => "TEXT".to_string(),
+        DataType::Name => "TEXT".to_string(),
+        DataType::Boolean => "BOOLEAN".to_string(),
+        DataType::Date => "DATE".to_string(),
+        DataType::Time { with_timezone } => {
+            if *with_timezone {
+                "TIME WITH TIME ZONE".to_string()
+            } else {
+                "TIME".to_string()
+            }
+        }
+        DataType::Timestamp { with_timezone } => {
+            if *with_timezone {
+                "TIMESTAMP WITH TIME ZONE".to_string()
+            } else {
+                "DATETIME".to_string()
+            }
+        }
+        DataType::Interval { .. } => "INTERVAL".to_string(),
+        DataType::BinaryLargeObject => "BLOB".to_string(),
+        DataType::Bit { length } => match length {
+            Some(len) => format!("BIT({})", len),
+            None => "BIT".to_string(),
+        },
+        DataType::UserDefined { type_name } => type_name.clone(),
+        DataType::Vector { dimensions } => format!("VECTOR({})", dimensions),
+        // Typeless columns (CREATE TABLE t(c)) report empty string in SQLite.
+        DataType::Null => String::new(),
+    }
+}
+
 /// Format SqlValue for output in SQLite-compatible format
 /// - Booleans are displayed as 0/1 instead of FALSE/TRUE
 /// - Other values use their standard Display format
@@ -99,6 +164,11 @@ impl SqlExecutor {
         };
 
         Ok(SqlExecutor { db, timing_enabled: false })
+    }
+
+    /// Returns true if the current session is inside an active transaction.
+    pub fn in_transaction(&self) -> bool {
+        self.db.in_transaction()
     }
 
     pub fn execute(&mut self, sql: &str) -> anyhow::Result<QueryResult> {
@@ -781,6 +851,9 @@ impl SqlExecutor {
             "FOREIGN_KEY_CHECK" => {
                 return self.execute_pragma_foreign_key_check(stmt);
             }
+            "TABLE_INFO" => {
+                return self.execute_pragma_table_info(stmt);
+            }
             _ => {}
         }
 
@@ -1262,6 +1335,127 @@ impl SqlExecutor {
             execution_time_ms: None,
             message: None,
         })
+    }
+
+    /// PRAGMA table_info(table_name) - SQLite-compatible
+    ///
+    /// Returns one row per column with:
+    ///   cid (0-based column index), name, type (declared SQL type, may be ""),
+    ///   notnull (0 or 1), dflt_value (default expression text or NULL),
+    ///   pk (0 if not PK, else 1-based position within PK).
+    ///
+    /// Schema-qualified syntax is accepted: `PRAGMA main.table_info(t)`. VibeSQL
+    /// only carries a single schema, so any other schema yields an empty result
+    /// (matching the SQLite behavior of "no such table" being silent for
+    /// table_info on missing tables).
+    fn execute_pragma_table_info(
+        &self,
+        stmt: &vibesql_ast::PragmaStmt,
+    ) -> anyhow::Result<QueryResult> {
+        let columns = vec![
+            "cid".to_string(),
+            "name".to_string(),
+            "type".to_string(),
+            "notnull".to_string(),
+            "dflt_value".to_string(),
+            "pk".to_string(),
+        ];
+
+        let table_name = match &stmt.value {
+            Some(vibesql_ast::PragmaValue::Identifier(name)) => name.clone(),
+            Some(vibesql_ast::PragmaValue::String(name)) => name.clone(),
+            _ => {
+                // No table argument supplied - return empty (SQLite behavior)
+                return Ok(QueryResult {
+                    columns,
+                    rows: Vec::new(),
+                    row_count: 0,
+                    execution_time_ms: None,
+                    message: None,
+                });
+            }
+        };
+
+        // Schema-qualified pragma handling. Only "main" or the current schema
+        // refer to the available schema; anything else returns an empty result
+        // (SQLite returns no rows for a missing table in table_info, no error).
+        let current_schema = self.db.catalog.get_current_schema().to_string();
+        if let Some(ref schema) = stmt.database {
+            let is_current = schema.eq_ignore_ascii_case(&current_schema)
+                || schema.eq_ignore_ascii_case("main");
+            if !is_current {
+                return Ok(QueryResult {
+                    columns,
+                    rows: Vec::new(),
+                    row_count: 0,
+                    execution_time_ms: None,
+                    message: None,
+                });
+            }
+        }
+
+        let schema = match self.db.catalog.get_table(&table_name) {
+            Some(s) => s,
+            None => {
+                // SQLite returns empty result for table_info on a missing table.
+                return Ok(QueryResult {
+                    columns,
+                    rows: Vec::new(),
+                    row_count: 0,
+                    execution_time_ms: None,
+                    message: None,
+                });
+            }
+        };
+
+        // Build a name->pk-position map (1-based) for primary key lookups.
+        // For composite keys, the position is the column's position within
+        // the declared primary-key column list.
+        let pk_positions: std::collections::HashMap<String, usize> =
+            match schema.primary_key.as_ref() {
+                Some(pk_cols) => pk_cols
+                    .iter()
+                    .enumerate()
+                    .map(|(i, name)| (name.clone(), i + 1))
+                    .collect(),
+                None => std::collections::HashMap::new(),
+            };
+
+        let mut rows: Vec<Vec<Option<String>>> = Vec::with_capacity(schema.columns.len());
+        for (cid, column) in schema.columns.iter().enumerate() {
+            // Type column: SQLite reports the declared type as supplied in the
+            // CREATE TABLE statement. We don't preserve the verbatim text, so
+            // we map our DataType back to the canonical SQLite-flavor name.
+            let type_str = sqlite_declared_type(&column.data_type, column.is_exact_integer_type);
+
+            // notnull: 1 if NOT NULL, else 0. SQLite implicitly marks INTEGER
+            // PRIMARY KEY rowid alias columns as NOT NULL.
+            let notnull = if !column.nullable { 1 } else { 0 };
+
+            // dflt_value: render the default expression as SQL text, or NULL.
+            let dflt_value: Option<String> = column.default_value.as_ref().map(|e| {
+                use vibesql_ast::pretty_print::ToSql;
+                e.to_sql()
+            });
+
+            // pk: 1-based position within the primary key, or 0 if not PK.
+            let pk = pk_positions
+                .get(&column.name)
+                .copied()
+                .unwrap_or(0);
+
+            rows.push(vec![
+                Some(cid.to_string()),
+                Some(column.name.clone()),
+                Some(type_str),
+                Some(notnull.to_string()),
+                dflt_value,
+                Some(pk.to_string()),
+            ]);
+        }
+
+        let row_count = rows.len();
+        Ok(QueryResult { columns, rows, row_count, execution_time_ms: None, message: None })
     }
 }
 

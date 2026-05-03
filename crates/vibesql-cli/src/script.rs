@@ -136,12 +136,24 @@ impl ScriptExecutor {
                         vibe_msg!("script-error", index = (idx + 1) as i64, error = e.to_string())
                     );
                     error_count += 1;
-                    // SQLite compatibility: Stop on first error (issue #4731)
-                    // SQLite's TCL interface and CLI stop execution when a statement fails.
-                    // Previously, we continued executing remaining statements which caused
-                    // bugs like catchsql { CREATE TABLE t1; INSERT... } where CREATE fails
-                    // but INSERT succeeds, adding duplicate rows.
-                    break;
+                    // SQLite compatibility:
+                    //   - Outside a transaction: stop on first error (issue #4731).
+                    //     SQLite's TCL interface and CLI both stop execution on
+                    //     statement error so that scripts like
+                    //     `catchsql { CREATE TABLE t1; INSERT... }` don't continue
+                    //     executing remaining statements after a failure.
+                    //   - Inside an active transaction: keep running so that
+                    //     subsequent statements (typically ROLLBACK or COMMIT)
+                    //     can still execute. SQLite leaves the transaction in
+                    //     a failed state after a constraint violation; the
+                    //     caller is expected to ROLLBACK explicitly. If we
+                    //     stopped on the failed statement we'd terminate the
+                    //     CLI process and lose the in-memory transaction state,
+                    //     making the explicit ROLLBACK arrive at a fresh
+                    //     process with no active transaction (issue #5087).
+                    if !self.executor.in_transaction() {
+                        break;
+                    }
                 }
             }
         }
