@@ -19,6 +19,7 @@ pub mod errors;
 pub mod evaluator;
 mod explain;
 pub mod expression_index_maintenance;
+pub mod foreign_key_check;
 mod grant;
 pub mod index_ddl;
 pub mod information_schema;

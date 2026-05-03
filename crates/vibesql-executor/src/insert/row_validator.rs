@@ -347,12 +347,21 @@ impl<'a> RowValidator<'a> {
         }
 
         for (fk_idx, fk_values) in fk_keys.iter().enumerate() {
-            // Skip if any FK value is NULL (stored as None)
+            let fk = &self.schema.foreign_keys[fk_idx];
+
+            // Mismatch check runs before any row-existence test so that bad
+            // FK targets are reported even when the parent table is empty
+            // (matches SQLite behaviour and fkey1-6.1 / fkey5-11.1).
+            if let Some((child, parent)) =
+                crate::foreign_key_check::detect_fk_mismatch(self.db, self.table_name, fk)
+            {
+                return Err(ExecutorError::ForeignKeyMismatch { child, parent });
+            }
+
+            // Skip row-existence check if any FK value is NULL (stored as None)
             let Some(ref fk_values) = fk_values else {
                 continue;
             };
-
-            let fk = &self.schema.foreign_keys[fk_idx];
 
             // Check if the referenced key exists in the parent table
             let parent_table = self
@@ -360,11 +369,24 @@ impl<'a> RowValidator<'a> {
                 .get_table(&fk.parent_table)
                 .ok_or_else(|| ExecutorError::TableNotFound(fk.parent_table.clone()))?;
 
+            let parent_collations =
+                crate::foreign_key_check::parent_collations_for_fk(self.db, fk);
+            let parent_indices =
+                crate::foreign_key_check::resolved_parent_indices_for_fk(self.db, fk);
+
             let key_exists = parent_table.scan().iter().any(|parent_row| {
-                fk.parent_column_indices
+                parent_indices
                     .iter()
                     .zip(fk_values)
-                    .all(|(&parent_idx, fk_val)| parent_row.get(parent_idx) == Some(fk_val))
+                    .enumerate()
+                    .all(|(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
+                        Some(parent_val) => crate::foreign_key_check::fk_values_equal(
+                            fk_val,
+                            parent_val,
+                            parent_collations.get(i).and_then(|c| c.as_deref()),
+                        ),
+                        None => false,
+                    })
             });
 
             if !key_exists {
