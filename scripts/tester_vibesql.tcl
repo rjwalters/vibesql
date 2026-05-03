@@ -1101,7 +1101,7 @@ proc execsql {sql {db ""}} {
                 }
                 continue  ;# Check for more statements
             }
-            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys)} [string trim $sql]]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|table_info)} [string trim $sql]]} {
                 # This PRAGMA is supported (with =value) - stop stripping
                 break
             } else {
@@ -1178,6 +1178,20 @@ proc execsql {sql {db ""}} {
             return {Count VirtualMachine Start Stop}
         }
         # Other EXPLAIN queries fall through to run normally with SQLite-compatible VM output
+    }
+
+    # Standalone ROLLBACK with no batched-transaction context: treat as a
+    # silent no-op. After a constraint violation in a previous batch, test
+    # files often issue `db eval {ROLLBACK}` to clean up the connection's
+    # transaction state. In SQLite this is harmless because the connection
+    # carries the transaction across statements; in VibeSQL each batch runs
+    # as a separate process so the "phantom" rollback would otherwise hit a
+    # fresh process with no active transaction and crash the test runner.
+    if {!$::in_transaction} {
+        set sql_trim_upper [string toupper [string trim $sql " \t\n;"]]
+        if {$sql_trim_upper eq "ROLLBACK" || $sql_trim_upper eq "ROLLBACK TRANSACTION"} {
+            return {}
+        }
     }
 
     # Handle transaction batching
@@ -3087,6 +3101,7 @@ array set vibesql_skip_tests {
     window1-11.4 "Expression indexes with window functions not supported"
 
     fkey1-3.5 "Uses sqlite3_db_status internal API"
+    fkey1-8.3 "Tests SQLite-internal B-tree corruption via PRAGMA writable_schema + REINDEX (not portable to VibeSQL)"
     fkey6-1.3 "Uses sqlite3_db_status internal API"
     fkey6-1.5.1 "Uses sqlite3_db_status internal API"
     fkey6-1.5.2 "Uses sqlite3_db_status internal API"

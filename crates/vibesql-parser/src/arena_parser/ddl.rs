@@ -1057,6 +1057,13 @@ impl<'arena> ArenaParser<'arena> {
                 let sym = self.interner.intern(&ident);
                 Ok(PragmaValue::Identifier(sym))
             }
+            Token::DelimitedIdentifier(ident) => {
+                // Accept double-quoted/bracketed/backtick identifiers as
+                // PRAGMA arguments (e.g. `PRAGMA table_info("name with space")`).
+                self.advance();
+                let sym = self.interner.intern(&ident);
+                Ok(PragmaValue::Identifier(sym))
+            }
             Token::Keyword { keyword: kw, .. } => {
                 self.advance();
                 let sym = self.interner.intern(&kw.to_string());
