@@ -1342,6 +1342,63 @@ pub(crate) fn extract_order_by_aggregates(
     aggregates
 }
 
+/// Extract aggregate expressions from window function PARTITION BY/ORDER BY clauses
+/// in the SELECT list. These need to be pre-computed during GROUP BY so the window
+/// evaluator (which runs after aggregation) can reference them.
+///
+/// Example:
+/// ```sql
+/// SELECT max(b) OVER (ORDER BY max(c)) FROM t GROUP BY b;
+/// ```
+/// Here `max(c)` inside the OVER clause must be pre-computed per group, then the window
+/// evaluator can sort by that pre-computed value.
+///
+/// Returns a vector of unique aggregate expressions used in any window's PARTITION BY,
+/// ORDER BY, or frame offset.
+pub(crate) fn extract_window_aggregates(
+    select_list: &[vibesql_ast::SelectItem],
+) -> Vec<vibesql_ast::Expression> {
+    use vibesql_ast::{Expression, SelectItem};
+
+    let mut aggregates = Vec::new();
+
+    for item in select_list {
+        if let SelectItem::Expression { expr: Expression::WindowFunction { over, .. }, .. } =
+            item
+        {
+            // PARTITION BY expressions
+            if let Some(partition_by) = &over.partition_by {
+                for p_expr in partition_by {
+                    collect_aggregates_from_expr(p_expr, &mut aggregates);
+                }
+            }
+            // ORDER BY expressions
+            if let Some(order_by) = &over.order_by {
+                for ob_item in order_by {
+                    collect_aggregates_from_expr(&ob_item.expr, &mut aggregates);
+                }
+            }
+            // Frame offset expressions (e.g., `ROWS BETWEEN sum(x) PRECEDING ...`)
+            if let Some(frame) = &over.frame {
+                if let vibesql_ast::FrameBound::Preceding(e)
+                | vibesql_ast::FrameBound::Following(e) = &frame.start
+                {
+                    collect_aggregates_from_expr(e, &mut aggregates);
+                }
+                if let Some(end) = &frame.end {
+                    if let vibesql_ast::FrameBound::Preceding(e)
+                    | vibesql_ast::FrameBound::Following(e) = end
+                    {
+                        collect_aggregates_from_expr(e, &mut aggregates);
+                    }
+                }
+            }
+        }
+    }
+
+    aggregates
+}
+
 /// Recursively collect aggregate function expressions from an expression tree.
 fn collect_aggregates_from_expr(
     expr: &vibesql_ast::Expression,

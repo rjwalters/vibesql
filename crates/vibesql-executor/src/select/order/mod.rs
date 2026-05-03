@@ -19,8 +19,9 @@ use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 
 // Re-export public API
 pub(crate) use resolution::{
-    extract_order_by_aggregates, resolve_order_by_alias, resolve_order_by_for_aggregates,
-    resolve_where_aliases, resolve_where_aliases_with_schema, select_list_has_aliases,
+    extract_order_by_aggregates, extract_window_aggregates, resolve_order_by_alias,
+    resolve_order_by_for_aggregates, resolve_where_aliases, resolve_where_aliases_with_schema,
+    select_list_has_aliases,
 };
 
 /// Sort key for ORDER BY: (value, direction, nulls_order, collation)

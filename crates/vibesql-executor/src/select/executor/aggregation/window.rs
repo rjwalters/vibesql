@@ -193,15 +193,21 @@ fn collect_window_functions(
 /// the inner values (e.g., for LEAD(x), each row has the x value).
 /// This function applies the window function over these values.
 ///
-/// `group_by_exprs` contains the GROUP BY expressions. Their evaluated values are
-/// appended as hidden columns after the SELECT items in each row. This allows
-/// window ORDER BY / PARTITION BY clauses to reference GROUP BY columns.
+/// Hidden column layout in each row (after the SELECT items):
+/// 1. `group_by_exprs` (count: G)
+/// 2. `order_by_aggregates` (count: order_by_aggregates_count) — pre-computed
+///    aggregates from the outer SQL ORDER BY (not used here, but skip past them)
+/// 3. `window_aggregates` (count: W) — pre-computed aggregates from the window's
+///    PARTITION BY/ORDER BY/frame (used to support `OVER (ORDER BY <agg>)`).
+///    See issue #5106.
 pub(super) fn apply_window_functions_to_aggregates(
     mut rows: Vec<Row>,
     select_list: &[SelectItem],
     database: &vibesql_storage::Database,
     window_definitions: Option<&Vec<WindowDefinition>>,
     group_by_exprs: &[Expression],
+    order_by_aggregates_count: usize,
+    window_aggregates: &[Expression],
 ) -> Result<Vec<Row>, ExecutorError> {
     let window_funcs = collect_window_functions(select_list, window_definitions)?;
 
@@ -211,7 +217,13 @@ pub(super) fn apply_window_functions_to_aggregates(
 
     // Build a schema for the aggregate result rows
     // Each column corresponds to a SELECT list item, plus hidden GROUP BY columns
-    let result_schema = build_aggregate_result_schema(select_list, group_by_exprs);
+    // and window-aggregate columns.
+    let result_schema = build_aggregate_result_schema(
+        select_list,
+        group_by_exprs,
+        order_by_aggregates_count,
+        window_aggregates,
+    );
     let evaluator = CombinedExpressionEvaluator::with_database(&result_schema, database);
 
     // Process each window function
@@ -226,7 +238,18 @@ pub(super) fn apply_window_functions_to_aggregates(
         // in the aggregate result schema. Create column reference expressions.
         let partition_exprs: Option<Vec<Expression>> =
             win_func.window_spec.partition_by.as_ref().map(|exprs| {
-                exprs.iter().map(|e| map_expr_to_result_column(e, select_list, group_by_exprs)).collect::<Vec<_>>()
+                exprs
+                    .iter()
+                    .map(|e| {
+                        map_expr_to_result_column(
+                            e,
+                            select_list,
+                            group_by_exprs,
+                            order_by_aggregates_count,
+                            window_aggregates,
+                        )
+                    })
+                    .collect::<Vec<_>>()
             });
 
         // Partition the rows
@@ -243,7 +266,13 @@ pub(super) fn apply_window_functions_to_aggregates(
                 items
                     .iter()
                     .map(|item| vibesql_ast::OrderByItem {
-                        expr: map_expr_to_result_column(&item.expr, select_list, group_by_exprs),
+                        expr: map_expr_to_result_column(
+                            &item.expr,
+                            select_list,
+                            group_by_exprs,
+                            order_by_aggregates_count,
+                            window_aggregates,
+                        ),
                         direction: item.direction.clone(),
                         nulls_order: item.nulls_order,
                     })
@@ -285,7 +314,15 @@ pub(super) fn apply_window_functions_to_aggregates(
             let mapped_args: Vec<Expression> = win_func
                 .args
                 .iter()
-                .map(|arg| map_expr_to_result_column(arg, select_list, group_by_exprs))
+                .map(|arg| {
+                    map_expr_to_result_column(
+                        arg,
+                        select_list,
+                        group_by_exprs,
+                        order_by_aggregates_count,
+                        window_aggregates,
+                    )
+                })
                 .collect();
 
             // Evaluate the window function for each row in the partition
@@ -615,11 +652,14 @@ pub(super) fn apply_window_functions_to_aggregates(
 /// Build a schema for aggregate result rows
 ///
 /// Uses consistent column naming: col0, col1, col2, ... so column references work correctly.
-/// Includes hidden columns for GROUP BY expressions (appended after SELECT items)
-/// so that window ORDER BY / PARTITION BY can reference GROUP BY columns.
+/// Includes hidden columns for GROUP BY expressions, ORDER BY aggregates, and window
+/// aggregates (in that order, appended after SELECT items) so that window
+/// ORDER BY / PARTITION BY clauses can reference any of them.
 fn build_aggregate_result_schema(
     select_list: &[SelectItem],
     group_by_exprs: &[Expression],
+    order_by_aggregates_count: usize,
+    window_aggregates: &[Expression],
 ) -> CombinedSchema {
     let mut columns = Vec::new();
 
@@ -637,6 +677,29 @@ fn build_aggregate_result_schema(
     // Use consistent col{idx} naming so make_result_col_ref() references work.
     for i in 0..group_by_exprs.len() {
         let column_name = format!("col{}", select_list.len() + i);
+        columns.push(ColumnSchema::new(
+            column_name,
+            DataType::Varchar { max_length: Some(255) },
+            true,
+        ));
+    }
+
+    // Hidden ORDER BY aggregate columns (used by outer SQL ORDER BY, but referenced
+    // here only to keep schema column count aligned with row width).
+    let order_by_offset = select_list.len() + group_by_exprs.len();
+    for i in 0..order_by_aggregates_count {
+        let column_name = format!("col{}", order_by_offset + i);
+        columns.push(ColumnSchema::new(
+            column_name,
+            DataType::Varchar { max_length: Some(255) },
+            true,
+        ));
+    }
+
+    // Hidden window-aggregate columns (used by window's PARTITION BY/ORDER BY/frame).
+    let window_offset = order_by_offset + order_by_aggregates_count;
+    for i in 0..window_aggregates.len() {
+        let column_name = format!("col{}", window_offset + i);
         columns.push(ColumnSchema::new(
             column_name,
             DataType::Varchar { max_length: Some(255) },
@@ -666,15 +729,20 @@ fn build_aggregate_result_schema(
 
 /// Map an expression to a column reference in the result schema
 ///
-/// For expressions that appear in the SELECT list or GROUP BY, we create a ColumnRef
-/// that references the computed value. For others, we return the expression as-is.
+/// For expressions that appear in the SELECT list, GROUP BY, or window aggregates,
+/// we create a ColumnRef that references the computed value. For others, we return
+/// the expression as-is.
 ///
-/// GROUP BY expressions are stored as hidden columns at positions
-/// `select_list.len() + i` in the aggregate result rows.
+/// Hidden column layout (after SELECT items):
+/// - GROUP BY expressions at positions `select_list.len() + i`
+/// - ORDER BY aggregates at positions `select_list.len() + G + i`
+/// - Window aggregates at positions `select_list.len() + G + O + i`
 fn map_expr_to_result_column(
     expr: &Expression,
     select_list: &[SelectItem],
     group_by_exprs: &[Expression],
+    order_by_aggregates_count: usize,
+    window_aggregates: &[Expression],
 ) -> Expression {
     // Helper to create a column ref for the synthetic result schema.
     // The schema uses col0, col1, col2, ... naming, so we always use that format.
@@ -778,6 +846,17 @@ fn map_expr_to_result_column(
                     return make_result_col_ref(select_count + i);
                 }
             }
+        }
+    }
+
+    // Check window-function aggregate expressions (stored as hidden columns after
+    // GROUP BY and ORDER BY aggregate columns). This enables window ORDER BY /
+    // PARTITION BY clauses that reference aggregates like `OVER (ORDER BY max(c))`.
+    // See issue #5106.
+    let window_agg_offset = select_count + group_by_exprs.len() + order_by_aggregates_count;
+    for (i, win_agg_expr) in window_aggregates.iter().enumerate() {
+        if expressions_match(expr, win_agg_expr) {
+            return make_result_col_ref(window_agg_offset + i);
         }
     }
 

@@ -297,6 +297,14 @@ impl SelectExecutor<'_> {
             Vec::new()
         };
 
+        // Extract aggregates from window function PARTITION BY/ORDER BY/frame for
+        // pre-computation during GROUP BY. This allows queries like:
+        //   SELECT max(b) OVER (ORDER BY max(c)) FROM t GROUP BY b
+        // where the window's ORDER BY references an aggregate output that must be
+        // computed per group. See issue #5106.
+        let window_aggregates =
+            crate::select::order::extract_window_aggregates(&stmt.select_list);
+
         // Column pruning optimization (#4355, #4377)
         // After JOIN completes, project only the columns needed for aggregation.
         // This reduces memory and CPU overhead significantly for multi-way JOINs.
@@ -311,6 +319,12 @@ impl SelectExecutor<'_> {
 
             // Also collect columns from ORDER BY aggregates
             for agg_expr in &order_by_aggregates {
+                collect_columns_from_expr(agg_expr, &mut required_columns);
+            }
+
+            // Also collect columns from window function aggregates (PARTITION BY,
+            // ORDER BY, frame) so they survive column pruning. See issue #5106.
+            for agg_expr in &window_aggregates {
                 collect_columns_from_expr(agg_expr, &mut required_columns);
             }
 
@@ -541,6 +555,20 @@ impl SelectExecutor<'_> {
                             row_values.push(agg_value);
                         }
 
+                        // Compute window-function aggregates and append them to row
+                        // values. The window evaluator references these via the
+                        // aggregate result schema. See issue #5106.
+                        for win_agg_expr in &window_aggregates {
+                            let agg_value = self.evaluate_with_aggregates_and_grouping(
+                                win_agg_expr,
+                                &group_rows,
+                                &group_key,
+                                &evaluator,
+                                &grouping_context,
+                            )?;
+                            row_values.push(agg_value);
+                        }
+
                         let row = vibesql_storage::Row::new(row_values);
 
                         // Track memory for aggregation result row
@@ -639,7 +667,23 @@ impl SelectExecutor<'_> {
                 };
 
                 if include_group {
-                    let row = vibesql_storage::Row::new(aggregate_results);
+                    // No GROUP BY columns and no ORDER BY aggregates in this path,
+                    // but we still need to append window-function aggregates so the
+                    // window evaluator can reference them. See issue #5106.
+                    let mut row_values = aggregate_results;
+
+                    for win_agg_expr in &window_aggregates {
+                        let agg_value = self.evaluate_with_aggregates_and_grouping(
+                            win_agg_expr,
+                            &group_rows,
+                            &group_key,
+                            &evaluator,
+                            &grouping_context,
+                        )?;
+                        row_values.push(agg_value);
+                    }
+
+                    let row = vibesql_storage::Row::new(row_values);
 
                     // Track memory for aggregation result row
                     let row_memory = std::mem::size_of::<vibesql_storage::Row>()
@@ -660,7 +704,9 @@ impl SelectExecutor<'_> {
 
         // Apply window functions that wrap aggregates (e.g., AVG(SUM(x)) OVER (...))
         // This must happen after GROUP BY but before ORDER BY
-        // Pass GROUP BY expressions so window ORDER BY/PARTITION BY can reference them
+        // Pass GROUP BY expressions so window ORDER BY/PARTITION BY can reference them.
+        // Pass window_aggregates and order_by_aggregates count so window evaluator can
+        // map references to the pre-computed hidden columns. See issue #5106.
         let result_rows = if window::has_aggregate_window_functions(&expanded_select_list) {
             window::apply_window_functions_to_aggregates(
                 result_rows,
@@ -668,13 +714,16 @@ impl SelectExecutor<'_> {
                 self.database,
                 stmt.window_definitions.as_ref(),
                 &group_by_exprs,
+                order_by_aggregates.len(),
+                &window_aggregates,
             )?
         } else {
             result_rows
         };
 
-        // Calculate count of hidden columns (GROUP BY + ORDER BY aggregates)
-        let hidden_col_count = group_by_exprs.len() + order_by_aggregates.len();
+        // Calculate count of hidden columns (GROUP BY + ORDER BY aggregates + window aggregates)
+        let hidden_col_count =
+            group_by_exprs.len() + order_by_aggregates.len() + window_aggregates.len();
 
         // Apply ORDER BY if present
         // Note: For scalar aggregates (no GROUP BY), ORDER BY is skipped because:
