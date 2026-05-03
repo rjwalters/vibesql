@@ -242,6 +242,8 @@ mod catalog_tests {
             parent_column_indices: vec![0],
             on_delete: ReferentialAction::Cascade,
             on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
         };
 
         let mut schema = TableSchema::with_foreign_keys("orders".to_string(), columns, vec![fk]);
@@ -281,6 +283,8 @@ mod catalog_tests {
             parent_column_indices: vec![0],
             on_delete: ReferentialAction::Cascade,
             on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
         };
 
         let mut schema = TableSchema::with_foreign_keys("orders".to_string(), columns, vec![fk]);
@@ -461,6 +465,8 @@ mod catalog_tests {
             parent_column_indices: vec![0],
             on_delete: ReferentialAction::Cascade,
             on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
         };
 
         // Create a check constraint: age >= 18

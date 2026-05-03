@@ -94,7 +94,7 @@ pub(super) fn execute_add_constraint(
             references_columns,
             on_delete,
             on_update,
-            ..
+            deferral,
         } => {
             // Convert AST ReferentialAction to catalog ReferentialAction
             let convert_action = |action: &Option<vibesql_ast::ReferentialAction>| match action {
@@ -158,6 +158,10 @@ pub(super) fn execute_add_constraint(
                 parent_column_indices.push(idx);
             }
 
+            let (is_deferrable, initially_deferred) = deferral
+                .map(|d| (d.is_deferrable, d.initially_deferred))
+                .unwrap_or((false, false));
+
             let fk = ForeignKeyConstraint {
                 name: stmt.constraint.name.clone(),
                 column_names: columns.clone(),
@@ -167,6 +171,8 @@ pub(super) fn execute_add_constraint(
                 parent_column_indices,
                 on_delete: convert_action(on_delete),
                 on_update: convert_action(on_update),
+                is_deferrable,
+                initially_deferred,
             };
 
             let table = database

@@ -48,6 +48,7 @@ set ::pragma_case_sensitive_like 0 ;# Default: OFF (case-insensitive LIKE)
 set ::pragma_count_changes 0       ;# Default: OFF (UPDATE/DELETE return nothing)
 set ::pragma_reverse_unordered_selects 0  ;# Default: OFF (normal row order)
 set ::pragma_foreign_keys 0              ;# Default: OFF (SQLite default)
+set ::pragma_defer_foreign_keys 0        ;# Default: OFF; auto-resets at COMMIT/ROLLBACK
 
 # DQS (Double-Quoted Strings) mode tracking
 # When enabled, double-quoted strings are treated as string literals instead of identifiers
@@ -846,6 +847,13 @@ proc build_pragma_prefix {} {
     if {$::pragma_foreign_keys != 0} {
         append prefix "PRAGMA foreign_keys=$::pragma_foreign_keys;\n"
     }
+    # Include defer_foreign_keys if it's been set to ON.
+    # Per SQLite, this pragma auto-resets at every COMMIT or ROLLBACK; the
+    # shim's `track_pragma_setting` clears `::pragma_defer_foreign_keys` when
+    # it sees those statements so subsequent batches don't re-apply ON.
+    if {$::pragma_defer_foreign_keys != 0} {
+        append prefix "PRAGMA defer_foreign_keys=$::pragma_defer_foreign_keys;\n"
+    }
     return $prefix
 }
 
@@ -919,7 +927,9 @@ proc track_pragma_setting {sql} {
     }
 
     # Look for foreign_keys settings (find all occurrences, use last one)
-    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?foreign_keys\s*[=(]\s*(\w+)\s*[)]?} $sql]
+    # Note: `(?<!_)` style lookbehind isn't portable to TCL regex; use a word
+    # boundary anchor `\m` (start-of-word) to avoid matching `defer_foreign_keys`.
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?\mforeign_keys\s*[=(]\s*(\w+)\s*[)]?} $sql]
     foreach {match value} $matches {
         set upper [string toupper $value]
         if {$upper eq "ON" || $upper eq "TRUE" || $upper eq "YES" || $value eq "1"} {
@@ -928,6 +938,25 @@ proc track_pragma_setting {sql} {
             set ::pragma_foreign_keys 0
         }
         set found 1
+    }
+
+    # Look for defer_foreign_keys settings (find all occurrences, use last one)
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?defer_foreign_keys\s*[=(]\s*(\w+)\s*[)]?} $sql]
+    foreach {match value} $matches {
+        set upper [string toupper $value]
+        if {$upper eq "ON" || $upper eq "TRUE" || $upper eq "YES" || $value eq "1"} {
+            set ::pragma_defer_foreign_keys 1
+        } else {
+            set ::pragma_defer_foreign_keys 0
+        }
+        set found 1
+    }
+
+    # SQLite auto-resets defer_foreign_keys at every COMMIT or ROLLBACK
+    # (R-21752-26913). Mirror that here so re-emitted PRAGMAs don't carry over
+    # across the boundary in subsequent CLI process invocations.
+    if {[regexp -nocase {(?:^|;)\s*(?:COMMIT|ROLLBACK)\s*(?:;|$)} $sql]} {
+        set ::pragma_defer_foreign_keys 0
     }
 
     return $found
@@ -1101,7 +1130,7 @@ proc execsql {sql {db ""}} {
                 }
                 continue  ;# Check for more statements
             }
-            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|table_info)} [string trim $sql]]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|table_info)} [string trim $sql]]} {
                 # This PRAGMA is supported (with =value) - stop stripping
                 break
             } else {
@@ -1565,7 +1594,7 @@ proc execsql2 {sql {db ""}} {
     set sql_upper [string toupper [string trim $sql]]
     if {[string match "PRAGMA*" $sql_upper]} {
         # Allow supported PRAGMAs through
-        if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|foreign_key_list|foreign_key_check|foreign_keys)} $sql]} {
+        if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys)} $sql]} {
             # Pass through to VibeSQL - these are supported
         } else {
             return {}  ;# Skip unsupported PRAGMA statements
@@ -4199,6 +4228,7 @@ proc sqlite3 {db args} {
     set ::pragma_case_sensitive_like 0
     set ::pragma_reverse_unordered_selects 0
     set ::pragma_foreign_keys 0
+    set ::pragma_defer_foreign_keys 0
     set ::dqs_dml_mode 0  ;# Reset DQS mode for new database
 
     # Create db command alias - if name is not "db" (which already exists)
@@ -4496,6 +4526,7 @@ proc reset_db {} {
     set ::pragma_case_sensitive_like 0
     set ::pragma_reverse_unordered_selects 0
     set ::pragma_foreign_keys 0
+    set ::pragma_defer_foreign_keys 0
 }
 
 proc forcedelete {args} {

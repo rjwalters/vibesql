@@ -387,6 +387,8 @@ mod tests {
             parent_column_indices: vec![0],
             on_delete: ReferentialAction::NoAction,
             on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
         });
         schemas.insert("posts".to_string(), posts_schema);
 

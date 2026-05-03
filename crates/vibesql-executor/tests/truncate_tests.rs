@@ -420,6 +420,8 @@ fn test_truncate_blocked_by_fk_references() {
             parent_column_indices: vec![0],
             on_delete: ReferentialAction::NoAction,
             on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
         }],
     );
     db.create_table(child_schema).unwrap();

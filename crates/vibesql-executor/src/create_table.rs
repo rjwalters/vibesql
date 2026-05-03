@@ -240,7 +240,7 @@ impl CreateTableExecutor {
                 references_columns,
                 on_delete,
                 on_update,
-                ..
+                deferral,
             } = &constraint.kind
             {
                 // Resolve column indices for FK columns
@@ -314,6 +314,10 @@ impl CreateTableExecutor {
                     parent_column_indices
                 };
 
+                let (is_deferrable, initially_deferred) = deferral
+                    .map(|d| (d.is_deferrable, d.initially_deferred))
+                    .unwrap_or((false, false));
+
                 let fk = vibesql_catalog::ForeignKeyConstraint {
                     name: constraint.name.clone(),
                     column_names: fk_columns.clone(),
@@ -323,6 +327,8 @@ impl CreateTableExecutor {
                     parent_column_indices: effective_parent_indices,
                     on_delete: convert_action(on_delete),
                     on_update: convert_action(on_update),
+                    is_deferrable,
+                    initially_deferred,
                 };
 
                 table_schema.add_foreign_key(fk)?;
@@ -345,7 +351,7 @@ impl CreateTableExecutor {
                     column: ref_column,
                     on_delete,
                     on_update,
-                    ..
+                    deferral,
                 } = &constraint.kind
                 {
                     let col_idx =
@@ -403,6 +409,10 @@ impl CreateTableExecutor {
                             }
                         };
 
+                    let (is_deferrable, initially_deferred) = deferral
+                        .map(|d| (d.is_deferrable, d.initially_deferred))
+                        .unwrap_or((false, false));
+
                     let fk = vibesql_catalog::ForeignKeyConstraint {
                         name: constraint.name.clone(),
                         column_names: vec![col_def.name.clone()],
@@ -412,6 +422,8 @@ impl CreateTableExecutor {
                         parent_column_indices: vec![parent_col_idx],
                         on_delete: convert_action(on_delete),
                         on_update: convert_action(on_update),
+                        is_deferrable,
+                        initially_deferred,
                     };
 
                     column_level_fks.push(fk);

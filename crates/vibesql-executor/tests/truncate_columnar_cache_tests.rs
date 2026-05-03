@@ -248,6 +248,8 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
             parent_column_indices: vec![0],
             on_delete: ReferentialAction::Cascade,
             on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
         }],
     );
     db.create_table(child_schema).unwrap();
