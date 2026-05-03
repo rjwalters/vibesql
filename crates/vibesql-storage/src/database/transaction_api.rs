@@ -56,6 +56,11 @@ impl Database {
 
         self.lifecycle.transaction_manager_mut().commit_transaction()?;
 
+        // SQLite: PRAGMA defer_foreign_keys is automatically reset to OFF at
+        // every COMMIT (R-21752-26913, fkey6-1.10.1). This is a session-level
+        // flag, so reset it here regardless of FK enforcement state.
+        self.set_defer_foreign_keys(false);
+
         // Emit WAL entry for persistence
         if let Some(txn_id) = txn_id {
             self.emit_wal_op(WalOp::TxnCommit { txn_id });
@@ -84,6 +89,10 @@ impl Database {
         let txn_id = self.transaction_id();
 
         self.lifecycle.perform_rollback(&mut self.catalog, &mut self.tables)?;
+
+        // SQLite: PRAGMA defer_foreign_keys is automatically reset to OFF at
+        // every COMMIT or ROLLBACK (R-21752-26913, fkey6-1.10.1).
+        self.set_defer_foreign_keys(false);
 
         // Emit WAL entry for persistence
         if let Some(txn_id) = txn_id {

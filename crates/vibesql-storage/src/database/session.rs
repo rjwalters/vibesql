@@ -167,6 +167,30 @@ impl Database {
         );
     }
 
+    /// Get the defer_foreign_keys PRAGMA setting (SQLite compatibility).
+    ///
+    /// When ON, enforcement of all foreign key constraints is delayed until
+    /// the outermost transaction is committed. Per SQLite, this pragma
+    /// defaults to OFF and is automatically reset to OFF at every COMMIT or
+    /// ROLLBACK (see `fkey6-1.10.1`).
+    ///
+    /// **Phase C1 of #5085**: this method only stores/returns the flag. The
+    /// runtime change (queueing FK violations until commit) lands in Phase C2.
+    pub fn defer_foreign_keys(&self) -> bool {
+        match self.get_session_variable("DEFER_FOREIGN_KEYS") {
+            Some(vibesql_types::SqlValue::Integer(n)) => *n != 0,
+            _ => false, // Default: OFF (SQLite compatibility)
+        }
+    }
+
+    /// Set the defer_foreign_keys PRAGMA setting (SQLite compatibility).
+    pub fn set_defer_foreign_keys(&mut self, value: bool) {
+        self.set_session_variable(
+            "DEFER_FOREIGN_KEYS",
+            vibesql_types::SqlValue::Integer(if value { 1 } else { 0 }),
+        );
+    }
+
     // ============================================================================
     // SQLite stat1 Storage (SQLite Compatibility)
     // ============================================================================

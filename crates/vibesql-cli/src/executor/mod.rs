@@ -913,6 +913,20 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "DEFER_FOREIGN_KEYS" => {
+                    // SQLite-compatible PRAGMA defer_foreign_keys.
+                    // Phase C1 of #5085: store/read the flag and auto-reset
+                    // at COMMIT/ROLLBACK. Runtime semantic change (deferring
+                    // FK violations until COMMIT) ships in Phase C2.
+                    self.db.set_defer_foreign_keys(bool_value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 _ => {
                     // Unknown pragma - silently ignore for SQLite compatibility
                     Ok(QueryResult {
@@ -983,6 +997,18 @@ impl SqlExecutor {
                     let value = if self.db.foreign_keys_enabled() { "1" } else { "0" };
                     Ok(QueryResult {
                         columns: vec!["foreign_keys".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "DEFER_FOREIGN_KEYS" => {
+                    // SQLite-compatible PRAGMA defer_foreign_keys read.
+                    // Defaults to 0 and auto-resets at COMMIT/ROLLBACK.
+                    let value = if self.db.defer_foreign_keys() { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["defer_foreign_keys".to_string()],
                         rows: vec![vec![Some(value.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,
