@@ -14,6 +14,14 @@ use crate::{
 /// `a` from the row where `a` has its maximum value, not just the first row.
 ///
 /// See issue #4683 for details.
+///
+/// **Issue #5104 — implicit-outer-aggregate-collapse**: When the scalar
+/// subquery is *bare* (no FROM) and its body contains an aggregate referencing
+/// outer columns, SQLite collapses the outer query into a single-row aggregate
+/// with the inner aggregate computed over all outer rows. We propagate
+/// `group_rows` as `outer_rows` to the inner subquery's evaluator so the
+/// existing #4930 inner-aggregate path can iterate them. Without this, the
+/// inner aggregate would only see the representative row (1 row → wrong avg).
 pub(super) fn evaluate_scalar(
     executor: &SelectExecutor,
     expr: &vibesql_ast::Expression,
@@ -30,9 +38,160 @@ pub(super) fn evaluate_scalar(
     };
 
     if let Some(row) = representative_row {
+        // Issue #5104: when the subquery is a bare scalar subquery whose body
+        // has an aggregate referencing an outer column, override `outer_rows`
+        // with the current group's rows so the inner aggregate can iterate
+        // them (via the #4930 outer-correlated-aggregate path). For other
+        // subqueries the parent evaluator's outer_rows are preserved.
+        if scalar_subquery_needs_outer_rows(expr) {
+            let mut overridden = evaluator.clone_for_new_expression();
+            overridden.set_outer_rows(group_rows);
+            return overridden.eval(expr, row);
+        }
         evaluator.eval(expr, row)
     } else {
         Ok(vibesql_types::SqlValue::Null)
+    }
+}
+
+/// Check whether `expr` is a scalar subquery (or a compound expression
+/// containing one) that needs `outer_rows` set to the current group's rows
+/// for SQLite's implicit-outer-aggregate-collapse semantics (#5104).
+///
+/// The pattern: a bare (FROM-less) scalar subquery whose body contains an
+/// aggregate function whose argument / FILTER / ORDER BY references an outer
+/// column. Inside a bare subquery, *any* column reference is necessarily an
+/// outer reference, so we just check for any column ref in the aggregate.
+fn scalar_subquery_needs_outer_rows(expr: &vibesql_ast::Expression) -> bool {
+    use vibesql_ast::Expression;
+
+    match expr {
+        Expression::ScalarSubquery(stmt) => {
+            if stmt.from.is_some() {
+                return false;
+            }
+            stmt.select_list.iter().any(|item| match item {
+                vibesql_ast::SelectItem::Expression { expr: inner, .. } => {
+                    bare_subquery_inner_has_outer_aggregate(inner)
+                }
+                _ => false,
+            })
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            scalar_subquery_needs_outer_rows(left)
+                || scalar_subquery_needs_outer_rows(right)
+        }
+        Expression::UnaryOp { expr, .. } => scalar_subquery_needs_outer_rows(expr),
+        Expression::Cast { expr, .. } => scalar_subquery_needs_outer_rows(expr),
+        Expression::IsNull { expr, .. } => scalar_subquery_needs_outer_rows(expr),
+        Expression::Function { args, .. } => args.iter().any(scalar_subquery_needs_outer_rows),
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|e| scalar_subquery_needs_outer_rows(e))
+                || when_clauses.iter().any(|w| {
+                    w.conditions.iter().any(scalar_subquery_needs_outer_rows)
+                        || scalar_subquery_needs_outer_rows(&w.result)
+                })
+                || else_result.as_ref().is_some_and(|e| scalar_subquery_needs_outer_rows(e))
+        }
+        _ => false,
+    }
+}
+
+/// Inside a bare scalar subquery, check whether `expr` contains an aggregate
+/// whose args/filter/order_by reference any column (which is necessarily an
+/// outer reference — bare subqueries have no inner columns).
+fn bare_subquery_inner_has_outer_aggregate(expr: &vibesql_ast::Expression) -> bool {
+    use vibesql_ast::Expression;
+
+    match expr {
+        Expression::AggregateFunction { args, filter, order_by, .. } => {
+            if args.iter().any(any_column_ref) {
+                return true;
+            }
+            if filter.as_ref().is_some_and(|f| any_column_ref(f)) {
+                return true;
+            }
+            if order_by
+                .as_ref()
+                .is_some_and(|items| items.iter().any(|i| any_column_ref(&i.expr)))
+            {
+                return true;
+            }
+            args.iter().any(bare_subquery_inner_has_outer_aggregate)
+        }
+        Expression::Function { name, args, .. } => {
+            // Old Function variant for aggregate names
+            let upper = name.to_uppercase();
+            let is_agg = matches!(
+                upper.as_str(),
+                "COUNT" | "SUM" | "AVG" | "TOTAL" | "MIN" | "MAX" | "GROUP_CONCAT" | "STRING_AGG"
+            );
+            let is_scalar_minmax = matches!(upper.as_str(), "MIN" | "MAX") && args.len() > 1;
+            if is_agg && !is_scalar_minmax && args.iter().any(any_column_ref) {
+                return true;
+            }
+            args.iter().any(bare_subquery_inner_has_outer_aggregate)
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            bare_subquery_inner_has_outer_aggregate(left)
+                || bare_subquery_inner_has_outer_aggregate(right)
+        }
+        Expression::UnaryOp { expr, .. } => bare_subquery_inner_has_outer_aggregate(expr),
+        Expression::Cast { expr, .. } => bare_subquery_inner_has_outer_aggregate(expr),
+        Expression::IsNull { expr, .. } => bare_subquery_inner_has_outer_aggregate(expr),
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|e| bare_subquery_inner_has_outer_aggregate(e))
+                || when_clauses.iter().any(|w| {
+                    w.conditions.iter().any(bare_subquery_inner_has_outer_aggregate)
+                        || bare_subquery_inner_has_outer_aggregate(&w.result)
+                })
+                || else_result.as_ref().is_some_and(|e| bare_subquery_inner_has_outer_aggregate(e))
+        }
+        // Don't descend into nested subqueries / window functions (own scope).
+        _ => false,
+    }
+}
+
+/// Recursively check whether `expr` contains any column reference. Used inside
+/// bare subqueries where any column ref is necessarily outer.
+fn any_column_ref(expr: &vibesql_ast::Expression) -> bool {
+    use vibesql_ast::Expression;
+
+    match expr {
+        Expression::ColumnRef(_) => true,
+        Expression::BinaryOp { left, right, .. } => {
+            any_column_ref(left) || any_column_ref(right)
+        }
+        Expression::UnaryOp { expr, .. } => any_column_ref(expr),
+        Expression::Cast { expr, .. } => any_column_ref(expr),
+        Expression::IsNull { expr, .. } => any_column_ref(expr),
+        Expression::Function { args, .. } => args.iter().any(any_column_ref),
+        Expression::AggregateFunction { args, filter, order_by, .. } => {
+            args.iter().any(any_column_ref)
+                || filter.as_ref().is_some_and(|f| any_column_ref(f))
+                || order_by
+                    .as_ref()
+                    .is_some_and(|items| items.iter().any(|i| any_column_ref(&i.expr)))
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|e| any_column_ref(e))
+                || when_clauses.iter().any(|w| {
+                    w.conditions.iter().any(any_column_ref)
+                        || any_column_ref(&w.result)
+                })
+                || else_result.as_ref().is_some_and(|e| any_column_ref(e))
+        }
+        Expression::Like { expr, pattern, .. } => {
+            any_column_ref(expr) || any_column_ref(pattern)
+        }
+        Expression::Between { expr, low, high, .. } => {
+            any_column_ref(expr) || any_column_ref(low) || any_column_ref(high)
+        }
+        Expression::InList { expr, values, .. } => {
+            any_column_ref(expr) || values.iter().any(any_column_ref)
+        }
+        // Don't descend into nested subqueries or window functions (own scope).
+        _ => false,
     }
 }
 

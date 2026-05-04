@@ -345,6 +345,36 @@ fn collect_correlation_refs_from_expr(
             collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
             collect_correlation_refs(subquery, outer_schema, subquery_tables, refs);
         }
+        // Window functions: check args, PARTITION BY, ORDER BY for outer column refs.
+        // Without this, queries like `(SELECT min(a) OVER ())` over a correlated `a`
+        // would compute an empty correlation set, producing the same cache key for
+        // every outer row and returning the first row's value to all subsequent rows
+        // (window4.test 12.1 — issue #5104).
+        vibesql_ast::Expression::WindowFunction { function, over } => {
+            let args = match function {
+                vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
+            };
+            for arg in args {
+                collect_correlation_refs_from_expr(arg, outer_schema, subquery_tables, refs);
+            }
+            if let Some(partition_by) = &over.partition_by {
+                for p in partition_by {
+                    collect_correlation_refs_from_expr(p, outer_schema, subquery_tables, refs);
+                }
+            }
+            if let Some(order_by) = &over.order_by {
+                for ob_item in order_by {
+                    collect_correlation_refs_from_expr(
+                        &ob_item.expr,
+                        outer_schema,
+                        subquery_tables,
+                        refs,
+                    );
+                }
+            }
+        }
         // Literals and other expressions don't contribute to correlation
         _ => {}
     }
