@@ -13,6 +13,16 @@ categories = ["database"]
 default = ["compression"]
 # zstd compression for binary persistence (disabled in WASM where browsers provide compression)
 compression = ["zstd"]
+# MVCC machinery toggle (Phase 1 of #5136 / parent #4460).
+#
+# Off by default. In Phase 1a this flag is purely a forward-compatibility
+# placeholder: the on-disk format already always carries `xmin`/`xmax`
+# (vbsql v7), but the executor write path stamps them with the pre-MVCC
+# sentinel and the read path does no visibility filtering. Subsequent phases
+# (1b: TxnSnapshot + visible_to predicate; 1c: write-path stamping;
+# 1d: read-path filtering) will conditionally compile their behavior on
+# this flag. Enabling it in Phase 1a is therefore a no-op.
+mvcc_enabled = []
 # Force in-memory indexes regardless of table size (for benchmarks)
 # This avoids the slow disk-backed index creation for ephemeral benchmark data
 in-memory-indexes = []

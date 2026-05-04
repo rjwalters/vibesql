@@ -294,8 +294,8 @@ impl RecoveryManager {
         // Read catalog section with version awareness
         let mut db = read_catalog_v(&mut reader, version)?;
 
-        // Read data section
-        read_data(&mut reader, &mut db)?;
+        // Read data section (version-aware: v6 has no per-row MVCC prefix; v7+ does)
+        read_data(&mut reader, &mut db, version)?;
 
         Ok((db, header.lsn))
     }

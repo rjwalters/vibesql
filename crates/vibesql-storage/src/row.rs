@@ -2,6 +2,27 @@ use smallvec::SmallVec;
 use std::collections::HashMap;
 use vibesql_types::{Date, SqlValue};
 
+/// Transaction identifier type for MVCC version fields.
+///
+/// `TxnId` is currently a monotonically increasing `u64`, allocated by the
+/// transaction manager at `BEGIN` time. The value `0` (`PRE_MVCC_TXN_ID`) is a
+/// reserved sentinel meaning "this row was written before the MVCC machinery
+/// existed and should be treated as always-committed." This is what we stamp on
+/// rows recovered from v6 `.vbsql` files (see Phase 1a of #5136 — the
+/// persistence format upgrade from v6 to v7 added `xmin`/`xmax` to each row).
+///
+/// In future phases (1b/1c/1d) this alias may become a newtype if we need
+/// stronger type discipline; keeping it a transparent alias for now to avoid
+/// touching the ~1,800 `Row::new`/`Row {}` construction sites in this Phase 1a
+/// PR.
+pub type TxnId = u64;
+
+/// Sentinel `TxnId` for rows that pre-date MVCC (v6 `.vbsql` files, or rows
+/// written when the `mvcc_enabled` feature flag is off). Rows stamped with
+/// `xmin = PRE_MVCC_TXN_ID` are considered visible to every transaction —
+/// equivalent to "committed before any active txn started."
+pub const PRE_MVCC_TXN_ID: TxnId = 0;
+
 /// Inline capacity for Row values.
 /// Rows with up to this many columns avoid heap allocation.
 ///
@@ -40,6 +61,22 @@ pub type RowValues = SmallVec<[SqlValue; ROW_INLINE_CAPACITY]>;
 /// Uses SmallVec to avoid heap allocations for rows with up to
 /// [`ROW_INLINE_CAPACITY`] columns. This optimization significantly
 /// reduces allocation overhead for common query patterns.
+///
+/// # MVCC Version Fields (Phase 1a of #5136)
+///
+/// Every row carries two version fields used by Multi-Version Concurrency
+/// Control:
+///
+/// - [`xmin`](Self::xmin): the transaction that created this row version.
+/// - [`xmax`](Self::xmax): the transaction that deleted this row version, or
+///   `None` if the row is still live.
+///
+/// Phase 1a only adds these fields and threads them through serialization;
+/// no executor code reads or writes them yet, so all constructors default
+/// `xmin = PRE_MVCC_TXN_ID` (= 0) and `xmax = None`. This keeps the existing
+/// ~1,800 `Row::new` / `Row { ... }` call sites compiling unchanged.
+/// Phase 1b will introduce `Row::visible_to(&TxnSnapshot)`; Phase 1c will
+/// stamp non-zero `xmin`/`xmax` from the write-path executors.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
     pub values: RowValues,
@@ -50,28 +87,65 @@ pub struct Row {
     /// Maps table name (lowercase) to row ID for qualified ROWID references like `t1.rowid`
     /// Only populated for joined rows; single-table rows use `row_id` field instead.
     pub row_ids: Option<HashMap<String, u64>>,
+    /// MVCC: transaction id that created this row version.
+    ///
+    /// Defaults to [`PRE_MVCC_TXN_ID`] (= 0) for rows constructed via the
+    /// public constructors and for rows recovered from pre-v7 (`v6`) `.vbsql`
+    /// files. The sentinel means "always committed, visible to every snapshot."
+    /// Phase 1c will stamp the active transaction id here on INSERT/UPDATE.
+    pub xmin: TxnId,
+    /// MVCC: transaction id that deleted/superseded this row version.
+    ///
+    /// `None` means the row is still live. A row with `xmax = Some(t)` is
+    /// considered deleted by transaction `t` and only visible to snapshots
+    /// that don't yet see `t` as committed. Phase 1c will stamp this on
+    /// UPDATE (old version) and DELETE.
+    pub xmax: Option<TxnId>,
 }
 
 impl Row {
     /// Create a new row from values.
     ///
     /// Accepts any iterable that can be converted into a SmallVec.
+    ///
+    /// MVCC version fields default to the pre-MVCC sentinels
+    /// (`xmin = PRE_MVCC_TXN_ID`, `xmax = None`) — see the [`Row`] doc comment.
     pub fn new(values: impl Into<RowValues>) -> Self {
-        Row { values: values.into(), row_id: None, row_ids: None }
+        Row {
+            values: values.into(),
+            row_id: None,
+            row_ids: None,
+            xmin: PRE_MVCC_TXN_ID,
+            xmax: None,
+        }
     }
 
     /// Create a new row from a Vec of values.
     ///
     /// This is a convenience method that accepts Vec<SqlValue> directly.
+    ///
+    /// MVCC version fields default to the pre-MVCC sentinels — see [`Row::new`].
     pub fn from_vec(values: Vec<SqlValue>) -> Self {
-        Row { values: SmallVec::from_vec(values), row_id: None, row_ids: None }
+        Row {
+            values: SmallVec::from_vec(values),
+            row_id: None,
+            row_ids: None,
+            xmin: PRE_MVCC_TXN_ID,
+            xmax: None,
+        }
     }
 
     /// Create a new row with a specific row ID
     ///
     /// Used during table scans to preserve ROWID for SQLite compatibility.
     pub fn with_row_id(values: impl Into<RowValues>, row_id: u64) -> Self {
-        Row { values: values.into(), row_id: Some(row_id), row_ids: None }
+        Row {
+            values: values.into(),
+            row_id: Some(row_id),
+            row_ids: None,
+            xmin: PRE_MVCC_TXN_ID,
+            xmax: None,
+        }
     }
 
     /// Create a new row with per-table row IDs (for JOIN results)
@@ -82,6 +156,8 @@ impl Row {
             values: values.into(),
             row_id: None,
             row_ids: if row_ids.is_empty() { None } else { Some(row_ids) },
+            xmin: PRE_MVCC_TXN_ID,
+            xmax: None,
         }
     }
 
