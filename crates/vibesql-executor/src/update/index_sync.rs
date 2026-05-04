@@ -12,6 +12,7 @@ use vibesql_catalog::TableSchema;
 use vibesql_storage::{Database, Row, Table};
 use vibesql_types::SqlValue;
 
+use super::PendingUpdate;
 use crate::errors::ExecutorError;
 
 /// Find row indices that would conflict with an updated row (for REPLACE conflict resolution)
@@ -123,14 +124,15 @@ pub(super) fn find_conflicting_rows_for_update(
 /// This catches cases like `UPDATE t SET pk = 1` when multiple rows are being updated -
 /// all rows would end up with the same PK value, violating the UNIQUE constraint.
 pub(super) fn validate_cross_update_uniqueness(
-    updates: &[(usize, Row, Row, HashSet<usize>, bool)],
+    updates: &[PendingUpdate],
     schema: &TableSchema,
 ) -> Result<(), ExecutorError> {
     // Check PRIMARY KEY uniqueness across updates
     if let Some(pk_indices) = schema.get_primary_key_indices() {
         let mut seen_pks: HashSet<Vec<SqlValue>> = HashSet::new();
 
-        for (_row_index, _old_row, new_row, _changed_columns, _updates_pk) in updates {
+        for update in updates {
+            let new_row = &update.new_row;
             let pk_values: Vec<SqlValue> =
                 pk_indices.iter().map(|&idx| new_row.values[idx].clone()).collect();
 
@@ -155,7 +157,8 @@ pub(super) fn validate_cross_update_uniqueness(
     for (constraint_idx, unique_indices) in unique_constraint_indices.iter().enumerate() {
         let mut seen_values: HashSet<Vec<SqlValue>> = HashSet::new();
 
-        for (_row_index, _old_row, new_row, _changed_columns, _updates_pk) in updates {
+        for update in updates {
+            let new_row = &update.new_row;
             let unique_values: Vec<SqlValue> =
                 unique_indices.iter().map(|&idx| new_row.values[idx].clone()).collect();
 
@@ -185,7 +188,7 @@ pub(super) fn validate_cross_update_uniqueness(
 /// This ensures that when multiple rows are updated to the same PK/UNIQUE value,
 /// only the last one (in order of processing) survives - matching SQLite's behavior.
 pub(super) fn resolve_cross_update_conflicts_for_replace(
-    updates: &mut Vec<(usize, Row, Row, HashSet<usize>, bool)>,
+    updates: &mut Vec<PendingUpdate>,
     schema: &TableSchema,
 ) -> Vec<usize> {
     let mut indices_to_delete = Vec::new();
@@ -196,16 +199,16 @@ pub(super) fn resolve_cross_update_conflicts_for_replace(
         // Map: PK values -> (position in updates list, row_index)
         let mut pk_map: HashMap<Vec<SqlValue>, (usize, usize)> = HashMap::new();
 
-        for (pos, (row_index, _old_row, new_row, _changed_columns, _updates_pk)) in
-            updates.iter().enumerate()
-        {
+        for (pos, update) in updates.iter().enumerate() {
             // Skip if already marked for removal
             if indices_to_remove.contains(&pos) {
                 continue;
             }
 
-            let pk_values: Vec<SqlValue> =
-                pk_indices.iter().map(|&idx| new_row.values[idx].clone()).collect();
+            let pk_values: Vec<SqlValue> = pk_indices
+                .iter()
+                .map(|&idx| update.new_row.values[idx].clone())
+                .collect();
 
             // Skip NULL PKs
             if pk_values.contains(&SqlValue::Null) {
@@ -217,7 +220,7 @@ pub(super) fn resolve_cross_update_conflicts_for_replace(
                 indices_to_remove.insert(*prev_pos);
                 indices_to_delete.push(*prev_row_index);
             }
-            pk_map.insert(pk_values, (pos, *row_index));
+            pk_map.insert(pk_values, (pos, update.row_index));
         }
     }
 
@@ -226,16 +229,16 @@ pub(super) fn resolve_cross_update_conflicts_for_replace(
     for unique_indices in unique_constraint_indices.iter() {
         let mut unique_map: HashMap<Vec<SqlValue>, (usize, usize)> = HashMap::new();
 
-        for (pos, (row_index, _old_row, new_row, _changed_columns, _updates_pk)) in
-            updates.iter().enumerate()
-        {
+        for (pos, update) in updates.iter().enumerate() {
             // Skip if already marked for removal
             if indices_to_remove.contains(&pos) {
                 continue;
             }
 
-            let unique_values: Vec<SqlValue> =
-                unique_indices.iter().map(|&idx| new_row.values[idx].clone()).collect();
+            let unique_values: Vec<SqlValue> = unique_indices
+                .iter()
+                .map(|&idx| update.new_row.values[idx].clone())
+                .collect();
 
             // Skip if any value is NULL
             if unique_values.contains(&SqlValue::Null) {
@@ -249,7 +252,7 @@ pub(super) fn resolve_cross_update_conflicts_for_replace(
                     indices_to_delete.push(*prev_row_index);
                 }
             }
-            unique_map.insert(unique_values, (pos, *row_index));
+            unique_map.insert(unique_values, (pos, update.row_index));
         }
     }
 
@@ -279,13 +282,13 @@ pub(super) fn resolve_cross_update_conflicts_for_replace(
 /// by [`validate_cross_update_uniqueness`], which must be called before this function.
 ///
 /// # Arguments
-/// * `updates` - All pending updates: (row_index, old_row, new_row, changed_columns, updates_pk)
+/// * `updates` - All pending updates (`PendingUpdate`: row_index, old_row, new_row, changed_columns, updates_pk)
 /// * `schema` - Table schema (for PK/UNIQUE constraint metadata)
 /// * `table` - Storage table reference (for accessing PK/UNIQUE hash indexes)
 /// * `database` - Database reference (for accessing user-defined UNIQUE indexes)
 /// * `table_name` - Canonical table name
 pub(super) fn validate_post_statement_uniqueness(
-    updates: &[(usize, Row, Row, HashSet<usize>, bool)],
+    updates: &[PendingUpdate],
     schema: &TableSchema,
     table: &Table,
     database: &Database,
@@ -296,10 +299,10 @@ pub(super) fn validate_post_statement_uniqueness(
     let pk_indices_opt = schema.get_primary_key_indices();
     let mut updated_new_pk: HashMap<usize, Vec<SqlValue>> = HashMap::new();
     if let Some(ref pk_indices) = pk_indices_opt {
-        for (row_index, _old_row, new_row, _changed, _upd_pk) in updates {
+        for u in updates {
             let new_pk: Vec<SqlValue> =
-                pk_indices.iter().map(|&i| new_row.values[i].clone()).collect();
-            updated_new_pk.insert(*row_index, new_pk);
+                pk_indices.iter().map(|&i| u.new_row.values[i].clone()).collect();
+            updated_new_pk.insert(u.row_index, new_pk);
         }
     }
 
@@ -308,11 +311,11 @@ pub(super) fn validate_post_statement_uniqueness(
     // (because rows in the update set will be moved away; only their FINAL state matters).
     if let Some(ref pk_indices) = pk_indices_opt {
         if let Some(pk_index) = table.primary_key_index() {
-            for (row_index, old_row, new_row, _changed, _upd_pk) in updates {
+            for u in updates {
                 let new_pk: Vec<SqlValue> =
-                    pk_indices.iter().map(|&i| new_row.values[i].clone()).collect();
+                    pk_indices.iter().map(|&i| u.new_row.values[i].clone()).collect();
                 let old_pk: Vec<SqlValue> =
-                    pk_indices.iter().map(|&i| old_row.values[i].clone()).collect();
+                    pk_indices.iter().map(|&i| u.old_row.values[i].clone()).collect();
 
                 // No-op update for PK: skip
                 if new_pk == old_pk {
@@ -321,7 +324,7 @@ pub(super) fn validate_post_statement_uniqueness(
 
                 if let Some(&existing_idx) = pk_index.get(&new_pk) {
                     // Self: this row already had this PK
-                    if existing_idx == *row_index {
+                    if existing_idx == u.row_index {
                         continue;
                     }
 
@@ -362,17 +365,17 @@ pub(super) fn validate_post_statement_uniqueness(
 
         // Build map of (updated_row_index -> new unique values) for this constraint
         let mut updated_new_unique: HashMap<usize, Vec<SqlValue>> = HashMap::new();
-        for (row_index, _old_row, new_row, _changed, _upd_pk) in updates {
+        for u in updates {
             let new_uv: Vec<SqlValue> =
-                unique_indices.iter().map(|&i| new_row.values[i].clone()).collect();
-            updated_new_unique.insert(*row_index, new_uv);
+                unique_indices.iter().map(|&i| u.new_row.values[i].clone()).collect();
+            updated_new_unique.insert(u.row_index, new_uv);
         }
 
-        for (row_index, old_row, new_row, _changed, _upd_pk) in updates {
+        for u in updates {
             let new_uv: Vec<SqlValue> =
-                unique_indices.iter().map(|&i| new_row.values[i].clone()).collect();
+                unique_indices.iter().map(|&i| u.new_row.values[i].clone()).collect();
             let old_uv: Vec<SqlValue> =
-                unique_indices.iter().map(|&i| old_row.values[i].clone()).collect();
+                unique_indices.iter().map(|&i| u.old_row.values[i].clone()).collect();
 
             // NULL values are exempt (NULL != NULL in SQL)
             if new_uv.contains(&SqlValue::Null) {
@@ -385,7 +388,7 @@ pub(super) fn validate_post_statement_uniqueness(
             }
 
             if let Some(&existing_idx) = unique_index.get(&new_uv) {
-                if existing_idx == *row_index {
+                if existing_idx == u.row_index {
                     continue;
                 }
                 if let Some(other_new_uv) = updated_new_unique.get(&existing_idx) {
@@ -446,10 +449,10 @@ pub(super) fn validate_post_statement_uniqueness(
 
         // Build map of (updated_row_index -> new index key values) for this index
         let mut updated_new_key: HashMap<usize, Vec<SqlValue>> = HashMap::new();
-        for (row_index, _old_row, new_row, _changed, _upd_pk) in updates {
+        for u in updates {
             let nk: Vec<SqlValue> =
-                col_idxs.iter().map(|&i| new_row.values[i].clone()).collect();
-            updated_new_key.insert(*row_index, nk);
+                col_idxs.iter().map(|&i| u.new_row.values[i].clone()).collect();
+            updated_new_key.insert(u.row_index, nk);
         }
 
         let index_data = match database.get_index_data(&index_name) {
@@ -457,11 +460,11 @@ pub(super) fn validate_post_statement_uniqueness(
             None => continue,
         };
 
-        for (row_index, old_row, new_row, _changed, _upd_pk) in updates {
+        for u in updates {
             let new_key: Vec<SqlValue> =
-                col_idxs.iter().map(|&i| new_row.values[i].clone()).collect();
+                col_idxs.iter().map(|&i| u.new_row.values[i].clone()).collect();
             let old_key: Vec<SqlValue> =
-                col_idxs.iter().map(|&i| old_row.values[i].clone()).collect();
+                col_idxs.iter().map(|&i| u.old_row.values[i].clone()).collect();
 
             // NULL values are exempt
             if new_key.contains(&SqlValue::Null) {
@@ -482,7 +485,7 @@ pub(super) fn validate_post_statement_uniqueness(
             // Check each conflicting row index: skip self and rows being moved off this key
             let mut real_conflict = false;
             for existing_idx in &conflicting_rows {
-                if *existing_idx == *row_index {
+                if *existing_idx == u.row_index {
                     continue;
                 }
                 if let Some(other_new_key) = updated_new_key.get(existing_idx) {
