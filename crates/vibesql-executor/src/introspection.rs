@@ -383,6 +383,20 @@ impl<'a> IntrospectionExecutor<'a> {
             // Add ON UPDATE action
             fk_def.push_str(&format!(" ON UPDATE {}", format_referential_action(&fk.on_update)));
 
+            // Phase C3 of #5085: emit deferral state when non-default.
+            // The default for SQLite is NOT DEFERRABLE; we omit that case
+            // to keep CREATE TABLE output minimal. When the constraint is
+            // DEFERRABLE we emit `DEFERRABLE INITIALLY DEFERRED` or
+            // `DEFERRABLE INITIALLY IMMEDIATE`, matching SQLite's
+            // sqlite_master format.
+            if fk.is_deferrable {
+                if fk.initially_deferred {
+                    fk_def.push_str(" DEFERRABLE INITIALLY DEFERRED");
+                } else {
+                    fk_def.push_str(" DEFERRABLE INITIALLY IMMEDIATE");
+                }
+            }
+
             definitions.push(fk_def);
         }
 

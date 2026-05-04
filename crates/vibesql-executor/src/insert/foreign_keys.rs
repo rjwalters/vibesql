@@ -74,6 +74,28 @@ pub fn validate_foreign_key_constraints(
             continue;
         }
 
+        // Phase C3 of #5085 / fkey8-3.0: self-referential FK. When the FK
+        // points back at the table being inserted into, the row itself
+        // can satisfy the constraint (e.g. INSERT ... VALUES (1, 'a',
+        // 'a', 'a', 'a') with FK(b, c) REFERENCES self(d, e)). SQLite
+        // checks the parent index *after* the row is inserted, so the
+        // row participates in its own FK check. Mirror that here.
+        if fk.parent_table.eq_ignore_ascii_case(table_name) {
+            let row_satisfies_fk = parent_indices.iter().zip(&fk_values).enumerate().all(
+                |(i, (&parent_idx, fk_val))| match row_values.get(parent_idx) {
+                    Some(parent_val) => crate::foreign_key_check::fk_values_equal(
+                        fk_val,
+                        parent_val,
+                        parent_collations.get(i).and_then(|c| c.as_deref()),
+                    ),
+                    None => false,
+                },
+            );
+            if row_satisfies_fk {
+                continue;
+            }
+        }
+
         let should_defer = in_txn && (fk.initially_deferred || session_defer);
         if should_defer {
             deferred.push(DeferredFkViolation {

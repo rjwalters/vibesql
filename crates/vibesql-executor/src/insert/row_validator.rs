@@ -416,6 +416,26 @@ impl<'a> RowValidator<'a> {
                 continue;
             }
 
+            // Phase C3 of #5085 / fkey8-3.0: self-referential FK. When the
+            // FK points back at the table being inserted into, the row
+            // itself can satisfy the constraint (SQLite checks the parent
+            // index *after* the row is inserted). Mirror that here.
+            if fk.parent_table.eq_ignore_ascii_case(self.table_name) {
+                let row_satisfies_fk = parent_indices.iter().zip(fk_values).enumerate().all(
+                    |(i, (&parent_idx, fk_val))| match full_row_values.get(parent_idx) {
+                        Some(parent_val) => crate::foreign_key_check::fk_values_equal(
+                            fk_val,
+                            parent_val,
+                            parent_collations.get(i).and_then(|c| c.as_deref()),
+                        ),
+                        None => false,
+                    },
+                );
+                if row_satisfies_fk {
+                    continue;
+                }
+            }
+
             // FK row-existence violation. Defer if the constraint is
             // INITIALLY DEFERRED or the session has defer_foreign_keys=ON,
             // *and* we're inside a transaction. Outside a transaction we
