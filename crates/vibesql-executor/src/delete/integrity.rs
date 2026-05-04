@@ -57,9 +57,15 @@ pub fn check_no_child_references(
         return Ok(());
     }
 
-    // Phase C2: cache session defer + transaction state. RESTRICT is
-    // *never* deferred even with INITIALLY DEFERRED (per SQLite docs);
-    // only NO ACTION can be deferred.
+    // Phase C2: cache session defer + transaction state.
+    //
+    // RESTRICT is never deferred by `INITIALLY DEFERRED` on the
+    // constraint (per SQLite docs), but the session pragma
+    // `defer_foreign_keys=ON` *does* delay RESTRICT until COMMIT
+    // (EVIDENCE-OF R-18981-16292; see fkey6-3.2.3).
+    //
+    // NO ACTION can be deferred by either INITIALLY DEFERRED or the
+    // session pragma.
     let session_defer = db.defer_foreign_keys();
     let in_txn = db.in_transaction();
 
@@ -115,12 +121,21 @@ pub fn check_no_child_references(
     for (child_table_name, fk, fk_idx, action) in actions_to_perform {
         match action {
             ReferentialAction::Restrict => {
-                // RESTRICT is immediate, never deferred (SQLite docs).
-                return Err(ExecutorError::ConstraintViolation(format!(
-                    "FOREIGN KEY constraint violation: cannot delete or update a parent row when a foreign key constraint exists. The conflict occurred in table \'{}\', constraint \'{}\'.",
-                    child_table_name,
-                    fk.name.as_deref().unwrap_or(""),
-                )));
+                // RESTRICT is immediate by default, but the session
+                // pragma `defer_foreign_keys=ON` delays it until COMMIT
+                // (EVIDENCE-OF R-18981-16292; see fkey6-3.2.3 and
+                // fkey6-3.3.4). Per-constraint INITIALLY DEFERRED does
+                // *not* defer RESTRICT — only the session pragma does.
+                let should_defer = in_txn && session_defer;
+                if should_defer {
+                    queue_orphaned_children(db, &child_table_name, &fk, fk_idx, &parent_key_values);
+                } else {
+                    return Err(ExecutorError::ConstraintViolation(format!(
+                        "FOREIGN KEY constraint violation: cannot delete or update a parent row when a foreign key constraint exists. The conflict occurred in table \'{}\', constraint \'{}\'.",
+                        child_table_name,
+                        fk.name.as_deref().unwrap_or(""),
+                    )));
+                }
             }
             ReferentialAction::NoAction => {
                 // NO ACTION can be deferred (Phase C2 of #5085). Queue

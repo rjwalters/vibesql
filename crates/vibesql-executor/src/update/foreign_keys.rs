@@ -304,12 +304,29 @@ impl ForeignKeyValidator {
                             cascade_updates.push((table_name.clone(), updated_rows));
                         }
                         vibesql_catalog::ReferentialAction::Restrict => {
-                            // RESTRICT is immediate, never deferred.
-                            return Err(ExecutorError::ConstraintViolation(format!(
-                                "FOREIGN KEY constraint violation: cannot update a parent row when a foreign key constraint exists. The conflict occurred in table \'{}\', constraint \'{}\'.",
-                                table_name,
-                                fk.name.as_deref().unwrap_or(""),
-                            )));
+                            // RESTRICT is immediate by default, but the
+                            // session pragma `defer_foreign_keys=ON`
+                            // delays it until COMMIT (EVIDENCE-OF
+                            // R-18981-16292; see fkey6-3.2.3). Per-
+                            // constraint INITIALLY DEFERRED does *not*
+                            // defer RESTRICT — only the session pragma
+                            // does. Mirrors the DELETE-side handling in
+                            // delete/integrity.rs.
+                            let should_defer = in_txn && session_defer;
+                            if should_defer {
+                                deferred_parent_orphans.push((
+                                    table_name.clone(),
+                                    fk.clone(),
+                                    fk_idx,
+                                    matching_rows.clone(),
+                                ));
+                            } else {
+                                return Err(ExecutorError::ConstraintViolation(format!(
+                                    "FOREIGN KEY constraint violation: cannot update a parent row when a foreign key constraint exists. The conflict occurred in table \'{}\', constraint \'{}\'.",
+                                    table_name,
+                                    fk.name.as_deref().unwrap_or(""),
+                                )));
+                            }
                         }
                         vibesql_catalog::ReferentialAction::NoAction => {
                             // NO ACTION can be deferred (Phase C2 of
