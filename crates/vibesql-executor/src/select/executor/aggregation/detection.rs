@@ -2,6 +2,251 @@
 
 use super::super::builder::SelectExecutor;
 
+/// Check whether an expression contains a *bare* (FROM-less) scalar subquery
+/// whose body has an aggregate referencing an outer column. This triggers
+/// SQLite's implicit-outer-aggregate-collapse semantics (#5104).
+///
+/// "Outer column" inside a bare subquery means *any* column reference (since
+/// the subquery has no tables of its own). We check the aggregate's args, its
+/// FILTER clause, and its ORDER BY items.
+fn expression_contains_outer_aggregate_collapse(expr: &vibesql_ast::Expression) -> bool {
+    use vibesql_ast::Expression;
+
+    match expr {
+        Expression::ScalarSubquery(stmt) => {
+            // Bare (FROM-less) subquery: an aggregate in the projection that
+            // references a column is necessarily outer-correlated (no inner
+            // tables) → triggers collapse.
+            if stmt.from.is_none() {
+                for item in &stmt.select_list {
+                    if let vibesql_ast::SelectItem::Expression { expr: inner, .. } = item {
+                        if expr_has_column_referencing_aggregate(inner) {
+                            return true;
+                        }
+                        // Recurse: nested scalar subqueries.
+                        if expression_contains_outer_aggregate_collapse(inner) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+
+            // FROM-bearing subquery: only recurse into the SELECT list to
+            // find further bare-subquery collapse triggers. We do NOT walk
+            // into FROM/WHERE/HAVING/ORDER-BY of FROM-bearing subqueries
+            // here because we lack schema information to disambiguate
+            // which columns resolve to inner vs outer scope. Without that
+            // disambiguation, recursing too deeply produces false positives
+            // (e.g. `SELECT (SELECT sum(x) FROM t2) FROM t1` would falsely
+            // match if we treated any aggregate-with-column-ref as a
+            // trigger). Issue #5104's window1.test 57.3 case (which
+            // requires deep cross-scope analysis) is handled by a follow-up.
+            stmt.select_list.iter().any(|item| match item {
+                vibesql_ast::SelectItem::Expression { expr: inner, .. } => {
+                    expression_contains_outer_aggregate_collapse(inner)
+                }
+                _ => false,
+            })
+        }
+        // Recurse into compound expressions.
+        Expression::BinaryOp { left, right, .. } => {
+            expression_contains_outer_aggregate_collapse(left)
+                || expression_contains_outer_aggregate_collapse(right)
+        }
+        Expression::UnaryOp { expr, .. } => expression_contains_outer_aggregate_collapse(expr),
+        Expression::Cast { expr, .. } => expression_contains_outer_aggregate_collapse(expr),
+        Expression::IsNull { expr, .. } => expression_contains_outer_aggregate_collapse(expr),
+        Expression::Like { expr, pattern, .. } => {
+            expression_contains_outer_aggregate_collapse(expr)
+                || expression_contains_outer_aggregate_collapse(pattern)
+        }
+        Expression::Between { expr, low, high, .. } => {
+            expression_contains_outer_aggregate_collapse(expr)
+                || expression_contains_outer_aggregate_collapse(low)
+                || expression_contains_outer_aggregate_collapse(high)
+        }
+        Expression::InList { expr, values, .. } => {
+            expression_contains_outer_aggregate_collapse(expr)
+                || values.iter().any(expression_contains_outer_aggregate_collapse)
+        }
+        Expression::In { expr, .. } => expression_contains_outer_aggregate_collapse(expr),
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand
+                .as_ref()
+                .is_some_and(|e| expression_contains_outer_aggregate_collapse(e))
+                || when_clauses.iter().any(|w| {
+                    w.conditions.iter().any(expression_contains_outer_aggregate_collapse)
+                        || expression_contains_outer_aggregate_collapse(&w.result)
+                })
+                || else_result
+                    .as_ref()
+                    .is_some_and(|e| expression_contains_outer_aggregate_collapse(e))
+        }
+        Expression::Function { args, .. } => {
+            args.iter().any(expression_contains_outer_aggregate_collapse)
+        }
+        Expression::AggregateFunction { args, filter, order_by, .. } => {
+            // The collapse pattern only triggers from a bare scalar subquery,
+            // so an aggregate at this level is the *outer* aggregate (already
+            // handled by `has_aggregates`). We only recurse to find subqueries
+            // that themselves trigger the pattern (e.g. `min(...((SELECT avg(a))))`).
+            args.iter().any(expression_contains_outer_aggregate_collapse)
+                || filter
+                    .as_ref()
+                    .is_some_and(|f| expression_contains_outer_aggregate_collapse(f))
+                || order_by.as_ref().is_some_and(|items| {
+                    items.iter().any(|i| expression_contains_outer_aggregate_collapse(&i.expr))
+                })
+        }
+        Expression::WindowFunction { function, over, .. } => {
+            // Window function: check the function's args AND the OVER clause's
+            // PARTITION BY / ORDER BY / frame, since the example in #5104
+            // (window1.test 57.3) places the collapse-trigger inside the
+            // ORDER BY of a window function.
+            let args = match function {
+                vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
+            };
+            if args.iter().any(expression_contains_outer_aggregate_collapse) {
+                return true;
+            }
+            if let Some(partition_by) = &over.partition_by {
+                if partition_by.iter().any(expression_contains_outer_aggregate_collapse) {
+                    return true;
+                }
+            }
+            if let Some(order_by) = &over.order_by {
+                if order_by
+                    .iter()
+                    .any(|item| expression_contains_outer_aggregate_collapse(&item.expr))
+                {
+                    return true;
+                }
+            }
+            false
+        }
+        Expression::QuantifiedComparison { expr, .. } => {
+            expression_contains_outer_aggregate_collapse(expr)
+        }
+        // EXISTS has its own scope — don't recurse into it.
+        // Other leaf expressions can't contain a scalar subquery.
+        _ => false,
+    }
+}
+
+/// Check whether an expression contains an aggregate function whose arguments,
+/// FILTER, or ORDER BY items reference a column. Inside a bare (FROM-less)
+/// scalar subquery, *any* column reference is necessarily an outer reference.
+fn expr_has_column_referencing_aggregate(expr: &vibesql_ast::Expression) -> bool {
+    use vibesql_ast::Expression;
+
+    match expr {
+        Expression::AggregateFunction { args, filter, order_by, .. } => {
+            if args.iter().any(expression_contains_column_ref_simple) {
+                return true;
+            }
+            if filter.as_ref().is_some_and(|f| expression_contains_column_ref_simple(f)) {
+                return true;
+            }
+            if order_by.as_ref().is_some_and(|items| {
+                items.iter().any(|i| expression_contains_column_ref_simple(&i.expr))
+            }) {
+                return true;
+            }
+            // An outer aggregate doesn't itself match, but it might have a
+            // nested aggregate inside its args.
+            args.iter().any(expr_has_column_referencing_aggregate)
+        }
+        Expression::Function { name, args, .. }
+            if matches!(
+                name.to_uppercase().as_str(),
+                "COUNT" | "SUM" | "AVG" | "TOTAL" | "MIN" | "MAX" | "GROUP_CONCAT" | "STRING_AGG"
+            ) =>
+        {
+            // Old Function variant aggregate. min/max with >1 args are scalar.
+            let upper = name.to_uppercase();
+            let is_scalar_minmax = matches!(upper.as_str(), "MIN" | "MAX") && args.len() > 1;
+            if !is_scalar_minmax && args.iter().any(expression_contains_column_ref_simple) {
+                return true;
+            }
+            args.iter().any(expr_has_column_referencing_aggregate)
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            expr_has_column_referencing_aggregate(left)
+                || expr_has_column_referencing_aggregate(right)
+        }
+        Expression::UnaryOp { expr, .. } => expr_has_column_referencing_aggregate(expr),
+        Expression::Cast { expr, .. } => expr_has_column_referencing_aggregate(expr),
+        Expression::IsNull { expr, .. } => expr_has_column_referencing_aggregate(expr),
+        Expression::Function { args, .. } => {
+            args.iter().any(expr_has_column_referencing_aggregate)
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|e| expr_has_column_referencing_aggregate(e))
+                || when_clauses.iter().any(|w| {
+                    w.conditions.iter().any(expr_has_column_referencing_aggregate)
+                        || expr_has_column_referencing_aggregate(&w.result)
+                })
+                || else_result.as_ref().is_some_and(|e| expr_has_column_referencing_aggregate(e))
+        }
+        // Don't descend into inner subqueries / window functions — they have
+        // their own scope. Stop here.
+        _ => false,
+    }
+}
+
+/// Simple recursive column-reference check (no scope analysis — we're already
+/// inside a bare subquery so any column ref is necessarily an outer one).
+fn expression_contains_column_ref_simple(expr: &vibesql_ast::Expression) -> bool {
+    use vibesql_ast::Expression;
+
+    match expr {
+        Expression::ColumnRef(_) => true,
+        Expression::BinaryOp { left, right, .. } => {
+            expression_contains_column_ref_simple(left)
+                || expression_contains_column_ref_simple(right)
+        }
+        Expression::UnaryOp { expr, .. } => expression_contains_column_ref_simple(expr),
+        Expression::Cast { expr, .. } => expression_contains_column_ref_simple(expr),
+        Expression::IsNull { expr, .. } => expression_contains_column_ref_simple(expr),
+        Expression::Function { args, .. } => {
+            args.iter().any(expression_contains_column_ref_simple)
+        }
+        Expression::AggregateFunction { args, filter, order_by, .. } => {
+            args.iter().any(expression_contains_column_ref_simple)
+                || filter.as_ref().is_some_and(|f| expression_contains_column_ref_simple(f))
+                || order_by.as_ref().is_some_and(|items| {
+                    items.iter().any(|i| expression_contains_column_ref_simple(&i.expr))
+                })
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|e| expression_contains_column_ref_simple(e))
+                || when_clauses.iter().any(|w| {
+                    w.conditions.iter().any(expression_contains_column_ref_simple)
+                        || expression_contains_column_ref_simple(&w.result)
+                })
+                || else_result.as_ref().is_some_and(|e| expression_contains_column_ref_simple(e))
+        }
+        Expression::Like { expr, pattern, .. } => {
+            expression_contains_column_ref_simple(expr)
+                || expression_contains_column_ref_simple(pattern)
+        }
+        Expression::Between { expr, low, high, .. } => {
+            expression_contains_column_ref_simple(expr)
+                || expression_contains_column_ref_simple(low)
+                || expression_contains_column_ref_simple(high)
+        }
+        Expression::InList { expr, values, .. } => {
+            expression_contains_column_ref_simple(expr)
+                || values.iter().any(expression_contains_column_ref_simple)
+        }
+        // Don't descend into nested subqueries (separate scope).
+        _ => false,
+    }
+}
+
 impl SelectExecutor<'_> {
     /// Check if SELECT list contains aggregate functions
     pub(in crate::select::executor) fn has_aggregates(
@@ -110,6 +355,34 @@ impl SelectExecutor<'_> {
             // contain aggregates
             _ => false,
         }
+    }
+
+    /// Detect SQLite's implicit-outer-aggregate-collapse pattern (#5104).
+    ///
+    /// Returns true when the SELECT list contains a *bare* (FROM-less) scalar
+    /// subquery whose body has an aggregate function referencing an outer
+    /// column. SQLite collapses the outer query into a single-row aggregate
+    /// in this case, with the inner aggregate computed over all outer rows.
+    ///
+    /// Examples that match:
+    /// - `SELECT (SELECT avg(a)) FROM t2`               — bare aggregate, outer-correlated
+    /// - `SELECT (SELECT sum(y) FILTER(WHERE x>0)) FROM t` — outer-correlated via FILTER
+    ///
+    /// Examples that do NOT match (return false):
+    /// - `SELECT (SELECT 1) FROM t`                   — no aggregate
+    /// - `SELECT (SELECT min(a) OVER ()) FROM t`      — window, not bare aggregate
+    /// - `SELECT (SELECT avg(x) FROM other) FROM t`   — has FROM, not bare
+    /// - `SELECT avg(a) FROM t`                       — top-level aggregate (already handled)
+    pub(in crate::select::executor) fn select_list_has_outer_aggregate_collapse(
+        &self,
+        select_list: &[vibesql_ast::SelectItem],
+    ) -> bool {
+        select_list.iter().any(|item| match item {
+            vibesql_ast::SelectItem::Expression { expr, .. } => {
+                expression_contains_outer_aggregate_collapse(expr)
+            }
+            _ => false,
+        })
     }
 
     /// Check if statement is a simple COUNT(*) query that can use fast path

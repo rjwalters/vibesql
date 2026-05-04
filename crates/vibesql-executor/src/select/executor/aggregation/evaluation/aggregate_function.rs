@@ -715,6 +715,53 @@ pub(super) fn evaluate(
         }
     }
 
+    // Issue #4930 / #5104: outer-correlated aggregate. When the aggregate's
+    // argument references only outer columns, iterate over all outer rows
+    // instead of `group_rows`. This is the inner-evaluation path used by
+    // SQLite's implicit-outer-aggregate-collapse: outer query collapses to
+    // one row, and the inner aggregate runs over all outer rows.
+    //
+    // Previously only GROUP_CONCAT/STRING_AGG implemented this path; here we
+    // generalize it to all aggregates (AVG, SUM, MIN, MAX, COUNT, ...) so
+    // `SELECT (SELECT avg(a)) FROM t2` produces a single 2.0 row instead of
+    // averaging one row at a time. (window4.test 12.2)
+    let has_outer_context_for_collapse = evaluator.get_outer_schema().is_some();
+    let is_outer_only = expression_refs_only_outer_columns(
+        &args[0],
+        evaluator.get_schema(),
+        has_outer_context_for_collapse,
+    );
+    if is_outer_only {
+        if let (Some(outer_rows), Some(outer_schema)) =
+            (evaluator.get_outer_rows(), evaluator.get_outer_schema())
+        {
+            for outer_row in outer_rows.iter() {
+                evaluator.clear_cse_cache();
+                // FILTER inside the inner aggregate may reference the same
+                // outer column. Evaluate it against the outer row using the
+                // outer schema; on failure (e.g. references inner columns),
+                // fall back to skipping the filter (no rows to filter from).
+                if let Some(filter_expr) = filter {
+                    let filter_val = evaluate_expr_against_outer_row(
+                        filter_expr,
+                        outer_row,
+                        outer_schema,
+                    )?;
+                    if !executor.is_truthy(&filter_val)? {
+                        continue;
+                    }
+                }
+                let value =
+                    evaluate_expr_against_outer_row(&args[0], outer_row, outer_schema)?;
+                acc.accumulate(&value);
+            }
+            let result = acc.finalize()?;
+            executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
+            return Ok(result);
+        }
+        // Fall through to normal path if outer_rows not available
+    }
+
     // Try to compile CASE expression for fast-path evaluation (#3079)
     // This optimization helps TPC-DS Q2 which has 7 SUM(CASE...) aggregates
     // For ~14K rows × 7 aggregates = ~98K evaluations, compiled CASE avoids:

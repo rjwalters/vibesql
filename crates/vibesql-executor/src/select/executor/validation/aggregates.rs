@@ -1451,20 +1451,61 @@ fn find_outer_referencing_aggregate(expr: &Expression) -> Option<String> {
     })
 }
 
+/// Context in which a subquery appears, controlling how
+/// `validate_subquery_context_misuse` treats outer-correlated aggregates inside
+/// bare scalar subqueries.
+///
+/// SQLite has two distinct behaviors for a bare scalar subquery whose body
+/// contains an aggregate referencing an *outer* column:
+///
+/// 1. **WHERE / HAVING / ORDER BY** (and arguments to other outer functions):
+///    SQLite raises `"misuse of aggregate: X()"`. The outer aggregation context
+///    is not implicitly borrowed in these positions.
+///
+/// 2. **SELECT list** (issue #5104): SQLite implicitly collapses the outer
+///    query into a single-row aggregate, with the inner aggregate computed
+///    over all outer rows. The aggregate is *not* a misuse here — it's
+///    well-defined and produces a single output row.
+///
+/// We therefore parameterize the validator on context: SELECT-list calls pass
+/// [`SubqueryContext::SelectList`] to skip the outer-correlated-aggregate
+/// rejection (it will be handled by the implicit-collapse path). All other
+/// callers pass [`SubqueryContext::WhereOrEqual`] to preserve the SQLite
+/// rejection.
+///
+/// Row-value misuse is checked in *both* contexts — `(SELECT (a, b))` is
+/// always an error regardless of where the subquery appears.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubqueryContext {
+    /// Bare scalar subquery in WHERE, HAVING, ORDER BY, or as an argument to
+    /// an outer function. Outer-correlated aggregates → "misuse of aggregate".
+    WhereOrEqual,
+    /// Bare scalar subquery in the SELECT list. Outer-correlated aggregates
+    /// trigger SQLite's implicit-outer-aggregate-collapse instead of a misuse
+    /// error (#5104).
+    SelectList,
+}
+
 /// Detect aggregate / row-value misuse inside *bare* scalar subqueries.
 ///
 /// SQLite has a special rule: when a scalar subquery has no FROM clause and
 /// its body contains an aggregate function whose argument or FILTER references
 /// an *outer* column, the aggregate implicitly borrows the outer aggregation
-/// context. SQLite reports this as `"misuse of aggregate: X()"`.
+/// context. SQLite reports this as `"misuse of aggregate: X()"` *unless* the
+/// subquery appears in the SELECT list, where it instead triggers
+/// implicit-outer-aggregate-collapse (#5104).
 ///
-/// Examples that trigger this rule:
+/// Examples that trigger this rule (in WHERE/HAVING/ORDER BY context):
 /// - `WHERE (SELECT AVG(0) FILTER(WHERE outer.c))`  → "misuse of aggregate: AVG()"
 /// - `ntile((SELECT sum(x))) OVER (...)`             → "misuse of aggregate: sum()"
 ///
+/// In SELECT-list context (#5104), the same patterns are *allowed* and trigger
+/// outer-aggregate collapse:
+/// - `SELECT (SELECT avg(a)) FROM t2` → outer collapses to single row
+///
 /// Additionally, when a bare scalar subquery's sole projection is a
 /// `RowValueConstructor` with multiple elements, that's `RowValueMisused`
-/// (a row value where a scalar is required).
+/// (a row value where a scalar is required) — checked in both contexts.
 ///
 /// Note: pure *window* functions inside bare scalar subqueries are NOT flagged
 /// here — SQLite allows them (they are evaluated row-by-row against the outer
@@ -1472,7 +1513,8 @@ fn find_outer_referencing_aggregate(expr: &Expression) -> Option<String> {
 /// (WHERE-clause walker, GROUP BY positional refs, etc.).
 ///
 /// This walker is meant to be called on expressions appearing in the outer
-/// scope — typically WHERE, HAVING, ORDER BY, or arguments to outer functions.
+/// scope — typically WHERE, HAVING, ORDER BY, or arguments to outer functions
+/// (with `WhereOrEqual`), or the SELECT list (with `SelectList`).
 /// It deliberately does NOT recurse into scalar subqueries that have a FROM
 /// clause (those have their own aggregation context and are validated
 /// independently).
@@ -1480,13 +1522,17 @@ fn find_outer_referencing_aggregate(expr: &Expression) -> Option<String> {
 /// To preserve SQLite's exact error text (which uses the function name as
 /// originally written by the user), we walk the inner expression and report
 /// the first such aggregate's name.
-pub fn validate_subquery_context_misuse(expr: &Expression) -> Result<(), ExecutorError> {
+pub fn validate_subquery_context_misuse(
+    expr: &Expression,
+    context: SubqueryContext,
+) -> Result<(), ExecutorError> {
     match expr {
         Expression::ScalarSubquery(stmt) => {
             // Only "bare" subqueries (no FROM) re-borrow the outer context.
             if stmt.from.is_none() {
                 // Check for row value misuse (sole projection is a row value
-                // constructor with multiple elements).
+                // constructor with multiple elements). This is an error in
+                // any context.
                 if stmt.select_list.len() == 1 {
                     if let SelectItem::Expression {
                         expr: Expression::RowValueConstructor(items),
@@ -1503,21 +1549,30 @@ pub fn validate_subquery_context_misuse(expr: &Expression) -> Result<(), Executo
                 // flag aggregates whose body references something outside the
                 // bare subquery's own scope (i.e., references a column — the
                 // bare subquery has no tables, so any column is an outer ref).
-                for item in &stmt.select_list {
-                    if let SelectItem::Expression { expr: inner, .. } = item {
-                        if let Some(name) = find_outer_referencing_aggregate(inner) {
-                            return Err(ExecutorError::MisuseOfAggregateContext {
-                                function_name: name,
-                            });
+                //
+                // In SELECT-list context, this is *not* a misuse; it triggers
+                // implicit-outer-aggregate-collapse instead (#5104). Skip the
+                // rejection so the executor's collapse path can handle it.
+                if context == SubqueryContext::WhereOrEqual {
+                    for item in &stmt.select_list {
+                        if let SelectItem::Expression { expr: inner, .. } = item {
+                            if let Some(name) = find_outer_referencing_aggregate(inner) {
+                                return Err(ExecutorError::MisuseOfAggregateContext {
+                                    function_name: name,
+                                });
+                            }
                         }
                     }
                 }
 
                 // Recurse into nested expressions inside the bare subquery's
-                // SELECT list as well — e.g. (SELECT (SELECT sum(x)))
+                // SELECT list as well — e.g. (SELECT (SELECT sum(x))).
+                // Inner subqueries inherit the same context: nested bare
+                // subqueries in a SELECT-list context still treat their own
+                // SELECT-list position as SELECT-list.
                 for item in &stmt.select_list {
                     if let SelectItem::Expression { expr: inner, .. } = item {
-                        validate_subquery_context_misuse(inner)?;
+                        validate_subquery_context_misuse(inner, context)?;
                     }
                 }
             }
@@ -1528,65 +1583,68 @@ pub fn validate_subquery_context_misuse(expr: &Expression) -> Result<(), Executo
         // those are checked by their own dedicated validators which understand
         // the surrounding context (FILTER, ORDER BY, etc.).
         Expression::BinaryOp { left, right, .. } => {
-            validate_subquery_context_misuse(left)?;
-            validate_subquery_context_misuse(right)
+            validate_subquery_context_misuse(left, context)?;
+            validate_subquery_context_misuse(right, context)
         }
-        Expression::UnaryOp { expr, .. } => validate_subquery_context_misuse(expr),
-        Expression::IsNull { expr, .. } => validate_subquery_context_misuse(expr),
+        Expression::UnaryOp { expr, .. } => validate_subquery_context_misuse(expr, context),
+        Expression::IsNull { expr, .. } => validate_subquery_context_misuse(expr, context),
         Expression::IsDistinctFrom { left, right, .. } => {
-            validate_subquery_context_misuse(left)?;
-            validate_subquery_context_misuse(right)
+            validate_subquery_context_misuse(left, context)?;
+            validate_subquery_context_misuse(right, context)
         }
-        Expression::IsTruthValue { expr, .. } => validate_subquery_context_misuse(expr),
-        Expression::Cast { expr, .. } => validate_subquery_context_misuse(expr),
+        Expression::IsTruthValue { expr, .. } => validate_subquery_context_misuse(expr, context),
+        Expression::Cast { expr, .. } => validate_subquery_context_misuse(expr, context),
         Expression::Like { expr, pattern, .. } => {
-            validate_subquery_context_misuse(expr)?;
-            validate_subquery_context_misuse(pattern)
+            validate_subquery_context_misuse(expr, context)?;
+            validate_subquery_context_misuse(pattern, context)
         }
         Expression::Between { expr, low, high, .. } => {
-            validate_subquery_context_misuse(expr)?;
-            validate_subquery_context_misuse(low)?;
-            validate_subquery_context_misuse(high)
+            validate_subquery_context_misuse(expr, context)?;
+            validate_subquery_context_misuse(low, context)?;
+            validate_subquery_context_misuse(high, context)
         }
         Expression::InList { expr, values, .. } => {
-            validate_subquery_context_misuse(expr)?;
+            validate_subquery_context_misuse(expr, context)?;
             for v in values {
-                validate_subquery_context_misuse(v)?;
+                validate_subquery_context_misuse(v, context)?;
             }
             Ok(())
         }
-        Expression::In { expr, .. } => validate_subquery_context_misuse(expr),
+        Expression::In { expr, .. } => validate_subquery_context_misuse(expr, context),
         Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
-                validate_subquery_context_misuse(op)?;
+                validate_subquery_context_misuse(op, context)?;
             }
             for w in when_clauses {
                 for cond in &w.conditions {
-                    validate_subquery_context_misuse(cond)?;
+                    validate_subquery_context_misuse(cond, context)?;
                 }
-                validate_subquery_context_misuse(&w.result)?;
+                validate_subquery_context_misuse(&w.result, context)?;
             }
             if let Some(else_expr) = else_result {
-                validate_subquery_context_misuse(else_expr)?;
+                validate_subquery_context_misuse(else_expr, context)?;
             }
             Ok(())
         }
         Expression::Function { args, .. } => {
             for arg in args {
-                validate_subquery_context_misuse(arg)?;
+                validate_subquery_context_misuse(arg, context)?;
             }
             Ok(())
         }
         Expression::AggregateFunction { args, filter, order_by, .. } => {
+            // Aggregate function arguments are evaluated in WHERE/HAVING-like
+            // context (their value must be a scalar). Subqueries inside their
+            // args are NOT in SELECT-list position, so reset context.
             for arg in args {
-                validate_subquery_context_misuse(arg)?;
+                validate_subquery_context_misuse(arg, SubqueryContext::WhereOrEqual)?;
             }
             if let Some(f) = filter {
-                validate_subquery_context_misuse(f)?;
+                validate_subquery_context_misuse(f, SubqueryContext::WhereOrEqual)?;
             }
             if let Some(items) = order_by {
                 for item in items {
-                    validate_subquery_context_misuse(&item.expr)?;
+                    validate_subquery_context_misuse(&item.expr, SubqueryContext::WhereOrEqual)?;
                 }
             }
             Ok(())
@@ -1595,26 +1653,30 @@ pub fn validate_subquery_context_misuse(expr: &Expression) -> Result<(), Executo
             // Only recurse into the function's arguments — the OVER clause has
             // its own context and may legally contain aggregates / nested
             // subqueries (window functions are evaluated AFTER aggregation).
+            // Window function arguments are like aggregate-function arguments
+            // (must be scalar) — reset context to WhereOrEqual.
             let args = match function {
                 vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
                 | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
                 | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
             };
             for a in args {
-                validate_subquery_context_misuse(a)?;
+                validate_subquery_context_misuse(a, SubqueryContext::WhereOrEqual)?;
             }
             Ok(())
         }
-        Expression::QuantifiedComparison { expr, .. } => validate_subquery_context_misuse(expr),
+        Expression::QuantifiedComparison { expr, .. } => {
+            validate_subquery_context_misuse(expr, context)
+        }
         Expression::Conjunction(children) | Expression::Disjunction(children) => {
             for child in children {
-                validate_subquery_context_misuse(child)?;
+                validate_subquery_context_misuse(child, context)?;
             }
             Ok(())
         }
         Expression::RowValueConstructor(children) => {
             for child in children {
-                validate_subquery_context_misuse(child)?;
+                validate_subquery_context_misuse(child, context)?;
             }
             Ok(())
         }
@@ -2242,19 +2304,31 @@ mod tests {
             source_text: None,
         }]);
 
-        let result = validate_subquery_context_misuse(&subquery);
+        // WhereOrEqual context: SQLite reports "misuse of aggregate" here.
+        let result = validate_subquery_context_misuse(&subquery, SubqueryContext::WhereOrEqual);
         match result {
             Err(ExecutorError::MisuseOfAggregateContext { function_name }) => {
                 assert_eq!(function_name, "AVG");
             }
             other => panic!("expected MisuseOfAggregateContext(AVG), got {:?}", other),
         }
+
+        // SelectList context (#5104): allowed — triggers implicit-collapse
+        // instead of erroring.
+        let result_select_list =
+            validate_subquery_context_misuse(&subquery, SubqueryContext::SelectList);
+        assert!(
+            result_select_list.is_ok(),
+            "SelectList context should allow outer-correlated aggregate, got {:?}",
+            result_select_list
+        );
     }
 
     #[test]
     fn test_subquery_misuse_aggregate_with_outer_arg_ref() {
         // (SELECT sum(x)) — bare subquery, sum's arg is an outer column ref
-        // Expected: misuse of aggregate: sum()
+        // Expected: misuse of aggregate: sum() in WhereOrEqual context;
+        // allowed in SelectList context (#5104).
         let inner_agg = Expression::AggregateFunction {
             name: FunctionIdentifier::new("sum"),
             distinct: false,
@@ -2268,19 +2342,27 @@ mod tests {
             source_text: None,
         }]);
 
-        let result = validate_subquery_context_misuse(&subquery);
+        let result = validate_subquery_context_misuse(&subquery, SubqueryContext::WhereOrEqual);
         match result {
             Err(ExecutorError::MisuseOfAggregateContext { function_name }) => {
                 assert_eq!(function_name, "sum");
             }
             other => panic!("expected MisuseOfAggregateContext(sum), got {:?}", other),
         }
+
+        let result_select_list =
+            validate_subquery_context_misuse(&subquery, SubqueryContext::SelectList);
+        assert!(
+            result_select_list.is_ok(),
+            "SelectList context should allow outer-correlated aggregate, got {:?}",
+            result_select_list
+        );
     }
 
     #[test]
     fn test_subquery_misuse_aggregate_with_constant_args_does_not_fire() {
         // (SELECT sum(0)) — bare subquery whose aggregate has no column refs.
-        // Should NOT error (no outer reference).
+        // Should NOT error in either context (no outer reference).
         let inner_agg = Expression::AggregateFunction {
             name: FunctionIdentifier::new("sum"),
             distinct: false,
@@ -2294,14 +2376,17 @@ mod tests {
             source_text: None,
         }]);
 
-        let result = validate_subquery_context_misuse(&subquery);
+        let result = validate_subquery_context_misuse(&subquery, SubqueryContext::WhereOrEqual);
         assert!(result.is_ok(), "constant aggregate in bare subquery should be OK");
+        let result_select =
+            validate_subquery_context_misuse(&subquery, SubqueryContext::SelectList);
+        assert!(result_select.is_ok(), "constant aggregate in SelectList should be OK");
     }
 
     #[test]
     fn test_subquery_row_value_misused() {
         // (SELECT (a, b)) — bare subquery returning a row value where a scalar
-        // is expected. Expected: row value misused.
+        // is expected. Expected: row value misused — in BOTH contexts.
         let row_value = Expression::RowValueConstructor(vec![
             Expression::ColumnRef(ColumnIdentifier::simple("a", false)),
             Expression::ColumnRef(ColumnIdentifier::simple("b", false)),
@@ -2312,8 +2397,16 @@ mod tests {
             source_text: None,
         }]);
 
-        let result = validate_subquery_context_misuse(&subquery);
+        let result = validate_subquery_context_misuse(&subquery, SubqueryContext::WhereOrEqual);
         assert!(matches!(result, Err(ExecutorError::RowValueMisused)));
+
+        let result_select =
+            validate_subquery_context_misuse(&subquery, SubqueryContext::SelectList);
+        assert!(
+            matches!(result_select, Err(ExecutorError::RowValueMisused)),
+            "row value misuse should still error in SelectList, got {:?}",
+            result_select
+        );
     }
 
     #[test]
@@ -2339,7 +2432,7 @@ mod tests {
             source_text: None,
         }]);
 
-        let result = validate_subquery_context_misuse(&subquery);
+        let result = validate_subquery_context_misuse(&subquery, SubqueryContext::WhereOrEqual);
         assert!(
             result.is_ok(),
             "window function in bare subquery should not be flagged, got {:?}",

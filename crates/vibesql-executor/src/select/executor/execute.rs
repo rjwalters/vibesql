@@ -67,22 +67,36 @@ impl SelectExecutor<'_> {
         super::validation::validate_aggregate_subquery_outer_refs(stmt, self.database)?;
 
         // Validate bare scalar subqueries in the SELECT list / ORDER BY for
-        // misuse of aggregate / window / row-value (#5069). A "bare" scalar
-        // subquery (no FROM) re-borrows the outer aggregation context, so any
-        // aggregate inside it is a misuse of the outer scope.
-        // Examples:
-        //   SELECT ntile((SELECT sum(x))) OVER (ORDER BY x) FROM t1;
-        //     → "misuse of aggregate: sum()"
-        //   ... ORDER BY (SELECT (a, b))
-        //     → "row value misused"
+        // misuse of aggregate / window / row-value (#5069, refined #5104).
+        //
+        // A "bare" scalar subquery (no FROM) re-borrows the outer aggregation
+        // context. SQLite has two distinct behaviors depending on where the
+        // subquery appears:
+        //
+        // * SELECT-list (#5104): `SELECT (SELECT avg(a)) FROM t2` is allowed —
+        //   the outer query implicitly collapses to a single-row aggregate. We
+        //   pass `SubqueryContext::SelectList` so the validator skips the
+        //   "misuse of aggregate" rejection in this position.
+        // * WHERE / HAVING / ORDER BY (and arguments to outer functions): an
+        //   outer-correlated aggregate inside a bare scalar subquery is still
+        //   a misuse and must be rejected. We pass `WhereOrEqual` for ORDER BY
+        //   to preserve SQLite's rejection there.
+        //
+        // Row-value misuse (`(SELECT (a, b))`) is detected in both contexts.
         for item in &stmt.select_list {
             if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
-                super::validation::validate_subquery_context_misuse(expr)?;
+                super::validation::validate_subquery_context_misuse(
+                    expr,
+                    super::validation::SubqueryContext::SelectList,
+                )?;
             }
         }
         if let Some(order_by) = stmt.order_by.as_deref() {
             for item in order_by {
-                super::validation::validate_subquery_context_misuse(&item.expr)?;
+                super::validation::validate_subquery_context_misuse(
+                    &item.expr,
+                    super::validation::SubqueryContext::WhereOrEqual,
+                )?;
             }
         }
 
@@ -973,6 +987,21 @@ impl SelectExecutor<'_> {
         let has_window_funcs = self.has_window_functions(&stmt.select_list);
         let has_distinct_aggregates = self.has_distinct_aggregates(&stmt.select_list);
 
+        // Issue #5104: implicit-outer-aggregate-collapse requires the
+        // aggregation pipeline. The columnar pipelines do not support this
+        // semantic, so fall back to the row-oriented path which routes
+        // through `execute_with_aggregation`.
+        if !has_aggregates
+            && !has_group_by
+            && self.select_list_has_outer_aggregate_collapse(&stmt.select_list)
+        {
+            log::debug!(
+                "{} pipeline: implicit-outer-aggregate-collapse — falling back to row-oriented",
+                strategy_name
+            );
+            return Ok(None);
+        }
+
         // Create the pipeline
         let pipeline = create_pipeline();
 
@@ -1228,7 +1257,18 @@ impl SelectExecutor<'_> {
         let has_aggregates = self.has_aggregates(&stmt.select_list) || stmt.having.is_some();
         let has_group_by = stmt.group_by.is_some();
 
-        if has_aggregates || has_group_by {
+        // Issue #5104: SQLite's implicit-outer-aggregate-collapse semantics.
+        // When the SELECT list contains a bare scalar subquery whose body has
+        // an aggregate referencing an outer column, the outer query collapses
+        // into a single-row aggregate (with the inner aggregate computed over
+        // all outer rows). Route through the aggregation pipeline so the
+        // single-group grand-total path runs and `outer_rows` is wired through
+        // to the inner subquery.
+        let has_implicit_collapse = !has_aggregates
+            && !has_group_by
+            && self.select_list_has_outer_aggregate_collapse(&stmt.select_list);
+
+        if has_aggregates || has_group_by || has_implicit_collapse {
             self.execute_with_aggregation(stmt, cte_results)
         } else if let Some(from_clause) = &stmt.from {
             // Re-enabled predicate pushdown for all queries (issue #1902)
