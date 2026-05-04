@@ -19,6 +19,10 @@ include = [
 
 [features]
 memory-tracking = ["memory-stats"]
+# MVCC machinery toggle (Phase 1 of #5136). Off by default. See
+# `crates/vibesql-storage/Cargo.toml` for full documentation. Enabling this
+# at the top level forwards the flag to `vibesql-storage`.
+mvcc_enabled = ["vibesql-storage/mvcc_enabled"]
 
 [dependencies]
 vibesql-types = { version = "0.1.4", path = "crates/vibesql-types" }

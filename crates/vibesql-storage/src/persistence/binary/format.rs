@@ -19,7 +19,12 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 /// - v4: Added quoted flag for TableIdentifier (SQL:1999 case-sensitivity)
 /// - v5: Added column-level collation persistence
 /// - v6: Added expression index support (type_byte before each index column)
-pub const VERSION: u8 = 6;
+/// - v7: Added MVCC version fields (`xmin: u64` + `xmax: Option<u64>`) per row.
+///       Phase 1a of #5136 / parent #4460. v6 files remain readable: the v6
+///       row layout has no MVCC prefix, so the read path treats absent fields
+///       as `xmin = PRE_MVCC_TXN_ID (= 0), xmax = None` — meaning "always
+///       committed, visible to every snapshot." Write path always emits v7.
+pub const VERSION: u8 = 7;
 
 /// Type tags for binary serialization
 #[repr(u8)]
