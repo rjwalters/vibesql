@@ -546,3 +546,44 @@ fn update_from_non_pk_change_still_works() {
         .collect();
     assert_eq!(labels, vec!["uno", "dos"]);
 }
+
+#[test]
+fn update_from_composite_pk_shift_succeeds() {
+    // Composite PK (a,b) shift driven by UPDATE FROM. Mirrors the default-path
+    // `composite_pk_shift_succeeds` test against the FROM-clause form: a join-driven
+    // shift on column `b` produces intermediate states that transiently duplicate
+    // (a,b) pairs, but the final state is unique. Deferred-UNIQUE semantics must hold
+    // for composite PKs through the UPDATE FROM path as well.
+    let mut db = Database::new();
+    run_sql(
+        &mut db,
+        "CREATE TABLE c(a INTEGER, b INTEGER, v TEXT, PRIMARY KEY(a, b)); \
+         CREATE TABLE delta(id INTEGER, shift INTEGER); \
+         INSERT INTO c VALUES (1, 0, 'r1'); \
+         INSERT INTO c VALUES (1, 1, 'r2'); \
+         INSERT INTO c VALUES (1, 2, 'r3'); \
+         INSERT INTO delta VALUES (0, -1); \
+         INSERT INTO delta VALUES (1, -1); \
+         INSERT INTO delta VALUES (2, -1);",
+    );
+
+    let count = run_update(
+        &mut db,
+        "UPDATE c SET b = c.b + delta.shift FROM delta WHERE c.b = delta.id",
+    )
+    .expect(
+        "UPDATE FROM composite-PK shift on column b should succeed — final keys \
+         (1,-1)(1,0)(1,1) are unique even though intermediate states duplicate.",
+    );
+    assert_eq!(count, 3);
+
+    let rows = get_rows(&db, "c");
+    let pairs: Vec<(i64, i64)> = rows
+        .iter()
+        .map(|r| match (&r[0], &r[1]) {
+            (SqlValue::Integer(a), SqlValue::Integer(b)) => (*a, *b),
+            _ => panic!("expected integer columns"),
+        })
+        .collect();
+    assert_eq!(pairs, vec![(1, -1), (1, 0), (1, 1)]);
+}

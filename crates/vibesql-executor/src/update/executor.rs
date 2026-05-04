@@ -1166,9 +1166,18 @@ fn execute_update_from(
     // fail with a spurious "UNIQUE constraint failed" when intermediate states
     // transiently duplicate keys.
     //
-    // UPDATE FROM does not support OR IGNORE / OR REPLACE conflict clauses, so the
-    // gating used by the default path (`!use_replace && !use_ignore`) is not needed
-    // here — every UPDATE FROM uses the deferred-UNIQUE path.
+    // The default UPDATE path gates the deferred-UNIQUE pass on
+    // `!use_replace && !use_ignore` because OR IGNORE / OR REPLACE need per-row
+    // skip / evict semantics that don't match the post-statement model. The
+    // UPDATE FROM path here unconditionally uses the deferred-UNIQUE pass: although
+    // the parser accepts `UPDATE OR IGNORE ... FROM` and `UPDATE OR REPLACE ... FROM`
+    // (populating `stmt.conflict_clause`), this dispatch path silently drops the
+    // conflict clause — meaning IGNORE/REPLACE semantics aren't honored on
+    // UPDATE FROM today. This is a pre-existing limitation (predates #5140; the
+    // dispatch on line ~179 above never inspects `stmt.conflict_clause` before
+    // calling `execute_update_from`).
+    // TODO(#5144): honor `stmt.conflict_clause` on UPDATE FROM (skip-on-IGNORE,
+    // evict-on-REPLACE) and gate the deferred-UNIQUE pass accordingly.
     let constraint_validator = ConstraintValidator::new(schema);
 
     // Phase C2 of #5085: collect deferred FK violations during the loop
