@@ -29,6 +29,7 @@ use super::{
     row_selector::RowSelector,
     triggers,
     value_updater::ValueUpdater,
+    PendingUpdate,
 };
 
 /// Internal implementation supporting both schema caching, procedural context, and trigger
@@ -239,8 +240,8 @@ pub(super) fn execute_internal(
     let use_replace = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace));
 
     // Step 6: Build list of updates (two-phase execution for SQL semantics)
-    // Each update consists of: (row_index, old_row, new_row, changed_columns, updates_pk)
-    let mut updates: Vec<(usize, Row, Row, HashSet<usize>, bool)> = Vec::new();
+    // Each `PendingUpdate` carries: row_index, old_row, new_row, changed_columns, updates_pk.
+    let mut updates: Vec<PendingUpdate> = Vec::new();
 
     // Track rows to delete for REPLACE conflict resolution (before applying updates)
     let mut rows_to_delete_for_replace: Vec<usize> = Vec::new();
@@ -360,7 +361,13 @@ pub(super) fn execute_internal(
             }
         }
 
-        updates.push((row_index, row.clone(), new_row, changed_columns, updates_pk));
+        updates.push(PendingUpdate {
+            row_index,
+            old_row: row.clone(),
+            new_row,
+            changed_columns,
+            updates_pk,
+        });
     }
 
     // Cross-update uniqueness validation: check if multiple updates would produce
@@ -408,7 +415,7 @@ pub(super) fn execute_internal(
         rows_to_delete_for_replace.dedup();
 
         // Filter out any rows that we're going to update (shouldn't delete our own rows)
-        let update_indices: HashSet<usize> = updates.iter().map(|(idx, _, _, _, _)| *idx).collect();
+        let update_indices: HashSet<usize> = updates.iter().map(|u| u.row_index).collect();
         rows_to_delete_for_replace.retain(|idx| !update_indices.contains(idx));
 
         if !rows_to_delete_for_replace.is_empty() {
@@ -470,9 +477,14 @@ pub(super) fn execute_internal(
 
     // Step 7: Handle CASCADE updates for primary key changes (before triggers)
     // This must happen after validation but before applying parent updates
-    for (_row_index, old_row, new_row, _changed_columns, updates_pk) in &updates {
-        if *updates_pk {
-            ForeignKeyValidator::check_no_child_references(database, table_name, old_row, new_row)?;
+    for u in &updates {
+        if u.updates_pk {
+            ForeignKeyValidator::check_no_child_references(
+                database,
+                table_name,
+                &u.old_row,
+                &u.new_row,
+            )?;
         }
     }
 
@@ -480,8 +492,8 @@ pub(super) fn execute_internal(
     if !updates.is_empty() {
         // Compute aggregate changed columns across all updates
         let mut all_changed_columns = HashSet::new();
-        for (_, _, _, changed_cols, _) in &updates {
-            all_changed_columns.extend(changed_cols.iter().copied());
+        for u in &updates {
+            all_changed_columns.extend(u.changed_columns.iter().copied());
         }
 
         let optimizer = DmlOptimizer::new(database, table_name);
@@ -502,13 +514,13 @@ pub(super) fn execute_internal(
 
     // Fire BEFORE UPDATE triggers for all rows (before database mutation)
     if has_triggers {
-        for (_row_index, old_row, new_row, _changed_columns, _updates_pk) in &updates {
+        for u in &updates {
             crate::TriggerFirer::execute_before_triggers(
                 database,
                 table_name,
                 vibesql_ast::TriggerEvent::Update(None),
-                Some(old_row),
-                Some(new_row),
+                Some(&u.old_row),
+                Some(&u.new_row),
             )?;
         }
     }
@@ -523,12 +535,17 @@ pub(super) fn execute_internal(
 
     // Collect the updates first
     let mut index_updates = Vec::new();
-    for (index, old_row, new_row, changed_columns, _updates_pk) in &updates {
+    for u in &updates {
         table_mut
-            .update_row_selective(*index, new_row.clone(), changed_columns)
+            .update_row_selective(u.row_index, u.new_row.clone(), &u.changed_columns)
             .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
 
-        index_updates.push((*index, old_row.clone(), new_row.clone(), changed_columns.clone()));
+        index_updates.push((
+            u.row_index,
+            u.old_row.clone(),
+            u.new_row.clone(),
+            u.changed_columns.clone(),
+        ));
     }
 
     // Fire AFTER UPDATE triggers for all updated rows
@@ -1138,57 +1155,93 @@ fn execute_update_from(
         return Ok(0);
     }
 
-    // Validate constraints for each update
-    let table = database
-        .get_table(table_name)
-        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+    // Validate constraints for each update.
+    //
+    // Issue #5140: PRIMARY KEY / UNIQUE checks are deferred to a post-statement pass
+    // (matching the default UPDATE path's #5137 fix in PR #5138). The per-row
+    // `validate_row_skip_uniqueness` enforces NOT NULL / CHECK only; deferred-aware
+    // PK / UNIQUE / user-defined-unique-index validation runs after the loop via
+    // `validate_post_statement_uniqueness`. Without this, statements like
+    //     UPDATE p SET a = a + delta.shift FROM delta WHERE p.a = delta.id
+    // fail with a spurious "UNIQUE constraint failed" when intermediate states
+    // transiently duplicate keys.
+    //
+    // UPDATE FROM does not support OR IGNORE / OR REPLACE conflict clauses, so the
+    // gating used by the default path (`!use_replace && !use_ignore`) is not needed
+    // here — every UPDATE FROM uses the deferred-UNIQUE path.
     let constraint_validator = ConstraintValidator::new(schema);
 
     // Phase C2 of #5085: collect deferred FK violations during the loop
-    // and queue them after the loop ends, since the loop body holds an
-    // immutable borrow of `database` via `table`.
+    // and queue them after the loop ends, since `database` is immutably
+    // borrowed once we re-fetch `table` for the post-statement PK/UNIQUE check.
     let mut pending_deferred_violations: Vec<vibesql_storage::DeferredFkViolation> = Vec::new();
 
-    for (row_index, old_row, new_row, _changed_columns, _updates_pk) in &updates {
-        // Validate all constraints
-        constraint_validator.validate_row(table, table_name, *row_index, new_row, old_row)?;
-        constraint_validator.validate_unique_indexes(database, table_name, new_row, old_row)?;
+    for u in &updates {
+        // Per-row: NOT NULL + CHECK only. PK / UNIQUE deferred to post-statement.
+        constraint_validator.validate_row_skip_uniqueness(table_name, &u.new_row)?;
 
         // Validate foreign key constraints
         if !schema.foreign_keys.is_empty() {
             let deferred =
-                ForeignKeyValidator::collect_constraints(database, table_name, &new_row.values)?;
+                ForeignKeyValidator::collect_constraints(database, table_name, &u.new_row.values)?;
             pending_deferred_violations.extend(deferred);
         }
     }
 
-    // Push deferred FK violations onto the queue now that `table` has
-    // been released.
+    // Push deferred FK violations onto the queue now that the table has not
+    // yet been re-borrowed for the post-statement uniqueness check.
     for v in pending_deferred_violations {
         database.queue_deferred_fk_violation(v);
     }
 
-    // Cross-update uniqueness validation
+    // Cross-update uniqueness validation: catches multiple updates landing on the
+    // same final PK / UNIQUE value (e.g. `UPDATE p SET a = 5 FROM ...` matching
+    // multiple rows). This must run before the post-statement deferred check.
     if updates.len() > 1 {
         validate_cross_update_uniqueness(&updates, schema)?;
     }
 
+    // Deferred uniqueness check (issue #5140 — port of #5138 to UPDATE FROM):
+    // validate PK / UNIQUE / user-defined unique indexes against the post-statement
+    // table state. Rows that are themselves being updated to a different key are
+    // excluded from "existing" entries, allowing cross-row PK shifts via FROM
+    // (`UPDATE p SET a = a + delta.shift FROM delta WHERE p.a = delta.id`) to
+    // succeed even when intermediate states transiently duplicate keys.
+    if !updates.is_empty() {
+        // Re-borrow the table — the FK queue push above released the prior immutable borrow.
+        let table_for_check = database
+            .get_table(table_name)
+            .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+        validate_post_statement_uniqueness(
+            &updates,
+            schema,
+            table_for_check,
+            database,
+            table_name,
+        )?;
+    }
+
     // Handle CASCADE updates for primary key changes
-    for (_row_index, old_row, new_row, _changed_columns, updates_pk) in &updates {
-        if *updates_pk {
-            ForeignKeyValidator::check_no_child_references(database, table_name, old_row, new_row)?;
+    for u in &updates {
+        if u.updates_pk {
+            ForeignKeyValidator::check_no_child_references(
+                database,
+                table_name,
+                &u.old_row,
+                &u.new_row,
+            )?;
         }
     }
 
     // Fire BEFORE UPDATE triggers
     if has_triggers {
-        for (_row_index, old_row, new_row, _changed_columns, _updates_pk) in &updates {
+        for u in &updates {
             crate::TriggerFirer::execute_before_triggers(
                 database,
                 table_name,
                 vibesql_ast::TriggerEvent::Update(None),
-                Some(old_row),
-                Some(new_row),
+                Some(&u.old_row),
+                Some(&u.new_row),
             )?;
         }
     }
@@ -1200,12 +1253,17 @@ fn execute_update_from(
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
     let mut index_updates = Vec::new();
-    for (index, old_row, new_row, changed_columns, _updates_pk) in &updates {
+    for u in &updates {
         table_mut
-            .update_row_selective(*index, new_row.clone(), changed_columns)
+            .update_row_selective(u.row_index, u.new_row.clone(), &u.changed_columns)
             .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
 
-        index_updates.push((*index, old_row.clone(), new_row.clone(), changed_columns.clone()));
+        index_updates.push((
+            u.row_index,
+            u.old_row.clone(),
+            u.new_row.clone(),
+            u.changed_columns.clone(),
+        ));
     }
 
     // Fire AFTER UPDATE triggers

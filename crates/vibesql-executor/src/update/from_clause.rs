@@ -20,6 +20,7 @@ use vibesql_catalog::TableSchema;
 use vibesql_storage::{Database, Row};
 use vibesql_types::SqlValue;
 
+use super::PendingUpdate;
 use crate::errors::ExecutorError;
 
 /// Result of executing the join between target table and FROM tables
@@ -297,13 +298,13 @@ fn combine_with_from_clause(accumulated: FromClause, from_clause: FromClause) ->
 
 /// Apply UPDATE FROM matches to build update operations
 ///
-/// Takes the matched rows with pre-computed SET values and creates
-/// (row_index, old_row, new_row, changed_columns) tuples for the executor.
-pub fn apply_update_from_matches(
+/// Takes the matched rows with pre-computed SET values and produces a
+/// `Vec<PendingUpdate>` for the executor's two-phase apply step.
+pub(super) fn apply_update_from_matches(
     matches: &[UpdateFromMatch],
     assignments: &[Assignment],
     target_schema: &TableSchema,
-) -> Result<Vec<(usize, Row, Row, HashSet<usize>, bool)>, ExecutorError> {
+) -> Result<Vec<PendingUpdate>, ExecutorError> {
     let pk_indices = target_schema.get_primary_key_indices();
     let mut updates = Vec::with_capacity(matches.len());
 
@@ -370,7 +371,13 @@ pub fn apply_update_from_matches(
             }
         }
 
-        updates.push((m.row_index, m.target_row.clone(), new_row, changed_columns, updates_pk));
+        updates.push(PendingUpdate {
+            row_index: m.row_index,
+            old_row: m.target_row.clone(),
+            new_row,
+            changed_columns,
+            updates_pk,
+        });
     }
 
     Ok(updates)
