@@ -31,19 +31,10 @@ pub fn check_no_child_references(
         return Ok(());
     }
 
-    let parent_schema = db
+    let _parent_schema = db
         .catalog
         .get_table(parent_table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(parent_table_name.to_string()))?;
-
-    // This check is only meaningful if the parent table has a primary key.
-    let pk_indices = match parent_schema.get_primary_key_indices() {
-        Some(indices) => indices,
-        None => return Ok(()),
-    };
-
-    let parent_key_values: Vec<SqlValue> =
-        pk_indices.iter().map(|&idx| parent_row.values[idx].clone()).collect();
 
     // Optimization: Check if any table in the database has foreign keys at all
     let has_any_fks = db.catalog.list_tables().iter().any(|table_name| {
@@ -70,12 +61,20 @@ pub fn check_no_child_references(
     let in_txn = db.in_transaction();
 
     // Collect all child tables that reference this parent row
-    // We need to collect first to avoid borrowing issues when we mutate
+    // We need to collect first to avoid borrowing issues when we mutate.
+    //
+    // Phase C3 of #5085 / fkey8-3.1: each FK supplies its own
+    // `parent_column_indices`, which may differ from the parent's PRIMARY
+    // KEY (e.g. `FOREIGN KEY(b, c) REFERENCES self(d, e)` where d/e are
+    // backed by a UNIQUE INDEX rather than the PK). The FK match must
+    // therefore extract `parent_key_values` from the FK's *parent-side*
+    // columns, not from the parent's PK.
     let mut actions_to_perform: Vec<(
         String,
         vibesql_catalog::ForeignKeyConstraint,
         usize,
         ReferentialAction,
+        Vec<SqlValue>, // parent_key_values for THIS FK
     )> = Vec::new();
 
     for table_name in db.catalog.list_tables() {
@@ -91,8 +90,28 @@ pub fn check_no_child_references(
                 continue;
             }
 
-            // Check if any row in the child table references the parent row
-            // Use scan_live() to skip soft-deleted rows
+            // Resolve the FK's parent-side column indices and extract the
+            // values from the parent row being deleted.
+            let parent_indices = crate::foreign_key_check::resolved_parent_indices_for_fk(db, fk);
+            if parent_indices.is_empty()
+                || parent_indices.iter().any(|&idx| idx >= parent_row.values.len())
+            {
+                continue;
+            }
+            let fk_parent_key_values: Vec<SqlValue> =
+                parent_indices.iter().map(|&idx| parent_row.values[idx].clone()).collect();
+
+            // Skip if the parent-side key values are NULL — NULLs don't
+            // participate in FK matching.
+            if fk_parent_key_values.iter().any(|v| matches!(v, SqlValue::Null)) {
+                continue;
+            }
+
+            let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
+
+            // Check if any row in the child table references this parent
+            // row's FK-target columns. Use scan_live() to skip
+            // soft-deleted rows.
             let child_table = db.get_table(&table_name).unwrap();
             let has_references = child_table.scan_live().any(|(_, child_row)| {
                 let child_fk_values: Vec<SqlValue> =
@@ -103,7 +122,15 @@ pub fn check_no_child_references(
                     return false;
                 }
 
-                child_fk_values == parent_key_values
+                child_fk_values.iter().zip(&fk_parent_key_values).enumerate().all(
+                    |(i, (cv, pv))| {
+                        crate::foreign_key_check::fk_values_equal(
+                            cv,
+                            pv,
+                            parent_collations.get(i).and_then(|c| c.as_deref()),
+                        )
+                    },
+                )
             });
 
             if has_references {
@@ -112,13 +139,14 @@ pub fn check_no_child_references(
                     fk.clone(),
                     fk_idx,
                     fk.on_delete.clone(),
+                    fk_parent_key_values,
                 ));
             }
         }
     }
 
     // Now perform the actions
-    for (child_table_name, fk, fk_idx, action) in actions_to_perform {
+    for (child_table_name, fk, fk_idx, action, parent_key_values) in actions_to_perform {
         match action {
             ReferentialAction::Restrict => {
                 // RESTRICT is immediate by default, but the session
