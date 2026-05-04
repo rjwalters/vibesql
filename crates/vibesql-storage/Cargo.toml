@@ -48,7 +48,7 @@ smallvec = { version = "1.13", features = ["serde"] }
 arcstr = "1.2"
 ryu = "1.0"  # Fast float-to-string conversion with proper formatting
 tokio = { version = "1", features = ["rt", "sync"], optional = true }
-opendal = { version = "0.55", optional = true }
+opendal = { version = "0.56", optional = true }
 
 # Use parking_lot for native builds, std::sync for WASM
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
