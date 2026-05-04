@@ -5,7 +5,7 @@
 // This module provides transaction management methods for the Database struct.
 // Methods are implemented via an impl block on the Database type.
 
-use super::transactions::TransactionChange;
+use super::transactions::{DeferredFkViolation, TransactionChange};
 use super::Database;
 use crate::wal::{DurabilityMode, TransactionDurability, WalOp};
 use crate::StorageError;
@@ -158,5 +158,34 @@ impl Database {
     /// Release (destroy) a named savepoint
     pub fn release_savepoint(&mut self, name: String) -> Result<(), StorageError> {
         self.lifecycle.transaction_manager_mut().release_savepoint(name)
+    }
+
+    // ============================================================================
+    // Deferred FK Violation Queue (Phase C2 of #5085)
+    // ============================================================================
+
+    /// Push a deferred FK violation onto the active transaction's queue.
+    ///
+    /// Called by FK validators in the executor when a constraint is
+    /// `DEFERRABLE INITIALLY DEFERRED` or the session has
+    /// `PRAGMA defer_foreign_keys=ON`. The COMMIT path drains the queue
+    /// and re-checks each violation against the current parent state.
+    pub fn queue_deferred_fk_violation(&mut self, violation: DeferredFkViolation) {
+        self.lifecycle.transaction_manager_mut().queue_deferred_fk_violation(violation);
+    }
+
+    /// Drain the deferred FK violation queue for COMMIT-time
+    /// re-validation. The executor calls this just before
+    /// [`commit_transaction`] and aborts the commit (rolling back) if
+    /// any violation still holds against the current parent state.
+    pub fn take_deferred_fk_violations(&mut self) -> Vec<DeferredFkViolation> {
+        self.lifecycle.transaction_manager_mut().take_deferred_fk_violations()
+    }
+
+    /// Read-only view of the deferred FK violation queue. Returns an
+    /// empty slice when no transaction is active. Used by the
+    /// `sqlite3_db_status DBSTATUS_DEFERRED_FKS` PRAGMA bridge.
+    pub fn deferred_fk_violations(&self) -> &[DeferredFkViolation] {
+        self.lifecycle.transaction_manager().deferred_fk_violations()
     }
 }

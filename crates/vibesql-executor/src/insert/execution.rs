@@ -608,6 +608,7 @@ fn execute_insert_internal(
         }
 
         let validation_result = validator.validate(&full_row_values)?;
+        drop(validator); // release the immutable &Database borrow before the queue push below
 
         // Track PK values for batch duplicate checking (using pre-extracted keys)
         if let Some(pk_values) = validation_result.primary_key {
@@ -620,6 +621,13 @@ fn execute_insert_internal(
             if let Some(values) = unique_values {
                 unique_constraint_values[constraint_idx].push(values);
             }
+        }
+
+        // Phase C2 of #5085: queue any FK violations that were deferred
+        // (INITIALLY DEFERRED constraint or PRAGMA defer_foreign_keys=ON)
+        // onto the active transaction's deferred-FK queue.
+        for v in validation_result.deferred_fk_violations {
+            db.queue_deferred_fk_violation(v);
         }
 
         // Store validated row for insertion (with optional explicit rowid)

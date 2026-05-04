@@ -22,7 +22,13 @@ use vibesql_types::{DataType, SqlValue, StringValue};
 /// Create a standard parent table with a primary key
 ///
 /// Creates a table with columns: ID (INTEGER, PK), NAME (VARCHAR(50), nullable)
+///
+/// Also enables `PRAGMA foreign_keys=ON` on the database so that the FK
+/// enforcement codepath actually runs (SQLite compatibility: FKs default
+/// to OFF, see PR #5060). This matches what `foreign_key_set_default_tests`
+/// does in the executor crate.
 pub fn create_parent_table(db: &mut Database, table_name: &str) {
+    db.set_foreign_keys_enabled(true);
     let schema = TableSchema::with_primary_key(
         table_name.to_string(),
         vec![
@@ -45,6 +51,7 @@ pub fn create_child_table(
     on_delete: ReferentialAction,
     on_update: ReferentialAction,
 ) {
+    db.set_foreign_keys_enabled(true);
     let columns = vec![
         ColumnSchema::new("ID".to_string(), DataType::Integer, false),
         ColumnSchema::new("PARENT_ID".to_string(), DataType::Integer, true),
@@ -60,6 +67,8 @@ pub fn create_child_table(
         parent_column_indices: vec![0],
         on_delete: on_delete.clone(),
         on_update: on_update.clone(),
+        is_deferrable: false,
+        initially_deferred: false,
     };
 
     let mut schema =
@@ -83,6 +92,7 @@ pub fn create_child_table_with_default(
     on_update: ReferentialAction,
     default_value: i64,
 ) {
+    db.set_foreign_keys_enabled(true);
     let mut parent_id_column = ColumnSchema::new("PARENT_ID".to_string(), DataType::Integer, true);
     parent_id_column.set_default(Expression::Literal(SqlValue::Integer(default_value)));
 
@@ -101,6 +111,8 @@ pub fn create_child_table_with_default(
         parent_column_indices: vec![0],
         on_delete: on_delete.clone(),
         on_update: on_update.clone(),
+        is_deferrable: false,
+        initially_deferred: false,
     };
 
     let mut schema =
@@ -115,6 +127,7 @@ pub fn create_child_table_with_default(
 /// Creates a table with columns: ID (INTEGER, PK), MANAGER_ID (INTEGER, nullable, self-FK), NAME
 /// (VARCHAR(50))
 pub fn create_self_referential_employee_table(db: &mut Database) {
+    db.set_foreign_keys_enabled(true);
     let columns = vec![
         ColumnSchema::new("ID".to_string(), DataType::Integer, false),
         ColumnSchema::new("MANAGER_ID".to_string(), DataType::Integer, true),
@@ -130,6 +143,8 @@ pub fn create_self_referential_employee_table(db: &mut Database) {
         parent_column_indices: vec![0],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     };
 
     let mut schema =
@@ -143,6 +158,7 @@ pub fn create_self_referential_employee_table(db: &mut Database) {
 /// Parent: DEPT_ID (INTEGER), EMP_ID (INTEGER), NAME (VARCHAR), composite PK on (DEPT_ID, EMP_ID)
 /// Child: ID (INTEGER, PK), PARENT_DEPT_ID (INTEGER), PARENT_EMP_ID (INTEGER), multi-column FK
 pub fn create_multi_column_parent_child_tables(db: &mut Database) {
+    db.set_foreign_keys_enabled(true);
     // Create parent with composite primary key
     let parent_schema = TableSchema::with_primary_key(
         "PARENT".to_string(),
@@ -175,6 +191,8 @@ pub fn create_multi_column_parent_child_tables(db: &mut Database) {
         parent_column_indices: vec![0, 1],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     };
 
     let mut schema =
@@ -207,6 +225,8 @@ pub fn create_multiple_parent_child_tables(db: &mut Database) {
         parent_column_indices: vec![0],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     };
 
     let fk2 = ForeignKeyConstraint {
@@ -218,6 +238,8 @@ pub fn create_multiple_parent_child_tables(db: &mut Database) {
         parent_column_indices: vec![0],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     };
 
     let mut schema =

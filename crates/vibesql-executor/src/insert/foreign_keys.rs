@@ -1,8 +1,16 @@
+use vibesql_storage::{DeferredFkViolation, DeferredFkViolationKind};
+
 use crate::errors::ExecutorError;
 
-/// Validate FOREIGN KEY constraints for a new row
+/// Validate FOREIGN KEY constraints for a new row.
+///
+/// Phase C2 of #5085: when the constraint is `INITIALLY DEFERRED` or
+/// the session has `PRAGMA defer_foreign_keys=ON` (and a transaction is
+/// active), a missing parent row is queued onto the transaction's
+/// deferred-FK queue instead of returning an immediate error. The
+/// queue is drained and re-checked at COMMIT.
 pub fn validate_foreign_key_constraints(
-    db: &vibesql_storage::Database,
+    db: &mut vibesql_storage::Database,
     table_name: &str,
     row_values: &[vibesql_types::SqlValue],
 ) -> Result<(), ExecutorError> {
@@ -11,14 +19,21 @@ pub fn validate_foreign_key_constraints(
         return Ok(());
     }
 
+    let session_defer = db.defer_foreign_keys();
+    let in_txn = db.in_transaction();
+
     let schema = db
         .catalog
         .get_table(table_name)
-        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?
+        .clone();
 
-    for fk in &schema.foreign_keys {
+    let mut deferred: Vec<DeferredFkViolation> = Vec::new();
+
+    for (fk_idx, fk) in schema.foreign_keys.iter().enumerate() {
         // Mismatch check runs before any row-existence test so that bad
         // FK targets are reported even when the parent table is empty.
+        // Mismatch is never deferred (matches SQLite behaviour).
         if let Some((child, parent)) =
             crate::foreign_key_check::detect_fk_mismatch(db, table_name, fk)
         {
@@ -43,28 +58,43 @@ pub fn validate_foreign_key_constraints(
         let parent_indices = crate::foreign_key_check::resolved_parent_indices_for_fk(db, fk);
 
         let key_exists = parent_table.scan().iter().any(|parent_row| {
-            parent_indices
-                .iter()
-                .zip(&fk_values)
-                .enumerate()
-                .all(|(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
+            parent_indices.iter().zip(&fk_values).enumerate().all(|(i, (&parent_idx, fk_val))| {
+                match parent_row.get(parent_idx) {
                     Some(parent_val) => crate::foreign_key_check::fk_values_equal(
                         fk_val,
                         parent_val,
                         parent_collations.get(i).and_then(|c| c.as_deref()),
                     ),
                     None => false,
-                })
+                }
+            })
         });
 
-        if !key_exists {
-            return Err(ExecutorError::ConstraintViolation(format!(
-                "FOREIGN KEY constraint \'{}\' violated: key ({}) not found in table \'{}\'",
-                fk.name.as_deref().unwrap_or(""),
-                fk.column_names.join(", "),
-                fk.parent_table
-            )));
+        if key_exists {
+            continue;
         }
+
+        let should_defer = in_txn && (fk.initially_deferred || session_defer);
+        if should_defer {
+            deferred.push(DeferredFkViolation {
+                child_table: table_name.to_string(),
+                fk_index: fk_idx,
+                child_row: row_values.to_vec(),
+                kind: DeferredFkViolationKind::ChildInsertOrUpdate,
+            });
+            continue;
+        }
+
+        return Err(ExecutorError::ConstraintViolation(format!(
+            "FOREIGN KEY constraint \'{}\' violated: key ({}) not found in table \'{}\'",
+            fk.name.as_deref().unwrap_or(""),
+            fk.column_names.join(", "),
+            fk.parent_table
+        )));
+    }
+
+    for v in deferred {
+        db.queue_deferred_fk_violation(v);
     }
 
     Ok(())
