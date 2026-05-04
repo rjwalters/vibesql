@@ -3,6 +3,7 @@
 //! This module handles:
 //! - Detecting conflicting rows for UPDATE OR REPLACE operations
 //! - Cross-update uniqueness validation (preventing multiple rows from getting same PK)
+//! - Post-statement uniqueness validation (deferred PK/UNIQUE checks against final state)
 //! - Resolving cross-update conflicts for REPLACE mode
 
 use std::collections::{HashMap, HashSet};
@@ -261,4 +262,255 @@ pub(super) fn resolve_cross_update_conflicts_for_replace(
     }
 
     indices_to_delete
+}
+
+/// Validate uniqueness against the post-statement table state (deferred PK/UNIQUE check).
+///
+/// SQLite defers UNIQUE constraint checks until the end of the statement. This means a
+/// statement like `UPDATE p SET a = a - 1` succeeds even when intermediate states transiently
+/// duplicate keys, as long as the final state has no duplicates.
+///
+/// This function implements that semantic. It checks each pending update's new PK / UNIQUE
+/// values against the table's current index state, but excludes any "conflict" with a row
+/// that is itself being updated to a different key in this same statement (because that row
+/// is being moved away from the conflicting key).
+///
+/// Cross-update conflicts (multiple updates landing on the same key) are caught separately
+/// by [`validate_cross_update_uniqueness`], which must be called before this function.
+///
+/// # Arguments
+/// * `updates` - All pending updates: (row_index, old_row, new_row, changed_columns, updates_pk)
+/// * `schema` - Table schema (for PK/UNIQUE constraint metadata)
+/// * `table` - Storage table reference (for accessing PK/UNIQUE hash indexes)
+/// * `database` - Database reference (for accessing user-defined UNIQUE indexes)
+/// * `table_name` - Canonical table name
+pub(super) fn validate_post_statement_uniqueness(
+    updates: &[(usize, Row, Row, HashSet<usize>, bool)],
+    schema: &TableSchema,
+    table: &Table,
+    database: &Database,
+    table_name: &str,
+) -> Result<(), ExecutorError> {
+    // Build a map of (updated_row_index -> new PK values) so we can identify rows that
+    // are being moved away from their original key.
+    let pk_indices_opt = schema.get_primary_key_indices();
+    let mut updated_new_pk: HashMap<usize, Vec<SqlValue>> = HashMap::new();
+    if let Some(ref pk_indices) = pk_indices_opt {
+        for (row_index, _old_row, new_row, _changed, _upd_pk) in updates {
+            let new_pk: Vec<SqlValue> =
+                pk_indices.iter().map(|&i| new_row.values[i].clone()).collect();
+            updated_new_pk.insert(*row_index, new_pk);
+        }
+    }
+
+    // PRIMARY KEY: for each pending update, check the new PK against the table's PK index.
+    // If a conflicting row exists, only error if that row is NOT being updated to a different key
+    // (because rows in the update set will be moved away; only their FINAL state matters).
+    if let Some(ref pk_indices) = pk_indices_opt {
+        if let Some(pk_index) = table.primary_key_index() {
+            for (row_index, old_row, new_row, _changed, _upd_pk) in updates {
+                let new_pk: Vec<SqlValue> =
+                    pk_indices.iter().map(|&i| new_row.values[i].clone()).collect();
+                let old_pk: Vec<SqlValue> =
+                    pk_indices.iter().map(|&i| old_row.values[i].clone()).collect();
+
+                // No-op update for PK: skip
+                if new_pk == old_pk {
+                    continue;
+                }
+
+                if let Some(&existing_idx) = pk_index.get(&new_pk) {
+                    // Self: this row already had this PK
+                    if existing_idx == *row_index {
+                        continue;
+                    }
+
+                    // If the conflicting row is itself being updated to a different PK,
+                    // it's being moved away — not a real conflict.
+                    if let Some(other_new_pk) = updated_new_pk.get(&existing_idx) {
+                        if other_new_pk != &new_pk {
+                            continue;
+                        }
+                        // Otherwise the other row's new PK equals our new PK — that's a
+                        // cross-update collision, which validate_cross_update_uniqueness
+                        // should have already caught. Fall through to error for safety.
+                    }
+
+                    let pk_col_names: Vec<String> =
+                        schema.primary_key.as_ref().unwrap().clone();
+                    let qualified_cols: Vec<String> = pk_col_names
+                        .iter()
+                        .map(|col| format!("{}.{}", schema.name, col))
+                        .collect();
+                    return Err(ExecutorError::ConstraintViolation(format!(
+                        "UNIQUE constraint failed: {}",
+                        qualified_cols.join(", ")
+                    )));
+                }
+            }
+        }
+    }
+
+    // UNIQUE constraints (table-level): same logic as PK.
+    let unique_constraint_indices = schema.get_unique_constraint_indices();
+    let unique_indexes = table.unique_indexes();
+    for (constraint_idx, unique_indices) in unique_constraint_indices.iter().enumerate() {
+        if constraint_idx >= unique_indexes.len() {
+            continue; // No backing hash index — fallback path is not deferred-aware
+        }
+        let unique_index = &unique_indexes[constraint_idx];
+
+        // Build map of (updated_row_index -> new unique values) for this constraint
+        let mut updated_new_unique: HashMap<usize, Vec<SqlValue>> = HashMap::new();
+        for (row_index, _old_row, new_row, _changed, _upd_pk) in updates {
+            let new_uv: Vec<SqlValue> =
+                unique_indices.iter().map(|&i| new_row.values[i].clone()).collect();
+            updated_new_unique.insert(*row_index, new_uv);
+        }
+
+        for (row_index, old_row, new_row, _changed, _upd_pk) in updates {
+            let new_uv: Vec<SqlValue> =
+                unique_indices.iter().map(|&i| new_row.values[i].clone()).collect();
+            let old_uv: Vec<SqlValue> =
+                unique_indices.iter().map(|&i| old_row.values[i].clone()).collect();
+
+            // NULL values are exempt (NULL != NULL in SQL)
+            if new_uv.contains(&SqlValue::Null) {
+                continue;
+            }
+
+            // No-op for this constraint
+            if new_uv == old_uv {
+                continue;
+            }
+
+            if let Some(&existing_idx) = unique_index.get(&new_uv) {
+                if existing_idx == *row_index {
+                    continue;
+                }
+                if let Some(other_new_uv) = updated_new_unique.get(&existing_idx) {
+                    if other_new_uv != &new_uv {
+                        continue;
+                    }
+                }
+                let unique_col_names: Vec<String> =
+                    schema.unique_constraints[constraint_idx].clone();
+                let qualified_cols: Vec<String> = unique_col_names
+                    .iter()
+                    .map(|col| format!("{}.{}", schema.name, col))
+                    .collect();
+                return Err(ExecutorError::ConstraintViolation(format!(
+                    "UNIQUE constraint failed: {}",
+                    qualified_cols.join(", ")
+                )));
+            }
+        }
+    }
+
+    // User-defined UNIQUE indexes (CREATE UNIQUE INDEX).
+    for index_name in database.list_indexes_for_table(table_name) {
+        let index_metadata = match database.get_index(&index_name) {
+            Some(m) => m,
+            None => continue,
+        };
+        if !index_metadata.unique {
+            continue;
+        }
+
+        // Resolve column indices for this index. Skip expression indexes (handled separately).
+        let mut col_idxs: Vec<usize> = Vec::with_capacity(index_metadata.columns.len());
+        let mut is_expression_index = false;
+        for ic in &index_metadata.columns {
+            if ic.get_expression().is_some() {
+                is_expression_index = true;
+                break;
+            }
+            let cn = match ic.column_name() {
+                Some(n) => n,
+                None => {
+                    is_expression_index = true;
+                    break;
+                }
+            };
+            match schema.get_column_index(cn) {
+                Some(ci) => col_idxs.push(ci),
+                None => {
+                    is_expression_index = true;
+                    break;
+                }
+            }
+        }
+        if is_expression_index {
+            continue;
+        }
+
+        // Build map of (updated_row_index -> new index key values) for this index
+        let mut updated_new_key: HashMap<usize, Vec<SqlValue>> = HashMap::new();
+        for (row_index, _old_row, new_row, _changed, _upd_pk) in updates {
+            let nk: Vec<SqlValue> =
+                col_idxs.iter().map(|&i| new_row.values[i].clone()).collect();
+            updated_new_key.insert(*row_index, nk);
+        }
+
+        let index_data = match database.get_index_data(&index_name) {
+            Some(d) => d,
+            None => continue,
+        };
+
+        for (row_index, old_row, new_row, _changed, _upd_pk) in updates {
+            let new_key: Vec<SqlValue> =
+                col_idxs.iter().map(|&i| new_row.values[i].clone()).collect();
+            let old_key: Vec<SqlValue> =
+                col_idxs.iter().map(|&i| old_row.values[i].clone()).collect();
+
+            // NULL values are exempt
+            if new_key.contains(&SqlValue::Null) {
+                continue;
+            }
+
+            // No-op
+            if new_key == old_key {
+                continue;
+            }
+
+            // Get all rows that currently hold this key
+            let conflicting_rows = match index_data.get(&new_key) {
+                Some(v) => v,
+                None => continue,
+            };
+
+            // Check each conflicting row index: skip self and rows being moved off this key
+            let mut real_conflict = false;
+            for existing_idx in &conflicting_rows {
+                if *existing_idx == *row_index {
+                    continue;
+                }
+                if let Some(other_new_key) = updated_new_key.get(existing_idx) {
+                    if other_new_key != &new_key {
+                        // This row is being moved away — not a conflict
+                        continue;
+                    }
+                }
+                real_conflict = true;
+                break;
+            }
+
+            if real_conflict {
+                let columns_str = index_metadata
+                    .columns
+                    .iter()
+                    .map(|col| {
+                        format!("{}.{}", table_name, col.column_name().unwrap_or("?"))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(ExecutorError::ConstraintViolation(format!(
+                    "UNIQUE constraint failed: {}",
+                    columns_str
+                )));
+            }
+        }
+    }
+
+    Ok(())
 }

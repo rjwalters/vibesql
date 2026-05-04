@@ -40,6 +40,22 @@ impl<'a> ConstraintValidator<'a> {
         Ok(())
     }
 
+    /// Validate non-uniqueness constraints (NOT NULL, CHECK) for an updated row.
+    ///
+    /// This is the per-row half of constraint validation. PK and UNIQUE checks must be
+    /// deferred to a post-statement pass (see [`super::index_sync::validate_post_statement_uniqueness`])
+    /// to match SQLite's deferred UNIQUE semantics — e.g. `UPDATE p SET a = a - 1` must
+    /// succeed even when intermediate states transiently duplicate keys.
+    pub fn validate_row_skip_uniqueness(
+        &self,
+        table_name: &str,
+        new_row: &vibesql_storage::Row,
+    ) -> Result<(), ExecutorError> {
+        self.validate_not_null(table_name, new_row)?;
+        self.validate_check_constraints(new_row)?;
+        Ok(())
+    }
+
     /// Validate row against user-defined UNIQUE indexes
     /// This is separate from validate_row to allow access to db
     pub fn validate_unique_indexes(

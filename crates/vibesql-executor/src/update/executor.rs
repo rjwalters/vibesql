@@ -24,7 +24,7 @@ use super::{
     from_clause::{apply_update_from_matches, execute_update_from_join},
     index_sync::{
         find_conflicting_rows_for_update, resolve_cross_update_conflicts_for_replace,
-        validate_cross_update_uniqueness,
+        validate_cross_update_uniqueness, validate_post_statement_uniqueness,
     },
     row_selector::RowSelector,
     triggers,
@@ -331,11 +331,12 @@ pub(super) fn execute_internal(
                 ForeignKeyValidator::validate_constraints(database, table_name, &new_row.values)?;
             }
         } else {
-            // Default: validate all constraints
-            constraint_validator.validate_row(table, table_name, row_index, &new_row, &row)?;
-
-            // Validate user-defined UNIQUE indexes (CREATE UNIQUE INDEX)
-            constraint_validator.validate_unique_indexes(database, table_name, &new_row, &row)?;
+            // Default: validate NOT NULL and CHECK per-row.
+            // PRIMARY KEY / UNIQUE checks are deferred to a post-statement pass
+            // (see validate_post_statement_uniqueness below). This matches SQLite's
+            // deferred UNIQUE semantics — e.g. `UPDATE p SET a = a - 1` must succeed
+            // even when intermediate states transiently duplicate keys (issue #5137).
+            constraint_validator.validate_row_skip_uniqueness(table_name, &new_row)?;
 
             // Enforce FOREIGN KEY constraints (child table)
             if !schema.foreign_keys.is_empty() {
@@ -352,6 +353,28 @@ pub(super) fn execute_internal(
     // Skip for REPLACE mode since conflicts will be resolved by deletion.
     if !use_replace && !use_ignore && updates.len() > 1 {
         validate_cross_update_uniqueness(&updates, schema)?;
+    }
+
+    // Deferred uniqueness check (issue #5137): validate PK / UNIQUE / user-defined unique
+    // indexes against the post-statement table state. Rows that are themselves being
+    // updated to a different key are excluded from "existing" entries, allowing
+    // statements like `UPDATE p SET a = a - 1` to succeed even when intermediate
+    // states transiently duplicate keys.
+    //
+    // Skipped for IGNORE/REPLACE since those modes use per-row validation/resolution.
+    if !use_replace && !use_ignore && !updates.is_empty() {
+        // Re-borrow the table — `database` may have been mutated above for REPLACE,
+        // and we need an immutable read of the current PK/UNIQUE indexes.
+        let table_for_check = database
+            .get_table(table_name)
+            .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+        validate_post_statement_uniqueness(
+            &updates,
+            schema,
+            table_for_check,
+            database,
+            table_name,
+        )?;
     }
 
     // For REPLACE: handle cross-update conflicts by keeping only the last update
