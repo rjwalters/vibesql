@@ -1,6 +1,6 @@
 //! Foreign key constraint validation for UPDATE operations
 
-use vibesql_storage::Database;
+use vibesql_storage::{Database, DeferredFkViolation, DeferredFkViolationKind};
 
 use crate::errors::ExecutorError;
 
@@ -8,28 +8,43 @@ use crate::errors::ExecutorError;
 pub struct ForeignKeyValidator;
 
 impl ForeignKeyValidator {
-    /// Validate FOREIGN KEY constraints for a new row
+    /// Validate FOREIGN KEY constraints for a new row, returning any
+    /// deferred violations rather than queueing them directly.
     ///
     /// Checks that all foreign key values in the row reference existing parent rows.
     /// NULL values in foreign keys are allowed (not considered violations).
-    pub fn validate_constraints(
+    ///
+    /// Phase C2 of #5085: when the constraint is `INITIALLY DEFERRED`
+    /// or the session has `PRAGMA defer_foreign_keys=ON` (and a
+    /// transaction is active), a missing parent row produces a
+    /// `DeferredFkViolation` in the returned vector instead of an
+    /// immediate `Err`. The caller must push the returned violations
+    /// onto the transaction queue once any immutable borrow of
+    /// `database` is released.
+    pub fn collect_constraints(
         db: &Database,
         table_name: &str,
         row_values: &[vibesql_types::SqlValue],
-    ) -> Result<(), ExecutorError> {
+    ) -> Result<Vec<DeferredFkViolation>, ExecutorError> {
+        let mut deferred: Vec<DeferredFkViolation> = Vec::new();
+
         // Skip FK enforcement when PRAGMA foreign_keys is OFF (default)
         if !db.foreign_keys_enabled() {
-            return Ok(());
+            return Ok(deferred);
         }
+
+        let session_defer = db.defer_foreign_keys();
+        let in_txn = db.in_transaction();
 
         let schema = db
             .catalog
             .get_table(table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
-        for fk in &schema.foreign_keys {
+        for (fk_idx, fk) in schema.foreign_keys.iter().enumerate() {
             // Mismatch check runs before any row-existence test so that bad
             // FK targets are reported even when the parent table is empty.
+            // Mismatch is never deferred (matches SQLite behaviour).
             if let Some((child, parent)) =
                 crate::foreign_key_check::detect_fk_mismatch(db, table_name, fk)
             {
@@ -54,31 +69,42 @@ impl ForeignKeyValidator {
             let parent_indices = crate::foreign_key_check::resolved_parent_indices_for_fk(db, fk);
 
             let key_exists = parent_table.scan().iter().any(|parent_row| {
-                parent_indices
-                    .iter()
-                    .zip(&fk_values)
-                    .enumerate()
-                    .all(|(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
+                parent_indices.iter().zip(&fk_values).enumerate().all(
+                    |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
                         Some(parent_val) => crate::foreign_key_check::fk_values_equal(
                             fk_val,
                             parent_val,
                             parent_collations.get(i).and_then(|c| c.as_deref()),
                         ),
                         None => false,
-                    })
+                    },
+                )
             });
 
-            if !key_exists {
-                return Err(ExecutorError::ConstraintViolation(format!(
-                    "FOREIGN KEY constraint \'{}\' violated: key ({}) not found in table \'{}\'",
-                    fk.name.as_deref().unwrap_or(""),
-                    fk.column_names.join(", "),
-                    fk.parent_table
-                )));
+            if key_exists {
+                continue;
             }
+
+            let should_defer = in_txn && (fk.initially_deferred || session_defer);
+            if should_defer {
+                deferred.push(DeferredFkViolation {
+                    child_table: table_name.to_string(),
+                    fk_index: fk_idx,
+                    child_row: row_values.to_vec(),
+                    kind: DeferredFkViolationKind::ChildInsertOrUpdate,
+                });
+                continue;
+            }
+
+            return Err(ExecutorError::ConstraintViolation(format!(
+                "FOREIGN KEY constraint \'{}\' violated: key ({}) not found in table \'{}\'",
+                fk.name.as_deref().unwrap_or(""),
+                fk.column_names.join(", "),
+                fk.parent_table
+            )));
         }
 
-        Ok(())
+        Ok(deferred)
     }
 
     /// Check that no child tables reference a row that is about to be deleted or updated.
@@ -127,8 +153,22 @@ impl ForeignKeyValidator {
             return Ok(());
         }
 
+        // Phase C2 of #5085: cache session defer + transaction state.
+        let session_defer = db.defer_foreign_keys();
+        let in_txn = db.in_transaction();
+
         // Collect cascade updates to apply after scanning (to avoid borrow checker issues)
         let mut cascade_updates: Vec<(String, Vec<(usize, vibesql_storage::Row)>)> = Vec::new();
+
+        // Phase C2: collected NO ACTION orphans to queue after scanning
+        // (queueing requires &mut Database, which conflicts with the
+        // catalog/table borrows held inside the scan loop).
+        let mut deferred_parent_orphans: Vec<(
+            String,
+            vibesql_catalog::ForeignKeyConstraint,
+            usize,
+            Vec<(usize, vibesql_storage::Row)>,
+        )> = Vec::new();
 
         // Scan all tables in the database to find foreign keys that reference this table.
         for table_name in db.catalog.list_tables() {
@@ -139,7 +179,7 @@ impl ForeignKeyValidator {
                 continue;
             }
 
-            for fk in &child_schema.foreign_keys {
+            for (fk_idx, fk) in child_schema.foreign_keys.iter().enumerate() {
                 // Use case-insensitive comparison for SQL identifier matching
                 if !fk.parent_table.eq_ignore_ascii_case(parent_table_name) {
                     continue;
@@ -263,14 +303,34 @@ impl ForeignKeyValidator {
 
                             cascade_updates.push((table_name.clone(), updated_rows));
                         }
-                        vibesql_catalog::ReferentialAction::NoAction
-                        | vibesql_catalog::ReferentialAction::Restrict => {
-                            // Block the update when child references exist
+                        vibesql_catalog::ReferentialAction::Restrict => {
+                            // RESTRICT is immediate, never deferred.
                             return Err(ExecutorError::ConstraintViolation(format!(
                                 "FOREIGN KEY constraint violation: cannot update a parent row when a foreign key constraint exists. The conflict occurred in table \'{}\', constraint \'{}\'.",
                                 table_name,
                                 fk.name.as_deref().unwrap_or(""),
                             )));
+                        }
+                        vibesql_catalog::ReferentialAction::NoAction => {
+                            // NO ACTION can be deferred (Phase C2 of
+                            // #5085). When deferred, queue every
+                            // orphaned child row for COMMIT-time
+                            // re-validation; otherwise fail immediately.
+                            let should_defer = in_txn && (fk.initially_deferred || session_defer);
+                            if should_defer {
+                                deferred_parent_orphans.push((
+                                    table_name.clone(),
+                                    fk.clone(),
+                                    fk_idx,
+                                    matching_rows.clone(),
+                                ));
+                            } else {
+                                return Err(ExecutorError::ConstraintViolation(format!(
+                                    "FOREIGN KEY constraint violation: cannot update a parent row when a foreign key constraint exists. The conflict occurred in table \'{}\', constraint \'{}\'.",
+                                    table_name,
+                                    fk.name.as_deref().unwrap_or(""),
+                                )));
+                            }
                         }
                     }
                 }
@@ -287,6 +347,19 @@ impl ForeignKeyValidator {
             }
             // Rebuild indexes after updates (following the same pattern as DELETE operations)
             db.rebuild_indexes(&table_name);
+        }
+
+        // Phase C2 of #5085: queue NO ACTION orphans onto the deferred
+        // FK queue for COMMIT-time re-validation.
+        for (table_name, _fk, fk_idx, matching_rows) in deferred_parent_orphans {
+            for (_row_idx, child_row) in matching_rows {
+                db.queue_deferred_fk_violation(DeferredFkViolation {
+                    child_table: table_name.clone(),
+                    fk_index: fk_idx,
+                    child_row: child_row.values.to_vec(),
+                    kind: DeferredFkViolationKind::ChildInsertOrUpdate,
+                });
+            }
         }
 
         Ok(())

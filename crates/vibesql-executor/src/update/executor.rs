@@ -245,6 +245,12 @@ pub(super) fn execute_internal(
     // Track rows to delete for REPLACE conflict resolution (before applying updates)
     let mut rows_to_delete_for_replace: Vec<usize> = Vec::new();
 
+    // Phase C2 of #5085: collect deferred FK violations during the loop
+    // and queue them after the loop ends, since the loop body holds an
+    // immutable borrow of `database` (via `table`) and queueing requires
+    // `&mut database`.
+    let mut pending_deferred_violations: Vec<vibesql_storage::DeferredFkViolation> = Vec::new();
+
     for (row_index, row) in candidate_rows {
         // Clear CSE cache before evaluating assignment expressions for this row
         // to prevent cached column values from previous rows
@@ -312,13 +318,13 @@ pub(super) fn execute_internal(
 
             // Validate foreign key constraints
             if !schema.foreign_keys.is_empty() {
-                let fk_result = ForeignKeyValidator::validate_constraints(
+                match ForeignKeyValidator::collect_constraints(
                     database,
                     table_name,
                     &new_row.values,
-                );
-                if fk_result.is_err() {
-                    continue; // Skip this row
+                ) {
+                    Ok(deferred) => pending_deferred_violations.extend(deferred),
+                    Err(_) => continue, // Skip this row
                 }
             }
         } else if use_replace {
@@ -328,7 +334,12 @@ pub(super) fn execute_internal(
 
             // Validate foreign key constraints
             if !schema.foreign_keys.is_empty() {
-                ForeignKeyValidator::validate_constraints(database, table_name, &new_row.values)?;
+                let deferred = ForeignKeyValidator::collect_constraints(
+                    database,
+                    table_name,
+                    &new_row.values,
+                )?;
+                pending_deferred_violations.extend(deferred);
             }
         } else {
             // Default: validate all constraints
@@ -339,7 +350,12 @@ pub(super) fn execute_internal(
 
             // Enforce FOREIGN KEY constraints (child table)
             if !schema.foreign_keys.is_empty() {
-                ForeignKeyValidator::validate_constraints(database, table_name, &new_row.values)?;
+                let deferred = ForeignKeyValidator::collect_constraints(
+                    database,
+                    table_name,
+                    &new_row.values,
+                )?;
+                pending_deferred_violations.extend(deferred);
             }
         }
 
@@ -419,6 +435,14 @@ pub(super) fn execute_internal(
                 .get_table(table_name)
                 .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
         }
+    }
+
+    // Phase C2 of #5085: push deferred FK violations collected during
+    // per-row validation onto the active transaction's queue. The
+    // immutable borrows of `database` (via `table`) used during
+    // validation have been released by this point.
+    for v in pending_deferred_violations {
+        database.queue_deferred_fk_violation(v);
     }
 
     // Step 7: Handle CASCADE updates for primary key changes (before triggers)
@@ -1097,6 +1121,11 @@ fn execute_update_from(
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
     let constraint_validator = ConstraintValidator::new(schema);
 
+    // Phase C2 of #5085: collect deferred FK violations during the loop
+    // and queue them after the loop ends, since the loop body holds an
+    // immutable borrow of `database` via `table`.
+    let mut pending_deferred_violations: Vec<vibesql_storage::DeferredFkViolation> = Vec::new();
+
     for (row_index, old_row, new_row, _changed_columns, _updates_pk) in &updates {
         // Validate all constraints
         constraint_validator.validate_row(table, table_name, *row_index, new_row, old_row)?;
@@ -1104,8 +1133,16 @@ fn execute_update_from(
 
         // Validate foreign key constraints
         if !schema.foreign_keys.is_empty() {
-            ForeignKeyValidator::validate_constraints(database, table_name, &new_row.values)?;
+            let deferred =
+                ForeignKeyValidator::collect_constraints(database, table_name, &new_row.values)?;
+            pending_deferred_violations.extend(deferred);
         }
+    }
+
+    // Push deferred FK violations onto the queue now that `table` has
+    // been released.
+    for v in pending_deferred_violations {
+        database.queue_deferred_fk_violation(v);
     }
 
     // Cross-update uniqueness validation

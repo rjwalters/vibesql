@@ -1,6 +1,7 @@
 //! Foreign key integrity checking and enforcement for DELETE operations
 
 use vibesql_catalog::ReferentialAction;
+use vibesql_storage::{DeferredFkViolation, DeferredFkViolationKind};
 use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;
@@ -56,11 +57,18 @@ pub fn check_no_child_references(
         return Ok(());
     }
 
+    // Phase C2: cache session defer + transaction state. RESTRICT is
+    // *never* deferred even with INITIALLY DEFERRED (per SQLite docs);
+    // only NO ACTION can be deferred.
+    let session_defer = db.defer_foreign_keys();
+    let in_txn = db.in_transaction();
+
     // Collect all child tables that reference this parent row
     // We need to collect first to avoid borrowing issues when we mutate
     let mut actions_to_perform: Vec<(
         String,
         vibesql_catalog::ForeignKeyConstraint,
+        usize,
         ReferentialAction,
     )> = Vec::new();
 
@@ -71,7 +79,7 @@ pub fn check_no_child_references(
             continue;
         }
 
-        for fk in &child_schema.foreign_keys {
+        for (fk_idx, fk) in child_schema.foreign_keys.iter().enumerate() {
             // Use case-insensitive comparison for SQL identifier matching
             if !fk.parent_table.eq_ignore_ascii_case(parent_table_name) {
                 continue;
@@ -93,21 +101,42 @@ pub fn check_no_child_references(
             });
 
             if has_references {
-                actions_to_perform.push((table_name.clone(), fk.clone(), fk.on_delete.clone()));
+                actions_to_perform.push((
+                    table_name.clone(),
+                    fk.clone(),
+                    fk_idx,
+                    fk.on_delete.clone(),
+                ));
             }
         }
     }
 
     // Now perform the actions
-    for (child_table_name, fk, action) in actions_to_perform {
+    for (child_table_name, fk, fk_idx, action) in actions_to_perform {
         match action {
-            ReferentialAction::NoAction | ReferentialAction::Restrict => {
-                // Fail with constraint violation
+            ReferentialAction::Restrict => {
+                // RESTRICT is immediate, never deferred (SQLite docs).
                 return Err(ExecutorError::ConstraintViolation(format!(
                     "FOREIGN KEY constraint violation: cannot delete or update a parent row when a foreign key constraint exists. The conflict occurred in table \'{}\', constraint \'{}\'.",
                     child_table_name,
                     fk.name.as_deref().unwrap_or(""),
                 )));
+            }
+            ReferentialAction::NoAction => {
+                // NO ACTION can be deferred (Phase C2 of #5085). Queue
+                // every orphaned child row so that COMMIT-time re-check
+                // verifies each one finds a parent. If not deferred,
+                // fail immediately as before.
+                let should_defer = in_txn && (fk.initially_deferred || session_defer);
+                if should_defer {
+                    queue_orphaned_children(db, &child_table_name, &fk, fk_idx, &parent_key_values);
+                } else {
+                    return Err(ExecutorError::ConstraintViolation(format!(
+                        "FOREIGN KEY constraint violation: cannot delete or update a parent row when a foreign key constraint exists. The conflict occurred in table \'{}\', constraint \'{}\'.",
+                        child_table_name,
+                        fk.name.as_deref().unwrap_or(""),
+                    )));
+                }
             }
             ReferentialAction::Cascade => {
                 // Delete child rows that reference the parent
@@ -125,6 +154,50 @@ pub fn check_no_child_references(
     }
 
     Ok(())
+}
+
+/// Queue every orphaned child row (referencing the deleted parent) onto
+/// the transaction's deferred FK violation queue. Used by NO ACTION
+/// when the constraint is deferred (Phase C2 of #5085).
+fn queue_orphaned_children(
+    db: &mut vibesql_storage::Database,
+    child_table_name: &str,
+    fk: &vibesql_catalog::ForeignKeyConstraint,
+    fk_idx: usize,
+    parent_key_values: &[SqlValue],
+) {
+    // Snapshot the orphaned child rows first to release the immutable
+    // borrow before queueing (which mutates the transaction state).
+    let orphaned: Vec<Vec<SqlValue>> = {
+        let child_table = match db.get_table(child_table_name) {
+            Some(t) => t,
+            None => return,
+        };
+        child_table
+            .scan_live()
+            .filter_map(|(_, child_row)| {
+                let child_fk_values: Vec<SqlValue> =
+                    fk.column_indices.iter().map(|&idx| child_row.values[idx].clone()).collect();
+                if child_fk_values.iter().any(|v| matches!(v, SqlValue::Null)) {
+                    return None;
+                }
+                if child_fk_values == parent_key_values {
+                    Some(child_row.values.to_vec())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+
+    for row_values in orphaned {
+        db.queue_deferred_fk_violation(DeferredFkViolation {
+            child_table: child_table_name.to_string(),
+            fk_index: fk_idx,
+            child_row: row_values,
+            kind: DeferredFkViolationKind::ChildInsertOrUpdate,
+        });
+    }
 }
 
 /// Delete child rows that reference a deleted parent row (CASCADE action)

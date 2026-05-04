@@ -474,6 +474,8 @@ fn test_circular_foreign_keys() {
         parent_column_indices: vec![0],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     };
 
     let columns_b = vec![
@@ -496,6 +498,8 @@ fn test_circular_foreign_keys() {
         parent_column_indices: vec![0],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     };
 
     let columns_c = vec![
@@ -514,6 +518,8 @@ fn test_circular_foreign_keys() {
         parent_column_indices: vec![0],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     });
     // This should succeed - no cycle yet
     db.create_table(schema_c).unwrap();
@@ -540,6 +546,8 @@ fn test_circular_foreign_keys() {
         parent_column_indices: vec![0],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     });
     schema_x.foreign_keys.push(ForeignKeyConstraint {
         name: Some("FK_X_A".to_string()),
@@ -550,6 +558,8 @@ fn test_circular_foreign_keys() {
         parent_column_indices: vec![0],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     });
     // This creates X → C → A → B (no cycle from this table's perspective)
     db.create_table(schema_x).unwrap();
@@ -600,6 +610,8 @@ fn test_circular_foreign_keys() {
         parent_column_indices: vec![0],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     });
     db2.create_table(schema_q).unwrap();
 
@@ -627,6 +639,8 @@ fn test_circular_foreign_keys() {
         parent_column_indices: vec![0],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     });
     // Self-reference should be ALLOWED (e.g., employee table with manager_id)
     let result = db2.create_table(schema_r);
@@ -664,6 +678,8 @@ fn test_circular_foreign_keys() {
         parent_column_indices: vec![0],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     });
     db3.create_table(schema_t2).unwrap();
 
@@ -685,6 +701,8 @@ fn test_circular_foreign_keys() {
         parent_column_indices: vec![0],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     });
     db3.create_table(schema_t3).unwrap();
 
@@ -709,6 +727,8 @@ fn test_circular_foreign_keys() {
         parent_column_indices: vec![0],
         on_delete: ReferentialAction::NoAction,
         on_update: ReferentialAction::NoAction,
+        is_deferrable: false,
+        initially_deferred: false,
     });
 
     // This MUST fail - creating cycle T1→T3→T2→T1
