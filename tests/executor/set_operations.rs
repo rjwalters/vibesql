@@ -227,3 +227,45 @@ fn test_e2e_set_operations() {
             .unwrap();
     assert_eq!(results.len(), 3);
 }
+
+/// Regression test for issue #5105 (window9.test 8.4):
+/// UNION dedup of cross-class numerics must follow SQLite's "last-occurrence
+/// wins" rule when the operands have the same numeric magnitude but different
+/// storage classes. SQLite's ephemeral B-tree uses `OP_IdxInsert` semantics
+/// that overwrite existing entries with the new (right-arm) value.
+///
+/// Concretely: `SELECT 0 UNION SELECT 0.0` returns `0.0` (REAL), not `0` (INTEGER).
+#[test]
+fn test_union_dedup_storage_class_last_wins() {
+    let db = Database::new();
+
+    // Right-arm REAL should win over left-arm INTEGER for same magnitude.
+    let results = execute_select(&db, "SELECT 0 UNION SELECT 0.0;").unwrap();
+    assert_eq!(results.len(), 1);
+    match &results[0].values[0] {
+        SqlValue::Real(_) | SqlValue::Float(_) | SqlValue::Double(_) | SqlValue::Numeric(_) => {}
+        other => panic!(
+            "Expected REAL-class value for `SELECT 0 UNION SELECT 0.0`, got {:?}",
+            other
+        ),
+    }
+
+    // Right-arm INTEGER should win over left-arm REAL for same magnitude.
+    let results = execute_select(&db, "SELECT 0.0 UNION SELECT 0;").unwrap();
+    assert_eq!(results.len(), 1);
+    match &results[0].values[0] {
+        SqlValue::Integer(_) | SqlValue::Bigint(_) | SqlValue::Smallint(_) => {}
+        other => panic!(
+            "Expected INTEGER-class value for `SELECT 0.0 UNION SELECT 0`, got {:?}",
+            other
+        ),
+    }
+
+    // Three-arm chain: ((0 UNION 0.0) UNION 0) → final right arm INTEGER wins.
+    let results = execute_select(&db, "SELECT 0 UNION SELECT 0.0 UNION SELECT 0;").unwrap();
+    assert_eq!(results.len(), 1);
+    match &results[0].values[0] {
+        SqlValue::Integer(_) | SqlValue::Bigint(_) | SqlValue::Smallint(_) => {}
+        other => panic!("Expected INTEGER-class value for chained UNION, got {:?}", other),
+    }
+}

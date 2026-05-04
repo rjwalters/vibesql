@@ -152,14 +152,30 @@ pub(super) fn apply_set_operation(
                 // dedup and sorting so that cross-type numerics (e.g. Real(30.0) and
                 // Numeric(30.0) produced by sum() OVER()) are treated as equal and
                 // sort by their numeric magnitude.
-                let mut result = left;
-                result.extend(right);
+                //
+                // Dedup precedence: last-occurrence wins. SQLite's UNION uses an
+                // ephemeral B-tree with `OP_IdxInsert` semantics that *overwrite*
+                // an existing entry whose key compares equal — even when the new
+                // row's storage class differs (e.g. `INTEGER 0` vs `REAL 0.0`).
+                // Concretely, `SELECT 0 UNION SELECT 0.0` returns `0.0` (REAL),
+                // not `0` (INTEGER). To match this, walk the combined rows in
+                // order, replacing any previously-seen row with the same
+                // normalized key. (See window9.test 8.4 / issue #5105.)
+                let mut combined = left;
+                combined.extend(right);
 
-                let mut seen = HashSet::new();
-                result.retain(|row| {
+                let mut index_by_key: HashMap<Vec<vibesql_types::SqlValue>, usize> =
+                    HashMap::new();
+                let mut result: Vec<vibesql_storage::Row> = Vec::with_capacity(combined.len());
+                for row in combined {
                     let key = normalize_row_for_comparison(&row.values, collations);
-                    seen.insert(key)
-                });
+                    if let Some(&idx) = index_by_key.get(&key) {
+                        result[idx] = row;
+                    } else {
+                        index_by_key.insert(key, result.len());
+                        result.push(row);
+                    }
+                }
 
                 result.sort_by(|a, b| {
                     let ka = normalize_row_for_comparison(&a.values, collations);
