@@ -38,8 +38,8 @@
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4.3.0",
-    "@vitest/coverage-v8": "^4.1.6",
-    "@vitest/ui": "^4.1.6",
+    "@vitest/coverage-v8": "^4.1.7",
+    "@vitest/ui": "^4.1.7",
     "autoprefixer": "^10.5.0",
     "eslint": "^10.4.0",
     "eslint-config-prettier": "^10.1.8",
@@ -51,10 +51,10 @@
     "prettier": "^3.8.3",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.59.3",
-    "vite": "^8.0.13",
+    "typescript-eslint": "^8.59.4",
+    "vite": "^8.0.14",
     "vite-plugin-wasm": "^3.6.0",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.7"
   },
   "dependencies": {
     "@fluent/bundle": "^0.19.1",
