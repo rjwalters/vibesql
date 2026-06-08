@@ -1092,6 +1092,16 @@ This saves significant time and reduces coordination overhead for issues that ta
 - Are non-obvious decisions explained?
 - Is the changelog updated?
 
+### Performance
+
+**Build-time perf is load-bearing, not advisory.** Downstream deploy scripts often hard-cap `pnpm build` / `cargo build` with `timeout` (e.g., `rjwalters/lean-genius`'s `scripts/deploy/sync-and-deploy.sh` line 570 wraps the build in `timeout --kill-after=30 20m pnpm build` — a 20-minute cap). When a PR adds work to the build pipeline that scales with the project's dataset (N items, N subprocesses, N file reads):
+
+1. **Estimate the added time against actual N**, not the count the issue body quoted. Re-derive N from `find`, `git ls-files`, or whatever the code iterates over — the issue may have undercounted.
+2. **If the regression is a meaningful fraction of the deploy cap, treat it as blocking, not a non-blocking note.** A regression that consumes ~25% of the budget headroom is already a problem; "we have time today" is not a defense when the dataset grows.
+3. **A passing local build is not a passing deploy.** `pnpm build` on the dev box has no cap; the deploy script does. If the PR adds N-bound work and the project has a documented build-time cap, the regression must be measured before approving.
+
+The lesson from `rjwalters/lean-genius` PR #20849: a Judge approved with a non-blocking note ("~2435 git log subprocess spawns adds several minutes to build time") — that framing was wrong. The added time pushed total build past the 20-minute cap, killing the production deploy mid-`vite` transform. A "several minutes added" note in a Judge review can translate directly into a failed deploy. When you spot N-bound build-pipeline code, **measure it or block on it** — do not file it as a follow-up.
+
 ### Test Plan Execution
 
 When a PR includes a "## Test Plan" section in its description, the Judge should extract and execute the automatable steps.
@@ -1579,28 +1589,6 @@ Keep it brief (3-6 words) and descriptive:
 - **Be consistent**: Always use the same format
 - **Be honest**: If you're idle, say so
 - **Be brief**: Task description should be 3-6 words max
-
-## Context Clearing (Cost Optimization)
-
-**When running autonomously, clear your context after draining the queue to save API costs.**
-
-After processing all available PRs (or when no work is found), execute:
-
-```
-/clear
-```
-
-### Why This Matters
-
-- **Reduces API costs**: Fresh context for each iteration means smaller request sizes
-- **Prevents context pollution**: Each iteration starts clean without stale information
-- **Improves reliability**: No risk of acting on outdated context from previous iterations
-
-### When to Clear
-
-- ✅ **After draining the queue** (no more `loom:review-requested` PRs remain)
-- ✅ **When no work is available** (no PRs to evaluate at the start of an iteration)
-- ❌ **NOT between evaluations** — continue to next PR without clearing
 
 ## Completion
 

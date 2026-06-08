@@ -4,14 +4,28 @@
 # Safely creates and manages git worktrees for agent development
 #
 # Usage:
-#   pnpm worktree <issue-number>                    # Create worktree for issue
-#   pnpm worktree <issue-number> <branch>           # Create worktree with custom branch name
-#   pnpm worktree --check                           # Check if currently in a worktree
-#   pnpm worktree --json <issue-number>             # Machine-readable output
-#   pnpm worktree --return-to <dir> <issue-number>  # Store return directory
-#   pnpm worktree --help                            # Show help
+#   pnpm worktree <issue-number>                       # Create worktree for issue
+#   pnpm worktree <issue-number> <branch>              # Create worktree with custom branch name
+#   pnpm worktree <issue-number> --sparse <paths...>   # Cone-mode sparse checkout
+#   pnpm worktree <issue-number> --full                # Convert sparse worktree to full
+#   pnpm worktree --check                              # Check if currently in a worktree
+#   pnpm worktree --json <issue-number>                # Machine-readable output
+#   pnpm worktree --return-to <dir> <issue-number>     # Store return directory
+#   pnpm worktree --help                               # Show help
 
 set -e
+
+# Always-included safety set for sparse-mode checkouts. Even with --sparse,
+# these paths must materialize or the worktree is unusable by an agent:
+#   .claude/**         - agent skill graph + methodology hooks
+#   .loom/**           - Loom orchestration lifecycle (scripts, roles, hooks)
+#   .githooks/**       - repo hook config (core.hooksPath is set post-create)
+#   scripts/**         - sibling helpers the agent may invoke
+# Top-level tracked files are always included implicitly by cone mode.
+#
+# Downstream repos can extend this via LOOM_WORKTREE_ALWAYS_INCLUDE (space-
+# separated paths).
+LOOM_WORKTREE_ALWAYS_INCLUDE_DEFAULT=(.claude .loom .githooks scripts)
 
 # Colors for output
 RED='\033[0;31m'
@@ -35,6 +49,282 @@ print_info() {
 
 print_warning() {
     echo -e "${YELLOW}⚠ $1${NC}"
+}
+
+# --------------------------------------------------------------------------
+# Concurrency lock (issue #3380)
+# --------------------------------------------------------------------------
+#
+# `git worktree add` is not safe to run concurrently against the same repo —
+# parallel invocations contend on the per-worktree administrative dir
+# (`.git/worktrees/issue-N/`) and on git's repo-global locks. The observed
+# failure mode in busy shepherd sessions is multi-minute hangs (10-20 min)
+# while a peer process holds an `index.lock` it will never release.
+#
+# We use the same POSIX-atomic `mkdir`-based primitive as spawn-loop.sh
+# (`.loom/scripts/spawn-loop.sh:236-260`) — `flock` is not available on stock
+# macOS, so `mkdir` is the only portable atomic file-system operation we can
+# rely on.
+#
+# Lock scope is **repo-global** (`.loom/locks/worktree-add/`). The original
+# per-issue design was tried first but failed under concurrent invocations
+# with different issue numbers: `git worktree add` mutates the repo-global
+# `.git/config.lock` (writing the new branch's upstream configuration), and
+# concurrent processes race with the diagnostic:
+#
+#   error: could not lock config file .git/config: File exists
+#   error: unable to write upstream branch configuration
+#
+# A repo-global lock serializes the entire `git worktree add` call so this
+# race cannot happen. The cost — two builders on different issues no longer
+# parallelize through the helper — is acceptable because (a) `git worktree
+# add` itself is short relative to the rest of an issue's lifecycle, and
+# (b) parallel hangs that hold an `index.lock` for 10-20 minutes are the
+# very problem this PR fixes.
+#
+# The lock path uses the same name (`worktree-<id>/`) the per-issue version
+# used so its layout matches `.loom/locks/issue-<N>/` (spawn-loop). The "id"
+# here is the constant string "add"; per-issue accounting still lives in the
+# `owner.json` body for debugging visibility.
+#
+# Tunables (env vars, documented in show_help):
+#   LOOM_WORKTREE_LOCK_TIMEOUT       — seconds to wait (default 600 = 10min,
+#                                      sized to cover worst-case cold-clone
+#                                      submodule init on heavy repos)
+#   LOOM_WORKTREE_LOCK_POLL_INTERVAL — seconds between poll attempts (default 2)
+
+LOOM_WORKTREE_LOCK_TIMEOUT="${LOOM_WORKTREE_LOCK_TIMEOUT:-600}"
+LOOM_WORKTREE_LOCK_POLL_INTERVAL="${LOOM_WORKTREE_LOCK_POLL_INTERVAL:-2}"
+
+# Resolve the locks directory to the canonical git common dir so worktrees
+# and the main workspace all share the same lock namespace. Falls back to the
+# current dir for the rare case where we're not yet inside a repo (tests).
+_worktree_locks_dir() {
+    local common
+    common=$(git rev-parse --git-common-dir 2>/dev/null || true)
+    if [[ -n "$common" ]]; then
+        # git-common-dir may be returned as a relative path; resolve it.
+        local abs_common
+        abs_common=$(cd "$common" 2>/dev/null && pwd) || abs_common="$common"
+        echo "$(dirname "$abs_common")/.loom/locks"
+    else
+        echo ".loom/locks"
+    fi
+}
+
+_worktree_lock_path() {
+    # The argument is the issue number — accepted for owner-metadata logging
+    # only. The lock itself is repo-global; see the design note above.
+    echo "$(_worktree_locks_dir)/worktree-add"
+}
+
+# Returns 0 if lock acquired, non-zero otherwise. Sets WORKTREE_LOCK_HOLDER_PID
+# on timeout failure so the caller can include it in error output.
+WORKTREE_LOCK_HOLDER_PID=""
+
+acquire_worktree_lock() {
+    local issue="$1"
+    local lock
+    lock="$(_worktree_lock_path "$issue")"
+    local locks_dir
+    locks_dir="$(_worktree_locks_dir)"
+
+    mkdir -p "$locks_dir" 2>/dev/null || true
+
+    local deadline=$(( $(date +%s) + LOOM_WORKTREE_LOCK_TIMEOUT ))
+    local stale_retry_done=0
+
+    while true; do
+        if mkdir "$lock" 2>/dev/null; then
+            # Lock acquired; record owner metadata for debugging.
+            cat > "$lock/owner.json" <<EOF
+{
+  "issue": $issue,
+  "owner_pid": $$,
+  "script": "worktree.sh",
+  "acquired_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+            return 0
+        fi
+
+        # Lock exists. Check whether the owner is still alive; if not, clear
+        # it once and retry (mirrors spawn-loop's stale-lock recovery).
+        local owner_pid=""
+        if [[ -f "$lock/owner.json" ]]; then
+            owner_pid=$(awk -F'[ ,]+' '/owner_pid/ {gsub(/[^0-9]/,"",$3); print $3; exit}' "$lock/owner.json" 2>/dev/null)
+        fi
+
+        if [[ -n "$owner_pid" ]] && [[ "$stale_retry_done" -eq 0 ]] && ! kill -0 "$owner_pid" 2>/dev/null; then
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_warning "Stale worktree lock from dead PID $owner_pid — cleaning up"
+            fi
+            rm -rf "$lock" 2>/dev/null || true
+            stale_retry_done=1
+            continue
+        fi
+
+        if [[ $(date +%s) -ge $deadline ]]; then
+            WORKTREE_LOCK_HOLDER_PID="$owner_pid"
+            return 1
+        fi
+
+        sleep "$LOOM_WORKTREE_LOCK_POLL_INTERVAL"
+    done
+}
+
+release_worktree_lock() {
+    local issue="$1"
+    [[ -z "$issue" ]] && return 0
+    local lock
+    lock="$(_worktree_lock_path "$issue")"
+    [[ -d "$lock" ]] || return 0
+    rm -rf "$lock" 2>/dev/null || true
+}
+
+# cleanup_partial_worktree_state <issue>
+#
+# Removes the residue of a crashed `git worktree add`:
+#   - `.git/worktrees/issue-<N>/{index,HEAD,gitdir}.lock` — file-level locks
+#     that git would normally hold for the duration of an add operation and
+#     release on success/failure. A SIGKILL'd or stuck process leaves them
+#     behind, where they block every subsequent operation against the same
+#     administrative dir.
+#   - `.loom/worktrees/issue-<N>/` — a half-created worktree dir that was
+#     never registered with git (verified via `git worktree list --porcelain`).
+#
+# **Sentinel contract** (#3334): a dir that IS registered with git is NEVER
+# removed by this helper, regardless of `.loom-managed` presence. The sentinel
+# governs cleanup-on-merge; this helper governs cleanup-on-crash-recovery, and
+# the dividing line is "registered with git or not". An unregistered dir is by
+# definition a shell from a killed add — the sentinel is written *after* a
+# successful add (worktree.sh:761), so a half-created dir never has one.
+cleanup_partial_worktree_state() {
+    local issue="$1"
+    local git_common
+    git_common=$(git rev-parse --git-common-dir 2>/dev/null) || return 0
+
+    local admin_dir="$git_common/worktrees/issue-$issue"
+    local cleaned=0
+
+    # 1. Per-worktree file locks.
+    local lf
+    for lf in index.lock HEAD.lock gitdir.lock; do
+        if [[ -f "$admin_dir/$lf" ]]; then
+            rm -f "$admin_dir/$lf" 2>/dev/null && cleaned=1
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_warning "Cleaned stale $lf at $admin_dir/$lf"
+            fi
+        fi
+    done
+
+    # 2. Orphan worktree dir (exists but git doesn't know about it).
+    local wt_path=".loom/worktrees/issue-$issue"
+    if [[ -d "$wt_path" ]]; then
+        # `git worktree list --porcelain` emits absolute paths on the
+        # `worktree ` line; compare against the resolved absolute path.
+        local abs_wt
+        abs_wt=$(cd "$wt_path" 2>/dev/null && pwd) || abs_wt=""
+        local registered=0
+        if [[ -n "$abs_wt" ]]; then
+            if git worktree list --porcelain 2>/dev/null \
+                | awk '/^worktree / {print $2}' \
+                | grep -Fxq "$abs_wt"; then
+                registered=1
+            fi
+        fi
+        if [[ $registered -eq 0 ]]; then
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_warning "Removing orphan worktree dir (not registered with git): $wt_path"
+            fi
+            rm -rf "$wt_path" 2>/dev/null && cleaned=1
+        fi
+    fi
+
+    # 3. Prune now that the orphan administrative dir is locally consistent.
+    if [[ $cleaned -eq 1 ]]; then
+        git worktree prune 2>/dev/null || true
+    fi
+}
+
+# --------------------------------------------------------------------------
+# Sparse-checkout helpers
+# --------------------------------------------------------------------------
+#
+# IMPORTANT: `git sparse-checkout init` writes core.sparseCheckout and
+# core.sparseCheckoutCone to the per-worktree config
+# (.git/worktrees/<name>/config.worktree), NOT to the shared .git/config.
+# This avoids the regression where a stale shared core.sparseCheckout=true
+# silently breaks later actions/checkout runs.
+
+# Apply the sparse-checkout cone to an existing worktree.
+# Args: $1 = worktree path; remaining args = cone paths (already including the
+# always-included safety set).
+apply_sparse_cone() {
+    local wt_path="$1"
+    shift
+    local paths=("$@")
+
+    if [[ "$JSON_OUTPUT" != "true" ]]; then
+        print_info "Configuring sparse-checkout cone..."
+    fi
+
+    git -C "$wt_path" sparse-checkout init --cone >/dev/null 2>&1
+    # `sparse-checkout set` replaces the cone (idempotent: same paths = no-op).
+    git -C "$wt_path" sparse-checkout set "${paths[@]}" >/dev/null 2>&1
+}
+
+# Materialize files for the configured cone.
+materialize_sparse_cone() {
+    local wt_path="$1"
+    git -C "$wt_path" checkout >/dev/null 2>&1 || true
+}
+
+# Convert a sparse worktree back to a full checkout. Safe on already-full
+# worktrees (sparse-checkout disable is a no-op).
+disable_sparse_checkout() {
+    local wt_path="$1"
+
+    if [[ "$JSON_OUTPUT" != "true" ]]; then
+        print_info "Disabling sparse-checkout (full mode)..."
+    fi
+
+    if git -C "$wt_path" sparse-checkout disable >/dev/null 2>&1; then
+        :
+    else
+        # Fallback: manually unset per-worktree config keys.
+        git -C "$wt_path" config --unset core.sparseCheckout 2>/dev/null || true
+        git -C "$wt_path" config --unset core.sparseCheckoutCone 2>/dev/null || true
+    fi
+    # Re-materialize the full working tree.
+    git -C "$wt_path" checkout >/dev/null 2>&1 || true
+}
+
+# Check whether a worktree currently has sparse-checkout enabled (per-worktree
+# config). Echoes "true" or "false".
+is_sparse_enabled() {
+    local wt_path="$1"
+    local val
+    val=$(git -C "$wt_path" config --get core.sparseCheckout 2>/dev/null || echo "")
+    if [[ "$val" == "true" ]]; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+# Log the realized disk footprint of a worktree (human-readable only).
+log_worktree_size() {
+    local wt_path="$1"
+    local label="${2:-Worktree size}"
+    if [[ "$JSON_OUTPUT" == "true" ]]; then
+        return 0
+    fi
+    local size
+    size=$(du -sh "$wt_path" 2>/dev/null | awk '{print $1}')
+    if [[ -n "$size" ]]; then
+        print_info "$label: $size"
+    fi
 }
 
 # Function to fetch latest changes from origin/main
@@ -91,12 +381,14 @@ Loom Worktree Helper
 This script helps AI agents safely create and manage git worktrees.
 
 Usage:
-  pnpm worktree <issue-number>                    Create worktree for issue
-  pnpm worktree <issue-number> <branch>           Create worktree with custom branch
-  pnpm worktree --check                           Check if in a worktree
-  pnpm worktree --json <issue-number>             Machine-readable JSON output
-  pnpm worktree --return-to <dir> <issue-number>  Store return directory
-  pnpm worktree --help                            Show this help
+  pnpm worktree <issue-number>                          Create worktree for issue
+  pnpm worktree <issue-number> <branch>                 Create worktree with custom branch
+  pnpm worktree <issue-number> --sparse <paths...>      Cone-mode sparse checkout
+  pnpm worktree <issue-number> --full                   Convert sparse worktree to full
+  pnpm worktree --check                                 Check if in a worktree
+  pnpm worktree --json <issue-number>                   Machine-readable JSON output
+  pnpm worktree --return-to <dir> <issue-number>        Store return directory
+  pnpm worktree --help                                  Show this help
 
 Examples:
   pnpm worktree 42
@@ -107,6 +399,15 @@ Examples:
     Creates: .loom/worktrees/issue-42
     Branch: feature/fix-bug
 
+  pnpm worktree 42 --sparse src/lib defaults/scripts
+    Creates a sparse worktree containing only the listed paths plus the
+    always-included safety set (.claude/, .loom/, .githooks/, scripts/, and
+    all tracked top-level files).
+
+  pnpm worktree 42 --full
+    Converts an existing sparse worktree back to a full checkout
+    (no-op on an already-full worktree).
+
   pnpm worktree --check
     Shows current worktree status
 
@@ -115,6 +416,13 @@ Examples:
 
   pnpm worktree --return-to $(pwd) 42
     Creates worktree and stores current directory for later return
+
+Sparse-Mode Notes:
+  - --sparse and --full are mutually exclusive
+  - --sparse requires at least one path
+  - Re-running --sparse with the same cone is a clean no-op (idempotent)
+  - Re-running --sparse with a different cone replaces the cone
+  - Set LOOM_WORKTREE_ALWAYS_INCLUDE to add repo-specific safety paths
 
 Safety Features:
   ✓ Detects if already in a worktree
@@ -128,6 +436,18 @@ Safety Features:
   ✓ Symlinks .mcp.json from main (MCP config visible in worktrees)
   ✓ Runs project-specific hooks after creation
   ✓ Stashes/restores local changes during pull
+  ✓ Repo-global lock serializes concurrent invocations (issue #3380)
+  ✓ Recovers from stale .git/worktrees/issue-N/index.lock files
+  ✓ Recovers from half-created .loom/worktrees/issue-N/ dirs
+
+Environment Variables:
+  LOOM_WORKTREE_ALWAYS_INCLUDE      Extra sparse-mode safety paths (space-sep)
+  LOOM_SUBMODULE_TIMEOUT            Per-submodule init timeout (default 300s)
+  LOOM_WORKTREE_LOCK_TIMEOUT        Lock acquisition timeout in seconds
+                                    (default 600 — sized to cover worst-case
+                                    cold-clone submodule init)
+  LOOM_WORKTREE_LOCK_POLL_INTERVAL  Lock poll interval in seconds (default 2)
+  LOOM_PRESERVE_WORKTREE            Disable cleanup-on-merge for all worktrees
 
 Project-Specific Hooks:
   Create .loom/hooks/post-worktree.sh to run custom setup after worktree creation.
@@ -197,14 +517,86 @@ fi
 
 # Main worktree creation logic
 ISSUE_NUMBER="$1"
-CUSTOM_BRANCH="$2"
+shift || true
 
 # Validate issue number
 if ! [[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]]; then
     print_error "Issue number must be numeric (got: '$ISSUE_NUMBER')"
     echo ""
-    echo "Usage: pnpm worktree <issue-number> [branch-name]"
+    echo "Usage: pnpm worktree <issue-number> [branch-name] [--sparse <paths...> | --full]"
     exit 1
+fi
+
+# Parse remaining args:
+#   <branch> (positional, optional)
+#   --sparse <path1> [path2 ...]
+#   --full
+SPARSE_MODE=false
+FULL_MODE=false
+SPARSE_PATHS=()
+CUSTOM_BRANCH=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --sparse)
+            SPARSE_MODE=true
+            shift
+            # Collect remaining args as paths until we hit another flag
+            while [[ $# -gt 0 ]] && [[ "$1" != --* ]]; do
+                SPARSE_PATHS+=("$1")
+                shift
+            done
+            ;;
+        --full)
+            FULL_MODE=true
+            shift
+            ;;
+        --*)
+            print_error "Unknown flag: $1"
+            echo ""
+            echo "Usage: pnpm worktree <issue-number> [branch-name] [--sparse <paths...> | --full]"
+            exit 1
+            ;;
+        *)
+            if [[ -z "$CUSTOM_BRANCH" ]]; then
+                CUSTOM_BRANCH="$1"
+                shift
+            else
+                print_error "Unexpected argument: $1"
+                exit 1
+            fi
+            ;;
+    esac
+done
+
+# Validate flag combinations
+if [[ "$SPARSE_MODE" == "true" && "$FULL_MODE" == "true" ]]; then
+    if [[ "$JSON_OUTPUT" == "true" ]]; then
+        echo '{"success": false, "error": "--sparse and --full are mutually exclusive"}'
+    else
+        print_error "--sparse and --full are mutually exclusive"
+    fi
+    exit 1
+fi
+
+if [[ "$SPARSE_MODE" == "true" && ${#SPARSE_PATHS[@]} -eq 0 ]]; then
+    if [[ "$JSON_OUTPUT" == "true" ]]; then
+        echo '{"success": false, "error": "--sparse requires at least one path"}'
+    else
+        print_error "--sparse requires at least one path"
+        echo ""
+        echo "Example: pnpm worktree $ISSUE_NUMBER --sparse src/lib defaults/scripts"
+    fi
+    exit 1
+fi
+
+# Build the always-included safety set, allowing repo override via env var.
+ALWAYS_INCLUDE=("${LOOM_WORKTREE_ALWAYS_INCLUDE_DEFAULT[@]}")
+if [[ -n "${LOOM_WORKTREE_ALWAYS_INCLUDE:-}" ]]; then
+    # Split on whitespace
+    # shellcheck disable=SC2206
+    EXTRA_INCLUDE=(${LOOM_WORKTREE_ALWAYS_INCLUDE})
+    ALWAYS_INCLUDE+=("${EXTRA_INCLUDE[@]}")
 fi
 
 # Check if already in a worktree and automatically handle it
@@ -252,6 +644,39 @@ if check_if_in_worktree; then
     fi
 fi
 
+# ─── Concurrency lock (issue #3380) ─────────────────────────────────────────
+# Serialize concurrent invocations against the same issue. The lock dir
+# lives under the canonical git common dir so worktrees and the main
+# workspace agree on the lock namespace.
+#
+# Pre-cleanup runs *before* the lock so a crashed prior run's debris (which
+# would otherwise prevent us from making progress under the lock) is cleared
+# regardless of whether we ultimately acquire the lock.
+cleanup_partial_worktree_state "$ISSUE_NUMBER" || true
+
+if ! acquire_worktree_lock "$ISSUE_NUMBER"; then
+    if [[ "$JSON_OUTPUT" == "true" ]]; then
+        echo '{"success": false, "error": "worktree-lock-timeout", "issueNumber": '"$ISSUE_NUMBER"', "holderPid": "'"${WORKTREE_LOCK_HOLDER_PID:-}"'", "timeoutSeconds": '"$LOOM_WORKTREE_LOCK_TIMEOUT"'}'
+    else
+        print_error "Timed out waiting for worktree lock after ${LOOM_WORKTREE_LOCK_TIMEOUT}s"
+        if [[ -n "${WORKTREE_LOCK_HOLDER_PID:-}" ]]; then
+            echo "  Lock holder PID: $WORKTREE_LOCK_HOLDER_PID"
+        fi
+        echo "  Lock dir: $(_worktree_lock_path "$ISSUE_NUMBER")"
+        echo ""
+        echo "  If the holder is dead, remove the lock dir manually:"
+        echo "    rm -rf '$(_worktree_lock_path "$ISSUE_NUMBER")'"
+    fi
+    exit 1
+fi
+
+# Release the lock on any exit path (success, failure, signal).
+trap 'release_worktree_lock "$ISSUE_NUMBER"' EXIT INT TERM
+
+# Re-run cleanup under the lock so a crashed concurrent peer (one that died
+# between our pre-cleanup and our lock acquisition) is still handled.
+cleanup_partial_worktree_state "$ISSUE_NUMBER" || true
+
 # Prune orphaned worktree references before any worktree operations
 # This cleans up stale references when worktree directories were deleted externally (e.g., rm -rf)
 # Without this, subsequent worktree operations or `gh pr checkout` can fail
@@ -288,6 +713,48 @@ WORKTREE_PATH=".loom/worktrees/issue-$ISSUE_NUMBER"
 
 # Check if worktree already exists
 if [[ -d "$WORKTREE_PATH" ]]; then
+    # If caller passed --sparse / --full, apply the mode to the existing
+    # worktree and exit. This is the idempotent path: same cone is a no-op,
+    # different cone replaces the cone, --full disables sparse-checkout.
+    if [[ "$SPARSE_MODE" == "true" || "$FULL_MODE" == "true" ]]; then
+        if ! git worktree list | grep -q "$WORKTREE_PATH"; then
+            if [[ "$JSON_OUTPUT" == "true" ]]; then
+                echo '{"success": false, "error": "Directory exists but is not a registered worktree"}'
+            else
+                print_error "Directory exists but is not a registered worktree: $WORKTREE_PATH"
+            fi
+            exit 1
+        fi
+
+        if [[ "$FULL_MODE" == "true" ]]; then
+            disable_sparse_checkout "$WORKTREE_PATH"
+            log_worktree_size "$WORKTREE_PATH" "Worktree size (full)"
+            if [[ "$JSON_OUTPUT" == "true" ]]; then
+                ABS_WT=$(cd "$WORKTREE_PATH" && pwd)
+                echo '{"success": true, "worktreePath": "'"$ABS_WT"'", "branchName": "'"$BRANCH_NAME"'", "issueNumber": '"$ISSUE_NUMBER"', "sparse": false, "cone": []}'
+            else
+                print_success "Worktree converted to full checkout"
+                print_info "To use this worktree: cd $WORKTREE_PATH"
+            fi
+            exit 0
+        fi
+
+        # SPARSE_MODE
+        CONE_PATHS=("${SPARSE_PATHS[@]}" "${ALWAYS_INCLUDE[@]}")
+        apply_sparse_cone "$WORKTREE_PATH" "${CONE_PATHS[@]}"
+        materialize_sparse_cone "$WORKTREE_PATH"
+        log_worktree_size "$WORKTREE_PATH" "Worktree size (sparse)"
+        if [[ "$JSON_OUTPUT" == "true" ]]; then
+            ABS_WT=$(cd "$WORKTREE_PATH" && pwd)
+            CONE_JSON=$(printf '%s\n' "${CONE_PATHS[@]}" | awk 'BEGIN{printf "["} {if(NR>1)printf ","; printf "\"%s\"", $0} END{printf "]"}')
+            echo '{"success": true, "worktreePath": "'"$ABS_WT"'", "branchName": "'"$BRANCH_NAME"'", "issueNumber": '"$ISSUE_NUMBER"', "sparse": true, "cone": '"$CONE_JSON"'}'
+        else
+            print_success "Sparse-checkout cone applied"
+            print_info "To use this worktree: cd $WORKTREE_PATH"
+        fi
+        exit 0
+    fi
+
     print_warning "Worktree already exists at: $WORKTREE_PATH"
 
     # Check if it's registered with git
@@ -363,11 +830,19 @@ else
     CREATE_ARGS=("$WORKTREE_PATH" "-b" "$BRANCH_NAME" "origin/main")
 fi
 
+# In sparse mode, defer file materialization until after we configure the cone.
+if [[ "$SPARSE_MODE" == "true" ]]; then
+    CREATE_ARGS=("--no-checkout" "${CREATE_ARGS[@]}")
+fi
+
 # Create the worktree
 if [[ "$JSON_OUTPUT" != "true" ]]; then
     print_info "Creating worktree..."
     echo "  Path: $WORKTREE_PATH"
     echo "  Branch: $BRANCH_NAME"
+    if [[ "$SPARSE_MODE" == "true" ]]; then
+        echo "  Mode: sparse (cone: ${SPARSE_PATHS[*]})"
+    fi
     echo ""
 fi
 
@@ -520,6 +995,30 @@ if _try_worktree_add; then
     # Get absolute path to worktree
     ABS_WORKTREE_PATH=$(cd "$WORKTREE_PATH" && pwd)
 
+    # Write a sentinel marker identifying this worktree as Loom-managed.
+    # Cleanup tooling (merge-pr.sh, agent-destroy.sh, loom-clean) refuses to
+    # remove worktrees lacking this marker, so user-provisioned worktrees at
+    # arbitrary paths are never touched by Loom. See issue #3334.
+    cat > "$ABS_WORKTREE_PATH/.loom-managed" <<EOF
+# Loom-managed worktree marker
+# Created by .loom/scripts/worktree.sh
+# Issue: $ISSUE_NUMBER
+# Branch: $BRANCH_NAME
+# Removing this file makes Loom treat the worktree as user-owned and refuse
+# to clean it up automatically.
+EOF
+
+    # Sparse-mode: configure cone and materialize tracked files.
+    # This must run before submodule init / symlinking so the working tree
+    # exists and helpers see the same file layout as full mode.
+    SPARSE_CONE_PATHS=()
+    if [[ "$SPARSE_MODE" == "true" ]]; then
+        SPARSE_CONE_PATHS=("${SPARSE_PATHS[@]}" "${ALWAYS_INCLUDE[@]}")
+        apply_sparse_cone "$ABS_WORKTREE_PATH" "${SPARSE_CONE_PATHS[@]}"
+        materialize_sparse_cone "$ABS_WORKTREE_PATH"
+        log_worktree_size "$ABS_WORKTREE_PATH" "Sparse worktree size"
+    fi
+
     # Set git hooks path so .githooks/ works in worktrees (no npx/husky needed)
     git -C "$ABS_WORKTREE_PATH" config core.hooksPath .githooks
 
@@ -533,9 +1032,24 @@ if _try_worktree_add; then
     fi
 
     # Initialize submodules with reference to main workspace (for object sharing)
-    # This is much faster than downloading from network and saves disk space
+    # This is much faster than downloading from network and saves disk space.
+    #
+    # In sparse mode, `git submodule status` already lists only submodules
+    # whose path lies inside the materialized cone -- so this loop naturally
+    # filters out out-of-cone submodules without extra logic.
+    #
+    # Uses --recursive to handle nested submodules (a top-level submodule may
+    # itself declare submodules; without --recursive those remain empty and a
+    # builder sees a half-populated reference directory with no error).
+    # Timeout is generous (300s) because cold clones of large reference corpora
+    # without an object cache can legitimately exceed 30s. Override via
+    # LOOM_SUBMODULE_TIMEOUT.
+    # Stderr is preserved (not redirected to /dev/null) so the underlying git
+    # error is visible to whoever runs worktree.sh -- the previous "Some
+    # submodules failed to initialize" warning was a black box.
     MAIN_GIT_DIR=$(git rev-parse --git-common-dir 2>/dev/null)
     UNINIT_SUBMODULES=$(cd "$ABS_WORKTREE_PATH" && git submodule status 2>/dev/null | grep '^-' | wc -l | tr -d ' ')
+    SUBMODULE_TIMEOUT="${LOOM_SUBMODULE_TIMEOUT:-300}"
 
     if [[ "$UNINIT_SUBMODULES" -gt 0 ]]; then
         if [[ "$JSON_OUTPUT" != "true" ]]; then
@@ -550,12 +1064,12 @@ if _try_worktree_add; then
 
             if [[ -d "$ref_path" ]]; then
                 # Use reference to share objects with main workspace (fast, no network)
-                if ! timeout 30 git submodule update --init --reference "$ref_path" -- "$submod_path" 2>/dev/null; then
+                if ! timeout "$SUBMODULE_TIMEOUT" git submodule update --init --recursive --reference "$ref_path" -- "$submod_path"; then
                     echo "SUBMODULE_FAILED" > /tmp/loom-submodule-status-$$
                 fi
             else
                 # No reference available, initialize normally (may need network)
-                if ! timeout 30 git submodule update --init -- "$submod_path" 2>/dev/null; then
+                if ! timeout "$SUBMODULE_TIMEOUT" git submodule update --init --recursive -- "$submod_path"; then
                     echo "SUBMODULE_FAILED" > /tmp/loom-submodule-status-$$
                 fi
             fi
@@ -566,6 +1080,7 @@ if _try_worktree_add; then
             rm -f "/tmp/loom-submodule-status-$$"
             if [[ "$JSON_OUTPUT" != "true" ]]; then
                 print_warning "Some submodules failed to initialize (worktree still created)"
+                print_info "See stderr above for the underlying git error."
                 print_info "You may need to run: git submodule update --init --recursive"
             fi
         else
@@ -648,8 +1163,14 @@ if _try_worktree_add; then
 
     # Output results
     if [[ "$JSON_OUTPUT" == "true" ]]; then
-        # Machine-readable JSON output
-        echo '{"success": true, "worktreePath": "'"$ABS_WORKTREE_PATH"'", "branchName": "'"$BRANCH_NAME"'", "issueNumber": '"$ISSUE_NUMBER"', "returnTo": "'"${ABS_RETURN_TO:-}"'"}'
+        # Machine-readable JSON output. Sparse mode adds "sparse": true and
+        # "cone": [...] fields; full mode keeps "sparse": false with an empty cone.
+        if [[ "$SPARSE_MODE" == "true" ]]; then
+            CONE_JSON=$(printf '%s\n' "${SPARSE_CONE_PATHS[@]}" | awk 'BEGIN{printf "["} {if(NR>1)printf ","; printf "\"%s\"", $0} END{printf "]"}')
+            echo '{"success": true, "worktreePath": "'"$ABS_WORKTREE_PATH"'", "branchName": "'"$BRANCH_NAME"'", "issueNumber": '"$ISSUE_NUMBER"', "returnTo": "'"${ABS_RETURN_TO:-}"'", "sparse": true, "cone": '"$CONE_JSON"'}'
+        else
+            echo '{"success": true, "worktreePath": "'"$ABS_WORKTREE_PATH"'", "branchName": "'"$BRANCH_NAME"'", "issueNumber": '"$ISSUE_NUMBER"', "returnTo": "'"${ABS_RETURN_TO:-}"'", "sparse": false, "cone": []}'
+        fi
     else
         # Human-readable output
         print_success "Worktree created successfully!"

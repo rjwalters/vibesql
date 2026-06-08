@@ -119,3 +119,4 @@ profile-*.json.gz
 .loom/usage-cache.json
 .loom/claude-config/
 .loom/logs/
+.loom/spawn-loop-state.json

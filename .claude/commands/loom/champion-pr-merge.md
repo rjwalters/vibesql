@@ -87,12 +87,10 @@ fi
 - [ ] **Force mode**: Critical file check is waived (trust Judge review)
 
 **Critical file patterns** (do NOT auto-merge if PR modifies any of these - normal mode only):
-- `src-tauri/tauri.conf.json` - app configuration
 - `Cargo.toml` - root dependency changes
 - `loom-daemon/Cargo.toml` - daemon dependency changes
-- `src-tauri/Cargo.toml` - tauri dependency changes
+- `loom-api/Cargo.toml` - api dependency changes
 - `package.json` - npm dependency changes
-- `pnpm-lock.yaml` - lock file changes
 - `.github/workflows/*` - CI/CD pipeline changes
 - `*.sql` - database schema changes
 - `*migration*` - database migration files
@@ -110,12 +108,10 @@ else
 
   # Define critical patterns (extend as needed)
   CRITICAL_PATTERNS=(
-    "src-tauri/tauri.conf.json"
     "Cargo.toml"
     "loom-daemon/Cargo.toml"
-    "src-tauri/Cargo.toml"
+    "loom-api/Cargo.toml"
     "package.json"
-    "pnpm-lock.yaml"
     ".github/workflows/"
     ".sql"
     "migration"
@@ -354,9 +350,14 @@ After successful merge, verify that linked issues were automatically closed by G
 ```bash
 PR_NUMBER=$1
 
-# Extract linked issues from PR body
-PR_BODY=$(gh pr view "$PR_NUMBER" --json body --jq -r '.body')
-LINKED_ISSUES=$(echo "$PR_BODY" | grep -Eo "(Closes|Fixes|Resolves) #[0-9]+" | grep -Eo "[0-9]+" | sort -u)
+# Extract linked issues using GitHub's own parser (closingIssuesReferences).
+# This is the authoritative set of issues GitHub will auto-close on merge.
+# It correctly ignores `Updates #N`, `See #N`, code-fenced text, and substring
+# traps like `Discloses #N`. The previous regex-based approach silently
+# misclassified `Updates #N` as a closing reference — see issue #3267.
+source "$(git rev-parse --show-toplevel)/.loom/scripts/lib/forge-helpers.sh"
+forge_detect
+LINKED_ISSUES=$(forge_pr_close_targets "$PR_NUMBER")
 
 if [ -z "$LINKED_ISSUES" ]; then
   echo "No linked issues found in PR body"

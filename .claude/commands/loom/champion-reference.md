@@ -135,8 +135,12 @@ fi
 
 **Handling**:
 ```bash
-# Extract all linked issues
-LINKED_ISSUES=$(gh pr view "$PR_NUMBER" --json body --jq '.body' | grep -Eo "(Closes|Fixes|Resolves) #[0-9]+" | grep -Eo "[0-9]+")
+# Extract all linked issues using GitHub's own parser (closingIssuesReferences).
+# Note: `Updates #N` is intentionally excluded — it does not close the issue
+# (see issue #3267). The forge_pr_close_targets helper handles this correctly.
+source "$(git rev-parse --show-toplevel)/.loom/scripts/lib/forge-helpers.sh"
+forge_detect
+LINKED_ISSUES=$(forge_pr_close_targets "$PR_NUMBER")
 
 # Verify each issue closed after merge
 for issue in $LINKED_ISSUES; do
@@ -150,7 +154,7 @@ done
 
 **Decision**: **Allow merge, verify all linked issues** - standard practice.
 
-**Rationale**: GitHub auto-closes multiple issues, but verify and manually close if needed.
+**Rationale**: GitHub auto-closes multiple issues, but verify and manually close if needed. The helper uses GitHub's `closingIssuesReferences` so `Updates #N` (and similar non-closing references) are correctly excluded.
 
 ---
 
@@ -368,12 +372,10 @@ echo "PASS: Size check ($TOTAL lines)"
 if [ "$FORCE_MODE" != "true" ]; then
   FILES=$(gh pr view "$PR_NUMBER" --json files --jq -r '.files[].path')
   CRITICAL_PATTERNS=(
-    "src-tauri/tauri.conf.json"
     "Cargo.toml"
     "loom-daemon/Cargo.toml"
-    "src-tauri/Cargo.toml"
+    "loom-api/Cargo.toml"
     "package.json"
-    "pnpm-lock.yaml"
     ".github/workflows/"
     ".sql"
     "migration"
@@ -500,8 +502,11 @@ echo ""
 echo "STEP 4/5: Verifying linked issue closure..."
 echo ""
 
-PR_BODY=$(gh pr view "$PR_NUMBER" --json body --jq -r '.body')
-LINKED_ISSUES=$(echo "$PR_BODY" | grep -Eo "(Closes|Fixes|Resolves) #[0-9]+" | grep -Eo "[0-9]+" | sort -u)
+# Use GitHub's own parser via closingIssuesReferences (see issue #3267).
+# Correctly excludes `Updates #N` and substring traps like `Discloses #N`.
+source "$(git rev-parse --show-toplevel)/.loom/scripts/lib/forge-helpers.sh"
+forge_detect
+LINKED_ISSUES=$(forge_pr_close_targets "$PR_NUMBER")
 
 if [ -z "$LINKED_ISSUES" ]; then
   echo "No linked issues found - skipping closure verification"
@@ -624,8 +629,8 @@ done
 # Check PR merge status
 gh pr view <number> --json state,mergeable,statusCheckRollup
 
-# View linked issues
-gh pr view <number> --json body --jq '.body' | grep -Eo "(Closes|Fixes|Resolves) #[0-9]+"
+# View linked issues (uses GitHub's authoritative parser; `Updates #N` is excluded)
+gh pr view <number> --json closingIssuesReferences --jq '.closingIssuesReferences[].number'
 
 # Check daemon state
 cat .loom/daemon-state.json | jq '.force_mode'
