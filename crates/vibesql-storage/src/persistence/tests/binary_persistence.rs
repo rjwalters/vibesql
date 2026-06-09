@@ -438,21 +438,14 @@ fn test_format_version_is_at_least_7() {
     );
 }
 
-/// Binary-format round-trip for partial-index `WHERE` clause text (#5181).
+/// Binary-format write-side test for partial-index `WHERE` clause text (#5181).
 ///
 /// The binary `save_binary` path serialises the catalog-side
-/// `where_clause` after the index's column list (v8 schema). On load, the
-/// same SQL text is parsed back via `parse_expression_to_owned`.
-///
-/// **Scope note:** the load path currently does not repopulate the
-/// catalog's `IndexMetadata` for indexes that go through `db.create_index`
-/// (the storage `create_index` does not also call `catalog.add_index`).
-/// That's a pre-existing gap unrelated to this PR — see the follow-up
-/// issue. To still verify the v8 *write* contract, this test inspects the
-/// raw bytes on disk and confirms the SQL form of the predicate appears
-/// after the index column list. (When the load-side catalog-repopulation
-/// gap is closed in the follow-up, this test can be tightened into a
-/// full save → load → catalog-lookup round-trip.)
+/// `where_clause` after the index's column list (v8 schema). This test
+/// inspects the raw bytes on disk and confirms the SQL form of the
+/// predicate appears after the index column list. The matching
+/// catalog-repopulation behaviour on load is exercised by the dedicated
+/// round-trip tests below (issue #5215).
 #[test]
 fn test_partial_index_where_clause_written_to_binary_v8() {
     use vibesql_parser::arena_parser::parse_expression_to_owned;
@@ -569,4 +562,171 @@ fn test_partial_index_sql_dump_emits_where_clause() {
         "SQL dump must emit WHERE for partial index; dump was:\n{}",
         dump
     );
+}
+
+// ============================================================================
+// Issue #5215: Binary load path repopulates catalog index metadata
+// ============================================================================
+
+/// Full save → load → catalog-lookup round-trip for a partial UNIQUE index.
+///
+/// Before #5215, the binary load path called `db.create_index` (which only
+/// touches the storage-side `IndexManager`) and then `set_index_where_clause`
+/// (a silent no-op when no catalog entry exists). As a result, after a cold
+/// load `Catalog::find_index_by_name` returned `None` and the partial-index
+/// WHERE clause was lost, so `is_partial()` evaluated to `false` and the
+/// planner/FK checks mis-classified the index as a full one.
+///
+/// This test creates a partial UNIQUE index, persists the database to a
+/// binary file, reloads it, and asserts that the catalog still recognises
+/// the index as partial with the original predicate intact.
+#[test]
+fn test_partial_index_round_trips_through_binary_load() {
+    use vibesql_parser::arena_parser::parse_expression_to_owned;
+
+    let mut db = Database::new();
+
+    let schema = TableSchema::new(
+        "p1".to_string(),
+        vec![
+            ColumnSchema::new("x".to_string(), DataType::Integer, true),
+            ColumnSchema::new("y".to_string(), DataType::Integer, true),
+        ],
+    );
+    db.create_table(schema).unwrap();
+
+    // Storage-side index body
+    let ast_columns = vec![vibesql_ast::IndexColumn::new_column(
+        "x".to_string(),
+        vibesql_ast::OrderDirection::Asc,
+    )];
+    db.create_index("p1x".to_string(), "p1".to_string(), true, ast_columns).unwrap();
+
+    // Catalog-side metadata with WHERE clause
+    let catalog_meta = vibesql_catalog::IndexMetadata::new(
+        "p1x".to_string(),
+        "p1".to_string(),
+        vibesql_catalog::IndexType::BTree,
+        vec![vibesql_catalog::IndexedColumn::new_column(
+            "x".to_string(),
+            vibesql_catalog::SortOrder::Ascending,
+        )],
+        true,
+    );
+    db.catalog.add_index(catalog_meta).unwrap();
+    let predicate_expr = parse_expression_to_owned("y < 2").unwrap();
+    let updated = db.catalog.set_index_where_clause("p1x", Some(predicate_expr));
+    assert!(updated, "set_index_where_clause should find p1x in the source catalog");
+
+    // Sanity: source catalog reports the index as partial.
+    let src_meta = db.catalog.find_index_by_name("p1x").expect("p1x in source catalog");
+    assert!(src_meta.is_partial(), "source catalog should report p1x as partial");
+
+    // Round-trip through the binary format.
+    let path = "/tmp/test_partial_index_v8_roundtrip.vbsql";
+    db.save_binary(path).unwrap();
+    let loaded = Database::load_binary(path).unwrap();
+    std::fs::remove_file(path).ok();
+
+    // The loaded catalog must still know about the index AND know that it is
+    // partial. Before #5215, `find_index_by_name` returned `None` here.
+    let loaded_meta = loaded
+        .catalog
+        .find_index_by_name("p1x")
+        .expect("loaded catalog must repopulate IndexMetadata for persisted indexes (#5215)");
+    assert!(
+        loaded_meta.is_partial(),
+        "loaded catalog must preserve partial-index WHERE clause (#5215)"
+    );
+    assert_eq!(loaded_meta.name, "p1x");
+    assert_eq!(loaded_meta.table_name, "p1");
+    assert!(loaded_meta.is_unique);
+}
+
+/// Round-trip test that every persisted index (partial or not) shows up in
+/// the catalog after binary load. Before #5215, the storage-side index was
+/// created on load but the catalog never received the matching
+/// `IndexMetadata`, so any code that consulted
+/// `Catalog::find_index_by_name` post-load silently got `None`.
+#[test]
+fn test_load_binary_repopulates_catalog_for_all_indexes() {
+    let mut db = Database::new();
+
+    let schema = TableSchema::new(
+        "t".to_string(),
+        vec![
+            ColumnSchema::new("a".to_string(), DataType::Integer, true),
+            ColumnSchema::new("b".to_string(), DataType::Integer, true),
+        ],
+    );
+    db.create_table(schema).unwrap();
+
+    // Plain index — storage + catalog (mirroring what the executor would do).
+    db.create_index(
+        "idx_a".to_string(),
+        "t".to_string(),
+        false,
+        vec![vibesql_ast::IndexColumn::new_column(
+            "a".to_string(),
+            vibesql_ast::OrderDirection::Asc,
+        )],
+    )
+    .unwrap();
+    db.catalog
+        .add_index(vibesql_catalog::IndexMetadata::new(
+            "idx_a".to_string(),
+            "t".to_string(),
+            vibesql_catalog::IndexType::BTree,
+            vec![vibesql_catalog::IndexedColumn::new_column(
+                "a".to_string(),
+                vibesql_catalog::SortOrder::Ascending,
+            )],
+            false,
+        ))
+        .unwrap();
+
+    // Unique index — storage + catalog.
+    db.create_index(
+        "idx_b_unique".to_string(),
+        "t".to_string(),
+        true,
+        vec![vibesql_ast::IndexColumn::new_column(
+            "b".to_string(),
+            vibesql_ast::OrderDirection::Asc,
+        )],
+    )
+    .unwrap();
+    db.catalog
+        .add_index(vibesql_catalog::IndexMetadata::new(
+            "idx_b_unique".to_string(),
+            "t".to_string(),
+            vibesql_catalog::IndexType::BTree,
+            vec![vibesql_catalog::IndexedColumn::new_column(
+                "b".to_string(),
+                vibesql_catalog::SortOrder::Ascending,
+            )],
+            true,
+        ))
+        .unwrap();
+
+    // Save + load.
+    let path = "/tmp/test_repopulate_catalog_indexes.vbsql";
+    db.save_binary(path).unwrap();
+    let loaded = Database::load_binary(path).unwrap();
+    std::fs::remove_file(path).ok();
+
+    // Both indexes must be findable in the catalog after load.
+    let m1 =
+        loaded.catalog.find_index_by_name("idx_a").expect("idx_a must repopulate after load");
+    assert!(!m1.is_unique);
+    assert!(!m1.is_partial());
+    assert_eq!(m1.table_name, "t");
+
+    let m2 = loaded
+        .catalog
+        .find_index_by_name("idx_b_unique")
+        .expect("idx_b_unique must repopulate after load");
+    assert!(m2.is_unique);
+    assert!(!m2.is_partial());
+    assert_eq!(m2.table_name, "t");
 }
