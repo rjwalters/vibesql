@@ -118,9 +118,31 @@ impl ScriptExecutor {
                     self.formatter.print_result(&result);
                     success_count += 1;
 
-                    // Auto-save after modification statements if database path is provided
+                    // Auto-save after modification statements if database path is provided.
+                    //
+                    // CRITICAL: Skip auto-save while a transaction is open. Persisting
+                    // uncommitted changes turns ROLLBACK into a no-op across CLI
+                    // invocations — the .vbsql dump captures the mid-transaction state
+                    // and the next process loads it as committed. This silently broke
+                    // deferred-FK semantics in the batched TCL shim path (every fkey6
+                    // test that ran ROLLBACK after an INSERT/UPDATE/DELETE was
+                    // observed to have lost data despite the rollback succeeding
+                    // in memory). The next save naturally happens at COMMIT or
+                    // ROLLBACK statement boundary, both of which match
+                    // `is_modification_statement` only if we add them — instead, we
+                    // also force a save when the transaction state transitions back
+                    // to "no active transaction" after this statement.
                     if let Some(ref path) = self.database_path {
-                        if is_modification_statement(stmt) {
+                        let in_txn = self.executor.in_transaction();
+                        let should_save = is_modification_statement(stmt) && !in_txn;
+                        // Also save on the COMMIT/ROLLBACK boundary so the
+                        // post-commit (or post-rollback) state is durable.
+                        let upper = stmt.trim().to_uppercase();
+                        let is_txn_end = !in_txn
+                            && (upper.starts_with("COMMIT")
+                                || upper.starts_with("ROLLBACK")
+                                || upper.starts_with("END"));
+                        if should_save || is_txn_end {
                             if let Err(e) = self.executor.save_database(path) {
                                 eprintln!(
                                     "{}",

@@ -82,9 +82,23 @@ impl Repl {
                                 self.formatter.print_result(&result);
 
                                 // Auto-save if database path is provided and this was a
-                                // modification
+                                // modification.
+                                //
+                                // CRITICAL: Skip auto-save while a transaction is open.
+                                // Persisting uncommitted changes turns ROLLBACK into a
+                                // no-op across sessions — the .vbsql dump captures the
+                                // mid-transaction state and the next process loads it
+                                // as committed. Also save on the COMMIT/ROLLBACK
+                                // boundary so the final state is durable.
                                 if let Some(ref path) = self.database_path {
-                                    if is_modification_statement(&line) {
+                                    let in_txn = self.executor.in_transaction();
+                                    let should_save = is_modification_statement(&line) && !in_txn;
+                                    let upper = line.trim().to_uppercase();
+                                    let is_txn_end = !in_txn
+                                        && (upper.starts_with("COMMIT")
+                                            || upper.starts_with("ROLLBACK")
+                                            || upper.starts_with("END"));
+                                    if should_save || is_txn_end {
                                         self.has_modifications = true;
                                         if let Err(e) = self.executor.save_database(path) {
                                             eprintln!(
@@ -95,6 +109,9 @@ impl Repl {
                                                 )
                                             );
                                         }
+                                    } else if is_modification_statement(&line) {
+                                        // Mark dirty so the exit-time save runs.
+                                        self.has_modifications = true;
                                     }
                                 }
                             }
