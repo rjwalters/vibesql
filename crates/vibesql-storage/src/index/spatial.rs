@@ -65,7 +65,7 @@ impl SpatialIndex {
     /// Query the spatial index for geometries intersecting the given MBR
     /// Returns a vector of row IDs that potentially match
     pub fn locate_in_envelope(&self, mbr: &AABB<[f64; 2]>) -> Vec<usize> {
-        self.rtree.locate_in_envelope(mbr).map(|entry| entry.row_id).collect()
+        self.rtree.locate_in_envelope(*mbr).map(|entry| entry.row_id).collect()
     }
 
     /// Query the spatial index for geometries containing the given point

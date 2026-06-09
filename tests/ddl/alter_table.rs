@@ -26,30 +26,20 @@ fn create_populated_table(db: &mut Database) {
 
     // Insert test data
     let table = db.get_table_mut("users").unwrap();
-    let row1 = Row {
-        values: vec![
-            SqlValue::Integer(1),
-            SqlValue::Varchar(StringValue::from("Alice")),
-            SqlValue::Integer(30),
-            SqlValue::Varchar(StringValue::from("alice@example.com")),
-        ]
-        .into(),
-        row_id: None,
-        row_ids: None,
-    };
+    let row1 = Row::new(vec![
+        SqlValue::Integer(1),
+        SqlValue::Varchar(StringValue::from("Alice")),
+        SqlValue::Integer(30),
+        SqlValue::Varchar(StringValue::from("alice@example.com")),
+    ]);
     table.insert(row1).expect("Failed to insert row");
 
-    let row2 = Row {
-        values: vec![
-            SqlValue::Integer(2),
-            SqlValue::Varchar(StringValue::from("Bob")),
-            SqlValue::Integer(25),
-            SqlValue::Varchar(StringValue::from("bob@example.com")),
-        ]
-        .into(),
-        row_id: None,
-        row_ids: None,
-    };
+    let row2 = Row::new(vec![
+        SqlValue::Integer(2),
+        SqlValue::Varchar(StringValue::from("Bob")),
+        SqlValue::Integer(25),
+        SqlValue::Varchar(StringValue::from("bob@example.com")),
+    ]);
     table.insert(row2).expect("Failed to insert row");
 }
 
@@ -285,17 +275,12 @@ fn test_set_not_null_with_nulls_error() {
 
     // Insert row with NULL in email
     let table = db.get_table_mut("users").unwrap();
-    let row = Row {
-        values: vec![
-            SqlValue::Integer(1),
-            SqlValue::Varchar(StringValue::from("Alice")),
-            SqlValue::Integer(30),
-            SqlValue::Null, // NULL email
-        ]
-        .into(),
-        row_id: None,
-        row_ids: None,
-    };
+    let row = Row::new(vec![
+        SqlValue::Integer(1),
+        SqlValue::Varchar(StringValue::from("Alice")),
+        SqlValue::Integer(30),
+        SqlValue::Null, // NULL email
+    ]);
     table.insert(row).expect("Failed to insert row");
 
     let sql = "ALTER TABLE users ALTER COLUMN email SET NOT NULL";

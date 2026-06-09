@@ -44,7 +44,7 @@ impl SqliteDB {
                 hasher.update(key);
                 hasher.update("\n");
             }
-            let hash = format!("{:x}", hasher.finalize());
+            let hash: String = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect();
             let hash_string = format!("{} values hashing to {}", total_values, hash);
             Ok(DBOutput::Rows {
                 types: vec![DefaultColumnType::Text],
