@@ -30,14 +30,34 @@ pub fn validate_index_hints(
     stmt: &SelectStmt,
     database: &vibesql_storage::Database,
 ) -> Result<(), ExecutorError> {
+    validate_select(stmt, &[], database)
+}
+
+/// Validate a SELECT scope with the CTE names inherited from enclosing scopes.
+///
+/// The CTE-name scope is purely additive across nested scopes: an outer CTE
+/// remains visible inside derived-table subqueries, set-operation arms, and
+/// later CTE bodies, and an inner WITH can only add names. So a simple
+/// extended `Vec` threaded down the recursion is sufficient — no
+/// shadowing/removal logic is needed.
+fn validate_select(
+    stmt: &SelectStmt,
+    outer_cte_names: &[String],
+    database: &vibesql_storage::Database,
+) -> Result<(), ExecutorError> {
     // CTE names visible to this statement's FROM clause: a table reference
     // that resolves to a CTE can never carry a valid INDEXED BY hint.
-    let mut cte_names: Vec<String> = Vec::new();
+    let mut cte_names: Vec<String> = outer_cte_names.to_vec();
     if let Some(ctes) = &stmt.with_clause {
         for cte in ctes {
-            // Validate hints inside the CTE body itself
-            validate_index_hints(&cte.query, database)?;
+            // Push the CTE's own name before validating its body so a
+            // self-reference (`WITH x AS (... FROM x INDEXED BY i)`) errors
+            // rather than passing; SQLite errors on self-reference too
+            // (`circular reference` / `no query solution` — exact message
+            // parity is out of scope). Earlier CTEs in the same WITH clause
+            // plus the outer scope are also visible to the body.
             cte_names.push(cte.name.to_lowercase());
+            validate_select(&cte.query, &cte_names, database)?;
         }
     }
 
@@ -47,7 +67,7 @@ pub fn validate_index_hints(
 
     // Set-operation arms (UNION / INTERSECT / EXCEPT)
     if let Some(set_op) = &stmt.set_operation {
-        validate_index_hints(&set_op.right, database)?;
+        validate_select(&set_op.right, &cte_names, database)?;
     }
 
     Ok(())
@@ -70,7 +90,7 @@ fn validate_from_clause(
             validate_from_clause(left, cte_names, database)?;
             validate_from_clause(right, cte_names, database)
         }
-        FromClause::Subquery { query, .. } => validate_index_hints(query, database),
+        FromClause::Subquery { query, .. } => validate_select(query, cte_names, database),
         FromClause::Values { .. } => Ok(()),
     }
 }
