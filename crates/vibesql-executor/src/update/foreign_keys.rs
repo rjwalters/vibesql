@@ -185,6 +185,12 @@ impl ForeignKeyValidator {
                     continue;
                 }
 
+                // Resolve parent-side collations before borrowing the
+                // child table so the FK comparison honors NOCASE/RTRIM
+                // on the parent key (#5147).
+                let parent_collations =
+                    crate::foreign_key_check::parent_collations_for_fk(db, fk);
+
                 // Get the child table and find matching rows
                 let child_table = db.get_table(&table_name).unwrap();
                 let matching_rows: Vec<(usize, vibesql_storage::Row)> = child_table
@@ -198,7 +204,18 @@ impl ForeignKeyValidator {
                             .map(|&col_idx| child_row.values[col_idx].clone())
                             .collect();
 
-                        if child_fk_values == old_parent_key_values {
+                        let matches = child_fk_values
+                            .iter()
+                            .zip(&old_parent_key_values)
+                            .enumerate()
+                            .all(|(i, (cv, pv))| {
+                                crate::foreign_key_check::fk_values_equal(
+                                    cv,
+                                    pv,
+                                    parent_collations.get(i).and_then(|c| c.as_deref()),
+                                )
+                            });
+                        if matches {
                             Some((idx, child_row.clone()))
                         } else {
                             None

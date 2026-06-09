@@ -209,6 +209,10 @@ fn queue_orphaned_children(
     fk_idx: usize,
     parent_key_values: &[SqlValue],
 ) {
+    // Resolve parent-side collations up front so the immutable borrow
+    // inside the scan loop only sees the child table (#5147).
+    let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
+
     // Snapshot the orphaned child rows first to release the immutable
     // borrow before queueing (which mutates the transaction state).
     let orphaned: Vec<Vec<SqlValue>> = {
@@ -224,7 +228,16 @@ fn queue_orphaned_children(
                 if child_fk_values.iter().any(|v| matches!(v, SqlValue::Null)) {
                     return None;
                 }
-                if child_fk_values == parent_key_values {
+                let matches = child_fk_values.iter().zip(parent_key_values).enumerate().all(
+                    |(i, (cv, pv))| {
+                        crate::foreign_key_check::fk_values_equal(
+                            cv,
+                            pv,
+                            parent_collations.get(i).and_then(|c| c.as_deref()),
+                        )
+                    },
+                );
+                if matches {
                     Some(child_row.values.to_vec())
                 } else {
                     None
@@ -250,6 +263,10 @@ fn cascade_delete(
     fk: &vibesql_catalog::ForeignKeyConstraint,
     parent_key_values: &[SqlValue],
 ) -> Result<(), ExecutorError> {
+    // Resolve parent-side collations before borrowing the child table so
+    // FK comparisons honor NOCASE/RTRIM (#5147).
+    let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
+
     // Find rows to delete (use scan_live to skip soft-deleted rows)
     let child_table = db.get_table(child_table_name).unwrap();
     let mut rows_to_delete: Vec<vibesql_storage::Row> = Vec::new();
@@ -263,7 +280,16 @@ fn cascade_delete(
             continue;
         }
 
-        if child_fk_values == parent_key_values {
+        let matches = child_fk_values.iter().zip(parent_key_values).enumerate().all(
+            |(i, (cv, pv))| {
+                crate::foreign_key_check::fk_values_equal(
+                    cv,
+                    pv,
+                    parent_collations.get(i).and_then(|c| c.as_deref()),
+                )
+            },
+        );
+        if matches {
             rows_to_delete.push(child_row.clone());
         }
     }
@@ -294,6 +320,10 @@ fn set_null(
     fk: &vibesql_catalog::ForeignKeyConstraint,
     parent_key_values: &[SqlValue],
 ) -> Result<(), ExecutorError> {
+    // Resolve parent-side collations before borrowing the child table so
+    // FK comparisons honor NOCASE/RTRIM (#5147).
+    let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
+
     // Collect indices of rows to update
     let child_table = db.get_table(child_table_name).unwrap();
     let mut rows_to_update: Vec<(usize, vibesql_storage::Row)> = Vec::new();
@@ -308,7 +338,16 @@ fn set_null(
             continue;
         }
 
-        if child_fk_values == parent_key_values {
+        let matches = child_fk_values.iter().zip(parent_key_values).enumerate().all(
+            |(i, (cv, pv))| {
+                crate::foreign_key_check::fk_values_equal(
+                    cv,
+                    pv,
+                    parent_collations.get(i).and_then(|c| c.as_deref()),
+                )
+            },
+        );
+        if matches {
             // Create updated row with FK columns set to NULL
             let mut updated_row = child_row.clone();
             for &fk_col_idx in &fk.column_indices {
@@ -368,6 +407,10 @@ fn set_default(
         default_values.push(default_value);
     }
 
+    // Resolve parent-side collations before borrowing the child table so
+    // FK comparisons honor NOCASE/RTRIM (#5147).
+    let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
+
     // Collect indices of rows to update
     let child_table = db.get_table(child_table_name).unwrap();
     let mut rows_to_update: Vec<(usize, vibesql_storage::Row)> = Vec::new();
@@ -382,7 +425,16 @@ fn set_default(
             continue;
         }
 
-        if child_fk_values == parent_key_values {
+        let matches = child_fk_values.iter().zip(parent_key_values).enumerate().all(
+            |(i, (cv, pv))| {
+                crate::foreign_key_check::fk_values_equal(
+                    cv,
+                    pv,
+                    parent_collations.get(i).and_then(|c| c.as_deref()),
+                )
+            },
+        );
+        if matches {
             // Create updated row with FK columns set to default values
             let mut updated_row = child_row.clone();
             for (i, &fk_col_idx) in fk.column_indices.iter().enumerate() {
