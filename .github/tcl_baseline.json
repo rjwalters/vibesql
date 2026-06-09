@@ -1,0 +1,10 @@
+{
+  "priority1_pass_rate": 99.3,
+  "total_tests": 1057,
+  "passed": 959,
+  "failed": 7,
+  "skipped": 91,
+  "updated_at": "2025-12-31",
+  "git_commit": "1e0cb413",
+  "note": "7 tests now fail pending feature implementation (row value constructors, VALUES clause, N-way USING, correlated subquery in INTERSECT). See issues #4749-4753."
+}

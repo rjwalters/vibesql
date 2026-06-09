@@ -1,0 +1,100 @@
+name: 'Generate Test Badges'
+description: 'Generates SQL:1999 and SQLLogicTest badge JSON files from test results'
+inputs:
+  sqltest_results_file:
+    description: 'Path to sqltest_results.json'
+    required: false
+    default: 'target/sqltest_results.json'
+  sqllogictest_cumulative_file:
+    description: 'Path to sqllogictest_cumulative.json'
+    required: false
+    default: 'target/sqllogictest_cumulative.json'
+  output_dir:
+    description: 'Directory where badge JSON files will be created'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate badges from test results
+      shell: bash
+      run: |
+        set -e
+
+        echo "=== Generating Test Badges ==="
+        echo "Output directory: ${{ inputs.output_dir }}"
+        mkdir -p "${{ inputs.output_dir }}"
+
+        # Generate SQL:1999 badge
+        if [ -f "${{ inputs.sqltest_results_file }}" ]; then
+          echo "Generating SQL:1999 conformance badge..."
+
+          PASS_RATE=$(jq -r '.pass_rate // "0"' "${{ inputs.sqltest_results_file }}" | xargs printf "%.0f")
+
+          # Determine color based on pass rate
+          if (( $(echo "$PASS_RATE >= 80" | bc -l) )); then
+            COLOR="brightgreen"
+          elif (( $(echo "$PASS_RATE >= 60" | bc -l) )); then
+            COLOR="green"
+          elif (( $(echo "$PASS_RATE >= 40" | bc -l) )); then
+            COLOR="yellow"
+          elif (( $(echo "$PASS_RATE >= 20" | bc -l) )); then
+            COLOR="orange"
+          else
+            COLOR="red"
+          fi
+
+          # Create SQL:1999 badge JSON
+          cat > "${{ inputs.output_dir }}/sql1999-conformance.json" <<JSON
+        {
+          "schemaVersion": 1,
+          "label": "SQL:1999",
+          "message": "${PASS_RATE}%",
+          "color": "$COLOR"
+        }
+        JSON
+
+          echo "✓ Generated SQL:1999 badge: ${PASS_RATE}% ($COLOR)"
+        else
+          echo "⚠️  SQL:1999 results not found at ${{ inputs.sqltest_results_file }}"
+        fi
+
+        # Generate SQLLogicTest badge
+        if [ -f "${{ inputs.sqllogictest_cumulative_file }}" ]; then
+          echo "Generating SQLLogicTest badge..."
+
+          SLT_PASS_RATE=$(jq -r '.summary.pass_rate // "0"' "${{ inputs.sqllogictest_cumulative_file }}" | xargs printf "%.1f")
+          SLT_COVERAGE=$(jq -r '.summary.coverage_rate // "0"' "${{ inputs.sqllogictest_cumulative_file }}" | xargs printf "%.1f")
+          SLT_PASSED=$(jq -r '.summary.passed // "0"' "${{ inputs.sqllogictest_cumulative_file }}")
+          SLT_FAILED=$(jq -r '.summary.failed // "0"' "${{ inputs.sqllogictest_cumulative_file }}")
+
+          # Determine badge color (based on coverage rate)
+          if (( $(echo "$SLT_COVERAGE >= 80" | bc -l) )); then
+            SLT_COLOR="brightgreen"
+          elif (( $(echo "$SLT_COVERAGE >= 60" | bc -l) )); then
+            SLT_COLOR="green"
+          elif (( $(echo "$SLT_COVERAGE >= 40" | bc -l) )); then
+            SLT_COLOR="yellow"
+          elif (( $(echo "$SLT_COVERAGE >= 20" | bc -l) )); then
+            SLT_COLOR="orange"
+          else
+            SLT_COLOR="red"
+          fi
+
+          # Create SQLLogicTest badge JSON
+          cat > "${{ inputs.output_dir }}/sqllogictest.json" <<JSON
+        {
+          "schemaVersion": 1,
+          "label": "SQLLogicTest",
+          "message": "${SLT_PASSED}✓ ${SLT_FAILED}✗ (${SLT_COVERAGE}% tested)",
+          "color": "$SLT_COLOR"
+        }
+        JSON
+
+          echo "✓ Generated SQLLogicTest badge: ${SLT_PASSED}✓ ${SLT_FAILED}✗ (${SLT_COVERAGE}% coverage, $SLT_COLOR)"
+        else
+          echo "⚠️  SQLLogicTest cumulative results not found at ${{ inputs.sqllogictest_cumulative_file }}"
+        fi
+
+        echo ""
+        echo "=== Badge Files Created ==="
+        ls -lh "${{ inputs.output_dir }}"/*.json 2>/dev/null || echo "No badge files generated"
