@@ -55,6 +55,14 @@ impl IndexManager {
                     continue;
                 }
 
+                // Skip partial indexes - the executor must evaluate the WHERE
+                // predicate for the (deleted) row to decide whether the entry
+                // was ever in the index. Handled by
+                // update_partial_indexes_for_delete.
+                if metadata.is_partial() {
+                    continue;
+                }
+
                 if let Some(index_data) = self.index_data.get_mut(index_name) {
                     // Build key from the values slice
                     let key_values: Vec<SqlValue> = metadata
@@ -229,6 +237,8 @@ impl IndexManager {
         // Collect indexes that need updating for this table
         // Pre-compute column indices once per index (not per row)
         // Skip expression indexes - they need pre-computed keys
+        // Skip partial indexes - they need pre-evaluated predicates (handled by
+        // batch_update_partial_indexes_for_delete on the executor side).
         #[allow(clippy::type_complexity)]
         let indexes_to_update: Vec<(String, Vec<(usize, Option<u64>)>)> = self
             .indexes
@@ -236,6 +246,7 @@ impl IndexManager {
             .filter(|(_, metadata)| {
                 metadata.table_name.eq_ignore_ascii_case(table_name)
                     && !metadata.columns.iter().any(|col| col.is_expression())
+                    && !metadata.is_partial()
             })
             .map(|(index_name, metadata)| {
                 // Pre-compute column indices and prefix lengths for this index

@@ -73,6 +73,27 @@ pub struct IndexMetadata {
     pub table_name: String,
     pub unique: bool,
     pub columns: Vec<IndexColumn>,
+    /// Optional WHERE predicate for partial indexes (CREATE INDEX ... WHERE expr).
+    ///
+    /// When set, only rows for which the predicate evaluates to a truthy value
+    /// (SQLite semantics: non-NULL and non-zero) are stored in the index body.
+    /// The storage layer cannot evaluate expressions on its own; the executor
+    /// crate is responsible for evaluating the predicate and invoking the
+    /// dedicated `*_partial_indexes_*` maintenance entry points with a set of
+    /// indexes that should include the row. The default index-maintenance
+    /// methods (`add_to_indexes_for_insert`, `update_indexes_for_update`,
+    /// `update_indexes_for_delete`, and their `batch_*` variants) skip partial
+    /// indexes to avoid silently inserting rows that don't satisfy the
+    /// predicate. This mirrors how expression indexes are handled.
+    pub where_clause: Option<Box<vibesql_ast::Expression>>,
+}
+
+impl IndexMetadata {
+    /// Returns `true` when this index is partial (has a WHERE predicate).
+    #[inline]
+    pub fn is_partial(&self) -> bool {
+        self.where_clause.is_some()
+    }
 }
 
 /// Backend type for index storage

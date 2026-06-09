@@ -15,6 +15,7 @@
 mod create;
 mod delete;
 mod insert;
+mod partial;
 mod prefix;
 mod update;
 

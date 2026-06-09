@@ -22,6 +22,14 @@ use crate::{
 
 impl IndexManager {
     /// Create an index
+    ///
+    /// The optional `included_row_indices` parameter restricts the set of
+    /// table rows that get inserted into the index body. This is the
+    /// build-time hook for partial indexes (`CREATE INDEX ... WHERE expr`):
+    /// the executor evaluates the predicate against each row and passes the
+    /// set of row indices whose predicate is truthy. When `None`, every row
+    /// from `table_rows` is indexed (the full-index path).
+    #[allow(clippy::too_many_arguments)]
     pub fn create_index(
         &mut self,
         index_name: String,
@@ -30,6 +38,8 @@ impl IndexManager {
         table_rows: &[Row],
         unique: bool,
         columns: Vec<vibesql_ast::IndexColumn>,
+        where_clause: Option<Box<vibesql_ast::Expression>>,
+        included_row_indices: Option<&std::collections::HashSet<usize>>,
     ) -> Result<(), StorageError> {
         // Normalize index name for case-insensitive comparison
         let normalized_name = normalize_index_name(&index_name);
@@ -57,6 +67,7 @@ impl IndexManager {
             table_name: table_name.clone(),
             unique,
             columns: columns.clone(),
+            where_clause,
         };
 
         self.indexes.insert(normalized_name.clone(), metadata);
@@ -87,12 +98,21 @@ impl IndexManager {
             // Prepare sorted entries for bulk loading
             // The BTreeIndex has native duplicate key support via Vec<RowId> per key,
             // so we don't need to extend keys with row_id for non-unique indexes
+            //
+            // When `included_row_indices` is Some, only rows whose row_idx is in
+            // the set are added to the index body (partial-index build path).
             let mut sorted_entries: Vec<(Key, usize)> = Vec::new();
             let mut progress = ProgressTracker::new(
                 format!("Creating index '{}'", index_name),
                 Some(table_rows.len()),
             );
             for (row_idx, row) in table_rows.iter().enumerate() {
+                if let Some(included) = included_row_indices {
+                    if !included.contains(&row_idx) {
+                        progress.update(row_idx + 1);
+                        continue;
+                    }
+                }
                 let key_values: Vec<SqlValue> = column_indices
                     .iter()
                     .zip(columns.iter())
@@ -153,8 +173,17 @@ impl IndexManager {
             );
 
             // Phase 1: Extract all (key, row_idx) pairs
+            //
+            // For partial indexes, skip rows not in `included_row_indices`
+            // so that the in-memory body only carries matching rows.
             let mut entries: Vec<(Vec<SqlValue>, usize)> = Vec::with_capacity(table_rows.len());
             for (row_idx, row) in table_rows.iter().enumerate() {
+                if let Some(included) = included_row_indices {
+                    if !included.contains(&row_idx) {
+                        progress.update(row_idx + 1);
+                        continue;
+                    }
+                }
                 let key_values: Vec<SqlValue> = column_indices
                     .iter()
                     .zip(columns.iter())
@@ -232,11 +261,16 @@ impl IndexManager {
         }
 
         // Store index metadata (use normalized name as key)
+        // Expression indexes do not currently use partial-index semantics; the
+        // caller is responsible for filtering rows via `create_index_with_keys`'s
+        // `keys` parameter (so passing only matching rows is the equivalent of
+        // applying a partial-index predicate at build time).
         let metadata = IndexMetadata {
             index_name: index_name.clone(),
             table_name: table_name.clone(),
             unique,
             columns: columns.clone(),
+            where_clause: None,
         };
 
         self.indexes.insert(normalized_name.clone(), metadata);
@@ -355,6 +389,7 @@ impl IndexManager {
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         self.indexes.insert(normalized_name.clone(), metadata);
@@ -425,6 +460,7 @@ impl IndexManager {
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         self.indexes.insert(normalized_name.clone(), metadata);
@@ -597,6 +633,7 @@ impl IndexManager {
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,
             }],
+            where_clause: None,
         };
 
         self.indexes.insert(normalized_name.clone(), metadata);

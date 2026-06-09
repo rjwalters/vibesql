@@ -5,13 +5,19 @@
 //! - Unique indexes
 //! - Multi-column composite indexes
 //! - Expression indexes (delegated to expression_index module)
+//! - Partial indexes (with a WHERE predicate filter at build time)
+
+use std::collections::HashSet;
 
 use vibesql_ast::{CreateIndexStmt, IndexColumn};
 use vibesql_catalog::TableSchema;
 use vibesql_storage::Database;
 
 use super::expression_index::create_expression_index;
-use crate::errors::ExecutorError;
+use crate::{
+    errors::ExecutorError, evaluator::ExpressionEvaluator,
+    partial_index_maintenance::is_predicate_truthy,
+};
 
 /// Create a B-tree index on a table.
 ///
@@ -64,6 +70,13 @@ pub fn create_btree_index(
     // Create the B-tree index
     if has_expression {
         // Expression index: pre-compute keys using ExpressionEvaluator
+        // (Expression partial indexes are not yet supported — the partial
+        // predicate is ignored here. The catalog still records the
+        // where_clause, but `is_partial()` on the storage metadata will be
+        // false because expression indexes go through a different storage
+        // path. This is acceptable for now; the planner's
+        // `IndexedColumn::is_expression()` check already excludes expression
+        // indexes from most query-time paths.)
         create_expression_index(
             database,
             table_name,
@@ -71,6 +84,40 @@ pub fn create_btree_index(
             table_schema,
             &stmt.columns,
             unique,
+        )?;
+    } else if let Some(where_expr) = stmt.where_clause.as_deref() {
+        // Partial column-only index: evaluate the predicate against each
+        // existing row and only insert matching rows into the index body.
+        let table_rows: Vec<vibesql_storage::Row> = match database.get_table(table_name) {
+            Some(table) => table.scan().to_vec(),
+            None => Vec::new(),
+        };
+        let evaluator = ExpressionEvaluator::new(table_schema);
+        let mut included: HashSet<usize> = HashSet::with_capacity(table_rows.len());
+        for (row_idx, row) in table_rows.iter().enumerate() {
+            match evaluator.eval(where_expr, row) {
+                Ok(v) if is_predicate_truthy(&v) => {
+                    included.insert(row_idx);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn!(
+                        "Failed to evaluate partial-index '{}' predicate on row {}: {:?}; \
+                         treating row as not-in-index",
+                        index_name,
+                        row_idx,
+                        e
+                    );
+                }
+            }
+        }
+        database.create_index_partial(
+            index_name.clone(),
+            table_name.to_string(),
+            unique,
+            stmt.columns.clone(),
+            Box::new(where_expr.clone()),
+            &included,
         )?;
     } else {
         // Column-only index: use existing storage API

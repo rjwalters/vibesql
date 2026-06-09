@@ -182,6 +182,12 @@ impl IndexManager {
 
     /// Check unique constraints for user-defined indexes before insert
     /// This should be called BEFORE adding the row to the table
+    ///
+    /// Partial UNIQUE indexes are skipped here — storage cannot evaluate the
+    /// WHERE predicate to know whether the candidate row should even be in
+    /// the index. The executor crate must perform partial-aware uniqueness
+    /// checks before calling this method (see
+    /// `partial_index_maintenance::check_partial_unique_for_insert`).
     pub fn check_unique_constraints_for_insert(
         &self,
         table_name: &str,
@@ -189,7 +195,7 @@ impl IndexManager {
         row: &Row,
     ) -> Result<(), StorageError> {
         for (index_name, metadata) in &self.indexes {
-            if metadata.table_name == table_name && metadata.unique {
+            if metadata.table_name == table_name && metadata.unique && !metadata.is_partial() {
                 if let Some(index_data) = self.index_data.get(index_name) {
                     // Build composite key from the indexed columns
                     // Apply prefix truncation and normalize numeric types to ensure consistent
@@ -265,6 +271,30 @@ impl IndexManager {
     /// List all indexes
     pub fn list_indexes(&self) -> Vec<String> {
         self.indexes.keys().cloned().collect()
+    }
+
+    /// Attach (or clear) a partial-index WHERE clause on an existing
+    /// storage-side index. Used by persistence/recovery paths that
+    /// recreate indexes through the no-WHERE-clause path and then need to
+    /// graft the partial predicate on afterwards. Returns `true` if a
+    /// matching index was found and updated.
+    ///
+    /// Note: this does NOT re-evaluate the predicate against existing rows
+    /// — the index body is left untouched. Callers that need to ensure the
+    /// body only contains matching rows must rebuild the index (e.g.
+    /// through the executor's CREATE INDEX path, or REINDEX).
+    pub fn set_index_where_clause(
+        &mut self,
+        index_name: &str,
+        where_clause: Option<Box<vibesql_ast::Expression>>,
+    ) -> bool {
+        let normalized = super::index_metadata::normalize_index_name(index_name);
+        if let Some(meta) = self.indexes.get_mut(&normalized) {
+            meta.where_clause = where_clause;
+            true
+        } else {
+            false
+        }
     }
 
     // ========================================================================

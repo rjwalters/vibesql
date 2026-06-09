@@ -1,4 +1,6 @@
-use crate::{errors::ExecutorError, expression_index_maintenance, TriggerFirer};
+use crate::{
+    errors::ExecutorError, expression_index_maintenance, partial_index_maintenance, TriggerFirer,
+};
 
 /// Handle REPLACE logic: detect conflicts and delete conflicting rows
 /// Returns Ok(()) if no conflict or conflict was resolved
@@ -187,6 +189,9 @@ pub fn handle_replace_conflicts(
         expression_index_maintenance::maintain_expression_indexes_for_delete(
             db, table_name, row, *row_index,
         );
+        partial_index_maintenance::maintain_partial_indexes_for_delete(
+            db, table_name, row, *row_index,
+        );
     }
 
     // Collect indices for deletion
@@ -219,6 +224,15 @@ pub fn handle_replace_conflicts(
     if delete_result.compacted {
         // Compaction changed all row indices - rebuild indexes from scratch
         db.rebuild_indexes(table_name);
+        // Partial indexes need WHERE-predicate evaluation per row; the
+        // storage layer's `rebuild_indexes` skips them. Without this call,
+        // partial-index row indices would point at the wrong table rows
+        // after compaction (silent corruption).
+        partial_index_maintenance::rebuild_partial_indexes_after_compaction(db, table_name);
+        // NOTE: Expression-index compaction rebuild (`rebuild_expression_indexes_after_compaction`)
+        // is intentionally not invoked here because the existing code path
+        // never did so; that is a separate pre-existing gap tracked outside
+        // this PR.
     } else {
         // No compaction - just adjust remaining user-defined index entries
         // (entries pointing to indices > deleted need to be decremented)

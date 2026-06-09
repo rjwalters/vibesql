@@ -157,6 +157,8 @@ fn test_disk_backed_index_creation_with_bulk_load() {
             direction: OrderDirection::Asc,
             prefix_length: None,
         }],
+        None,
+        None,
     );
 
     assert!(result.is_ok(), "Large index creation should succeed");
@@ -198,6 +200,8 @@ fn test_in_memory_index_for_small_tables() {
             direction: OrderDirection::Asc,
             prefix_length: None,
         }],
+        None,
+        None,
     );
 
     assert!(result.is_ok());
@@ -266,6 +270,8 @@ fn test_budget_enforcement_with_spill_policy() {
             direction: OrderDirection::Asc,
             prefix_length: None,
         }],
+        None,
+        None,
     );
     assert!(result1.is_ok());
 
@@ -281,6 +287,8 @@ fn test_budget_enforcement_with_spill_policy() {
             direction: OrderDirection::Asc,
             prefix_length: None,
         }],
+        None,
+        None,
     );
     assert!(result2.is_ok());
 
@@ -336,6 +344,8 @@ fn test_lru_eviction_order() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            None,
+            None,
         )
         .unwrap();
 
@@ -354,6 +364,8 @@ fn test_lru_eviction_order() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            None,
+            None,
         )
         .unwrap();
 
@@ -377,6 +389,8 @@ fn test_lru_eviction_order() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            None,
+            None,
         )
         .unwrap();
 
@@ -424,6 +438,8 @@ fn test_access_tracking() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            None,
+            None,
         )
         .unwrap();
 
@@ -480,6 +496,8 @@ fn test_resource_cleanup_on_drop() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
             }],
+            None,
+            None,
         )
         .unwrap();
 
