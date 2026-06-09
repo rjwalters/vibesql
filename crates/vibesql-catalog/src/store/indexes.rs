@@ -112,9 +112,7 @@ impl Catalog {
         where_clause: Option<vibesql_ast::Expression>,
     ) -> bool {
         let target = index_name.to_lowercase();
-        if let Some(meta) =
-            self.indexes.values_mut().find(|m| m.name.to_lowercase() == target)
-        {
+        if let Some(meta) = self.indexes.values_mut().find(|m| m.name.to_lowercase() == target) {
             meta.where_clause = where_clause.map(Box::new);
             true
         } else {

@@ -101,6 +101,20 @@ pub fn can_eliminate_distinct(stmt: &SelectStmt, database: &Database) -> bool {
             continue;
         }
 
+        // Skip partial UNIQUE indexes: they only enforce uniqueness over the
+        // subset of rows matching the WHERE predicate, so they do not prove
+        // distinctness of the full table. The `is_partial` flag lives on the
+        // catalog-side `IndexMetadata` (mirroring the conservative exclusion
+        // in `index_planner` and `index_scan::selection`).
+        //
+        // Follow-up: partial-index bodies still index every row today, so
+        // this is correctness-preserving once the build path is fixed to
+        // honour the predicate.
+        if database.catalog.find_index_by_name(&index_name).map(|m| m.is_partial()).unwrap_or(false)
+        {
+            continue;
+        }
+
         // Get column names from index (skip expression indexes)
         let index_cols: Vec<String> =
             index.columns.iter().filter_map(|c| c.column_name().map(|s| s.to_string())).collect();
