@@ -197,3 +197,94 @@ fn test_indexed_by_in_from_subquery_errors() {
         "missing_idx",
     );
 }
+
+// --- CTE-name scope threaded into nested validation scopes (issue #5243) ---
+//
+// A CTE shadows any same-named real table, so `INDEXED BY` on a CTE
+// reference must error even when the reference appears in a nested scope
+// (derived-table subquery, set-operation arm, or a later CTE body). All SQL
+// below was verified against sqlite3.
+
+#[test]
+fn test_indexed_by_on_outer_cte_inside_subquery_errors() {
+    let db = create_test_db();
+    // The inner t1 resolves to the CTE, which can't carry an index hint.
+    // SQLite: no such index: t1x
+    assert_no_such_index(
+        &db,
+        "WITH t1 AS (SELECT 1 AS x) SELECT * FROM (SELECT * FROM t1 INDEXED BY t1x) sub",
+        "t1x",
+    );
+}
+
+#[test]
+fn test_indexed_by_on_outer_cte_in_union_arm_errors() {
+    let db = create_test_db();
+    // SQLite: no such index: t1x
+    assert_no_such_index(
+        &db,
+        "WITH t1 AS (SELECT 1 AS x) SELECT * FROM t1 UNION SELECT * FROM t1 INDEXED BY t1x",
+        "t1x",
+    );
+}
+
+#[test]
+fn test_indexed_by_on_earlier_cte_in_later_cte_body_errors() {
+    let db = create_test_db();
+    // SQLite: no such index: t1x
+    assert_no_such_index(
+        &db,
+        "WITH t1 AS (SELECT 1 AS x), b AS (SELECT * FROM t1 INDEXED BY t1x) SELECT * FROM b",
+        "t1x",
+    );
+}
+
+#[test]
+fn test_indexed_by_on_outer_cte_in_join_inside_subquery_errors() {
+    let db = create_test_db();
+    // CTE scope must thread through Join arms inside the subquery.
+    // SQLite: no such index: t1x
+    assert_no_such_index(
+        &db,
+        "WITH t1 AS (SELECT 1 AS x) SELECT * FROM (SELECT * FROM t2 JOIN t1 INDEXED BY t1x ON 1=1) sub",
+        "t1x",
+    );
+}
+
+#[test]
+fn test_indexed_by_self_reference_in_cte_body_errors() {
+    let db = create_test_db();
+    // SQLite errors with "circular reference: t1"; any error beats silently
+    // succeeding, so VibeSQL reports NoSuchIndex (message parity out of scope).
+    assert_no_such_index(
+        &db,
+        "WITH t1 AS (SELECT * FROM t1 INDEXED BY t1x) SELECT * FROM t1",
+        "t1x",
+    );
+}
+
+#[test]
+fn test_indexed_by_real_table_in_subquery_with_unrelated_cte_succeeds() {
+    let db = create_test_db();
+    // Negative control: an unrelated CTE in scope must not poison a valid
+    // hint on a real table inside a nested scope. SQLite: succeeds.
+    let rows = run_select(
+        &db,
+        "WITH q AS (SELECT 1 AS z) SELECT * FROM (SELECT * FROM t2 INDEXED BY t2a) sub",
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn test_indexed_by_real_table_with_inner_with_in_subquery_succeeds() {
+    let db = create_test_db();
+    // Negative control: an inner WITH inside a derived table doesn't poison
+    // real-table hints. SQLite: succeeds.
+    let rows = run_select(
+        &db,
+        "SELECT * FROM (WITH q AS (SELECT 1 AS z) SELECT * FROM t1 INDEXED BY t1x)",
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 2);
+}
