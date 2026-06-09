@@ -978,7 +978,7 @@ impl ToSql for SelectItem {
 impl ToSql for FromClause {
     fn to_sql(&self) -> String {
         match self {
-            FromClause::Table { name, alias, column_aliases, quoted } => {
+            FromClause::Table { name, alias, column_aliases, quoted, index_hint } => {
                 // Format name with quotes if it was originally quoted
                 let mut result = if *quoted {
                     format!("\"{}\"", name.replace('"', "\"\""))
@@ -990,6 +990,15 @@ impl ToSql for FromClause {
                     if let Some(cols) = column_aliases {
                         result.push_str(&format!(" ({})", cols.join(", ")));
                     }
+                }
+                match index_hint {
+                    Some(crate::IndexHint::IndexedBy(idx)) => {
+                        result.push_str(&format!(" INDEXED BY {}", format_identifier(idx)));
+                    }
+                    Some(crate::IndexHint::NotIndexed) => {
+                        result.push_str(" NOT INDEXED");
+                    }
+                    None => {}
                 }
                 result
             }
@@ -1247,6 +1256,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
+                index_hint: None,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -1285,6 +1295,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
+                index_hint: None,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -1321,6 +1332,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
+                index_hint: None,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -1347,12 +1359,14 @@ mod tests {
     fn test_join() {
         let from = FromClause::Join {
             left: Box::new(FromClause::Table {
+                index_hint: None,
                 name: "orders".to_string(),
                 alias: Some("o".to_string()),
                 column_aliases: None,
                 quoted: false,
             }),
             right: Box::new(FromClause::Table {
+                index_hint: None,
                 name: "customers".to_string(),
                 alias: Some("c".to_string()),
                 column_aliases: None,

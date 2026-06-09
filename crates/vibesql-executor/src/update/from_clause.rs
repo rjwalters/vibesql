@@ -124,6 +124,7 @@ pub fn execute_update_from_join(
 
     // Build FROM clause: target_table [alias], from_clause1, from_clause2, ...
     let target_from = FromClause::Table {
+        index_hint: None,
         name: target_table_name.clone(),
         alias: target_alias,
         column_aliases: None,
@@ -522,15 +523,13 @@ fn substitute_pseudo_vars(
                 .collect::<Result<Vec<_>, _>>()?,
             negated: *negated,
         },
-        Expression::Between { expr: inner, low, high, negated, symmetric } => {
-            Expression::Between {
-                expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
-                low: Box::new(substitute_pseudo_vars(low, trigger_context)?),
-                high: Box::new(substitute_pseudo_vars(high, trigger_context)?),
-                negated: *negated,
-                symmetric: *symmetric,
-            }
-        }
+        Expression::Between { expr: inner, low, high, negated, symmetric } => Expression::Between {
+            expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
+            low: Box::new(substitute_pseudo_vars(low, trigger_context)?),
+            high: Box::new(substitute_pseudo_vars(high, trigger_context)?),
+            negated: *negated,
+            symmetric: *symmetric,
+        },
         Expression::Cast { expr: inner, data_type } => Expression::Cast {
             expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
             data_type: data_type.clone(),

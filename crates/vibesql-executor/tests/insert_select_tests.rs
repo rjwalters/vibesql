@@ -54,6 +54,7 @@ fn test_insert_from_select_basic() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -149,6 +150,7 @@ fn test_insert_from_select_with_where() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -247,6 +249,7 @@ fn test_insert_from_select_column_mismatch() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -374,6 +377,7 @@ fn test_insert_from_select_with_aggregates() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,

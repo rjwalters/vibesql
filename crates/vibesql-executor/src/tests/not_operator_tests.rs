@@ -71,6 +71,7 @@ fn test_not_in_select_where() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "tab0".to_string(),
             alias: None,
@@ -157,6 +158,7 @@ fn test_not_with_equality() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "tab0".to_string(),
             alias: None,
@@ -271,6 +273,7 @@ fn test_not_in_delete_where() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "tab0".to_string(),
             alias: None,
@@ -348,6 +351,7 @@ fn test_not_with_null() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "tab0".to_string(),
             alias: None,

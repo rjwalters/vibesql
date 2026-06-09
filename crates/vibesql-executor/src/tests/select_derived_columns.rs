@@ -50,6 +50,7 @@ fn test_select_star_with_derived_columns() {
             alias: Some(vec!["c".to_string(), "d".to_string()]),
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,
@@ -117,6 +118,7 @@ fn test_select_qualified_star_with_derived_columns() {
             alias: Some(vec!["c".to_string(), "d".to_string()]),
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,
@@ -185,6 +187,7 @@ fn test_derived_columns_count_mismatch() {
             alias: Some(vec!["c".to_string(), "d".to_string(), "e".to_string()]),
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,
@@ -258,6 +261,7 @@ fn test_select_distinct_star_with_derived_columns() {
             alias: Some(vec!["c".to_string(), "d".to_string()]),
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,
@@ -325,6 +329,7 @@ fn test_select_star_alias_with_table_alias() {
             alias: Some(vec!["X".to_string(), "Y".to_string()]),
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: Some("alias_name".to_string()),

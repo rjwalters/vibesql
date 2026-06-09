@@ -238,6 +238,7 @@ fn collect_view_updates_with_from(
 
     // Build FROM clause: view [AS alias], from_clause1, from_clause2, ...
     let view_from = FromClause::Table {
+        index_hint: None,
         name: view_name.clone(),
         alias: stmt.alias.clone(),
         column_aliases: None,
@@ -341,11 +342,7 @@ fn collect_view_updates_with_from(
                     column_name: assignment.column.clone(),
                     table_name: view_def.name.clone(),
                     searched_tables: vec![view_def.name.clone()],
-                    available_columns: view_schema
-                        .columns
-                        .iter()
-                        .map(|c| c.name.clone())
-                        .collect(),
+                    available_columns: view_schema.columns.iter().map(|c| c.name.clone()).collect(),
                 })?;
             new_row_values[col_idx] = row.values[view_col_count + i].clone();
         }

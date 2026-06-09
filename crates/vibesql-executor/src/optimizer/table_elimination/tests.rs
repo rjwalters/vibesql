@@ -127,6 +127,7 @@ mod eliminate_unused_tables_tests {
 
     fn make_table(name: &str, alias: Option<&str>) -> FromClause {
         FromClause::Table {
+            index_hint: None,
             name: name.to_string(),
             alias: alias.map(|a| a.to_string()),
             column_aliases: None,

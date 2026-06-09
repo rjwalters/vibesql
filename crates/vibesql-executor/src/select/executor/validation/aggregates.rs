@@ -1060,11 +1060,9 @@ pub fn validate_window_query_order_by_aggregates(
     }
 
     for item in order_items {
-        if let Some(name) = find_outer_correlated_agg_in_order_by_subquery(
-            &item.expr,
-            outer_schema,
-            database,
-        ) {
+        if let Some(name) =
+            find_outer_correlated_agg_in_order_by_subquery(&item.expr, outer_schema, database)
+        {
             return Err(ExecutorError::MisuseOfAggregateContext { function_name: name });
         }
     }
@@ -1085,20 +1083,15 @@ fn find_outer_correlated_agg_in_order_by_subquery(
             // FROM clause. If we cannot determine it (e.g. nested subquery in
             // FROM), fall through to None — be conservative and don't flag
             // anything we can't prove correlated.
-            let inner_columns = collect_from_clause_column_names(
-                stmt.from.as_ref(),
-                database,
-            )?;
+            let inner_columns = collect_from_clause_column_names(stmt.from.as_ref(), database)?;
 
             // Walk the subquery's SELECT list looking for aggregate functions
             // whose column args resolve to the outer scope.
             for item in &stmt.select_list {
                 if let SelectItem::Expression { expr: inner, .. } = item {
-                    if let Some(name) = find_outer_correlated_aggregate(
-                        inner,
-                        &inner_columns,
-                        outer_schema,
-                    ) {
+                    if let Some(name) =
+                        find_outer_correlated_aggregate(inner, &inner_columns, outer_schema)
+                    {
                         return Some(name);
                     }
                 }
@@ -1109,10 +1102,9 @@ fn find_outer_correlated_agg_in_order_by_subquery(
         // expression may e.g. add a constant to a subquery: `(SELECT sum(a)
         // FROM t2) + 1`).
         Expression::BinaryOp { left, right, .. } => {
-            find_outer_correlated_agg_in_order_by_subquery(left, outer_schema, database)
-                .or_else(|| {
-                    find_outer_correlated_agg_in_order_by_subquery(right, outer_schema, database)
-                })
+            find_outer_correlated_agg_in_order_by_subquery(left, outer_schema, database).or_else(
+                || find_outer_correlated_agg_in_order_by_subquery(right, outer_schema, database),
+            )
         }
         Expression::UnaryOp { expr, .. } => {
             find_outer_correlated_agg_in_order_by_subquery(expr, outer_schema, database)
@@ -1191,7 +1183,13 @@ fn find_outer_correlated_aggregate(
 ) -> Option<String> {
     match expr {
         Expression::AggregateFunction { name, args, order_by, filter, .. } => {
-            if aggregate_args_correlate_outer(args, order_by.as_deref(), filter.as_deref(), inner_columns, outer_schema) {
+            if aggregate_args_correlate_outer(
+                args,
+                order_by.as_deref(),
+                filter.as_deref(),
+                inner_columns,
+                outer_schema,
+            ) {
                 return Some(name.to_string());
             }
             // Recurse into args in case there's a deeper aggregate (which
@@ -1208,12 +1206,12 @@ fn find_outer_correlated_aggregate(
         Expression::Function { name, args, .. } => {
             if is_aggregate_function(name.as_str()) {
                 let upper = name.to_uppercase();
-                let is_scalar_minmax =
-                    matches!(upper.as_str(), "MIN" | "MAX") && args.len() > 1;
+                let is_scalar_minmax = matches!(upper.as_str(), "MIN" | "MAX") && args.len() > 1;
                 if !is_scalar_minmax {
-                    if args.iter().any(|a| {
-                        column_ref_resolves_to_outer(a, inner_columns, outer_schema)
-                    }) {
+                    if args
+                        .iter()
+                        .any(|a| column_ref_resolves_to_outer(a, inner_columns, outer_schema))
+                    {
                         return Some(name.to_string());
                     }
                 }
@@ -1239,13 +1237,17 @@ fn find_outer_correlated_aggregate(
         }
         Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
-                if let Some(found) = find_outer_correlated_aggregate(op, inner_columns, outer_schema) {
+                if let Some(found) =
+                    find_outer_correlated_aggregate(op, inner_columns, outer_schema)
+                {
                     return Some(found);
                 }
             }
             for w in when_clauses {
                 for cond in &w.conditions {
-                    if let Some(found) = find_outer_correlated_aggregate(cond, inner_columns, outer_schema) {
+                    if let Some(found) =
+                        find_outer_correlated_aggregate(cond, inner_columns, outer_schema)
+                    {
                         return Some(found);
                     }
                 }
@@ -1276,17 +1278,13 @@ fn aggregate_args_correlate_outer(
     inner_columns: &HashSet<String>,
     outer_schema: &CombinedSchema,
 ) -> bool {
-    let arg_correlated = args
-        .iter()
-        .any(|a| column_ref_resolves_to_outer(a, inner_columns, outer_schema));
+    let arg_correlated =
+        args.iter().any(|a| column_ref_resolves_to_outer(a, inner_columns, outer_schema));
     let order_correlated = order_by.is_some_and(|items| {
-        items
-            .iter()
-            .any(|i| column_ref_resolves_to_outer(&i.expr, inner_columns, outer_schema))
+        items.iter().any(|i| column_ref_resolves_to_outer(&i.expr, inner_columns, outer_schema))
     });
-    let filter_correlated = filter.is_some_and(|f| {
-        column_ref_resolves_to_outer(f, inner_columns, outer_schema)
-    });
+    let filter_correlated =
+        filter.is_some_and(|f| column_ref_resolves_to_outer(f, inner_columns, outer_schema));
     arg_correlated || order_correlated || filter_correlated
 }
 
@@ -1327,24 +1325,24 @@ fn column_ref_resolves_to_outer(
             args.iter().any(|a| column_ref_resolves_to_outer(a, inner_columns, outer_schema))
         }
         Expression::Case { operand, when_clauses, else_result } => {
-            operand.as_ref().is_some_and(|e| {
-                column_ref_resolves_to_outer(e, inner_columns, outer_schema)
-            }) || when_clauses.iter().any(|w| {
-                w.conditions
-                    .iter()
-                    .any(|c| column_ref_resolves_to_outer(c, inner_columns, outer_schema))
-                    || column_ref_resolves_to_outer(&w.result, inner_columns, outer_schema)
-            }) || else_result.as_ref().is_some_and(|e| {
-                column_ref_resolves_to_outer(e, inner_columns, outer_schema)
-            })
+            operand
+                .as_ref()
+                .is_some_and(|e| column_ref_resolves_to_outer(e, inner_columns, outer_schema))
+                || when_clauses.iter().any(|w| {
+                    w.conditions
+                        .iter()
+                        .any(|c| column_ref_resolves_to_outer(c, inner_columns, outer_schema))
+                        || column_ref_resolves_to_outer(&w.result, inner_columns, outer_schema)
+                })
+                || else_result
+                    .as_ref()
+                    .is_some_and(|e| column_ref_resolves_to_outer(e, inner_columns, outer_schema))
         }
         Expression::IsNull { expr, .. } => {
             column_ref_resolves_to_outer(expr, inner_columns, outer_schema)
         }
         Expression::Conjunction(children) | Expression::Disjunction(children) => {
-            children
-                .iter()
-                .any(|c| column_ref_resolves_to_outer(c, inner_columns, outer_schema))
+            children.iter().any(|c| column_ref_resolves_to_outer(c, inner_columns, outer_schema))
         }
         // Don't recurse into nested subqueries — their scope is independent.
         _ => false,
@@ -2457,6 +2455,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: from_table.map(|name| vibesql_ast::FromClause::Table {
+                index_hint: None,
                 name: name.to_string(),
                 alias: None,
                 column_aliases: None,

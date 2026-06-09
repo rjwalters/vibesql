@@ -1049,6 +1049,7 @@ mod tests {
     /// Build a one-table FROM clause referring to the named table.
     fn from_table(name: &str) -> FromClause {
         FromClause::Table {
+            index_hint: None,
             name: name.to_string(),
             alias: None,
             column_aliases: None,

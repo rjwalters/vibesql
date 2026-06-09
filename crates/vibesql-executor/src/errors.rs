@@ -368,6 +368,12 @@ pub enum ExecutorError {
     NoSuchFunction {
         function_name: String,
     },
+    /// No such index (SQLite-compatible error, e.g. INDEXED BY with an
+    /// unknown index or an index on a different table)
+    /// Format: "no such index: X"
+    NoSuchIndex {
+        index_name: String,
+    },
     Other(String),
 }
 
@@ -1282,6 +1288,10 @@ impl std::fmt::Display for ExecutorError {
                     "{}",
                     vibe_msg!("executor-no-such-function", function_name = function_name.as_str())
                 )
+            }
+            ExecutorError::NoSuchIndex { index_name } => {
+                // SQLite-compatible error message format
+                write!(f, "no such index: {}", index_name)
             }
             ExecutorError::Other(msg) => {
                 write!(f, "{}", vibe_msg!("executor-other", message = msg.as_str()))

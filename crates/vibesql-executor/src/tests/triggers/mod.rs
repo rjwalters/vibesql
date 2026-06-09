@@ -97,6 +97,7 @@ pub(super) fn count_audit_rows(db: &Database) -> usize {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "AUDIT_LOG".to_string(),
             alias: None,

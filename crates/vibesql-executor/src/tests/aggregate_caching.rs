@@ -98,6 +98,7 @@ fn test_repeated_count_star_cached() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test".to_string(),
             alias: None,
@@ -179,6 +180,7 @@ fn test_repeated_sum_cached() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "sales".to_string(),
             alias: None,
@@ -306,6 +308,7 @@ fn test_cache_cleared_between_groups() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "items".to_string(),
             alias: None,
@@ -411,6 +414,7 @@ fn test_distinct_aggregates_not_confused() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "values".to_string(),
             alias: None,

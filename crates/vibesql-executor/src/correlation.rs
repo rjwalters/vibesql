@@ -523,6 +523,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
+                index_hint: None,
                 name: "tab0".to_string(),
                 alias: None,
                 column_aliases: None,

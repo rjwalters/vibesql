@@ -197,6 +197,7 @@ mod in_subquery {
                 source_text: None,
             }],
             from: Some(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 name: "inactive_depts".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -267,6 +268,7 @@ mod in_subquery {
                 source_text: None,
             }],
             from: Some(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 name: "active_depts".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -348,6 +350,7 @@ mod scalar_subquery {
                 source_text: None,
             }],
             from: Some(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 name: "employees".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -431,6 +434,7 @@ mod scalar_subquery {
                 source_text: None,
             }],
             from: Some(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 name: "items".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -505,6 +509,7 @@ mod scalar_subquery {
                 source_text: None,
             }],
             from: Some(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 name: "config".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -578,6 +583,7 @@ mod empty_subquery {
                 source_text: None,
             }],
             from: Some(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 name: "old_depts".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -658,6 +664,7 @@ mod complex_subquery {
                 source_text: None,
             }],
             from: Some(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 name: "inactive_customers".to_string(),
                 alias: None,
                 column_aliases: None,

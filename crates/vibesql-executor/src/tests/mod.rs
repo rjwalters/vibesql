@@ -82,6 +82,7 @@ mod expression_index_tests;
 mod foreign_key_mismatch;
 mod fulltext_search;
 mod function_tests;
+mod index_hint_validation;
 mod index_optimization;
 mod index_scan_tests;
 mod issue_938_integer_type_preservation;

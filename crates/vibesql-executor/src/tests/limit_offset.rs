@@ -13,6 +13,7 @@ fn make_pagination_stmt(limit: Option<usize>, offset: Option<usize>) -> vibesql_
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "users".to_string(),
             alias: None,
@@ -226,12 +227,14 @@ fn test_limit_with_inner_join() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             right: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "orders".to_string(),
                 alias: None,
@@ -341,12 +344,14 @@ fn test_offset_with_inner_join() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             right: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "orders".to_string(),
                 alias: None,
@@ -456,12 +461,14 @@ fn test_limit_offset_with_inner_join() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             right: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "orders".to_string(),
                 alias: None,

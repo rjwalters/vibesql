@@ -84,6 +84,7 @@ fn test_scalar_subquery_in_where_clause() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "employees".to_string(),
             alias: None,
@@ -108,6 +109,7 @@ fn test_scalar_subquery_in_where_clause() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "employees".to_string(),
             alias: None,
@@ -209,6 +211,7 @@ fn test_scalar_subquery_in_select_list() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "employees".to_string(),
             alias: None,
@@ -253,6 +256,7 @@ fn test_scalar_subquery_in_select_list() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "employees".to_string(),
             alias: None,
@@ -322,6 +326,7 @@ fn test_scalar_subquery_returns_null_when_empty() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "employees".to_string(),
             alias: None,
@@ -358,6 +363,7 @@ fn test_scalar_subquery_returns_null_when_empty() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "employees".to_string(),
             alias: None,

@@ -52,6 +52,7 @@ fn test_scalar_subquery_multiple_rows_returns_first() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "employees".to_string(),
             alias: None,
@@ -81,6 +82,7 @@ fn test_scalar_subquery_multiple_rows_returns_first() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "employees".to_string(),
             alias: None,
@@ -163,6 +165,7 @@ fn test_scalar_subquery_error_multiple_columns() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "employees".to_string(),
             alias: None,
@@ -191,6 +194,7 @@ fn test_scalar_subquery_error_multiple_columns() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "employees".to_string(),
             alias: None,

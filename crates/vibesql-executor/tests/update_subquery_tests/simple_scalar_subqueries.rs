@@ -63,6 +63,7 @@ fn create_scalar_subquery(table_name: &str, column_name: &str) -> Box<vibesql_as
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: table_name.to_string(),
             alias: None,
             column_aliases: None,
@@ -103,6 +104,7 @@ fn create_aggregate_subquery(
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: table_name.to_string(),
             alias: None,
             column_aliases: None,

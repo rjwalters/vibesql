@@ -198,8 +198,8 @@ pub use operators::{BinaryOperator, UnaryOperator};
 pub use revoke::{CascadeOption, RevokeStmt};
 pub use select::{
     CommonTableExpr, CteMaterialization, FromClause, GroupByClause, GroupingElement, GroupingSet,
-    JoinType, MixedGroupingItem, NullsOrder, OrderByItem, OrderDirection, SelectItem, SelectStmt,
-    SetOperation, SetOperator, WindowDefinition,
+    IndexHint, JoinType, MixedGroupingItem, NullsOrder, OrderByItem, OrderDirection, SelectItem,
+    SelectStmt, SetOperation, SetOperator, WindowDefinition,
 };
 pub use statement::Statement;
 

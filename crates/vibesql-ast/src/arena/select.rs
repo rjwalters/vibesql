@@ -99,6 +99,17 @@ pub enum SelectItem<'arena> {
     },
 }
 
+/// SQLite index hint on a FROM-clause table reference (arena variant).
+///
+/// Mirrors `crate::IndexHint` with the index name interned as a `Symbol`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum IndexHint {
+    /// `INDEXED BY <index-name>`
+    IndexedBy(Symbol),
+    /// `NOT INDEXED`
+    NotIndexed,
+}
+
 /// FROM clause
 #[derive(Debug, Clone, PartialEq)]
 pub enum FromClause<'arena> {
@@ -109,6 +120,8 @@ pub enum FromClause<'arena> {
         column_aliases: Option<BumpVec<'arena, Symbol>>,
         /// Whether the identifier was quoted (delimited) in the original SQL.
         quoted: bool,
+        /// SQLite index hint: `INDEXED BY <name>` / `NOT INDEXED`.
+        index_hint: Option<IndexHint>,
     },
     Join {
         left: &'arena FromClause<'arena>,

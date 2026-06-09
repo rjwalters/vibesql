@@ -535,6 +535,7 @@ fn test_hex_literal_in_subquery_without_from() {
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
                     from: Some(vibesql_ast::FromClause::Table {
+                        index_hint: None,
                         quoted: false,
                         name: "t1".to_string(),
                         alias: None,
@@ -646,6 +647,7 @@ fn test_binary_literal_in_subquery_without_from() {
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
                     from: Some(vibesql_ast::FromClause::Table {
+                        index_hint: None,
                         quoted: false,
                         name: "t1".to_string(),
                         alias: None,
@@ -725,6 +727,7 @@ fn test_in_subquery_multi_column_empty_table_should_error() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,
@@ -739,6 +742,7 @@ fn test_in_subquery_multi_column_empty_table_should_error() {
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
                 from: Some(vibesql_ast::FromClause::Table {
+                    index_hint: None,
                     quoted: false,
                     name: "t1".to_string(),
                     alias: None,

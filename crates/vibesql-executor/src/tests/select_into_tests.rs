@@ -74,6 +74,7 @@ fn test_select_into_single_row() {
         into_table: Some("target".to_string()),
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "source".to_string(),
             alias: None,
@@ -105,6 +106,7 @@ fn test_select_into_single_row() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "target".to_string(),
             alias: None,
@@ -169,6 +171,7 @@ fn test_select_into_no_rows_error() {
         into_table: Some("target".to_string()),
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "source".to_string(),
             alias: None,
@@ -248,6 +251,7 @@ fn test_select_into_multiple_rows_error() {
         into_table: Some("target".to_string()),
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "source".to_string(),
             alias: None,
@@ -328,6 +332,7 @@ fn test_select_into_with_expressions() {
         into_table: Some("target".to_string()),
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "source".to_string(),
             alias: None,
@@ -356,6 +361,7 @@ fn test_select_into_with_expressions() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "target".to_string(),
             alias: None,

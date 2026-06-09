@@ -106,6 +106,7 @@ fn test_count_distinct_basic() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "sales".to_string(),
             alias: None,
@@ -168,6 +169,7 @@ fn test_count_distinct_vs_count_all() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "sales".to_string(),
             alias: None,
@@ -217,6 +219,7 @@ fn test_sum_distinct() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "sales".to_string(),
             alias: None,
@@ -280,6 +283,7 @@ fn test_sum_distinct_vs_sum_all() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "sales".to_string(),
             alias: None,
@@ -331,6 +335,7 @@ fn test_avg_distinct() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "sales".to_string(),
             alias: None,
@@ -378,6 +383,7 @@ fn test_min_distinct() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "sales".to_string(),
             alias: None,
@@ -425,6 +431,7 @@ fn test_max_distinct() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "sales".to_string(),
             alias: None,
@@ -492,6 +499,7 @@ fn test_count_distinct_with_nulls() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test".to_string(),
             alias: None,
@@ -572,6 +580,7 @@ fn test_distinct_all_same_value() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test".to_string(),
             alias: None,
@@ -647,6 +656,7 @@ fn test_distinct_empty_table() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "empty_test".to_string(),
             alias: None,

@@ -693,10 +693,10 @@ impl<'arena> ArenaParser<'arena> {
         // Parse optional column aliases: (col1, col2, ...)
         let column_aliases = if alias.is_some() { self.parse_column_alias_list()? } else { None };
 
-        // Parse and ignore SQLite index hints: INDEXED BY <name> / NOT INDEXED
-        self.parse_index_hint()?;
+        // Parse SQLite index hints: INDEXED BY <name> / NOT INDEXED
+        let index_hint = self.parse_index_hint()?;
 
-        Ok(FromClause::Table { name, alias, column_aliases, quoted })
+        Ok(FromClause::Table { name, alias, column_aliases, quoted, index_hint })
     }
 
     /// Check if the upcoming tokens form a SQLite index hint:
@@ -716,28 +716,33 @@ impl<'arena> ArenaParser<'arena> {
         }
     }
 
-    /// Parse and ignore SQLite index hints: `INDEXED BY <index-name>` or
-    /// `NOT INDEXED`. VibeSQL's planner chooses indexes independently, so the
-    /// hint is accepted for SQLite compatibility but has no effect on planning.
-    fn parse_index_hint(&mut self) -> Result<(), ParseError> {
+    /// Parse SQLite index hints: `INDEXED BY <index-name>` or `NOT INDEXED`.
+    ///
+    /// The hint is carried through the AST so the executor can validate that
+    /// an `INDEXED BY` index exists on the table (SQLite: `no such index: X`).
+    /// VibeSQL's planner chooses indexes independently, so the hint has no
+    /// effect on planning.
+    fn parse_index_hint(&mut self) -> Result<Option<vibesql_ast::arena::IndexHint>, ParseError> {
         if !self.peek_index_hint() {
-            return Ok(());
+            return Ok(None);
         }
         if self.peek_keyword(Keyword::Not) {
             self.advance(); // consume NOT
             self.advance(); // consume INDEXED
-            return Ok(());
+            return Ok(Some(vibesql_ast::arena::IndexHint::NotIndexed));
         }
         self.advance(); // consume INDEXED
         self.advance(); // consume BY
         match self.peek() {
-            Token::Identifier(_) | Token::DelimitedIdentifier(_) => {
+            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                let name = name.clone();
                 self.advance();
-                Ok(())
+                Ok(Some(vibesql_ast::arena::IndexHint::IndexedBy(self.intern(&name))))
             }
             Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                let name = kw.to_string();
                 self.advance();
-                Ok(())
+                Ok(Some(vibesql_ast::arena::IndexHint::IndexedBy(self.intern(&name))))
             }
             _ => Err(ParseError { message: "Expected index name after INDEXED BY".to_string() }),
         }

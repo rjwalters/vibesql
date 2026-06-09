@@ -364,6 +364,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 name: table.to_string(),
                 alias: None,
                 column_aliases: None,

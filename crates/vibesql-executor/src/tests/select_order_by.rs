@@ -59,6 +59,7 @@ fn test_order_by_single_column_asc() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "users".to_string(),
             alias: None,
@@ -158,6 +159,7 @@ fn test_order_by_multiple_columns() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "users".to_string(),
             alias: None,
@@ -272,12 +274,14 @@ fn test_order_by_with_join_issue_4552() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "t1".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             right: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "t2".to_string(),
                 alias: None,
@@ -384,6 +388,7 @@ fn test_order_by_preserved_in_derived_table_issue_4734() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,
@@ -502,6 +507,7 @@ fn test_outer_order_by_takes_precedence_issue_4734() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,

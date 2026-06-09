@@ -16,10 +16,8 @@ fn build_window_map(
 
     if let Some(defs) = window_definitions {
         // First, build a raw map for lookups during resolution
-        let raw_map: HashMap<String, &WindowSpec> = defs
-            .iter()
-            .map(|def| (def.name.to_lowercase(), &def.spec))
-            .collect();
+        let raw_map: HashMap<String, &WindowSpec> =
+            defs.iter().map(|def| (def.name.to_lowercase(), &def.spec)).collect();
 
         // Then resolve each definition, potentially recursively
         for def in defs {
@@ -71,9 +69,9 @@ fn resolve_window_spec(
     match &spec.base_window_name {
         Some(base_name) => {
             // Look up the already-resolved base window definition
-            let base_spec = window_map.get(&base_name.to_lowercase()).ok_or_else(|| {
-                ExecutorError::Other(format!("no such window: {}", base_name))
-            })?;
+            let base_spec = window_map
+                .get(&base_name.to_lowercase())
+                .ok_or_else(|| ExecutorError::Other(format!("no such window: {}", base_name)))?;
 
             // Merge: inherit from base, override with any values from current spec
             Ok(WindowSpec {
@@ -188,7 +186,12 @@ fn collect_from_expression(
                 for cond in &when_clause.conditions {
                     collect_from_expression(cond, select_index, window_map, window_functions)?;
                 }
-                collect_from_expression(&when_clause.result, select_index, window_map, window_functions)?;
+                collect_from_expression(
+                    &when_clause.result,
+                    select_index,
+                    window_map,
+                    window_functions,
+                )?;
             }
             if let Some(else_expr) = else_result {
                 collect_from_expression(else_expr, select_index, window_map, window_functions)?;

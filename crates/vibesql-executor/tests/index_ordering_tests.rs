@@ -108,6 +108,7 @@ fn test_index_ordering() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,

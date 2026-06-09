@@ -63,6 +63,7 @@ fn test_all_greater_than_basic() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t2".to_string(),
             alias: None,
@@ -92,6 +93,7 @@ fn test_all_greater_than_basic() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,
@@ -174,6 +176,7 @@ fn test_any_less_than_basic() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t2".to_string(),
             alias: None,
@@ -203,6 +206,7 @@ fn test_any_less_than_basic() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,
@@ -286,6 +290,7 @@ fn test_some_equals_basic() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t2".to_string(),
             alias: None,
@@ -315,6 +320,7 @@ fn test_some_equals_basic() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,
@@ -392,6 +398,7 @@ fn test_all_with_empty_subquery() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t2".to_string(),
             alias: None,
@@ -421,6 +428,7 @@ fn test_all_with_empty_subquery() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,
@@ -498,6 +506,7 @@ fn test_any_with_empty_subquery() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t2".to_string(),
             alias: None,
@@ -527,6 +536,7 @@ fn test_any_with_empty_subquery() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,
@@ -611,6 +621,7 @@ fn test_all_with_null_in_subquery() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t2".to_string(),
             alias: None,
@@ -640,6 +651,7 @@ fn test_all_with_null_in_subquery() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,
@@ -713,6 +725,7 @@ fn test_all_with_null_left_value() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t2".to_string(),
             alias: None,
@@ -742,6 +755,7 @@ fn test_all_with_null_left_value() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "t1".to_string(),
             alias: None,
