@@ -22,6 +22,22 @@ use vibesql_storage::Row;
 
 use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 
+/// Collect the resolved window specs for all window functions in the SELECT list.
+///
+/// Named window references (`WINDOW w AS (...)` + `OVER w`) are resolved to
+/// their full specifications, including inheritance chains. Used by EXPLAIN
+/// QUERY PLAN to derive window sort keys statically without hooking the
+/// runtime evaluation path.
+pub(crate) fn collect_resolved_window_specs(
+    select_list: &[SelectItem],
+    window_definitions: Option<&Vec<WindowDefinition>>,
+) -> Result<Vec<vibesql_ast::WindowSpec>, ExecutorError> {
+    Ok(collection::collect_window_functions(select_list, window_definitions)?
+        .into_iter()
+        .map(|info| info.window_spec)
+        .collect())
+}
+
 /// Evaluate window functions and add results to rows
 ///
 /// This processes all window functions in the SELECT list and adds computed values
