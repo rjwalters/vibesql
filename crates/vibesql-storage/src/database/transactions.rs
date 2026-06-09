@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::{wal::TransactionDurability, Row, StorageError, Table};
+use crate::{mvcc::TxnSnapshot, row::TxnId, wal::TransactionDurability, Row, StorageError, Table};
 
 /// A single change made during a transaction
 #[derive(Debug, Clone)]
@@ -92,6 +92,21 @@ pub enum TransactionState {
         /// by replacing the entire transaction state; `ROLLBACK TO`
         /// truncates back to the savepoint's `deferred_fk_snapshot_index`.
         deferred_fk_violations: Vec<DeferredFkViolation>,
+        /// MVCC snapshot captured at `BEGIN` (Phase 1b of #5136).
+        ///
+        /// Captured once at transaction start and held for the entire
+        /// transaction lifetime. All reads within the transaction
+        /// consult the same snapshot, giving snapshot-isolation
+        /// semantics independent of concurrent commits.
+        ///
+        /// **Phase 1b note:** this field is captured but **not yet
+        /// consulted by any read path**. Phase 1d wires the
+        /// `Table::scan_visible(&snapshot)` boundary. Until then this
+        /// field is dead state at runtime — kept here so Phase 1c can
+        /// stamp `xmin = id` and Phase 1d has the snapshot to read with.
+        ///
+        /// See [`crate::mvcc::TxnSnapshot`] for the predicate contract.
+        snapshot: TxnSnapshot,
     },
 }
 
@@ -142,6 +157,16 @@ impl TransactionManager {
                 let transaction_id = self.next_transaction_id;
                 self.next_transaction_id += 1;
 
+                // Capture the MVCC snapshot **before** publishing the
+                // new transaction id. The `in_progress` set is computed
+                // from currently-active transactions (just this one
+                // would be self, which we deliberately exclude — a
+                // transaction always sees its own writes). Under the
+                // current single-writer model, in_progress is always
+                // empty at BEGIN; this will need to change when Raft +
+                // multi-writer arrives in later phases.
+                let snapshot = Self::capture_snapshot(transaction_id);
+
                 self.transaction_state = TransactionState::Active {
                     id: transaction_id,
                     original_catalog,
@@ -150,6 +175,7 @@ impl TransactionManager {
                     changes: Vec::new(),
                     durability,
                     deferred_fk_violations: Vec::new(),
+                    snapshot,
                 };
                 Ok(())
             }
@@ -157,6 +183,37 @@ impl TransactionManager {
                 Err(StorageError::TransactionError("Transaction already active".to_string()))
             }
         }
+    }
+
+    /// Build the MVCC snapshot for a transaction with id `txn_id`.
+    ///
+    /// **Phase 1b semantics (single-writer):** there are no other
+    /// concurrently-active transactions to put in `in_progress`. The
+    /// snapshot is:
+    ///
+    /// - `xmin_active = txn_id` — the next-to-allocate id (one past the
+    ///   high-water mark from the caller's perspective). This makes the
+    ///   `xmax > xmin_active` clause in [`Row::visible_to`] only true
+    ///   for transactions that started *after* us, which is the correct
+    ///   behavior with no concurrent peers.
+    /// - `xmax_committed = txn_id - 1` — every transaction allocated
+    ///   before us has, by the single-writer invariant, already finished
+    ///   (committed or rolled back). For the rolled-back case, the
+    ///   rollback path replaces tables wholesale, so no `xmin = rolled_back_id`
+    ///   row exists in storage and the predicate correctness is preserved.
+    /// - `in_progress = ∅` — no concurrent transactions.
+    ///
+    /// **Future (multi-writer / Raft):** when concurrent transactions
+    /// become possible, this method becomes the chokepoint where the
+    /// `in_progress` set is populated from the active-transactions
+    /// registry. The caller signature does not need to change.
+    ///
+    /// [`Row::visible_to`]: crate::Row::visible_to
+    fn capture_snapshot(txn_id: TxnId) -> TxnSnapshot {
+        // For txn_id = 1 (the first ever), xmax_committed = 0 means
+        // "only pre-MVCC rows are visible" — exactly right.
+        let xmax_committed = txn_id.saturating_sub(1);
+        TxnSnapshot::new(txn_id, xmax_committed, std::collections::HashSet::new())
     }
 
     /// Commit the current transaction
@@ -211,6 +268,24 @@ impl TransactionManager {
     pub fn get_durability(&self) -> Option<TransactionDurability> {
         match &self.transaction_state {
             TransactionState::Active { durability, .. } => Some(*durability),
+            TransactionState::None => None,
+        }
+    }
+
+    /// Get the MVCC snapshot for the current transaction (if any).
+    ///
+    /// Returns the snapshot captured at `BEGIN` time. The same snapshot
+    /// is returned on every call within a transaction — capture is
+    /// per-transaction, not per-statement.
+    ///
+    /// **Phase 1b note:** no callers consume this yet. Phase 1d will
+    /// thread it through the scan path so SELECT/JOIN/subquery reads
+    /// get snapshot-isolation semantics.
+    ///
+    /// See [`crate::mvcc::TxnSnapshot`].
+    pub fn current_snapshot(&self) -> Option<&TxnSnapshot> {
+        match &self.transaction_state {
+            TransactionState::Active { snapshot, .. } => Some(snapshot),
             TransactionState::None => None,
         }
     }
@@ -329,5 +404,125 @@ impl TransactionManager {
 impl Default for TransactionManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod snapshot_capture_tests {
+    //! Tests for MVCC snapshot capture (Phase 1b of #5136).
+    //!
+    //! These tests cover the contract that `begin_transaction` captures
+    //! a [`TxnSnapshot`] exactly once, that the snapshot reflects the
+    //! current `next_transaction_id` watermark, and that multiple reads
+    //! within the same transaction see the same snapshot.
+
+    use super::*;
+
+    fn empty_catalog_and_tables() -> (vibesql_catalog::Catalog, HashMap<String, Table>) {
+        (vibesql_catalog::Catalog::new(), HashMap::new())
+    }
+
+    #[test]
+    fn first_transaction_snapshot_has_xmax_committed_zero() {
+        // First-ever transaction: xmax_committed should be 0 (only
+        // pre-MVCC sentinel rows are visible to it), xmin_active should
+        // equal our own id (1).
+        let (catalog, tables) = empty_catalog_and_tables();
+        let mut mgr = TransactionManager::new();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
+
+        let snap = mgr.current_snapshot().expect("snapshot present after BEGIN");
+        assert_eq!(snap.xmin_active, 1);
+        assert_eq!(snap.xmax_committed, 0);
+        assert!(snap.in_progress.is_empty());
+    }
+
+    #[test]
+    fn second_transaction_snapshot_sees_first_as_committed() {
+        // Second transaction's snapshot should include the first txn's
+        // id in the "committed" range (xmax_committed >= 1).
+        let (catalog, tables) = empty_catalog_and_tables();
+        let mut mgr = TransactionManager::new();
+
+        mgr.begin_transaction(&catalog, &tables).unwrap();
+        mgr.commit_transaction().unwrap();
+
+        mgr.begin_transaction(&catalog, &tables).unwrap();
+        let snap = mgr.current_snapshot().expect("second snapshot present");
+        assert_eq!(snap.xmin_active, 2);
+        assert_eq!(snap.xmax_committed, 1);
+        assert!(snap.in_progress.is_empty());
+    }
+
+    #[test]
+    fn snapshot_stable_across_multiple_reads_within_transaction() {
+        // The snapshot is captured once at BEGIN; subsequent reads must
+        // return the same data. This is the snapshot-isolation contract.
+        let (catalog, tables) = empty_catalog_and_tables();
+        let mut mgr = TransactionManager::new();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
+
+        let snap1 = mgr.current_snapshot().cloned().unwrap();
+        let snap2 = mgr.current_snapshot().cloned().unwrap();
+        let snap3 = mgr.current_snapshot().cloned().unwrap();
+
+        assert_eq!(snap1.xmin_active, snap2.xmin_active);
+        assert_eq!(snap1.xmin_active, snap3.xmin_active);
+        assert_eq!(snap1.xmax_committed, snap2.xmax_committed);
+        assert_eq!(snap1.xmax_committed, snap3.xmax_committed);
+        assert_eq!(snap1.in_progress, snap2.in_progress);
+        assert_eq!(snap1.in_progress, snap3.in_progress);
+    }
+
+    #[test]
+    fn no_snapshot_outside_transaction() {
+        let mgr = TransactionManager::new();
+        assert!(mgr.current_snapshot().is_none());
+    }
+
+    #[test]
+    fn rolled_back_transaction_still_advances_watermark() {
+        // Even rolled-back transactions consume a TxnId, so the next
+        // transaction's snapshot xmax_committed includes them. The
+        // rollback path replaces tables wholesale, so no rows stamped
+        // with the rolled-back id remain, preserving predicate
+        // correctness.
+        let (mut catalog, mut tables) = empty_catalog_and_tables();
+        let mut mgr = TransactionManager::new();
+
+        mgr.begin_transaction(&catalog, &tables).unwrap();
+        mgr.rollback_transaction(&mut catalog, &mut tables).unwrap();
+
+        mgr.begin_transaction(&catalog, &tables).unwrap();
+        let snap = mgr.current_snapshot().unwrap();
+        // First txn id was 1 (rolled back). Second txn id is 2.
+        assert_eq!(snap.xmin_active, 2);
+        assert_eq!(snap.xmax_committed, 1);
+    }
+
+    #[test]
+    fn snapshot_visibility_integration() {
+        // End-to-end sanity check: a row stamped with the *current*
+        // active transaction's id (Phase 1c will do this) should NOT
+        // be visible to that transaction's own snapshot under this
+        // predicate — that's intentional. Phase 1c/1d will introduce a
+        // separate "is my own write" check that bypasses snapshot
+        // visibility. Documenting that gap here.
+        let (catalog, tables) = empty_catalog_and_tables();
+        let mut mgr = TransactionManager::new();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
+        let my_id = mgr.transaction_id().unwrap();
+        let snap = mgr.current_snapshot().unwrap();
+
+        // A row stamped with our own id: my_id > xmax_committed
+        // (== my_id - 1), so visible_to returns false. Phase 1c's
+        // "see my own writes" path will be a separate clause.
+        let mut my_row = crate::Row::new(vec![vibesql_types::SqlValue::Integer(1)]);
+        my_row.xmin = my_id;
+        assert!(
+            !my_row.visible_to(snap),
+            "Phase 1b predicate intentionally does not show transactions \
+             their own writes; Phase 1c will add a separate clause for that"
+        );
     }
 }

@@ -462,6 +462,76 @@ impl Row {
             _ => std::hint::unreachable_unchecked(),
         }
     }
+
+    // ========================================================================
+    // MVCC Visibility (Phase 1b of #5136)
+    //
+    // These methods interpret the `xmin`/`xmax` fields added in Phase 1a
+    // against a captured [`TxnSnapshot`]. Currently called only from unit
+    // tests — Phase 1d will wire `visible_to` into the scan boundary in
+    // `Table::scan*`. See `crate::mvcc` for the full design notes.
+    // ========================================================================
+
+    /// Returns `true` if this row version is visible to a reader holding
+    /// `snapshot` under snapshot isolation.
+    ///
+    /// See [`crate::mvcc`] for the full predicate contract. In summary,
+    /// the row is visible iff all three hold:
+    ///
+    /// 1. The creator (`xmin`) was committed-as-of the snapshot:
+    ///    `xmin <= snapshot.xmax_committed` AND `xmin` not in
+    ///    `snapshot.in_progress`. The pre-MVCC sentinel
+    ///    [`PRE_MVCC_TXN_ID`] (= 0) is always treated as committed.
+    /// 2. (Implied by clause 1) If the creator is the pre-MVCC sentinel,
+    ///    clause 1 is satisfied trivially.
+    /// 3. The deleter (`xmax`), if any, is **not** committed-as-of the
+    ///    snapshot. Concretely, the row is visible if `xmax.is_none()`,
+    ///    or `xmax > snapshot.xmin_active` (delete happened by a
+    ///    transaction that started after our snapshot's oldest concurrent
+    ///    peer), or `xmax` is in `snapshot.in_progress` (deleter was
+    ///    still running at snapshot time).
+    ///
+    /// # Phase 1b note
+    ///
+    /// This is a pure-function predicate — it doesn't read any global
+    /// state. Phase 1c starts producing rows with non-sentinel
+    /// `xmin`/`xmax`; Phase 1d starts calling this from the scan path.
+    /// Until then, every row created via [`Row::new`] / [`Row::from_vec`]
+    /// has `xmin = PRE_MVCC_TXN_ID, xmax = None`, so this method always
+    /// returns `true` for them.
+    #[inline]
+    pub fn visible_to(&self, snapshot: &crate::mvcc::TxnSnapshot) -> bool {
+        // Clause 1: creator must be committed-as-of the snapshot.
+        // The pre-MVCC sentinel is always committed (see TxnSnapshot::is_committed).
+        if !snapshot.is_committed(self.xmin) {
+            return false;
+        }
+
+        // Clause 3: if there's a deleter, it must NOT be committed-as-of
+        // the snapshot for us to still see the row.
+        match self.xmax {
+            None => true,
+            Some(deleter) => {
+                // Row is still visible if:
+                //   - the deleter started after our snapshot's xmin_active
+                //     (so the delete can't have been committed before us), OR
+                //   - the deleter was in_progress at snapshot time, OR
+                //   - the deleter is the pre-MVCC sentinel — which would be
+                //     bizarre (xmax = 0 means "deleted by no one") but is
+                //     handled defensively by treating sentinel-as-committed,
+                //     making the row invisible. This matches "PRE_MVCC means
+                //     definitely committed" and avoids accidental visibility.
+                if deleter > snapshot.xmin_active {
+                    return true;
+                }
+                if snapshot.is_in_progress(deleter) {
+                    return true;
+                }
+                // Deleter is committed-as-of snapshot → row is invisible.
+                false
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -536,6 +606,200 @@ mod tests {
         let row = Row::from_vec(vec![SqlValue::Integer(42)]);
         unsafe {
             row.get_string_unchecked(0); // Should panic in debug mode
+        }
+    }
+
+    // ========================================================================
+    // MVCC visibility predicate tests (Phase 1b of #5136)
+    // ========================================================================
+
+    mod visibility {
+        use std::collections::HashSet;
+
+        use super::super::*;
+        use crate::mvcc::TxnSnapshot;
+
+        /// Helper: build a row with explicit MVCC fields.
+        fn row_with(xmin: TxnId, xmax: Option<TxnId>) -> Row {
+            let mut r = Row::new(vec![SqlValue::Integer(0)]);
+            r.xmin = xmin;
+            r.xmax = xmax;
+            r
+        }
+
+        /// Helper: snapshot with `in_progress` set built from a slice.
+        fn snap(xmin_active: TxnId, xmax_committed: TxnId, in_progress: &[TxnId]) -> TxnSnapshot {
+            TxnSnapshot::new(xmin_active, xmax_committed, in_progress.iter().copied().collect())
+        }
+
+        #[test]
+        fn pre_mvcc_row_visible_under_empty_snapshot() {
+            // Legacy rows (xmin = 0, xmax = None) — the constructor default —
+            // are visible to every snapshot, including the empty one used
+            // by pre-MVCC code paths and auto-commit reads.
+            let r = Row::new(vec![SqlValue::Integer(42)]);
+            assert!(r.visible_to(&TxnSnapshot::empty()));
+        }
+
+        #[test]
+        fn pre_mvcc_row_visible_under_active_snapshot() {
+            let r = row_with(PRE_MVCC_TXN_ID, None);
+            let s = snap(5, 10, &[5, 7]);
+            assert!(r.visible_to(&s));
+        }
+
+        #[test]
+        fn row_visible_when_creator_committed_pre_snapshot() {
+            // Writer txn 3 committed before snapshot (xmax_committed = 10),
+            // not in in_progress → visible.
+            let r = row_with(3, None);
+            let s = snap(5, 10, &[5, 7]);
+            assert!(r.visible_to(&s));
+        }
+
+        #[test]
+        fn row_invisible_when_creator_in_progress() {
+            // Writer txn 7 was still running at snapshot time → invisible
+            // (this is the snapshot-isolation rule: concurrent writers don't
+            // affect each other's reads).
+            let r = row_with(7, None);
+            let s = snap(5, 10, &[5, 7]);
+            assert!(!r.visible_to(&s));
+        }
+
+        #[test]
+        fn row_invisible_when_creator_after_snapshot_high_watermark() {
+            // Writer txn 20 > xmax_committed = 10 → creator hadn't committed
+            // when we took the snapshot → invisible.
+            let r = row_with(20, None);
+            let s = snap(5, 10, &[5, 7]);
+            assert!(!r.visible_to(&s));
+        }
+
+        #[test]
+        fn row_visible_when_creator_equals_high_watermark() {
+            // Edge case: xmin == xmax_committed should be visible (committed
+            // exactly at the boundary).
+            let r = row_with(10, None);
+            let s = snap(5, 10, &[5, 7]);
+            assert!(r.visible_to(&s));
+        }
+
+        #[test]
+        fn row_invisible_when_deleter_committed_pre_snapshot() {
+            // Creator committed (xmin = 3 <= 10), deleter committed (xmax =
+            // Some(4) <= xmin_active = 5, not in_progress) → row is gone as
+            // far as this snapshot is concerned.
+            let r = row_with(3, Some(4));
+            let s = snap(5, 10, &[5, 7]);
+            assert!(!r.visible_to(&s));
+        }
+
+        #[test]
+        fn row_visible_when_deleter_after_snapshot_oldest_active() {
+            // Deleter xmax = 9 > xmin_active = 5 → delete happened after
+            // our snapshot's oldest concurrent peer started, so we don't
+            // see the delete yet.
+            let r = row_with(3, Some(9));
+            let s = snap(5, 10, &[5, 7]);
+            assert!(r.visible_to(&s));
+        }
+
+        #[test]
+        fn row_visible_when_deleter_still_in_progress() {
+            // Deleter xmax = 5 is in in_progress → the delete is still
+            // mid-flight at snapshot time → we still see the row.
+            let r = row_with(3, Some(5));
+            let s = snap(5, 10, &[5, 7]);
+            assert!(r.visible_to(&s));
+        }
+
+        #[test]
+        fn row_visible_when_deleter_eq_xmin_active_but_in_progress() {
+            // Boundary: deleter == xmin_active and is in in_progress → the
+            // in_progress check is what saves us (the > xmin_active check
+            // alone would be false).
+            let r = row_with(3, Some(5));
+            let s = snap(5, 10, &[5]);
+            assert!(r.visible_to(&s));
+        }
+
+        #[test]
+        fn row_invisible_when_deleter_eq_xmin_active_not_in_progress() {
+            // Boundary: deleter == xmin_active but NOT in in_progress.
+            // This is a slightly artificial case (xmin_active should be the
+            // *lowest* active id, so if 5 isn't active, xmin_active should
+            // be > 5 — but we still cover the predicate behavior).
+            let r = row_with(3, Some(5));
+            let s = snap(5, 10, &[7]);
+            assert!(!r.visible_to(&s));
+        }
+
+        #[test]
+        fn updated_row_chain_only_new_version_visible() {
+            // Models an UPDATE: txn 6 superseded a row by stamping xmax = 6
+            // on the old version and inserting a new version with xmin = 6.
+            // From a snapshot taken AFTER txn 6 committed, only the new
+            // version should be visible.
+            let old = row_with(3, Some(6));
+            let new = row_with(6, None);
+            let s = snap(10, 10, &[]); // No concurrent activity.
+            assert!(!old.visible_to(&s));
+            assert!(new.visible_to(&s));
+        }
+
+        #[test]
+        fn updated_row_chain_concurrent_snapshot_sees_old_version() {
+            // Same setup as above, but our snapshot was taken WHILE txn 6
+            // was still in-progress. We should see the old version (the
+            // delete is from a concurrent writer), not the new version.
+            let old = row_with(3, Some(6));
+            let new = row_with(6, None);
+            let mut in_progress = HashSet::new();
+            in_progress.insert(6);
+            let s = TxnSnapshot::new(6, 5, in_progress);
+            assert!(old.visible_to(&s));
+            assert!(!new.visible_to(&s));
+        }
+
+        #[test]
+        fn empty_snapshot_hides_all_mvcc_rows() {
+            // The empty snapshot has xmax_committed = 0, so any non-sentinel
+            // xmin is > xmax_committed → invisible. This is the conservative
+            // default: code that hasn't migrated to capture real snapshots
+            // sees only pre-MVCC rows.
+            assert!(!row_with(1, None).visible_to(&TxnSnapshot::empty()));
+            assert!(!row_with(42, None).visible_to(&TxnSnapshot::empty()));
+            assert!(row_with(0, None).visible_to(&TxnSnapshot::empty()));
+        }
+
+        #[test]
+        fn deleter_with_pre_mvcc_sentinel_treated_as_committed() {
+            // Defensive case: xmax = Some(0) is bizarre (means "deleted by
+            // nobody") but we treat the sentinel as definitely-committed,
+            // so the row is invisible. This avoids accidental visibility
+            // from buggy callers stamping `Some(0)` instead of `None`.
+            let r = row_with(1, Some(0));
+            let s = snap(5, 10, &[]);
+            // xmax = 0 < xmin_active = 5, not in_progress → invisible.
+            assert!(!r.visible_to(&s));
+        }
+
+        #[test]
+        fn writer_aborted_modeling_note() {
+            // Phase 1b deliberately does NOT carry an `aborted` set on
+            // TxnSnapshot. The current `TransactionManager::rollback`
+            // restores `original_tables` wholesale, which discards any
+            // xmin/xmax stamping the aborted txn did. So at the predicate
+            // level there is no "writer aborted" case to test — the rows
+            // simply don't exist after rollback.
+            //
+            // This test exists to document the design decision. Phase 1c
+            // will either confirm "revert on abort" or introduce the
+            // `aborted` set and a corresponding predicate clause.
+            let r = row_with(3, None);
+            let s = snap(5, 10, &[]);
+            assert!(r.visible_to(&s));
         }
     }
 
