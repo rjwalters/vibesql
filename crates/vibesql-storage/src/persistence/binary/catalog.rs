@@ -516,18 +516,33 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
 
     // Create indexes
     for (index_name, table_name, unique, columns, where_clause) in index_specs {
-        // Create the storage-side index first (it does not track WHERE clauses).
+        // Create the storage-side index first (it manages the index body but
+        // does not touch the catalog at all).
         db.create_index(index_name.clone(), table_name.clone(), unique, columns.clone())
             .map_err(|e| StorageError::NotImplemented(format!("Failed to create index: {}", e)))?;
 
-        // Then, if a partial-index predicate was persisted, patch the
-        // catalog-side metadata so subsequent FK-mismatch / planner checks
-        // recognise the index as partial. The storage `create_index` call
-        // also pushes a catalog entry without a WHERE clause; we rewrite
-        // it here to attach the predicate.
-        if let Some(expr) = where_clause {
-            db.catalog.set_index_where_clause(&index_name, Some(expr));
-        }
+        // Now populate the catalog-side `IndexMetadata` for this index. The
+        // executor's `CreateIndexExecutor::execute` normally does this at
+        // CREATE INDEX time, but the binary-load path bypasses the executor,
+        // so we mirror that work here. Without this, `Catalog::find_index_by_name`
+        // returns `None` for every persisted index after a cold load — which
+        // also silently swallows partial-index WHERE clauses, expression-index
+        // metadata, and breaks any planner/FK check that consults the catalog.
+        let catalog_columns = convert_ast_columns_to_catalog(&columns);
+        let catalog_meta = vibesql_catalog::IndexMetadata::new(
+            index_name.clone(),
+            table_name.clone(),
+            vibesql_catalog::IndexType::BTree,
+            catalog_columns,
+            unique,
+        )
+        .with_where_clause(where_clause);
+        db.catalog.add_index(catalog_meta).map_err(|e| {
+            StorageError::NotImplemented(format!(
+                "Failed to add catalog index metadata for '{}': {}",
+                index_name, e
+            ))
+        })?;
     }
 
     // Read triggers
@@ -634,6 +649,45 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
 pub fn read_catalog<R: Read>(reader: &mut R) -> Result<Database, StorageError> {
     // Default to v1 for backward compatibility with tests that don't pass version
     read_catalog_v(reader, 1)
+}
+
+/// Convert AST `IndexColumn`s (the format used by the storage-side index
+/// manager) into catalog `IndexedColumn`s (the format used by
+/// `vibesql_catalog::IndexMetadata`).
+///
+/// This mirrors the conversion in `vibesql-executor`'s
+/// `btree_index::create_btree_index`. We duplicate it here because the
+/// storage crate cannot depend on the executor crate, and the binary-load
+/// path needs to repopulate the catalog without re-running the executor.
+fn convert_ast_columns_to_catalog(
+    columns: &[vibesql_ast::IndexColumn],
+) -> Vec<vibesql_catalog::IndexedColumn> {
+    columns
+        .iter()
+        .map(|col| {
+            let order = match col.direction() {
+                vibesql_ast::OrderDirection::Asc => vibesql_catalog::SortOrder::Ascending,
+                vibesql_ast::OrderDirection::Desc => vibesql_catalog::SortOrder::Descending,
+            };
+
+            match col {
+                vibesql_ast::IndexColumn::Expression { expr, .. } => {
+                    vibesql_catalog::IndexedColumn::new_expression((**expr).clone(), order)
+                }
+                vibesql_ast::IndexColumn::Column { column_name, prefix_length, .. } => {
+                    if let Some(prefix) = prefix_length {
+                        vibesql_catalog::IndexedColumn::new_column_with_prefix(
+                            column_name.clone(),
+                            order,
+                            *prefix,
+                        )
+                    } else {
+                        vibesql_catalog::IndexedColumn::new_column(column_name.clone(), order)
+                    }
+                }
+            }
+        })
+        .collect()
 }
 
 /// Parse data type string back to DataType enum
