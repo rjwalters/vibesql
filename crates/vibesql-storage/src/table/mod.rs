@@ -566,6 +566,122 @@ impl Table {
         result
     }
 
+    /// Scan only live (non-deleted) rows that are also **MVCC-visible**
+    /// to `snapshot`, returning an owned Vec.
+    ///
+    /// # Phase 1d of #5136
+    ///
+    /// This is the read-path chokepoint that wires
+    /// [`Row::visible_to`](crate::Row::visible_to) into the SELECT scan
+    /// boundary.
+    ///
+    /// - With the `mvcc_enabled` feature **OFF** (default), this method
+    ///   behaves identically to [`scan_live_vec`](Self::scan_live_vec):
+    ///   the snapshot argument is ignored and every live row is returned.
+    ///   This preserves bit-for-bit pre-MVCC behavior for builds without
+    ///   the feature flag.
+    /// - With the `mvcc_enabled` feature **ON**, rows additionally have
+    ///   `Row::visible_to(snapshot)` applied. Rows that fail visibility
+    ///   are filtered out. The `snapshot` is typically the transaction's
+    ///   BEGIN-time snapshot (from
+    ///   [`crate::Database::current_snapshot`]); auto-commit reads pass
+    ///   [`TxnSnapshot::empty`](crate::mvcc::TxnSnapshot::empty) which
+    ///   under Phase 1c's write semantics is equivalent to "show only
+    ///   pre-MVCC rows + my-own writes" — but under the empty snapshot,
+    ///   no MVCC rows are visible. The executor must be careful to pass
+    ///   the right snapshot here; see `select::scan::table::execute_table_scan`
+    ///   for the canonical wiring.
+    ///
+    /// # Performance
+    /// O(n) time and space where n is the number of live rows.
+    /// With the feature OFF, this is exactly the same code path as
+    /// `scan_live_vec`; no extra branch is executed per row.
+    #[inline]
+    pub fn scan_visible_vec(&self, snapshot: &crate::mvcc::TxnSnapshot) -> Vec<Row> {
+        // With the feature OFF, the snapshot argument is dead; defer to
+        // the pre-MVCC scan_live_vec path so we are guaranteed bit-for-bit
+        // identical behavior to today.
+        #[cfg(not(feature = "mvcc_enabled"))]
+        {
+            let _ = snapshot;
+            return self.scan_live_vec();
+        }
+
+        #[cfg(feature = "mvcc_enabled")]
+        {
+            let mut result = Vec::with_capacity(self.row_count());
+            for (idx, row) in self.rows.iter().enumerate() {
+                if self.deleted[idx] {
+                    continue;
+                }
+                if !row.visible_to(snapshot) {
+                    continue;
+                }
+                let mut cloned = row.clone();
+                if cloned.row_id.is_none() {
+                    cloned.row_id = Some((idx + 1) as u64);
+                }
+                result.push(cloned);
+            }
+            result
+        }
+    }
+
+    /// Iterate over live rows that are also MVCC-visible to `snapshot`.
+    ///
+    /// See [`scan_visible_vec`](Self::scan_visible_vec) for the
+    /// feature-flag semantics. With the `mvcc_enabled` feature OFF, this
+    /// is exactly [`scan_live`](Self::scan_live) and the snapshot is
+    /// ignored.
+    #[inline]
+    pub fn scan_visible<'a>(
+        &'a self,
+        snapshot: &'a crate::mvcc::TxnSnapshot,
+    ) -> impl Iterator<Item = (usize, &'a Row)> + 'a {
+        self.rows.iter().enumerate().filter(move |(idx, row)| {
+            if self.deleted[*idx] {
+                return false;
+            }
+            #[cfg(feature = "mvcc_enabled")]
+            {
+                row.visible_to(snapshot)
+            }
+            #[cfg(not(feature = "mvcc_enabled"))]
+            {
+                let _ = (row, snapshot);
+                true
+            }
+        })
+    }
+
+    /// Check whether `row` (at physical index `idx`) is visible to
+    /// `snapshot`, accounting for both the deletion bitmap and MVCC
+    /// `xmin`/`xmax`.
+    ///
+    /// Returns `false` if the row is deleted via the bitmap. With the
+    /// `mvcc_enabled` feature OFF, the snapshot is ignored and the
+    /// answer is purely "is this row not deletion-bitmap-tombstoned?".
+    /// With the feature ON, the row must also pass
+    /// [`Row::visible_to`](crate::Row::visible_to).
+    #[inline]
+    pub fn is_row_visible(&self, idx: usize, snapshot: &crate::mvcc::TxnSnapshot) -> bool {
+        if idx >= self.deleted.len() || self.deleted[idx] {
+            return false;
+        }
+        #[cfg(feature = "mvcc_enabled")]
+        {
+            match self.rows.get(idx) {
+                Some(row) => row.visible_to(snapshot),
+                None => false,
+            }
+        }
+        #[cfg(not(feature = "mvcc_enabled"))]
+        {
+            let _ = snapshot;
+            idx < self.rows.len()
+        }
+    }
+
     /// Get a single row by index position (O(1) access)
     ///
     /// Returns None if the row is deleted or index is out of bounds.

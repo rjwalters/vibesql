@@ -7,6 +7,7 @@
 
 use super::transactions::{DeferredFkViolation, TransactionChange};
 use super::Database;
+use crate::mvcc::TxnSnapshot;
 use crate::wal::{DurabilityMode, TransactionDurability, WalOp};
 use crate::StorageError;
 
@@ -110,6 +111,26 @@ impl Database {
     /// Get current transaction ID (for debugging)
     pub fn transaction_id(&self) -> Option<u64> {
         self.lifecycle.transaction_manager().transaction_id()
+    }
+
+    /// Get the MVCC snapshot for the current transaction (if any).
+    ///
+    /// Returns `Some(&TxnSnapshot)` when a transaction is active, or
+    /// `None` for auto-commit reads. Phase 1d of #5136 wires this into
+    /// the SELECT scan boundary so transactional reads observe a stable
+    /// snapshot-isolation view.
+    ///
+    /// See [`crate::mvcc::TxnSnapshot`].
+    pub fn current_snapshot(&self) -> Option<&TxnSnapshot> {
+        self.lifecycle.transaction_manager().current_snapshot()
+    }
+
+    /// Capture a fresh "commit-time" MVCC snapshot.
+    ///
+    /// Phase 1d (#5151) helper for FK deferred-replay coordination —
+    /// see [`crate::database::transactions::TransactionManager::capture_commit_time_snapshot`].
+    pub fn capture_commit_time_snapshot(&self) -> TxnSnapshot {
+        self.lifecycle.transaction_manager().capture_commit_time_snapshot()
     }
 
     /// Create a savepoint within the current transaction
