@@ -167,6 +167,17 @@ fn generate_create_table_sql(table: &TableSchema) -> String {
             fk_def.push_str(&format!(" ON UPDATE {}", format_referential_action(&fk.on_update)));
         }
 
+        // Emit DEFERRABLE clause when non-default. Matches SQLite's
+        // sqlite_master format and the `introspection.rs` SHOW CREATE
+        // TABLE wiring landed in Phase C3 of #5085.
+        if fk.is_deferrable {
+            if fk.initially_deferred {
+                fk_def.push_str(" DEFERRABLE INITIALLY DEFERRED");
+            } else {
+                fk_def.push_str(" DEFERRABLE INITIALLY IMMEDIATE");
+            }
+        }
+
         definitions.push(fk_def);
     }
 

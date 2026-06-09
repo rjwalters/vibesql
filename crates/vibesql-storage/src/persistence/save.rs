@@ -324,6 +324,23 @@ impl Database {
                             })?;
                         }
                     }
+
+                    // Emit DEFERRABLE clause so deferred-FK semantics survive
+                    // a persistence round-trip. Without this, `.vbsql` dump
+                    // and reload would lose `INITIALLY DEFERRED` and the TCL
+                    // shim's batched-process model would degrade fkey6 tests
+                    // back to immediate enforcement.
+                    if fk.is_deferrable {
+                        if fk.initially_deferred {
+                            write!(writer, " DEFERRABLE INITIALLY DEFERRED").map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                        } else {
+                            write!(writer, " DEFERRABLE INITIALLY IMMEDIATE").map_err(|e| {
+                                StorageError::NotImplemented(format!("Write error: {}", e))
+                            })?;
+                        }
+                    }
                 }
 
                 // Close the column definitions
