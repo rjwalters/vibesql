@@ -1393,15 +1393,35 @@ proc parse_result {output} {
     # NOTE: This function is kept for backwards compatibility but parse_raw_result
     # should be preferred as it correctly handles NULL vs 'NULL' string distinction
     # Errors in output are translated to SQLite-compatible format
+    #
+    # VibeSQL emits one boxed table per result-producing statement, e.g.:
+    #   +----+
+    #   | x  |     <- header (between separators 1 and 2)
+    #   +----+
+    #   | 1  |     <- data row (after separator 2, before separator 3)
+    #   +----+
+    #   1 rows
+    #
+    # When a batch contains multiple result-producing statements (common when
+    # transactions are batched through `flush_batch` and PRAGMA reads are
+    # interleaved), the output contains multiple such tables back-to-back.
+    # We reset the per-table separator counter on the "N rows" trailer (or on
+    # the next leading separator after a 3rd separator) so the header of each
+    # subsequent table is correctly skipped instead of being captured as data.
+    # Without this, fkey6-1.10.1 saw the literal column name `defer_foreign_keys`
+    # appended between each pragma read in the result list.
     set data {}
     set lines [split $output "\n"]
-    set header_seen 0
     set separator_count 0
 
     foreach line $lines {
-        # Skip empty lines and row count lines
+        # Skip empty lines
         if {[string trim $line] eq ""} continue
-        if {[regexp {^\d+ rows?$} $line]} continue
+        # `N rows` marks the end of a table — reset for the next one
+        if {[regexp {^\d+ rows?$} $line]} {
+            set separator_count 0
+            continue
+        }
         if {[regexp {^=+$} $line]} continue
         if {[regexp {^Error} $line]} {
             # Translate error to SQLite format before raising
@@ -1410,7 +1430,14 @@ proc parse_result {output} {
 
         # Count separators - header is between 1st and 2nd separator
         if {[regexp {^\+[-+]+\+$} $line]} {
-            incr separator_count
+            # If we already saw the closing separator of the previous table
+            # (count==3) and no `N rows` trailer arrived (e.g. trimmed), the
+            # next `+---+` is the top of a new table.
+            if {$separator_count >= 3} {
+                set separator_count 1
+            } else {
+                incr separator_count
+            }
             continue
         }
 

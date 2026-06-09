@@ -27,6 +27,12 @@ pub struct RowValidator<'a> {
     batch_pk_values: &'a [Vec<vibesql_types::SqlValue>],
     /// Track UNIQUE values from batch for duplicate detection
     batch_unique_values: &'a [Vec<Vec<vibesql_types::SqlValue>>],
+    /// Previously validated full rows from this multi-row INSERT batch.
+    /// Used by self-referential FK validation so row N can find its parent
+    /// among earlier rows in the same VALUES list (e.g. fkey1-5.1:
+    /// `INSERT INTO t11 VALUES (1, NULL), (2, 1), (3, 2);` where t11.parent
+    /// references t11.x — row (2, 1) must see the just-validated (1, NULL)).
+    batch_full_rows: &'a [Vec<vibesql_types::SqlValue>],
     /// Skip PK/UNIQUE duplicate checks (for REPLACE conflict clause)
     skip_duplicate_checks: bool,
 }
@@ -38,9 +44,18 @@ impl<'a> RowValidator<'a> {
         table_name: &'a str,
         batch_pk_values: &'a [Vec<vibesql_types::SqlValue>],
         batch_unique_values: &'a [Vec<Vec<vibesql_types::SqlValue>>],
+        batch_full_rows: &'a [Vec<vibesql_types::SqlValue>],
         skip_duplicate_checks: bool,
     ) -> Self {
-        Self { db, schema, table_name, batch_pk_values, batch_unique_values, skip_duplicate_checks }
+        Self {
+            db,
+            schema,
+            table_name,
+            batch_pk_values,
+            batch_unique_values,
+            batch_full_rows,
+            skip_duplicate_checks,
+        }
     }
 
     /// Validate all constraints in a single pass through the row
@@ -397,6 +412,10 @@ impl<'a> RowValidator<'a> {
             };
 
             // Steps 4-6: shared per-FK row-existence + self-FK + defer decision.
+            // `batch_full_rows` carries the previously-validated rows from the
+            // same multi-row VALUES list so self-referential FKs can resolve
+            // against siblings (fkey1-5.1: `INSERT INTO t11 VALUES
+            // (1,NULL),(2,1),(3,2)` with t11.parent REFERENCES t11.x).
             match crate::foreign_key_check::check_fk_row_existence(
                 self.db,
                 self.table_name,
@@ -404,6 +423,7 @@ impl<'a> RowValidator<'a> {
                 fk_idx,
                 fk_values,
                 full_row_values,
+                self.batch_full_rows,
             )? {
                 crate::foreign_key_check::FkRowCheck::Ok => continue,
                 crate::foreign_key_check::FkRowCheck::Deferred(v) => {
