@@ -148,6 +148,26 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                     .write_all(&[direction])
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
             }
+
+            // v8+: persist partial-index WHERE clause (if any). Catalog-side
+            // metadata carries the predicate; the storage-side struct does
+            // not, so look up by index name. Serialised as SQL text and
+            // re-parsed on load.
+            use vibesql_ast::pretty_print::ToSql;
+            let where_sql = db
+                .catalog
+                .find_index_by_name(&index_name)
+                .and_then(|m| m.where_clause.as_deref())
+                .map(|expr| expr.to_sql());
+            match where_sql {
+                Some(sql) => {
+                    write_bool(writer, true)?;
+                    write_string(writer, &sql)?;
+                }
+                None => {
+                    write_bool(writer, false)?;
+                }
+            }
         }
     }
 
@@ -470,13 +490,44 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             columns.push(index_column);
         }
 
-        index_specs.push((index_name, table_name, unique, columns));
+        // v8+: read optional partial-index WHERE clause. v1-v7 files do not
+        // include this field, so we treat the absence as "full index".
+        let where_clause: Option<vibesql_ast::Expression> = if version >= 8 {
+            let has_where = read_bool(reader)?;
+            if has_where {
+                let sql = read_string(reader)?;
+                let parsed = vibesql_parser::arena_parser::parse_expression_to_owned(&sql)
+                    .map_err(|e| {
+                        StorageError::NotImplemented(format!(
+                            "Failed to parse partial-index WHERE expression '{}': {}",
+                            sql, e
+                        ))
+                    })?;
+                Some(parsed)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        index_specs.push((index_name, table_name, unique, columns, where_clause));
     }
 
     // Create indexes
-    for (index_name, table_name, unique, columns) in index_specs {
-        db.create_index(index_name, table_name, unique, columns)
+    for (index_name, table_name, unique, columns, where_clause) in index_specs {
+        // Create the storage-side index first (it does not track WHERE clauses).
+        db.create_index(index_name.clone(), table_name.clone(), unique, columns.clone())
             .map_err(|e| StorageError::NotImplemented(format!("Failed to create index: {}", e)))?;
+
+        // Then, if a partial-index predicate was persisted, patch the
+        // catalog-side metadata so subsequent FK-mismatch / planner checks
+        // recognise the index as partial. The storage `create_index` call
+        // also pushes a catalog entry without a WHERE clause; we rewrite
+        // it here to attach the predicate.
+        if let Some(expr) = where_clause {
+            db.catalog.set_index_where_clause(&index_name, Some(expr));
+        }
     }
 
     // Read triggers

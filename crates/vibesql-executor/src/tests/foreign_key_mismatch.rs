@@ -55,15 +55,19 @@ fn fk_mismatch_when_parent_column_not_unique() {
 #[test]
 fn fk_mismatch_when_only_partial_unique_index_exists() {
     // Mirrors fkey1-6.0/6.1: a UNIQUE INDEX with a WHERE clause does not
-    // qualify, but VibeSQL doesn't yet round-trip partial indexes — so for
-    // now we exercise the simpler "no UNIQUE at all" path which the same
-    // code branch produces.
+    // qualify as a FK target — SQLite's `sqlite3FkLocateIndex` requires the
+    // index to cover every parent row. After issue #5181, VibeSQL records
+    // the partial-index predicate on `IndexMetadata` and the FK-mismatch
+    // checker (`foreign_key_check::parent_has_matching_key`) explicitly
+    // rejects partial UNIQUE indexes as FK targets.
     let mut db = Database::new();
     db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE p1(x, y)").unwrap();
     exec_sql(&mut db, "INSERT INTO p1 VALUES(1, 1)").unwrap();
     exec_sql(&mut db, "CREATE TABLE c1(a REFERENCES p1(x))").unwrap();
+    // Add a partial unique index on x — this must NOT satisfy the FK target.
+    exec_sql(&mut db, "CREATE UNIQUE INDEX p1x ON p1(x) WHERE y<2").unwrap();
 
     let err = exec_sql(&mut db, "INSERT INTO c1 VALUES(1)").unwrap_err();
     assert!(
@@ -71,6 +75,28 @@ fn fk_mismatch_when_only_partial_unique_index_exists() {
         "expected mismatch wording, got: {}",
         err
     );
+}
+
+#[test]
+fn fk_succeeds_when_full_unique_index_added_after_partial() {
+    // fkey1-6.2: starting from the partial-index-only state, adding a full
+    // unique index (`p1x2 ON p1(x)`) makes the FK valid. Insert into the
+    // child should then succeed.
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+
+    exec_sql(&mut db, "CREATE TABLE p1(x, y)").unwrap();
+    exec_sql(&mut db, "INSERT INTO p1 VALUES(1, 1)").unwrap();
+    exec_sql(&mut db, "CREATE TABLE c1(a REFERENCES p1(x))").unwrap();
+    exec_sql(&mut db, "CREATE UNIQUE INDEX p1x ON p1(x) WHERE y<2").unwrap();
+    // FK still fails with only the partial index.
+    let err = exec_sql(&mut db, "INSERT INTO c1 VALUES(1)").unwrap_err();
+    assert!(err.contains("foreign key mismatch"), "expected mismatch, got: {}", err);
+
+    // Add a full unique index — FK target now satisfied.
+    exec_sql(&mut db, "CREATE UNIQUE INDEX p1x2 ON p1(x)").unwrap();
+    let r = exec_sql(&mut db, "INSERT INTO c1 VALUES(1)");
+    assert!(r.is_ok(), "expected success after full UNIQUE INDEX; got: {:?}", r);
 }
 
 #[test]

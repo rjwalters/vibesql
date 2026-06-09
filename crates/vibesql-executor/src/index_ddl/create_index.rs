@@ -74,17 +74,15 @@ impl CreateIndexExecutor {
         // Validate the CREATE INDEX statement
         let validation = validate_create_index(stmt, database)?;
 
-        // Partial indexes (CREATE INDEX … WHERE …) are not yet supported beyond
-        // parsing and validation (see #5091). Validation has already run any
-        // semantic checks against the predicate (e.g. rejecting window functions
-        // with the SQLite-compatible "misuse of window function" error); if we
-        // get here with a WHERE clause attached, the predicate was syntactically
-        // legal but storage support is still missing.
-        if stmt.where_clause.is_some() {
-            return Err(ExecutorError::UnsupportedFeature(
-                "partial indexes (CREATE INDEX ... WHERE) are not yet supported".to_string(),
-            ));
-        }
+        // Partial indexes (CREATE INDEX … WHERE …): the predicate has already
+        // been validated for semantic legality (e.g. no window functions). The
+        // catalog now records the predicate via `IndexMetadata::where_clause`
+        // so the FK-mismatch checker and the index-selection planner can
+        // recognise and skip partial indexes. The index *body* is still built
+        // over every row of the parent table — full SQLite-style predicate
+        // evaluation at build time is a follow-up (see issue #5181 curator
+        // notes). This is safe today because the planner refuses to use
+        // partial indexes for query execution.
 
         // Dispatch to appropriate index creation based on type
         match &stmt.index_type {

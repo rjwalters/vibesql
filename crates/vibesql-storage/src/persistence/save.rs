@@ -461,7 +461,23 @@ impl Database {
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
             }
 
-            writeln!(writer, ");")
+            write!(writer, ")")
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+            // Emit WHERE clause for partial indexes so they round-trip through
+            // the SQL-dump persistence path. The catalog-side IndexMetadata
+            // carries the predicate; the storage-side metadata does not, so
+            // we look it up by name.
+            if let Some(catalog_meta) = self.catalog.find_index_by_name(&index_name) {
+                if let Some(where_expr) = catalog_meta.where_clause.as_deref() {
+                    use vibesql_ast::pretty_print::ToSql;
+                    write!(writer, " WHERE {}", where_expr.to_sql()).map_err(|e| {
+                        StorageError::NotImplemented(format!("Write error: {}", e))
+                    })?;
+                }
+            }
+
+            writeln!(writer, ";")
                 .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
         }
         writeln!(writer)

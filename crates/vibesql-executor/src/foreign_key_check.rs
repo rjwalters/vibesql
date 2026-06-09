@@ -112,11 +112,12 @@ fn parent_has_matching_key(
         }
     }
 
-    // 3. Non-partial UNIQUE INDEX exact match. `IndexMetadata` does not yet
-    //    track a `where_clause`, so every UNIQUE index in the catalog is
-    //    treated as full-coverage. Expression indexes can never back an FK.
+    // 3. Non-partial UNIQUE INDEX exact match. Partial indexes (those with a
+    //    WHERE clause) are excluded — SQLite's `sqlite3FkLocateIndex` only
+    //    accepts indexes that cover every parent row. Expression indexes can
+    //    never back an FK either.
     for index in db.catalog.get_table_indexes(&parent.name) {
-        if !index.is_unique || index.has_expression_columns() {
+        if !index.is_unique || index.has_expression_columns() || index.is_partial() {
             continue;
         }
         let mut index_col_indices: Vec<usize> = Vec::with_capacity(index.columns.len());

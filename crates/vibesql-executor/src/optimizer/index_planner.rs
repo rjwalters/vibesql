@@ -244,6 +244,22 @@ impl<'a> IndexPlanner<'a> {
 
         for index_name in &indexes {
             if let Some(index_metadata) = self.database.get_index(index_name) {
+                // Skip partial indexes (CREATE INDEX ... WHERE expr): without
+                // a predicate-implication checker, we can't guarantee the
+                // partial index covers every row the skip-scan path would
+                // expect. Mirrors the conservative exclusion in
+                // `select::scan::index_scan::selection`. The partial flag is
+                // stored on the catalog-side IndexMetadata.
+                if self
+                    .database
+                    .catalog
+                    .find_index_by_name(index_name)
+                    .map(|m| m.is_partial())
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+
                 // Skip single-column indexes (no prefix to skip)
                 if index_metadata.columns.len() < 2 {
                     continue;
@@ -480,6 +496,19 @@ impl<'a> IndexPlanner<'a> {
             Some(meta) => meta,
             None => return false,
         };
+
+        // Conservative exclusion of partial indexes from query selection.
+        // See `select::scan::index_scan::selection` for the rationale. The
+        // partial flag is stored on the catalog-side IndexMetadata.
+        if self
+            .database
+            .catalog
+            .find_index_by_name(index_name)
+            .map(|m| m.is_partial())
+            .unwrap_or(false)
+        {
+            return false;
+        }
 
         let first_col = match index_metadata.columns.first() {
             Some(col) => col,
