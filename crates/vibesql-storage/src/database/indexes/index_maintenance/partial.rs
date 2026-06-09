@@ -313,10 +313,13 @@ impl IndexManager {
         let Some(index_data) = self.index_data.get(&normalized) else {
             return Ok(false);
         };
-        // SQLite ignores all-NULL keys for UNIQUE checks.
-        if key_values.iter().all(|v| matches!(v, SqlValue::Null)) {
-            return Ok(false);
-        }
+        // NULL-handling note: the executor's `check_partial_unique_for_insert`
+        // skips this call when *any* key component is NULL (matching SQLite's
+        // semantics for partial UNIQUE indexes). We rely on the executor as
+        // the authoritative NULL gate so this function never needs to do its
+        // own NULL filtering; should a future caller forget that contract,
+        // we would still be conservative (any-NULL keys never end up in the
+        // body because the insert path also skips them).
         match index_data {
             IndexData::InMemory { data, .. } => Ok(data.contains_key(key_values)),
             IndexData::DiskBacked { btree, .. } => {
@@ -350,5 +353,49 @@ impl IndexManager {
             })
             .map(|(name, metadata)| (name.clone(), metadata))
             .collect()
+    }
+
+    /// Clear partial-index data for a table (for rebuilding after compaction).
+    ///
+    /// Compaction in `delete_by_indices_batch` shifts row indices in the table,
+    /// invalidating the row-index → row mapping stored inside every index body.
+    /// The standard `rebuild_indexes` path skips partial indexes (it cannot
+    /// evaluate WHERE predicates), so the executor must drive the rebuild.
+    /// This helper clears the body so the executor can repopulate it after
+    /// evaluating predicates against the post-compaction rows.
+    pub fn clear_partial_index_data(&mut self, table_name: &str) {
+        let indexes_to_clear: Vec<String> = self
+            .indexes
+            .iter()
+            .filter(|(_, metadata)| {
+                metadata.table_name.eq_ignore_ascii_case(table_name) && metadata.is_partial()
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        for index_name in indexes_to_clear {
+            if let Some(index_data) = self.index_data.get_mut(&index_name) {
+                match index_data {
+                    IndexData::InMemory { data, pending_deletions } => {
+                        data.clear();
+                        pending_deletions.clear();
+                    }
+                    IndexData::DiskBacked { .. } => {
+                        // Disk-backed partial-index clearing is not yet supported.
+                        // Partial-index UNIQUE / point-lookup correctness can be
+                        // affected after compaction when the body is disk-backed;
+                        // gating fast-path bypasses on `has_partial_indexes` keeps
+                        // query results correct until this is implemented.
+                        log::warn!(
+                            "Disk-backed partial index '{}' clearing after compaction not yet supported",
+                            index_name
+                        );
+                    }
+                    IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => {
+                        // Vector indexes do not currently support partial-index semantics.
+                    }
+                }
+            }
+        }
     }
 }

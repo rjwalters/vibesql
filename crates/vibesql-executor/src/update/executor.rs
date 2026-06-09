@@ -13,8 +13,8 @@ use vibesql_types::SqlValue;
 
 use crate::{
     dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
-    expression_index_maintenance, partial_index_maintenance,
-    privilege_checker::PrivilegeChecker, sqlite_schema::is_sqlite_schema_table,
+    expression_index_maintenance, partial_index_maintenance, privilege_checker::PrivilegeChecker,
+    sqlite_schema::is_sqlite_schema_table,
 };
 
 use super::{
@@ -463,6 +463,13 @@ pub(super) fn execute_internal(
             // Handle index maintenance based on compaction
             if delete_result.compacted {
                 database.rebuild_indexes(table_name);
+                // Partial indexes need WHERE-predicate evaluation per row;
+                // the storage `rebuild_indexes` path skips them. Without
+                // this call, partial-index row indices would point at the
+                // wrong table rows after compaction (silent corruption).
+                partial_index_maintenance::rebuild_partial_indexes_after_compaction(
+                    database, table_name,
+                );
                 // KNOWN LIMITATION: After compaction, row indices in the `updates` vector
                 // may be stale since compaction can shift row positions. This is safe in
                 // practice because:
@@ -1376,6 +1383,13 @@ fn execute_update_from(
                 // Handle index maintenance based on compaction.
                 if delete_result.compacted {
                     database.rebuild_indexes(table_name);
+                    // Partial indexes need WHERE-predicate evaluation per row;
+                    // the storage `rebuild_indexes` path skips them. Without
+                    // this call, partial-index row indices would point at the
+                    // wrong table rows after compaction (silent corruption).
+                    partial_index_maintenance::rebuild_partial_indexes_after_compaction(
+                        database, table_name,
+                    );
                     // KNOWN LIMITATION: same caveat as the default path — after
                     // compaction, row indices in `updates` may be stale. This is
                     // safe in practice because UPDATE OR REPLACE typically deletes

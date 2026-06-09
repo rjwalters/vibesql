@@ -513,6 +513,10 @@ impl DeleteExecutor {
             expression_index_maintenance::rebuild_expression_indexes_after_compaction(
                 database, table_name,
             );
+            // Partial indexes need WHERE-predicate evaluation per row
+            partial_index_maintenance::rebuild_partial_indexes_after_compaction(
+                database, table_name,
+            );
         }
 
         // Invalidate the database-level columnar cache since table data changed.

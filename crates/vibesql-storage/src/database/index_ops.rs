@@ -484,6 +484,17 @@ impl Database {
         self.operations.clear_expression_index_data(table_name);
     }
 
+    /// Clear partial-index data for a table (for rebuilding after compaction).
+    ///
+    /// Used by the executor's `rebuild_partial_indexes_after_compaction` —
+    /// compaction in `delete_by_indices_batch` shifts row indices, invalidating
+    /// the per-index `row_index → row` mapping. The executor evaluates each
+    /// partial index's WHERE predicate against the post-compaction rows and
+    /// repopulates the body via `add_to_partial_indexes_for_insert`.
+    pub fn clear_partial_index_data(&mut self, table_name: &str) {
+        self.operations.clear_partial_index_data(table_name);
+    }
+
     // ============================================================================
     // Spatial Index Methods
     // ============================================================================

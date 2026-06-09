@@ -142,12 +142,48 @@ pub fn maintain_partial_indexes_for_delete(
     if included.is_empty() {
         return;
     }
-    db.update_partial_indexes_for_delete_with_values(
-        table_name,
-        &row.values,
-        row_index,
-        &included,
-    );
+    db.update_partial_indexes_for_delete_with_values(table_name, &row.values, row_index, &included);
+}
+
+/// Rebuild partial-index bodies after a table compaction shifted row indices.
+///
+/// `delete_by_indices_batch` may compact the table (when >50% of rows are
+/// being removed) which renumbers the surviving rows. The storage layer's
+/// `rebuild_indexes` repairs non-partial indexes but explicitly skips partial
+/// indexes — it cannot evaluate the WHERE predicate. This helper:
+///
+///  1. clears every partial-index body for the table,
+///  2. iterates the post-compaction rows,
+///  3. evaluates each partial index's WHERE predicate against each row, and
+///  4. re-inserts entries via `add_to_partial_indexes_for_insert`.
+///
+/// Must be invoked at every compaction site (`delete_by_indices_batch`
+/// returning `compacted=true`) directly after `rebuild_indexes` — otherwise
+/// partial-index row indices point at the *wrong* table rows (silent
+/// corruption).
+pub fn rebuild_partial_indexes_after_compaction(db: &mut Database, table_name: &str) {
+    if !db.has_partial_indexes(table_name) {
+        return;
+    }
+
+    // Snapshot rows so we can iterate without holding a borrow on the
+    // database while we call mutating index APIs.
+    let rows: Vec<vibesql_storage::Row> = match db.get_table(table_name) {
+        Some(table) => table.scan().to_vec(),
+        None => return,
+    };
+
+    // Clear the existing body — every row_index in there points at a
+    // now-incorrect table row after compaction.
+    db.clear_partial_index_data(table_name);
+
+    for (row_index, row) in rows.iter().enumerate() {
+        let included = evaluate_partial_index_predicates(db, table_name, row);
+        if included.is_empty() {
+            continue;
+        }
+        db.add_to_partial_indexes_for_insert(table_name, row, row_index, &included);
+    }
 }
 
 /// Check partial UNIQUE-index conflicts for a candidate insert.
@@ -198,9 +234,8 @@ pub fn check_partial_unique_for_insert(
             .map(|col| {
                 let col_name =
                     col.column_name().expect("Partial-index column should have a column name");
-                let col_idx = table_schema
-                    .get_column_index(col_name)
-                    .expect("Index column should exist");
+                let col_idx =
+                    table_schema.get_column_index(col_name).expect("Index column should exist");
                 row.values[col_idx].clone()
             })
             .collect();

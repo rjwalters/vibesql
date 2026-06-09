@@ -823,6 +823,11 @@ impl Operations {
         self.index_manager.clear_expression_index_data(table_name);
     }
 
+    /// Clear partial-index data for a table (for rebuilding after compaction).
+    pub fn clear_partial_index_data(&mut self, table_name: &str) {
+        self.index_manager.clear_partial_index_data(table_name);
+    }
+
     /// Rebuild user-defined indexes after bulk operations that change row indices
     pub fn rebuild_indexes(
         &mut self,

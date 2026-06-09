@@ -224,6 +224,15 @@ pub fn handle_replace_conflicts(
     if delete_result.compacted {
         // Compaction changed all row indices - rebuild indexes from scratch
         db.rebuild_indexes(table_name);
+        // Partial indexes need WHERE-predicate evaluation per row; the
+        // storage layer's `rebuild_indexes` skips them. Without this call,
+        // partial-index row indices would point at the wrong table rows
+        // after compaction (silent corruption).
+        partial_index_maintenance::rebuild_partial_indexes_after_compaction(db, table_name);
+        // NOTE: Expression-index compaction rebuild (`rebuild_expression_indexes_after_compaction`)
+        // is intentionally not invoked here because the existing code path
+        // never did so; that is a separate pre-existing gap tracked outside
+        // this PR.
     } else {
         // No compaction - just adjust remaining user-defined index entries
         // (entries pointing to indices > deleted need to be decremented)

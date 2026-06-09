@@ -188,12 +188,25 @@ fn delete_removes_partial_index_entry_when_predicate_was_truthy() {
         "deleting an included row should remove its index entry"
     );
 
-    // Delete a row that was NOT in the index — index body must be unchanged.
+    // Delete a row that was NOT in the index. With 2 of 3 original rows now
+    // deleted (>50%), `delete_by_indices_batch` triggers compaction and all
+    // surviving row indices renumber. The partial-index body must be
+    // rebuilt so it still points at the right surviving row (id=3, now at
+    // post-compaction row index 0) and must NOT retain the pre-compaction
+    // pointer (row index 2).
     execute_sql(&mut db, "DELETE FROM orders WHERE id = 2");
-    assert_eq!(
-        index_row_indices(&db, "idx_open"),
-        vec![2],
-        "deleting an excluded row must not touch the partial index body"
+    let body = index_body(&db, "idx_open");
+    assert_eq!(body.len(), 1, "partial-index body must have exactly one entry after delete");
+    let surviving_row_idx = *body.values().next().unwrap().first().unwrap();
+    let surviving_row = &db.get_table("orders").unwrap().scan()[surviving_row_idx];
+    // The surviving row must be the one whose predicate is truthy (id=3).
+    let id_val = &surviving_row.values[0];
+    let id_matches =
+        matches!(id_val, SqlValue::Integer(3) | SqlValue::Bigint(3) | SqlValue::Smallint(3));
+    assert!(
+        id_matches,
+        "partial-index body must reference the surviving predicate-truthy row (id=3); got {:?}",
+        id_val
     );
 }
 
@@ -287,12 +300,217 @@ fn batch_insert_into_partial_index_evaluates_predicate() {
     );
 
     // Batch insert path (multiple rows, no triggers).
-    execute_sql(
-        &mut db,
-        "INSERT INTO t VALUES (1, 1), (2, 0), (3, 1), (4, 0), (5, 1)",
-    );
+    execute_sql(&mut db, "INSERT INTO t VALUES (1, 1), (2, 0), (3, 1), (4, 0), (5, 1)");
 
     let entries = index_row_indices(&db, "idx_flag");
     // Row indices 0 (id=1), 2 (id=3), 4 (id=5) have flag=1.
     assert_eq!(entries, vec![0, 2, 4]);
+}
+
+// ============================================================================
+// Compaction-rebuild regression tests
+// ============================================================================
+//
+// `delete_by_indices_batch` compacts the table (renumbers all rows) when
+// >50% of rows are deleted. Before the fix, the executor invoked
+// `rebuild_indexes` (which skips partial indexes) but never rebuilt the
+// partial-index body — so partial-index `row_index` entries pointed at the
+// wrong table rows after compaction (silent corruption).
+//
+// The tests below trigger compaction with partial indexes present and verify
+// that the index body still refers to the correct post-compaction rows.
+
+/// Helper: assert the index body's row indices all refer to rows in the
+/// post-compaction table whose row content matches the index's WHERE
+/// predicate, and that *every* matching row in the table is represented.
+fn assert_partial_index_consistent_after_compaction(
+    db: &Database,
+    table_name: &str,
+    index_name: &str,
+    expected_predicate_truthy_ids: &[i64],
+    id_col: usize,
+) {
+    let table = db.get_table(table_name).expect("table missing");
+    let rows: Vec<_> = table.scan().to_vec();
+
+    // Collect the id values that the index currently points at.
+    let mut indexed_ids: Vec<i64> = index_row_indices(db, index_name)
+        .into_iter()
+        .map(|row_idx| {
+            let v = &rows[row_idx].values[id_col];
+            match v {
+                SqlValue::Integer(n) => *n,
+                SqlValue::Bigint(n) => *n,
+                SqlValue::Smallint(n) => *n as i64,
+                SqlValue::Double(n) => *n as i64,
+                SqlValue::Real(n) => *n as i64,
+                SqlValue::Float(n) => *n as i64,
+                other => panic!("unexpected id type in row: {:?}", other),
+            }
+        })
+        .collect();
+    indexed_ids.sort_unstable();
+
+    let mut expected: Vec<i64> = expected_predicate_truthy_ids.to_vec();
+    expected.sort_unstable();
+
+    assert_eq!(
+        indexed_ids, expected,
+        "partial-index body after compaction must reference exactly the rows whose predicate is truthy"
+    );
+}
+
+#[test]
+fn partial_index_survives_table_compaction_after_bulk_delete() {
+    // Build a table with enough rows that deleting >50% triggers compaction
+    // in `delete_by_indices_batch`. Sprinkle predicate-truthy rows throughout
+    // so the bug (stale row_index pointers after compaction) would surface
+    // as the index referencing the wrong rows.
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE orders (id INTEGER PRIMARY KEY, status INTEGER);
+        "#,
+    );
+
+    // 20 rows; predicate-truthy rows are at ids 3, 6, 9, 12, 15, 18 (status=1).
+    // Other rows have status=0.
+    let mut insert_sql = String::from("INSERT INTO orders VALUES ");
+    for id in 1..=20 {
+        let status = if id % 3 == 0 { 1 } else { 0 };
+        if id > 1 {
+            insert_sql.push_str(", ");
+        }
+        insert_sql.push_str(&format!("({}, {})", id, status));
+    }
+    execute_sql(&mut db, &insert_sql);
+
+    execute_sql(&mut db, "CREATE INDEX idx_open ON orders(id) WHERE status = 1");
+
+    // Before any delete, all 6 predicate-truthy rows should be indexed.
+    let truthy_ids_before: Vec<i64> = vec![3, 6, 9, 12, 15, 18];
+    assert_partial_index_consistent_after_compaction(
+        &db,
+        "orders",
+        "idx_open",
+        &truthy_ids_before,
+        /* id col */ 0,
+    );
+
+    // Delete 11 rows (>50% of 20) to force compaction. Keep ids
+    // {3, 6, 9, 12, 15, 18, 20} (all truthy ids plus one falsy survivor).
+    execute_sql(&mut db, "DELETE FROM orders WHERE id NOT IN (3, 6, 9, 12, 15, 18, 20)");
+
+    let truthy_ids_after: Vec<i64> = vec![3, 6, 9, 12, 15, 18];
+    assert_partial_index_consistent_after_compaction(
+        &db,
+        "orders",
+        "idx_open",
+        &truthy_ids_after,
+        /* id col */ 0,
+    );
+
+    // Also: the index must NOT reference any non-truthy row. The helper above
+    // already checks the indexed ids equal the truthy set, so this is implied.
+    // But also verify the table really compacted (row count dropped) so we
+    // know the test actually exercised the compaction path.
+    let table = db.get_table("orders").expect("table missing");
+    assert_eq!(table.row_count(), 7, "compaction should have left 7 surviving rows");
+}
+
+#[test]
+fn partial_unique_index_remains_enforceable_after_compaction() {
+    // After compaction-rebuild, the partial UNIQUE index body must still
+    // contain the correct surviving keys so subsequent inserts that would
+    // collide with a surviving truthy row are still rejected.
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE orders (id INTEGER PRIMARY KEY, status INTEGER, sku INTEGER);
+        "#,
+    );
+
+    let mut insert_sql = String::from("INSERT INTO orders VALUES ");
+    for id in 1..=20 {
+        let status = if id % 3 == 0 { 1 } else { 0 };
+        if id > 1 {
+            insert_sql.push_str(", ");
+        }
+        // Unique sku per row.
+        insert_sql.push_str(&format!("({}, {}, {})", id, status, 100 + id));
+    }
+    execute_sql(&mut db, &insert_sql);
+
+    execute_sql(&mut db, "CREATE UNIQUE INDEX idx_open_sku ON orders(sku) WHERE status = 1");
+
+    // Trigger compaction. Keep just the truthy rows + a couple falsy ones.
+    execute_sql(&mut db, "DELETE FROM orders WHERE id NOT IN (3, 6, 9, 12, 15, 18, 1, 2)");
+
+    // Surviving truthy rows have sku in {103, 106, 109, 112, 115, 118}.
+    // An insert that re-uses one of those skus with status=1 must still be
+    // rejected by the partial UNIQUE index. Before the fix, the index body
+    // referenced *pre-compaction* row indices and so this insert could either
+    // spuriously fail (if the stale pointer happened to land on a truthy
+    // surviving row with a different sku) or pass (if it landed on a
+    // non-truthy row). After the fix, the body has been rebuilt from current
+    // rows so the duplicate is caught.
+    let stmt = Parser::parse_sql("INSERT INTO orders VALUES (99, 1, 109)").unwrap();
+    let result = match &stmt {
+        vibesql_ast::Statement::Insert(s) => InsertExecutor::execute(&mut db, s),
+        _ => unreachable!(),
+    };
+    assert!(
+        result.is_err(),
+        "partial UNIQUE index must still reject duplicates after table compaction"
+    );
+
+    // Conversely, an insert that does NOT collide must succeed.
+    execute_sql(&mut db, "INSERT INTO orders VALUES (100, 1, 999)");
+
+    // And an insert with a sku matching a *deleted* truthy row must succeed —
+    // the body must NOT retain stale entries for the compacted-away rows.
+    // (sku 121 belonged to id=21 which we never inserted; sku 103 belonged
+    // to id=3 which we kept, so test with a deleted-truthy sku instead.)
+    // We deleted id=21? No — only ids 1..=20 inserted. Deleted truthy ids:
+    // none — we kept all truthy ids. So this case can't be exercised here;
+    // the regression test above already proves the body doesn't contain
+    // stale pointers (it would otherwise reject INSERT (100, 1, 999)).
+}
+
+#[test]
+fn partial_index_body_empty_after_compaction_removes_all_truthy_rows() {
+    // If every predicate-truthy row is deleted (and we cross the >50%
+    // threshold), the partial-index body must end up empty — never
+    // referencing the compacted-away rows.
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE orders (id INTEGER PRIMARY KEY, status INTEGER);
+        "#,
+    );
+
+    // 10 rows, only ids 4 and 7 truthy.
+    execute_sql(
+        &mut db,
+        "INSERT INTO orders VALUES \
+         (1, 0), (2, 0), (3, 0), (4, 1), (5, 0), \
+         (6, 0), (7, 1), (8, 0), (9, 0), (10, 0)",
+    );
+    execute_sql(&mut db, "CREATE INDEX idx_open ON orders(id) WHERE status = 1");
+    assert_eq!(index_row_indices(&db, "idx_open").len(), 2);
+
+    // Delete 6 rows (>50%) including both truthy rows.
+    execute_sql(&mut db, "DELETE FROM orders WHERE id IN (1, 2, 4, 5, 7, 8)");
+
+    // No surviving row matches the predicate, body must be empty.
+    assert!(
+        index_body(&db, "idx_open").is_empty(),
+        "after compaction removes all truthy rows, partial-index body must be empty"
+    );
+
+    let table = db.get_table("orders").expect("table missing");
+    assert_eq!(table.row_count(), 4);
 }
