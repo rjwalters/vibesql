@@ -68,18 +68,50 @@ impl ForeignKeyValidator {
             let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
             let parent_indices = crate::foreign_key_check::resolved_parent_indices_for_fk(db, fk);
 
-            let key_exists = parent_table.scan().iter().any(|parent_row| {
-                parent_indices.iter().zip(&fk_values).enumerate().all(
-                    |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
-                        Some(parent_val) => crate::foreign_key_check::fk_values_equal(
-                            fk_val,
-                            parent_val,
-                            parent_collations.get(i).and_then(|c| c.as_deref()),
-                        ),
-                        None => false,
-                    },
-                )
-            });
+            // Phase 1d follow-up (#5205): the parent-existence check on
+            // the UPDATE path must honor MVCC visibility for the same
+            // reason as INSERT — an uncommitted concurrent INSERT on the
+            // parent must not satisfy this child's FK. Off-state
+            // (`mvcc_enabled` OFF) preserves the previous `scan().iter()`
+            // semantics (including bitmap-deleted physical rows).
+            let snapshot = crate::mvcc::read_snapshot(db);
+            let key_exists = {
+                #[cfg(feature = "mvcc_enabled")]
+                {
+                    parent_table.scan_visible(&snapshot).any(|(_, parent_row)| {
+                        parent_indices.iter().zip(&fk_values).enumerate().all(
+                            |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
+                                Some(parent_val) => {
+                                    crate::foreign_key_check::fk_values_equal(
+                                        fk_val,
+                                        parent_val,
+                                        parent_collations.get(i).and_then(|c| c.as_deref()),
+                                    )
+                                }
+                                None => false,
+                            },
+                        )
+                    })
+                }
+                #[cfg(not(feature = "mvcc_enabled"))]
+                {
+                    let _ = &snapshot;
+                    parent_table.scan().iter().any(|parent_row| {
+                        parent_indices.iter().zip(&fk_values).enumerate().all(
+                            |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
+                                Some(parent_val) => {
+                                    crate::foreign_key_check::fk_values_equal(
+                                        fk_val,
+                                        parent_val,
+                                        parent_collations.get(i).and_then(|c| c.as_deref()),
+                                    )
+                                }
+                                None => false,
+                            },
+                        )
+                    })
+                }
+            };
 
             if key_exists {
                 continue;
@@ -191,37 +223,67 @@ impl ForeignKeyValidator {
                 let parent_collations =
                     crate::foreign_key_check::parent_collations_for_fk(db, fk);
 
-                // Get the child table and find matching rows
+                // Get the child table and find matching rows.
+                //
+                // Phase 1d follow-up (#5205): the child-reference scan
+                // must respect MVCC visibility. A child row that has been
+                // deleted by a concurrent committed transaction must not
+                // count as "referencing" the parent under our snapshot.
+                // Equally, our own in-txn child writes participate via
+                // the widened BEGIN-time snapshot (#5223). Off-state
+                // (`mvcc_enabled` OFF) preserves the pre-MVCC behavior of
+                // walking every physical row via `scan().iter()`.
+                let snapshot = crate::mvcc::read_snapshot(db);
                 let child_table = db.get_table(&table_name).unwrap();
-                let matching_rows: Vec<(usize, vibesql_storage::Row)> = child_table
-                    .scan()
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(idx, child_row)| {
-                        let child_fk_values: Vec<vibesql_types::SqlValue> = fk
-                            .column_indices
+                let matches_fk = |child_row: &vibesql_storage::Row| -> bool {
+                    let child_fk_values: Vec<vibesql_types::SqlValue> = fk
+                        .column_indices
+                        .iter()
+                        .map(|&col_idx| child_row.values[col_idx].clone())
+                        .collect();
+                    child_fk_values
+                        .iter()
+                        .zip(&old_parent_key_values)
+                        .enumerate()
+                        .all(|(i, (cv, pv))| {
+                            crate::foreign_key_check::fk_values_equal(
+                                cv,
+                                pv,
+                                parent_collations.get(i).and_then(|c| c.as_deref()),
+                            )
+                        })
+                };
+                let matching_rows: Vec<(usize, vibesql_storage::Row)> = {
+                    #[cfg(feature = "mvcc_enabled")]
+                    {
+                        child_table
+                            .scan_visible(&snapshot)
+                            .filter_map(|(idx, child_row)| {
+                                if matches_fk(child_row) {
+                                    Some((idx, child_row.clone()))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect()
+                    }
+                    #[cfg(not(feature = "mvcc_enabled"))]
+                    {
+                        let _ = &snapshot;
+                        child_table
+                            .scan()
                             .iter()
-                            .map(|&col_idx| child_row.values[col_idx].clone())
-                            .collect();
-
-                        let matches = child_fk_values
-                            .iter()
-                            .zip(&old_parent_key_values)
                             .enumerate()
-                            .all(|(i, (cv, pv))| {
-                                crate::foreign_key_check::fk_values_equal(
-                                    cv,
-                                    pv,
-                                    parent_collations.get(i).and_then(|c| c.as_deref()),
-                                )
-                            });
-                        if matches {
-                            Some((idx, child_row.clone()))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                            .filter_map(|(idx, child_row)| {
+                                if matches_fk(child_row) {
+                                    Some((idx, child_row.clone()))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect()
+                    }
+                };
 
                 if !matching_rows.is_empty() {
                     // Check the referential action
