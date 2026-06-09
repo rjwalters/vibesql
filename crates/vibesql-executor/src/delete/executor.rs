@@ -10,7 +10,7 @@ use crate::{
     dml_cost::DmlOptimizer,
     errors::ExecutorError,
     evaluator::{coercion::coerce_value_to_column_type, ExpressionEvaluator},
-    expression_index_maintenance,
+    expression_index_maintenance, partial_index_maintenance,
     privilege_checker::PrivilegeChecker,
     sqlite_schema::is_sqlite_schema_table,
     truncate_validation::can_use_truncate,
@@ -233,7 +233,15 @@ impl DeleteExecutor {
 
                     // Also skip fast path if there are expression indexes that need maintenance
                     let has_expression_indexes = database.has_expression_indexes(table_name);
-                    if !has_triggers && !has_referencing_fks && !has_expression_indexes {
+                    // Skip fast path if there are partial indexes — they need
+                    // the executor to evaluate the WHERE predicate against
+                    // the row being deleted before removing the entry.
+                    let has_partial_indexes = database.has_partial_indexes(table_name);
+                    if !has_triggers
+                        && !has_referencing_fks
+                        && !has_expression_indexes
+                        && !has_partial_indexes
+                    {
                         // Use the fast path - no triggers, no FKs, no expression indexes, single row PK delete
                         match database.delete_by_pk_fast(table_name, &pk_values) {
                             Ok(deleted) => {
@@ -457,6 +465,9 @@ impl DeleteExecutor {
         // Maintain expression indexes for each deleted row
         for (row_index, row) in &rows_and_indices_to_delete {
             expression_index_maintenance::maintain_expression_indexes_for_delete(
+                database, table_name, row, *row_index,
+            );
+            partial_index_maintenance::maintain_partial_indexes_for_delete(
                 database, table_name, row, *row_index,
             );
         }

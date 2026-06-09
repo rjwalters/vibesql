@@ -607,6 +607,12 @@ impl<'a> SessionMut<'a> {
             }
         }
 
+        // Partial indexes need the executor to evaluate the WHERE predicate
+        // against the row being deleted; the fast path skips that.
+        if self.db.has_partial_indexes(&plan.table_name) {
+            return false;
+        }
+
         true // No blockers, fast path is valid
     }
 

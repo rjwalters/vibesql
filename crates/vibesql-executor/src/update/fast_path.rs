@@ -22,6 +22,7 @@ use crate::{
     evaluator::{coercion::coerce_value_to_column_type, ExpressionEvaluator},
     expression_index_maintenance,
     insert::validation::coerce_value,
+    partial_index_maintenance,
 };
 
 /// Try to execute UPDATE via fast path for simple single-row PK updates.
@@ -224,6 +225,11 @@ pub(super) fn try_fast_path_update(
         database, table_name, &old_row, &new_row, row_index,
     );
 
+    // Maintain partial indexes for this update (predicate evaluated per row).
+    partial_index_maintenance::maintain_partial_indexes_for_update(
+        database, table_name, &old_row, &new_row, row_index,
+    );
+
     // Phase 1c (Issue #5150 / #5136): stamp the new row's xmin with the
     // active txn id when the `mvcc_enabled` feature is on. Off-state is a
     // no-op, preserving pre-MVCC behavior bit-for-bit.
@@ -316,6 +322,14 @@ fn try_super_fast_path(
         // Check no user-defined indexes on this column
         if database.has_index_on_column(table_name, &assignment.column) {
             return Ok(None); // Index update needs normal path
+        }
+
+        // Partial indexes may reference any column in their WHERE predicate
+        // (not just the indexed column). Skip the super-fast in-place path
+        // when any partial index exists so the partial-index maintenance
+        // helper can re-evaluate predicates.
+        if database.has_partial_indexes(table_name) {
+            return Ok(None);
         }
 
         inplace_updates.push((col_index, coerced_value));

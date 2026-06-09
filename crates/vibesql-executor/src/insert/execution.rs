@@ -3,8 +3,8 @@ use vibesql_storage::statistics::CostEstimator;
 
 use crate::{
     dml_cost::DmlOptimizer, errors::ExecutorError, expression_index_maintenance,
-    privilege_checker::PrivilegeChecker, sqlite_schema::is_sqlite_schema_table,
-    sqlite_stat::is_sqlite_stat1_table,
+    partial_index_maintenance, privilege_checker::PrivilegeChecker,
+    sqlite_schema::is_sqlite_schema_table, sqlite_stat::is_sqlite_stat1_table,
 };
 
 /// Execute an INSERT statement
@@ -713,6 +713,16 @@ fn execute_insert_internal(
                 let rows: Vec<vibesql_storage::Row> =
                     chunk.iter().map(|(v, rowid)| make_row((v.clone(), *rowid))).collect();
 
+                // Partial-aware unique-constraint check (storage skips
+                // partial UNIQUE indexes; the executor must do this itself).
+                for row in &rows {
+                    partial_index_maintenance::check_partial_unique_for_insert(
+                        db,
+                        &storage_table_name,
+                        row,
+                    )?;
+                }
+
                 let chunk_inserted =
                     db.insert_rows_batch(&storage_table_name, rows.clone()).map_err(|e| {
                         ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
@@ -721,6 +731,12 @@ fn execute_insert_internal(
                 // Maintain expression indexes for each inserted row
                 for (i, row) in rows.iter().enumerate() {
                     expression_index_maintenance::maintain_expression_indexes_for_insert(
+                        db,
+                        &storage_table_name,
+                        row,
+                        row_offset + i,
+                    );
+                    partial_index_maintenance::maintain_partial_indexes_for_insert(
                         db,
                         &storage_table_name,
                         row,
@@ -735,6 +751,16 @@ fn execute_insert_internal(
             let rows: Vec<vibesql_storage::Row> =
                 validated_rows.into_iter().map(make_row).collect();
 
+            // Partial-aware unique-constraint check (storage skips partial
+            // UNIQUE indexes; the executor must do this itself).
+            for row in &rows {
+                partial_index_maintenance::check_partial_unique_for_insert(
+                    db,
+                    &storage_table_name,
+                    row,
+                )?;
+            }
+
             rows_inserted =
                 db.insert_rows_batch(&storage_table_name, rows.clone()).map_err(|e| {
                     ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
@@ -743,6 +769,12 @@ fn execute_insert_internal(
             // Maintain expression indexes for each inserted row
             for (i, row) in rows.iter().enumerate() {
                 expression_index_maintenance::maintain_expression_indexes_for_insert(
+                    db,
+                    &storage_table_name,
+                    row,
+                    initial_row_count + i,
+                );
+                partial_index_maintenance::maintain_partial_indexes_for_insert(
                     db,
                     &storage_table_name,
                     row,
@@ -924,12 +956,25 @@ fn execute_insert_internal(
 
             // Insert the row
             let row = make_row((full_row_values, final_explicit_rowid));
+            // Partial-aware unique-constraint check (storage skips partial
+            // UNIQUE indexes; the executor must do that check itself).
+            partial_index_maintenance::check_partial_unique_for_insert(
+                db,
+                &storage_table_name,
+                &row,
+            )?;
             db.insert_row(&storage_table_name, row.clone()).map_err(|e| {
                 ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
             })?;
 
             // Maintain expression indexes for this insert
             expression_index_maintenance::maintain_expression_indexes_for_insert(
+                db,
+                &storage_table_name,
+                &row,
+                row_count_before,
+            );
+            partial_index_maintenance::maintain_partial_indexes_for_insert(
                 db,
                 &storage_table_name,
                 &row,

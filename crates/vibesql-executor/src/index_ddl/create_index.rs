@@ -76,13 +76,14 @@ impl CreateIndexExecutor {
 
         // Partial indexes (CREATE INDEX … WHERE …): the predicate has already
         // been validated for semantic legality (e.g. no window functions). The
-        // catalog now records the predicate via `IndexMetadata::where_clause`
-        // so the FK-mismatch checker and the index-selection planner can
-        // recognise and skip partial indexes. The index *body* is still built
-        // over every row of the parent table — full SQLite-style predicate
-        // evaluation at build time is a follow-up (see issue #5181 curator
-        // notes). This is safe today because the planner refuses to use
-        // partial indexes for query execution.
+        // catalog records the predicate via `IndexMetadata::where_clause` so
+        // the FK-mismatch checker and the index-selection planner can
+        // recognise and skip partial indexes. The B-tree index path
+        // (`create_btree_index`) now also evaluates the predicate against
+        // every existing row at build time so the initial index body only
+        // contains matching rows. Subsequent INSERT/UPDATE/DELETE maintenance
+        // is handled by `partial_index_maintenance` on each DML path. See
+        // issue #5214.
 
         // Dispatch to appropriate index creation based on type
         match &stmt.index_type {

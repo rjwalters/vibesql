@@ -20,6 +20,10 @@ impl IndexManager {
     /// Note: Expression indexes require pre-computed keys via
     /// `add_to_expression_indexes_for_insert`. This method skips expression indexes since it
     /// cannot evaluate expressions.
+    ///
+    /// Partial indexes are also skipped here. The storage layer cannot evaluate
+    /// the WHERE predicate, so the executor crate must call
+    /// `add_to_partial_indexes_for_insert` with a pre-computed inclusion set.
     pub fn add_to_indexes_for_insert(
         &mut self,
         table_name: &str,
@@ -35,6 +39,12 @@ impl IndexManager {
                 // Skip expression indexes - they need pre-computed keys
                 // Expression indexes are handled by add_to_expression_indexes_for_insert
                 if metadata.columns.iter().any(|col| col.is_expression()) {
+                    continue;
+                }
+
+                // Skip partial indexes - they need pre-evaluated predicates
+                // Partial indexes are handled by add_to_partial_indexes_for_insert
+                if metadata.is_partial() {
                     continue;
                 }
 
@@ -215,6 +225,7 @@ impl IndexManager {
         // Collect indexes that need updating for this table
         // Pre-compute column indices once per index (not per row)
         // Skip expression indexes - they need pre-computed keys
+        // Skip partial indexes - they need pre-evaluated predicates
         #[allow(clippy::type_complexity)]
         let indexes_to_update: Vec<(String, Vec<(usize, Option<u64>)>)> = self
             .indexes
@@ -222,6 +233,7 @@ impl IndexManager {
             .filter(|(_, metadata)| {
                 metadata.table_name.eq_ignore_ascii_case(table_name)
                     && !metadata.columns.iter().any(|col| col.is_expression())
+                    && !metadata.is_partial()
             })
             .map(|(index_name, metadata)| {
                 // Pre-compute column indices and prefix lengths for this index

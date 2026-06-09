@@ -528,6 +528,20 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
         // returns `None` for every persisted index after a cold load — which
         // also silently swallows partial-index WHERE clauses, expression-index
         // metadata, and breaks any planner/FK check that consults the catalog.
+        //
+        // For partial indexes we additionally patch the storage-side
+        // `where_clause` so subsequent insert/update/delete maintenance
+        // routes through the partial-index code paths.
+        //
+        // SAFETY / KNOWN LIMITATION: the index body created above includes
+        // every table row (since binary persistence dumped the unfiltered
+        // index body). Query correctness today is preserved because the
+        // planner's `is_partial()` skip prevents partial indexes from being
+        // consulted for reads. A subsequent REINDEX through the executor
+        // (which can evaluate the WHERE predicate) is needed to rebuild the
+        // body with only matching rows. For the SQL-dump load path, the
+        // dump replays the CREATE INDEX statement through the executor which
+        // already applies the predicate at build time.
         let catalog_columns = convert_ast_columns_to_catalog(&columns);
         let catalog_meta = vibesql_catalog::IndexMetadata::new(
             index_name.clone(),
@@ -536,13 +550,16 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             catalog_columns,
             unique,
         )
-        .with_where_clause(where_clause);
+        .with_where_clause(where_clause.clone());
         db.catalog.add_index(catalog_meta).map_err(|e| {
             StorageError::NotImplemented(format!(
                 "Failed to add catalog index metadata for '{}': {}",
                 index_name, e
             ))
         })?;
+        if let Some(expr) = where_clause {
+            db.set_index_where_clause(&index_name, Some(Box::new(expr)));
+        }
     }
 
     // Read triggers

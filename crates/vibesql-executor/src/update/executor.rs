@@ -13,8 +13,8 @@ use vibesql_types::SqlValue;
 
 use crate::{
     dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
-    expression_index_maintenance, privilege_checker::PrivilegeChecker,
-    sqlite_schema::is_sqlite_schema_table,
+    expression_index_maintenance, partial_index_maintenance,
+    privilege_checker::PrivilegeChecker, sqlite_schema::is_sqlite_schema_table,
 };
 
 use super::{
@@ -435,6 +435,9 @@ pub(super) fn execute_internal(
                 expression_index_maintenance::maintain_expression_indexes_for_delete(
                     database, table_name, row, *row_index,
                 );
+                partial_index_maintenance::maintain_partial_indexes_for_delete(
+                    database, table_name, row, *row_index,
+                );
             }
 
             // Phase 1c (Issue #5150 / #5136): capture the active txn id
@@ -603,6 +606,9 @@ pub(super) fn execute_internal(
 
         // Maintain expression indexes for this update
         expression_index_maintenance::maintain_expression_indexes_for_update(
+            database, table_name, &old_row, &new_row, index,
+        );
+        partial_index_maintenance::maintain_partial_indexes_for_update(
             database, table_name, &old_row, &new_row, index,
         );
     }
@@ -1342,6 +1348,9 @@ fn execute_update_from(
                     expression_index_maintenance::maintain_expression_indexes_for_delete(
                         database, table_name, row, *row_index,
                     );
+                    partial_index_maintenance::maintain_partial_indexes_for_delete(
+                        database, table_name, row, *row_index,
+                    );
                 }
 
                 // Phase 1c (Issue #5150 / #5136): capture the active txn
@@ -1521,6 +1530,9 @@ fn execute_update_from(
         );
 
         expression_index_maintenance::maintain_expression_indexes_for_update(
+            database, table_name, &old_row, &new_row, index,
+        );
+        partial_index_maintenance::maintain_partial_indexes_for_update(
             database, table_name, &old_row, &new_row, index,
         );
     }

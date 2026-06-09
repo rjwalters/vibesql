@@ -439,6 +439,16 @@ impl Operations {
     }
 
     /// Create an index
+    ///
+    /// `where_clause` and `included_row_indices` together describe the
+    /// partial-index build path. When both are `None`, this builds a normal
+    /// full-coverage index. When set, `where_clause` is stashed in the index
+    /// metadata (so subsequent insert/update maintenance can distinguish
+    /// partial indexes) and `included_row_indices` controls which existing
+    /// table rows make it into the initial index body. The executor crate
+    /// is responsible for evaluating the predicate to produce that set;
+    /// storage never evaluates expressions.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_index(
         &mut self,
         catalog: &vibesql_catalog::Catalog,
@@ -447,6 +457,8 @@ impl Operations {
         table_name: String,
         unique: bool,
         columns: Vec<IndexColumn>,
+        where_clause: Option<Box<vibesql_ast::Expression>>,
+        included_row_indices: Option<&std::collections::HashSet<usize>>,
     ) -> Result<(), StorageError> {
         // Normalize table name for lookup (matches catalog normalization)
         let normalized_name = if catalog.is_case_sensitive_identifiers() {
@@ -485,6 +497,8 @@ impl Operations {
             table.scan(),
             unique,
             columns,
+            where_clause,
+            included_row_indices,
         )
     }
 
@@ -645,6 +659,99 @@ impl Operations {
     }
 
     // ============================================================================
+    // Partial Index Methods (operations layer)
+    // ============================================================================
+
+    /// Maintain partial indexes after inserting a row.
+    pub fn add_to_partial_indexes_for_insert(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        table_name: &str,
+        row: &Row,
+        row_index: usize,
+        included_partial_indexes: &std::collections::HashSet<String>,
+    ) {
+        if let Some(table_schema) = catalog.get_table(table_name) {
+            self.index_manager.add_to_partial_indexes_for_insert(
+                table_name,
+                table_schema,
+                row,
+                row_index,
+                included_partial_indexes,
+            );
+        }
+    }
+
+    /// Maintain partial indexes after updating a row.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_partial_indexes_for_update(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        table_name: &str,
+        old_row: &Row,
+        new_row: &Row,
+        row_index: usize,
+        old_included: &std::collections::HashSet<String>,
+        new_included: &std::collections::HashSet<String>,
+    ) {
+        if let Some(table_schema) = catalog.get_table(table_name) {
+            self.index_manager.update_partial_indexes_for_update(
+                table_name,
+                table_schema,
+                old_row,
+                new_row,
+                row_index,
+                old_included,
+                new_included,
+            );
+        }
+    }
+
+    /// Maintain partial indexes after deleting a row.
+    pub fn update_partial_indexes_for_delete_with_values(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        table_name: &str,
+        values: &[vibesql_types::SqlValue],
+        row_index: usize,
+        included_partial_indexes: &std::collections::HashSet<String>,
+    ) {
+        if let Some(table_schema) = catalog.get_table(table_name) {
+            self.index_manager.update_partial_indexes_for_delete(
+                table_name,
+                table_schema,
+                values,
+                row_index,
+                included_partial_indexes,
+            );
+        }
+    }
+
+    /// Check whether a candidate key would violate the uniqueness of a
+    /// partial UNIQUE index. Caller must have already verified that the
+    /// partial-index WHERE predicate is truthy for the candidate row.
+    pub fn check_partial_unique_conflict(
+        &self,
+        index_name: &str,
+        key_values: &[vibesql_types::SqlValue],
+    ) -> Result<bool, StorageError> {
+        self.index_manager.check_partial_unique_conflict(index_name, key_values)
+    }
+
+    /// Whether the given table has any partial indexes.
+    pub fn has_partial_indexes(&self, table_name: &str) -> bool {
+        self.index_manager.has_partial_indexes(table_name)
+    }
+
+    /// Get all partial indexes for a specific table.
+    pub fn get_partial_indexes_for_table(
+        &self,
+        table_name: &str,
+    ) -> Vec<(String, &super::indexes::IndexMetadata)> {
+        self.index_manager.get_partial_indexes_for_table(table_name)
+    }
+
+    // ============================================================================
     // Expression Index Methods
     // ============================================================================
 
@@ -769,6 +876,17 @@ impl Operations {
     /// Drop an index
     pub fn drop_index(&mut self, index_name: &str) -> Result<(), StorageError> {
         self.index_manager.drop_index(index_name)
+    }
+
+    /// Patch a storage-side index's WHERE clause. See
+    /// `IndexManager::set_index_where_clause` for details. Used by
+    /// persistence/recovery paths.
+    pub fn set_index_where_clause(
+        &mut self,
+        index_name: &str,
+        where_clause: Option<Box<vibesql_ast::Expression>>,
+    ) -> bool {
+        self.index_manager.set_index_where_clause(index_name, where_clause)
     }
 
     /// List all indexes

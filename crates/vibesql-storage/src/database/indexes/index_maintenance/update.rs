@@ -50,6 +50,14 @@ impl IndexManager {
                     continue;
                 }
 
+                // Skip partial indexes - the executor must evaluate the WHERE
+                // predicate for both the old and new rows to decide whether
+                // to add, remove, or move the index entry. Handled by
+                // update_partial_indexes_for_update.
+                if metadata.is_partial() {
+                    continue;
+                }
+
                 // OPTIMIZATION: Skip indexes that don't involve any changed columns
                 // This avoids building key vectors and comparing them for unaffected indexes
                 if let Some(changed) = changed_columns {
@@ -295,12 +303,14 @@ impl IndexManager {
         // Collect index names that need rebuilding
         // Case-insensitive comparison for table name matching
         // Skip expression indexes - they need to be rebuilt by executor with expression evaluation
+        // Skip partial indexes - they need predicate evaluation by the executor
         let indexes_to_rebuild: Vec<String> = self
             .indexes
             .iter()
             .filter(|(_, metadata)| {
                 metadata.table_name.eq_ignore_ascii_case(table_name)
                     && !metadata.columns.iter().any(|col| col.is_expression())
+                    && !metadata.is_partial()
             })
             .map(|(name, _)| name.clone())
             .collect();

@@ -1,4 +1,6 @@
-use crate::{errors::ExecutorError, expression_index_maintenance, TriggerFirer};
+use crate::{
+    errors::ExecutorError, expression_index_maintenance, partial_index_maintenance, TriggerFirer,
+};
 
 /// Handle REPLACE logic: detect conflicts and delete conflicting rows
 /// Returns Ok(()) if no conflict or conflict was resolved
@@ -185,6 +187,9 @@ pub fn handle_replace_conflicts(
     // Maintain expression indexes for each deleted row
     for (row_index, row) in &rows_to_delete {
         expression_index_maintenance::maintain_expression_indexes_for_delete(
+            db, table_name, row, *row_index,
+        );
+        partial_index_maintenance::maintain_partial_indexes_for_delete(
             db, table_name, row, *row_index,
         );
     }

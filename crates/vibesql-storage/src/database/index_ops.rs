@@ -126,7 +126,12 @@ impl Database {
     // Index Management
     // ============================================================================
 
-    /// Create an index
+    /// Create a full-coverage index.
+    ///
+    /// For partial indexes (with a WHERE predicate), use
+    /// [`Database::create_index_partial`] instead so the executor can supply
+    /// both the predicate AST (for metadata) and the set of rows whose
+    /// predicate evaluated to truthy (for the initial index body).
     pub fn create_index(
         &mut self,
         index_name: String,
@@ -141,6 +146,38 @@ impl Database {
             table_name,
             unique,
             columns,
+            None,
+            None,
+        )
+    }
+
+    /// Create a partial index — `CREATE INDEX ... WHERE predicate`.
+    ///
+    /// `where_clause` is stashed in the index metadata so subsequent insert,
+    /// update, and delete maintenance can skip the index when the predicate
+    /// is false for the affected row.
+    /// `included_row_indices` is the set of table row indices whose predicate
+    /// evaluated to truthy at build time; only those rows are placed in the
+    /// initial index body. The executor crate is responsible for evaluating
+    /// the predicate — storage never evaluates expressions.
+    pub fn create_index_partial(
+        &mut self,
+        index_name: String,
+        table_name: String,
+        unique: bool,
+        columns: Vec<IndexColumn>,
+        where_clause: Box<vibesql_ast::Expression>,
+        included_row_indices: &std::collections::HashSet<usize>,
+    ) -> Result<(), StorageError> {
+        self.operations.create_index(
+            &self.catalog,
+            &self.tables,
+            index_name,
+            table_name,
+            unique,
+            columns,
+            Some(where_clause),
+            Some(included_row_indices),
         )
     }
 
@@ -255,6 +292,18 @@ impl Database {
         self.operations.drop_index(index_name)
     }
 
+    /// Patch a storage-side index's WHERE clause. See
+    /// `IndexManager::set_index_where_clause` for details. Used by
+    /// persistence/recovery paths that create the index through the
+    /// non-partial path and then attach the predicate post-hoc.
+    pub fn set_index_where_clause(
+        &mut self,
+        index_name: &str,
+        where_clause: Option<Box<vibesql_ast::Expression>>,
+    ) -> bool {
+        self.operations.set_index_where_clause(index_name, where_clause)
+    }
+
     /// List all indexes
     pub fn list_indexes(&self) -> Vec<String> {
         self.operations.list_indexes()
@@ -272,6 +321,95 @@ impl Database {
     #[inline]
     pub fn has_index_on_column(&self, table_name: &str, column_name: &str) -> bool {
         self.operations.has_index_on_column(table_name, column_name)
+    }
+
+    // ============================================================================
+    // Partial Index Methods
+    // ============================================================================
+
+    /// Maintain partial indexes after inserting a row.
+    ///
+    /// `included_partial_indexes` is the set of normalized partial-index
+    /// names whose WHERE predicate evaluated to truthy for this row.
+    /// Computed by the executor's partial-index maintenance helper.
+    pub fn add_to_partial_indexes_for_insert(
+        &mut self,
+        table_name: &str,
+        row: &Row,
+        row_index: usize,
+        included_partial_indexes: &std::collections::HashSet<String>,
+    ) {
+        self.operations.add_to_partial_indexes_for_insert(
+            &self.catalog,
+            table_name,
+            row,
+            row_index,
+            included_partial_indexes,
+        );
+    }
+
+    /// Maintain partial indexes after updating a row.
+    pub fn update_partial_indexes_for_update(
+        &mut self,
+        table_name: &str,
+        old_row: &Row,
+        new_row: &Row,
+        row_index: usize,
+        old_included: &std::collections::HashSet<String>,
+        new_included: &std::collections::HashSet<String>,
+    ) {
+        self.operations.update_partial_indexes_for_update(
+            &self.catalog,
+            table_name,
+            old_row,
+            new_row,
+            row_index,
+            old_included,
+            new_included,
+        );
+    }
+
+    /// Maintain partial indexes after deleting a row.
+    pub fn update_partial_indexes_for_delete_with_values(
+        &mut self,
+        table_name: &str,
+        values: &[vibesql_types::SqlValue],
+        row_index: usize,
+        included_partial_indexes: &std::collections::HashSet<String>,
+    ) {
+        self.operations.update_partial_indexes_for_delete_with_values(
+            &self.catalog,
+            table_name,
+            values,
+            row_index,
+            included_partial_indexes,
+        );
+    }
+
+    /// Check whether a candidate key would violate the uniqueness of a
+    /// partial UNIQUE index. Caller must have already verified that the
+    /// partial-index WHERE predicate is truthy for the candidate row.
+    pub fn check_partial_unique_conflict(
+        &self,
+        index_name: &str,
+        key_values: &[vibesql_types::SqlValue],
+    ) -> Result<bool, StorageError> {
+        self.operations.check_partial_unique_conflict(index_name, key_values)
+    }
+
+    /// Whether the given table has any partial indexes.
+    pub fn has_partial_indexes(&self, table_name: &str) -> bool {
+        self.operations.has_partial_indexes(table_name)
+    }
+
+    /// Get all partial indexes for a specific table.
+    ///
+    /// Returns `(normalized_index_name, IndexMetadata)` pairs.
+    pub fn get_partial_indexes_for_table(
+        &self,
+        table_name: &str,
+    ) -> Vec<(String, &super::indexes::IndexMetadata)> {
+        self.operations.get_partial_indexes_for_table(table_name)
     }
 
     // ============================================================================
