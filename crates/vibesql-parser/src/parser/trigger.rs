@@ -7,7 +7,7 @@ impl Parser {
     /// Parse CREATE TRIGGER statement
     ///
     /// Syntax:
-    ///   CREATE TRIGGER trigger_name
+    ///   CREATE [TEMP | TEMPORARY] TRIGGER trigger_name
     ///   [{BEFORE | AFTER | INSTEAD OF}] {INSERT | UPDATE | DELETE}
     ///   ON table_name
     ///   [FOR EACH {ROW | STATEMENT}]
@@ -20,6 +20,13 @@ impl Parser {
     ) -> Result<vibesql_ast::CreateTriggerStmt, ParseError> {
         // Expect CREATE keyword
         self.expect_keyword(Keyword::Create)?;
+
+        // Optional TEMP/TEMPORARY modifier, accepted for SQLite compatibility and
+        // ignored: SQLite places TEMP triggers in a session-scoped `temp` schema,
+        // but VibeSQL has no multi-session or ATTACH support, so the trigger is
+        // created as a regular trigger.
+        let _ =
+            self.try_consume_keyword(Keyword::Temp) || self.try_consume_keyword(Keyword::Temporary);
 
         // Expect TRIGGER keyword
         self.expect_keyword(Keyword::Trigger)?;

@@ -3251,7 +3251,7 @@ array set vibesql_skip_tests {
 
     fkey8-5.2 "UPDATE/DELETE PK affinity is fixed (#5145), but schema-reload drops DEFERRABLE INITIALLY DEFERRED so the deferred-INSERT on child fires immediately across CLI invocations — tracked separately in #5172"
 
-    triggerupfrom-2.3 "Cascades from upstream CREATE TEMP TRIGGER feature gap. Test 2.2 needs CREATE TEMP TRIGGER (tracked in #5218) which the parser rejects, leaving the temp tr2 trigger missing; 2.3's expected output assumes 2.2 succeeded. The UPDATE…FROM trigger logic in 2.3 itself works correctly when run in isolation (verified during #5192 builder pass)."
+    triggerupfrom-2.3 "Cascades from auto-skipped test 2.2. CREATE TEMP TRIGGER now parses (#5218), but 2.2 references aux.t3 and is auto-skipped by the ATTACH/aux regex (VibeSQL has no ATTACH/multi-database support), so the rows 2.2 inserts (10 y {}, 20 y {}) never exist and 2.3's expected output cannot match. The UPDATE…FROM trigger logic in 2.3 itself works correctly when run in isolation (verified during #5192 builder pass)."
 }
 
 # Pattern-based skip list for tests with many numbered variants
