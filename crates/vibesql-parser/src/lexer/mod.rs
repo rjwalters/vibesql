@@ -227,6 +227,10 @@ impl<'a> Lexer<'a> {
                     Ok(Token::Symbol(':'))
                 }
             }
+            // SQLite treats any non-ASCII character as an identifier character
+            // (its IdChar macro accepts all bytes >= 0x80), so a leading
+            // multi-byte UTF-8 char starts an identifier (e.g. `SELECT Ցam`).
+            ch if !ch.is_ascii() => self.tokenize_identifier_or_keyword(),
             _ => {
                 // SQLite-compatible error: extract a token-like span for "near" message
                 let token = self.extract_error_token();
@@ -357,8 +361,10 @@ impl<'a> Lexer<'a> {
             if b.is_ascii_alphanumeric() || b == b'_' || b == b'#' || b == b'$' || b == b'@' {
                 end += 1;
             } else if end == start {
-                // Include at least one character
-                end += 1;
+                // Include at least one character. Advance by the character's
+                // full UTF-8 width (not one byte) so the slice below never
+                // lands inside a multi-byte character.
+                end += self.input[start..].chars().next().map_or(1, char::len_utf8);
                 break;
             } else {
                 break;
@@ -556,5 +562,35 @@ impl<'a> Lexer<'a> {
 
         // Use NamedPlaceholder - the name includes :: prefix for uniqueness
         Ok(Token::NamedPlaceholder(name))
+    }
+}
+
+#[cfg(test)]
+mod extract_error_token_tests {
+    use super::Lexer;
+
+    /// `extract_error_token` is the only place in the lexer that does its own
+    /// byte arithmetic before slicing. Via the public API it can no longer be
+    /// reached with a non-ASCII start char (non-ASCII now lexes as an
+    /// identifier), so exercise the char-boundary hardening directly.
+    #[test]
+    fn test_extract_error_token_multibyte_start_does_not_panic() {
+        // 2-byte UTF-8 (U+0551) at the error position
+        let lexer = Lexer::new("Ցam");
+        assert_eq!(lexer.extract_error_token(), "Ց");
+
+        // 4-byte UTF-8 as the only (and final) character in the input
+        let lexer = Lexer::new("😀");
+        assert_eq!(lexer.extract_error_token(), "😀");
+    }
+
+    #[test]
+    fn test_extract_error_token_ascii_unchanged() {
+        let lexer = Lexer::new("#1 rest");
+        assert_eq!(lexer.extract_error_token(), "#1");
+
+        // Single non-token ASCII char still captured
+        let lexer = Lexer::new("^");
+        assert_eq!(lexer.extract_error_token(), "^");
     }
 }
