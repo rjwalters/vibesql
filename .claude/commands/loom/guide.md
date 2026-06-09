@@ -916,7 +916,7 @@ update_work_log() {
 ```markdown
 ### 2026-01-31
 
-- **PR #1803**: Fix Rust clippy errors across loom-daemon and src-tauri
+- **PR #1803**: Fix Rust clippy errors across loom-daemon and loom-api
 - **PR #1780**: Fix biome lint errors across quickstarts and src/lib
 - **Issue #1770** (closed): Stale heartbeat messages from previous phase
 ```
@@ -973,7 +973,7 @@ Only update README.md when merged PRs touch architectural files.
 ```bash
 check_readme_staleness() {
   # Check recently merged PRs for architectural file changes
-  local arch_patterns="Cargo.toml|package.json|src/lib/|src-tauri/|install.sh|scripts/install"
+  local arch_patterns="Cargo.toml|package.json|loom-daemon/|loom-api/|install.sh|scripts/install"
 
   # Get last 10 merged PRs and check their changed files
   local recent_prs=$(gh pr list --state merged --limit 10 --json number,files \
@@ -1080,24 +1080,3 @@ Document Maintenance Phase
 - README updates are conservative (stale sections only)
 - All changes go through the standard PR review pipeline
 
-## Context Clearing (Cost Optimization)
-
-**When running autonomously, clear your context at the end of each iteration to save API costs.**
-
-After completing your iteration (triaging issues and updating priorities), execute:
-
-```
-/clear
-```
-
-### Why This Matters
-
-- **Reduces API costs**: Fresh context for each iteration means smaller request sizes
-- **Prevents context pollution**: Each iteration starts clean without stale information
-- **Improves reliability**: No risk of acting on outdated context from previous iterations
-
-### When to Clear
-
-- ✅ **After completing triage** (priorities updated, urgent labels applied)
-- ✅ **When no issues need triage** (backlog is current)
-- ❌ **NOT during active work** (only after iteration is complete)

@@ -26,16 +26,12 @@ The `settings.json` file pre-approves common development commands to streamline 
 - Configuration: config, check-ignore
 
 ### Package Management
-- `pnpm install` - Install dependencies
-- `pnpm build` - Build project
-- `pnpm tauri:dev` - Run Tauri dev server
 - `pnpm daemon:dev` - Run daemon in dev mode
+- `pnpm daemon:build` - Build daemon (release)
 - `pnpm check:all` - Run all checks
 - `pnpm check:ci` - Run CI checks locally
 
 ### Code Quality
-- `pnpm lint` - Biome linting
-- `pnpm format` - Biome formatting
 - `pnpm clippy` - Rust linting
 - `pnpm test` - Run tests
 
@@ -73,7 +69,6 @@ The project includes two MCP servers configured in `.mcp.json`:
 ### loom-logs
 Monitor Loom application logs:
 - `tail_daemon_log` - View daemon logs (`~/.loom/daemon.log`)
-- `tail_tauri_log` - View Tauri app logs (`~/.loom/tauri.log`)
 - `list_terminal_logs` - List terminal output files
 - `tail_terminal_log` - View specific terminal output
 
@@ -92,7 +87,7 @@ Interact with the Loom application UI and state:
 - `trigger_start` - Trigger workspace start with confirmation dialog (factory reset with 6 terminals)
 - `trigger_force_start` - Trigger force start without confirmation (immediate reset)
 
-**Label State Machine Reset**: When workspace is started (via `trigger_start` or `trigger_force_start`), the `reset_github_labels` Tauri command automatically resets the GitHub label state machine:
+**Label State Machine Reset**: When workspace is started (via `trigger_start` or `trigger_force_start`), the `reset_github_labels` daemon command automatically resets the GitHub label state machine:
 - Removes `loom:building` from all open issues (workers can reclaim them)
 - Replaces `loom:reviewing` with `loom:review-requested` on all open PRs (reviewer can re-review)
 - This ensures a clean state when restarting the workspace with fresh agent terminals
@@ -153,7 +148,7 @@ To create a custom slash command:
 2. Include role purpose, workflow guidelines, and iteration instructions
 3. Use it with `/your-command` (or `/your-namespace/command`)
 
-**Note**: `.loom/roles/` contains symlinks to `.claude/commands/loom/` for Tauri App compatibility. The single source of truth for all Loom role definitions is `.claude/commands/loom/`.
+**Note**: `.loom/roles/` contains symlinks to `.claude/commands/loom/` for backward compatibility. The single source of truth for all Loom role definitions is `.claude/commands/loom/`.
 
 ## Custom Subagents
 
@@ -163,8 +158,6 @@ The `agents/` directory contains custom subagent definitions for Loom roles. The
 
 | Subagent | Model | Purpose |
 |----------|-------|---------|
-| `loom-shepherd` | sonnet | Single-issue lifecycle orchestration (Layer 1) |
-| `loom-daemon` | sonnet | System orchestration, work generation (Layer 2) |
 | `loom-builder` | opus | Implement features and fixes |
 | `loom-judge` | opus | Review pull requests |
 | `loom-curator` | sonnet | Enhance and organize issues |
@@ -175,6 +168,8 @@ The `agents/` directory contains custom subagent definitions for Loom roles. The
 | `loom-guide` | sonnet | Prioritize and triage issues |
 | `loom-auditor` | sonnet | Verify runtime behavior of built software |
 
+> **Note**: the `loom-shepherd` subagent was removed in v0.10.0 along with the `/shepherd` slash command — see [the migration guide](../../docs/migration/v0.10.0-shepherd-deprecation.md). Use `/loom:sweep <issue>` (Tier 1) for the equivalent lifecycle. The `loom-daemon` subagent is preserved and now documents the shell-level daemon surface (`./.loom/scripts/daemon.sh` + tmux + token rotation) rather than the deleted Python brain.
+
 ### How Subagents Work
 
 Subagents are specialized AI assistants that run in their own context window. Each has:
@@ -184,15 +179,32 @@ Subagents are specialized AI assistants that run in their own context window. Ea
 
 **Using Subagents with Task**:
 
-The Loom Shepherd (or daemon) can spawn subagents for each phase:
+The Loom Shepherd (or daemon) can spawn subagents for each phase. The recommended pattern is **native dispatch** -- pass the Loom role directly as `subagent_type`. Claude Code resolves `loom-<role>` against the `.claude/agents/loom-*.md` agent definitions that ship with Loom:
 
 ```python
-# Spawn builder subagent with fresh context
-# Note: subagent_type is always "general-purpose" - role selection
-# happens via the slash command in the prompt (e.g., "/builder 123")
+# Spawn builder subagent with fresh context using native dispatch.
+# subagent_type matches the agent definition name (loom-builder, loom-judge,
+# loom-doctor, loom-curator, loom-champion, loom-architect, loom-hermit,
+# loom-guide, loom-auditor, loom-shepherd).
 result = Task(
     description="Builder phase for issue #123",
-    prompt="/builder 123",
+    prompt="Implement issue #123",
+    subagent_type="loom-builder",
+    run_in_background=False
+)
+```
+
+The agent definition wires the correct system prompt, tool allowlist, and model preference, so the caller only needs to supply the task-specific prompt (e.g., the issue number).
+
+**Legacy pattern** (`subagent_type="general-purpose"` + a slash command in the prompt) still works for environments where the `loom-*` agent definitions are not installed, but prefer native dispatch when available:
+
+```python
+# Legacy fallback - role selection happens via the slash command in the prompt.
+# Note: Claude Code 2.1+ requires the namespaced `/loom:<role>` form for
+# subdirectory commands (`.claude/commands/loom/<role>.md`). See issue #3345.
+result = Task(
+    description="Builder phase for issue #123",
+    prompt="/loom:builder 123",
     subagent_type="general-purpose",
     run_in_background=False
 )
@@ -209,7 +221,7 @@ result = Task(
 | Feature | Slash Commands | Subagents |
 |---------|----------------|-----------|
 | Context | Shared with main conversation | Isolated, fresh context |
-| Invocation | `/builder 123` | `Task(subagent_type="general-purpose", prompt="/builder 123")` |
+| Invocation | `/builder 123` | `Task(subagent_type="loom-builder", prompt="Implement issue #123")` (legacy: `subagent_type="general-purpose"` + `/builder 123`) |
 | Use case | Manual orchestration | Automated orchestration |
 | Visibility | In main conversation | Spawned as separate task |
 
