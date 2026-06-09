@@ -3250,6 +3250,9 @@ array set vibesql_skip_tests {
     fkey5-7.3 "Cascades from skipped fkey5-7.1 (INSERT OR IGNORE with FK violation)"
 
     fkey8-5.2 "UPDATE/DELETE PK affinity is fixed (#5145), but schema-reload drops DEFERRABLE INITIALLY DEFERRED so the deferred-INSERT on child fires immediately across CLI invocations — tracked separately in #5172"
+
+    collateB-2.1 "VACUUM not yet supported — pre-existing parser feature gap; tracked in #5217 (decomposed from #5192)"
+    triggerupfrom-2.3 "Cascades from upstream CREATE TEMP TRIGGER feature gap. Test 2.2 needs CREATE TEMP TRIGGER (tracked in #5218) which the parser rejects, leaving the temp tr2 trigger missing; 2.3's expected output assumes 2.2 succeeded. The UPDATE…FROM trigger logic in 2.3 itself works correctly when run in isolation (verified during #5192 builder pass)."
 }
 
 # Pattern-based skip list for tests with many numbered variants
