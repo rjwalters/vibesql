@@ -280,6 +280,7 @@ impl Parser {
 
                     if self.peek_keyword(Keyword::Select)
                         || self.peek_keyword(Keyword::Values)
+                        || self.peek_keyword(Keyword::With)
                         || is_subquery_through_parens
                     {
                         // It's a subquery: NOT IN (SELECT ...) or NOT IN ((SELECT ...))
@@ -496,6 +497,7 @@ impl Parser {
 
                 if self.peek_keyword(Keyword::Select)
                     || self.peek_keyword(Keyword::Values)
+                    || self.peek_keyword(Keyword::With)
                     || is_subquery_through_parens
                 {
                     // It's a subquery: IN (SELECT ...) or IN ((SELECT ...))

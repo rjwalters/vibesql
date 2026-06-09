@@ -677,8 +677,8 @@ impl<'arena> ArenaParser<'arena> {
         if matches!(self.peek(), Token::LParen) {
             self.advance();
 
-            // Check for subquery
-            if self.peek_keyword(Keyword::Select) {
+            // Check for subquery (SELECT or WITH-prefixed SELECT)
+            if self.peek_keyword(Keyword::Select) || self.peek_keyword(Keyword::With) {
                 let subquery = self.parse_select_statement()?;
                 self.expect_token(Token::RParen)?;
                 return Ok(Expression::Extended(
@@ -986,7 +986,13 @@ impl<'arena> ArenaParser<'arena> {
         let expr_ref = self.arena.alloc(expr);
 
         self.consume_keyword(Keyword::As)?;
-        let data_type = self.parse_data_type()?;
+        // SQLite tolerates a missing type name: CAST(x AS ) parses with
+        // no affinity (treated like CAST(x AS ANY) — value passes through).
+        let data_type = if matches!(self.peek(), Token::RParen) {
+            vibesql_types::DataType::BinaryLargeObject
+        } else {
+            self.parse_data_type()?
+        };
 
         self.expect_token(Token::RParen)?;
 

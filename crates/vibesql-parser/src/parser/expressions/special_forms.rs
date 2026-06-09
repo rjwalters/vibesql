@@ -155,8 +155,14 @@ impl Parser {
                 // Expect AS keyword
                 self.expect_keyword(Keyword::As)?;
 
-                // Parse the target data type
-                let data_type = self.parse_data_type()?;
+                // Parse the target data type.
+                // SQLite tolerates a missing type name: CAST(x AS ) parses with
+                // no affinity (treated like CAST(x AS ANY) — value passes through).
+                let data_type = if matches!(self.peek(), Token::RParen) {
+                    vibesql_types::DataType::BinaryLargeObject
+                } else {
+                    self.parse_data_type()?
+                };
 
                 // Expect closing parenthesis
                 self.expect_token(Token::RParen)?;

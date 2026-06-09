@@ -342,6 +342,7 @@ impl Parser {
                     self.peek(),
                     Token::Identifier(_) | Token::DelimitedIdentifier(_)
                 ) && !self.is_join_keyword()
+                    && !self.peek_index_hint()
                 {
                     // Implicit alias (no AS keyword) - but not a JOIN keyword
                     match self.peek() {
@@ -355,6 +356,7 @@ impl Parser {
                 } else if matches!(self.peek(), Token::Keyword { keyword: _, .. })
                     && !self.is_join_keyword()
                     && !self.is_clause_keyword()
+                    && !self.peek_index_hint()
                 {
                     // Allow non-reserved keywords as implicit aliases (e.g., FROM t m)
                     // Keywords like M, YEAR, etc. can be used as aliases
@@ -376,6 +378,9 @@ impl Parser {
                 let column_aliases =
                     if alias.is_some() { self.parse_column_alias_list()? } else { None };
 
+                // Parse and ignore SQLite index hints: INDEXED BY <name> / NOT INDEXED
+                self.parse_index_hint()?;
+
                 Ok(vibesql_ast::FromClause::Table {
                     name: table.full_name(),
                     alias,
@@ -395,6 +400,7 @@ impl Parser {
                     self.peek(),
                     Token::Identifier(_) | Token::DelimitedIdentifier(_)
                 ) && !self.is_join_keyword()
+                    && !self.peek_index_hint()
                 {
                     match self.peek() {
                         Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
@@ -411,6 +417,9 @@ impl Parser {
                 let column_aliases =
                     if alias.is_some() { self.parse_column_alias_list()? } else { None };
 
+                // Parse and ignore SQLite index hints: INDEXED BY <name> / NOT INDEXED
+                self.parse_index_hint()?;
+
                 Ok(vibesql_ast::FromClause::Table {
                     name: table.full_name(),
                     alias,
@@ -421,6 +430,50 @@ impl Parser {
             _ => Err(ParseError {
                 message: "Expected table name or subquery in FROM clause".to_string(),
             }),
+        }
+    }
+
+    /// Check if the upcoming tokens form a SQLite index hint:
+    /// `INDEXED BY <name>` or `NOT INDEXED`.
+    ///
+    /// Note: INDEXED is not a keyword in our lexer, so it arrives as an
+    /// identifier token (lowercased by the lexer).
+    pub(crate) fn peek_index_hint(&self) -> bool {
+        match self.peek() {
+            Token::Identifier(id) if id.eq_ignore_ascii_case("indexed") => {
+                self.peek_next_keyword(Keyword::By)
+            }
+            Token::Keyword { keyword: Keyword::Not, .. } => {
+                matches!(self.peek_next(), Token::Identifier(id) if id.eq_ignore_ascii_case("indexed"))
+            }
+            _ => false,
+        }
+    }
+
+    /// Parse and ignore SQLite index hints: `INDEXED BY <index-name>` or
+    /// `NOT INDEXED`. VibeSQL's planner chooses indexes independently, so the
+    /// hint is accepted for SQLite compatibility but has no effect on planning.
+    pub(crate) fn parse_index_hint(&mut self) -> Result<(), ParseError> {
+        if !self.peek_index_hint() {
+            return Ok(());
+        }
+        if self.peek_keyword(Keyword::Not) {
+            self.advance(); // consume NOT
+            self.advance(); // consume INDEXED
+            return Ok(());
+        }
+        self.advance(); // consume INDEXED
+        self.advance(); // consume BY
+        match self.peek() {
+            Token::Identifier(_) | Token::DelimitedIdentifier(_) => {
+                self.advance();
+                Ok(())
+            }
+            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                self.advance();
+                Ok(())
+            }
+            _ => Err(ParseError { message: "Expected index name after INDEXED BY".to_string() }),
         }
     }
 

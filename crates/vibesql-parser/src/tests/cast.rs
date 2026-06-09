@@ -278,3 +278,36 @@ fn test_parse_cast_signed_cross_join_subquery() {
     );
     assert!(result.is_ok(), "CAST AS SIGNED with CROSS JOIN subquery should parse: {:?}", result);
 }
+
+#[test]
+fn test_parse_cast_empty_typename() {
+    // SQLite tolerates a missing type name: CAST(x AS ) parses with no
+    // affinity (treated like CAST(x AS ANY)). From window1.test 61.1.
+    let result = Parser::parse_sql("SELECT CAST(a AS ) FROM t1;");
+    assert!(result.is_ok(), "CAST with empty type name should parse: {:?}", result);
+
+    let stmt = result.unwrap();
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::Cast { data_type, .. } => {
+                    assert_eq!(
+                        data_type,
+                        &vibesql_types::DataType::BinaryLargeObject,
+                        "empty type name should map to no-affinity (BLOB) cast"
+                    );
+                }
+                _ => panic!("Expected CAST expression, got {:?}", expr),
+            },
+            _ => panic!("Expected expression"),
+        },
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_parse_cast_empty_typename_in_aggregate() {
+    // Regression for window1.test 61.1 (fuzz-derived): CAST(a AS ) inside sum()
+    let result = Parser::parse_sql("SELECT sum(CAST(a AS )) FROM t1;");
+    assert!(result.is_ok(), "sum(CAST(a AS )) should parse: {:?}", result);
+}

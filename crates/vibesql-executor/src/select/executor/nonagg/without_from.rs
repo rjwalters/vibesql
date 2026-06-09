@@ -64,6 +64,20 @@ impl SelectExecutor<'_> {
         // Check if we have outer context (for correlated subqueries)
         let has_outer_context = self.outer_row.is_some() && self.outer_schema.is_some();
 
+        // SQLite allows the WHERE clause of a FROM-less SELECT to reference
+        // select-list aliases, e.g. `SELECT (SELECT '') x WHERE x+x` (window1.test
+        // 15.2). Without outer context, a column reference in WHERE can only
+        // resolve to a select-list alias, so evaluate the select list first and
+        // bind the aliases for the WHERE evaluation.
+        if let Some(where_clause) = &stmt.where_clause {
+            if !has_outer_context
+                && !has_window_functions(&stmt.select_list)
+                && self.expression_references_column(where_clause)
+            {
+                return self.execute_select_without_from_alias_where(stmt, where_clause);
+            }
+        }
+
         // Evaluate WHERE clause first - if it's false, return empty result (SQLite compatibility)
         // This handles cases like `SELECT 99 WHERE 0` which should return no rows
         if let Some(where_clause) = &stmt.where_clause {
@@ -171,6 +185,86 @@ impl SelectExecutor<'_> {
         Ok(apply_limit_offset(result, limit, offset))
     }
 
+    /// Execute a FROM-less SELECT whose WHERE clause references select-list
+    /// aliases (SQLite compatibility, e.g. `SELECT (SELECT '') x WHERE x+x`).
+    ///
+    /// Evaluates the select list first, binds each item's alias as a column in
+    /// a synthetic single-row schema, then evaluates the WHERE clause against
+    /// that row. Column references that don't match an alias produce the same
+    /// "column not found" error as before.
+    fn execute_select_without_from_alias_where(
+        &self,
+        stmt: &vibesql_ast::SelectStmt,
+        where_clause: &vibesql_ast::Expression,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        let empty_schema = vibesql_catalog::TableSchema::new("".to_string(), vec![]);
+        let evaluator = ExpressionEvaluator::with_database(&empty_schema, self.database);
+        let empty_row = vibesql_storage::Row::new(vec![]);
+
+        // Evaluate the select list and collect alias bindings
+        let mut values = Vec::new();
+        let mut alias_columns = Vec::new();
+        for item in &stmt.select_list {
+            match item {
+                vibesql_ast::SelectItem::Wildcard { .. }
+                | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
+                    return Err(ExecutorError::UnsupportedFeature(
+                        "SELECT * and qualified wildcards require FROM clause".to_string(),
+                    ));
+                }
+                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
+                    if self.expression_references_column(expr) {
+                        return Err(ExecutorError::UnsupportedFeature(
+                            "Column reference requires FROM clause".to_string(),
+                        ));
+                    }
+                    let value = evaluator.eval(expr, &empty_row)?;
+                    let column_name = alias.clone().unwrap_or_default();
+                    let data_type = crate::select::cte::infer_type_from_value(&value);
+                    alias_columns.push(vibesql_catalog::ColumnSchema::new(
+                        column_name,
+                        data_type,
+                        true,
+                    ));
+                    values.push(value);
+                }
+            }
+        }
+
+        // Evaluate WHERE with the aliases bound as columns of a single row
+        let alias_schema = vibesql_catalog::TableSchema::new("".to_string(), alias_columns);
+        let where_evaluator = ExpressionEvaluator::with_database(&alias_schema, self.database);
+        let result_row = vibesql_storage::Row::new(values);
+        let where_result = where_evaluator.eval(where_clause, &result_row)?;
+
+        let is_truthy = match &where_result {
+            vibesql_types::SqlValue::Boolean(b) => *b,
+            vibesql_types::SqlValue::Null => false,
+            vibesql_types::SqlValue::Integer(n) => *n != 0,
+            vibesql_types::SqlValue::Smallint(n) => *n != 0,
+            vibesql_types::SqlValue::Bigint(n) => *n != 0,
+            vibesql_types::SqlValue::Float(f) => *f != 0.0,
+            vibesql_types::SqlValue::Real(f) => *f != 0.0,
+            vibesql_types::SqlValue::Double(f) => *f != 0.0,
+            vibesql_types::SqlValue::Numeric(n) => *n != 0.0,
+            // Non-numeric, non-NULL values follow SQLite numeric coercion:
+            // strings coerce to their numeric prefix (0 when non-numeric)
+            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                crate::evaluator::casting::string_to_number(s).1 != 0.0
+            }
+            _ => true,
+        };
+
+        if !is_truthy {
+            return Ok(vec![]);
+        }
+
+        let result = vec![result_row];
+        let limit = evaluate_limit(&stmt.limit, self.database)?;
+        let offset = evaluate_offset(&stmt.offset, self.database)?;
+        Ok(apply_limit_offset(result, limit, offset))
+    }
+
     /// Execute SELECT without FROM clause that contains window functions
     ///
     /// Window functions without FROM clause operate on a single implicit row.
@@ -206,8 +300,12 @@ impl SelectExecutor<'_> {
 
         // Process window functions - this adds computed values to each row
         // and returns a mapping from WindowFunctionKey to column index
-        let (rows_with_windows, window_mapping) =
-            evaluate_window_functions(rows, &stmt.select_list, stmt.window_definitions.as_ref(), &evaluator)?;
+        let (rows_with_windows, window_mapping) = evaluate_window_functions(
+            rows,
+            &stmt.select_list,
+            stmt.window_definitions.as_ref(),
+            &evaluator,
+        )?;
         rows = rows_with_windows;
 
         // Now evaluate the SELECT list with the window mapping

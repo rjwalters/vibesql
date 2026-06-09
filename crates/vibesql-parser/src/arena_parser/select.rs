@@ -650,7 +650,10 @@ impl<'arena> ArenaParser<'arena> {
         // Check for alias
         // Issue #4448: If AS is present, an alias MUST follow
         let has_as = self.try_consume_keyword(Keyword::As);
-        let alias = if let Token::Identifier(alias) = self.peek() {
+        let alias = if self.peek_index_hint() && !has_as {
+            // SQLite index hint (INDEXED BY x / NOT INDEXED), not an alias
+            None
+        } else if let Token::Identifier(alias) = self.peek() {
             // Make sure it's not a keyword that would start a new clause
             if !matches!(
                 self.peek(),
@@ -690,7 +693,54 @@ impl<'arena> ArenaParser<'arena> {
         // Parse optional column aliases: (col1, col2, ...)
         let column_aliases = if alias.is_some() { self.parse_column_alias_list()? } else { None };
 
+        // Parse and ignore SQLite index hints: INDEXED BY <name> / NOT INDEXED
+        self.parse_index_hint()?;
+
         Ok(FromClause::Table { name, alias, column_aliases, quoted })
+    }
+
+    /// Check if the upcoming tokens form a SQLite index hint:
+    /// `INDEXED BY <name>` or `NOT INDEXED`.
+    ///
+    /// Note: INDEXED is not a keyword in our lexer, so it arrives as an
+    /// identifier token (lowercased by the lexer).
+    fn peek_index_hint(&self) -> bool {
+        match self.peek() {
+            Token::Identifier(id) if id.eq_ignore_ascii_case("indexed") => {
+                self.peek_next_keyword(Keyword::By)
+            }
+            Token::Keyword { keyword: Keyword::Not, .. } => {
+                matches!(self.peek_next(), Token::Identifier(id) if id.eq_ignore_ascii_case("indexed"))
+            }
+            _ => false,
+        }
+    }
+
+    /// Parse and ignore SQLite index hints: `INDEXED BY <index-name>` or
+    /// `NOT INDEXED`. VibeSQL's planner chooses indexes independently, so the
+    /// hint is accepted for SQLite compatibility but has no effect on planning.
+    fn parse_index_hint(&mut self) -> Result<(), ParseError> {
+        if !self.peek_index_hint() {
+            return Ok(());
+        }
+        if self.peek_keyword(Keyword::Not) {
+            self.advance(); // consume NOT
+            self.advance(); // consume INDEXED
+            return Ok(());
+        }
+        self.advance(); // consume INDEXED
+        self.advance(); // consume BY
+        match self.peek() {
+            Token::Identifier(_) | Token::DelimitedIdentifier(_) => {
+                self.advance();
+                Ok(())
+            }
+            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                self.advance();
+                Ok(())
+            }
+            _ => Err(ParseError { message: "Expected index name after INDEXED BY".to_string() }),
+        }
     }
 
     /// Parse GROUP BY clause.
