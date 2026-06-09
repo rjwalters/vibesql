@@ -15,6 +15,7 @@ pub mod columnar_cache;
 pub mod database;
 pub mod error;
 pub mod index;
+pub mod mvcc;
 pub mod page;
 pub mod persistence;
 pub mod progress;
@@ -46,6 +47,7 @@ pub use database::{
 };
 pub use error::{StorageError, StorageResult};
 pub use index::{extract_mbr_from_sql_value, SpatialIndex, SpatialIndexEntry};
+pub use mvcc::TxnSnapshot;
 pub use persistence::load::{parse_sql_statements, read_sql_dump};
 pub use query_buffer_pool::{
     QueryBufferPool, QueryBufferPoolStats, RowBufferGuard, ValueBufferGuard,
