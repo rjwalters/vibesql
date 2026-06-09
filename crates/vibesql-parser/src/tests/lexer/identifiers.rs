@@ -149,6 +149,119 @@ fn test_keyword_matching_unchanged_for_ascii() {
 }
 
 // ============================================================================
+// Multi-byte UTF-8 Placeholder/Variable Tests (issue #5240)
+//
+// SQLite applies its IdChar rule (any byte >= 0x80 is an identifier char) to
+// variable/placeholder names too: `$tՑ`, `:tՑ`, `@tՑ`, `$Ց`, `:Ց`, `@Ց`,
+// and `$::Ց` are each a single variable token.
+// ============================================================================
+
+#[test]
+fn test_tokenize_dollar_placeholder_multibyte_middle() {
+    // SQLite: one variable `$tՑ` — must not split into `$t` + identifier `Ց`
+    let mut lexer = Lexer::new("SELECT $tՑ");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::NamedPlaceholder("tՑ".to_string()));
+    assert_eq!(tokens[2], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_dollar_placeholder_multibyte_leading() {
+    // SQLite: one variable `$Ց` — previously a lexer error in VibeSQL
+    let mut lexer = Lexer::new("SELECT $Ց");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::NamedPlaceholder("Ց".to_string()));
+    assert_eq!(tokens[2], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_dollar_placeholder_4byte_utf8() {
+    // 4-byte UTF-8 sequence (U+1F600) inside a placeholder name
+    let mut lexer = Lexer::new("SELECT $t😀");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::NamedPlaceholder("t😀".to_string()));
+    assert_eq!(tokens[2], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_colon_placeholder_multibyte_middle() {
+    // SQLite: one variable `:tՑ`; also covers non-ASCII at end of input
+    // with no trailing whitespace/semicolon
+    let mut lexer = Lexer::new("SELECT :tՑ");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::NamedPlaceholder("tՑ".to_string()));
+    assert_eq!(tokens[2], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_colon_placeholder_multibyte_leading() {
+    // SQLite: one variable `:Ց` — previously Symbol(':') + identifier
+    let mut lexer = Lexer::new("SELECT :Ց");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::NamedPlaceholder("Ց".to_string()));
+    assert_eq!(tokens[2], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_user_variable_multibyte_middle() {
+    // SQLite: one variable `@tՑ` — must not split into `@t` + identifier `Ց`
+    let mut lexer = Lexer::new("SELECT @tՑ");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::UserVariable("tՑ".to_string()));
+    assert_eq!(tokens[2], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_user_variable_multibyte_leading() {
+    // SQLite: one variable `@Ց` — previously "empty variable name" error
+    let mut lexer = Lexer::new("SELECT @Ց");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::UserVariable("Ց".to_string()));
+    assert_eq!(tokens[2], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_tcl_global_placeholder_multibyte() {
+    // SQLite: one variable `$::Ց` (TCL global namespace syntax)
+    let mut lexer = Lexer::new("SELECT $::Ց");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::NamedPlaceholder("::Ց".to_string()));
+    assert_eq!(tokens[2], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_tcl_global_placeholder_multibyte_namespaced() {
+    // Mixed namespace path with a non-ASCII trailing component
+    let mut lexer = Lexer::new("SELECT $::ns::Ց");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::NamedPlaceholder("::ns::Ց".to_string()));
+    assert_eq!(tokens[2], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_question_placeholder_not_extended_by_multibyte() {
+    // SQLite: `?Ց` is the anonymous `?` placeholder followed by identifier
+    // `Ց` (implicit alias) — `?` names are numeric-only, so no change here
+    let mut lexer = Lexer::new("SELECT ?Ց");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::Placeholder);
+    assert_eq!(tokens[2], Token::Identifier("Ց".to_string()));
+    assert_eq!(tokens[3], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_ascii_placeholders_unchanged() {
+    // ASCII placeholder lexing must be unaffected
+    let mut lexer = Lexer::new("SELECT $name, :name, @name, $1, ?");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::NamedPlaceholder("name".to_string()));
+    assert_eq!(tokens[3], Token::NamedPlaceholder("name".to_string()));
+    assert_eq!(tokens[5], Token::UserVariable("name".to_string()));
+    assert_eq!(tokens[7], Token::NumberedPlaceholder(1));
+    assert_eq!(tokens[9], Token::Placeholder);
+}
+
+// ============================================================================
 // Delimited Identifier Tests
 // ============================================================================
 

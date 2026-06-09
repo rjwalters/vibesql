@@ -13,12 +13,12 @@ fn test_tokenize_invalid_character() {
 
 #[test]
 fn test_error_token_with_multibyte_char_does_not_panic() {
-    // `$` followed by a non-placeholder char takes the extract_error_token
-    // path; a multi-byte char right after the `$` must not cause a
-    // non-char-boundary slice panic (issue #5236)
+    // Historically (issue #5236) `SELECT $Ց` hit the extract_error_token path
+    // and could panic on a non-char-boundary slice. Since issue #5240,
+    // non-ASCII chars after `$` start a named variable (SQLite IdChar), so
+    // this input must lex cleanly as a single placeholder — and must still
+    // never panic.
     let mut lexer = Lexer::new("SELECT $Ց");
-    let result = lexer.tokenize();
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert_eq!(err.near_token.as_deref(), Some("$"));
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::NamedPlaceholder("Ց".to_string()));
 }
