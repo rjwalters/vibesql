@@ -157,14 +157,14 @@ impl TransactionManager {
                 let transaction_id = self.next_transaction_id;
                 self.next_transaction_id += 1;
 
-                // Capture the MVCC snapshot **before** publishing the
-                // new transaction id. The `in_progress` set is computed
-                // from currently-active transactions (just this one
-                // would be self, which we deliberately exclude — a
-                // transaction always sees its own writes). Under the
-                // current single-writer model, in_progress is always
-                // empty at BEGIN; this will need to change when Raft +
-                // multi-writer arrives in later phases.
+                // Capture the MVCC snapshot for this transaction. The
+                // `in_progress` set is computed from currently-active
+                // transactions; the txn deliberately treats *itself* as
+                // committed (see [`Self::capture_snapshot`] for the
+                // #5207 self-write widening). Under the current
+                // single-writer model, in_progress is always empty at
+                // BEGIN; this will need to change when Raft + multi-
+                // writer arrives in later phases.
                 let snapshot = Self::capture_snapshot(transaction_id);
 
                 self.transaction_state = TransactionState::Active {
@@ -187,33 +187,48 @@ impl TransactionManager {
 
     /// Build the MVCC snapshot for a transaction with id `txn_id`.
     ///
-    /// **Phase 1b semantics (single-writer):** there are no other
-    /// concurrently-active transactions to put in `in_progress`. The
-    /// snapshot is:
+    /// **Single-writer semantics with #5207 self-write widening:** there
+    /// are no other concurrently-active transactions to put in
+    /// `in_progress`. The snapshot is:
     ///
-    /// - `xmin_active = txn_id` — the next-to-allocate id (one past the
-    ///   high-water mark from the caller's perspective). This makes the
-    ///   `xmax > xmin_active` clause in [`Row::visible_to`] only true
-    ///   for transactions that started *after* us, which is the correct
-    ///   behavior with no concurrent peers.
-    /// - `xmax_committed = txn_id - 1` — every transaction allocated
-    ///   before us has, by the single-writer invariant, already finished
-    ///   (committed or rolled back). For the rolled-back case, the
-    ///   rollback path replaces tables wholesale, so no `xmin = rolled_back_id`
-    ///   row exists in storage and the predicate correctness is preserved.
+    /// - `xmin_active = txn_id + 1` — one past the snapshot's own
+    ///   transaction id. Any row whose `xmax` value falls in
+    ///   `(xmin_active, ∞)` was deleted by a *later* transaction (one
+    ///   that hadn't yet been allocated when our snapshot was taken).
+    ///   Under the single-writer model this set is currently empty, but
+    ///   the bookkeeping keeps the `xmax > xmin_active` clause in
+    ///   [`Row::visible_to`] semantically correct.
+    /// - `xmax_committed = txn_id` — every transaction id allocated so
+    ///   far, **including our own**, is treated as committed-as-of this
+    ///   snapshot. This is the #5207 "see your own writes" widening:
+    ///   a row stamped with `xmin = txn_id` (the active transaction's
+    ///   own write) passes `is_committed(self)` and is therefore visible
+    ///   to subsequent reads within the same transaction. The same
+    ///   widening makes prior-transaction writes visible too — which is
+    ///   the correct snapshot-isolation behavior in single-writer
+    ///   (every "prior" transaction has already finished by the time
+    ///   the next one starts).
     /// - `in_progress = ∅` — no concurrent transactions.
     ///
     /// **Future (multi-writer / Raft):** when concurrent transactions
     /// become possible, this method becomes the chokepoint where the
     /// `in_progress` set is populated from the active-transactions
-    /// registry. The caller signature does not need to change.
+    /// registry. Transactions that started after this one but committed
+    /// before this one's reads must be invisible under SI; concurrent
+    /// transactions go in `in_progress`. The signature does not change.
     ///
     /// [`Row::visible_to`]: crate::Row::visible_to
     fn capture_snapshot(txn_id: TxnId) -> TxnSnapshot {
-        // For txn_id = 1 (the first ever), xmax_committed = 0 means
-        // "only pre-MVCC rows are visible" — exactly right.
-        let xmax_committed = txn_id.saturating_sub(1);
-        TxnSnapshot::new(txn_id, xmax_committed, std::collections::HashSet::new())
+        // #5207: widen `xmax_committed` to include the txn's own id so
+        // self-writes (xmin = txn_id) are visible. Under single-writer
+        // this is safe because there are no concurrent peers. Multi-
+        // writer will need to model the "still-running peers" set in
+        // `in_progress` instead.
+        TxnSnapshot::new(
+            txn_id.saturating_add(1),
+            txn_id,
+            std::collections::HashSet::new(),
+        )
     }
 
     /// Commit the current transaction
@@ -450,24 +465,26 @@ mod snapshot_capture_tests {
     }
 
     #[test]
-    fn first_transaction_snapshot_has_xmax_committed_zero() {
-        // First-ever transaction: xmax_committed should be 0 (only
-        // pre-MVCC sentinel rows are visible to it), xmin_active should
-        // equal our own id (1).
+    fn first_transaction_snapshot_includes_self_as_committed() {
+        // #5207: the BEGIN-time snapshot must treat its own txn id as
+        // committed so self-writes (xmin = txn_id) are visible to the
+        // txn's own reads. For the first-ever transaction (txn_id = 1):
+        //   - xmax_committed = 1 (self counts as committed)
+        //   - xmin_active = 2 (one past self)
         let (catalog, tables) = empty_catalog_and_tables();
         let mut mgr = TransactionManager::new();
         mgr.begin_transaction(&catalog, &tables).unwrap();
 
         let snap = mgr.current_snapshot().expect("snapshot present after BEGIN");
-        assert_eq!(snap.xmin_active, 1);
-        assert_eq!(snap.xmax_committed, 0);
+        assert_eq!(snap.xmin_active, 2);
+        assert_eq!(snap.xmax_committed, 1);
         assert!(snap.in_progress.is_empty());
     }
 
     #[test]
-    fn second_transaction_snapshot_sees_first_as_committed() {
-        // Second transaction's snapshot should include the first txn's
-        // id in the "committed" range (xmax_committed >= 1).
+    fn second_transaction_snapshot_sees_first_and_self_as_committed() {
+        // Second transaction's snapshot should include both the first
+        // txn's id AND its own id in the "committed" range.
         let (catalog, tables) = empty_catalog_and_tables();
         let mut mgr = TransactionManager::new();
 
@@ -476,8 +493,9 @@ mod snapshot_capture_tests {
 
         mgr.begin_transaction(&catalog, &tables).unwrap();
         let snap = mgr.current_snapshot().expect("second snapshot present");
-        assert_eq!(snap.xmin_active, 2);
-        assert_eq!(snap.xmax_committed, 1);
+        // #5207: xmax_committed = self (= 2), xmin_active = self + 1 (= 3)
+        assert_eq!(snap.xmin_active, 3);
+        assert_eq!(snap.xmax_committed, 2);
         assert!(snap.in_progress.is_empty());
     }
 
@@ -523,33 +541,30 @@ mod snapshot_capture_tests {
         mgr.begin_transaction(&catalog, &tables).unwrap();
         let snap = mgr.current_snapshot().unwrap();
         // First txn id was 1 (rolled back). Second txn id is 2.
-        assert_eq!(snap.xmin_active, 2);
-        assert_eq!(snap.xmax_committed, 1);
+        // #5207: xmax_committed = self (= 2), xmin_active = self + 1 (= 3).
+        assert_eq!(snap.xmin_active, 3);
+        assert_eq!(snap.xmax_committed, 2);
     }
 
     #[test]
-    fn snapshot_visibility_integration() {
-        // End-to-end sanity check: a row stamped with the *current*
-        // active transaction's id (Phase 1c will do this) should NOT
-        // be visible to that transaction's own snapshot under this
-        // predicate — that's intentional. Phase 1c/1d will introduce a
-        // separate "is my own write" check that bypasses snapshot
-        // visibility. Documenting that gap here.
+    fn snapshot_visibility_integration_self_writes_visible() {
+        // #5207: the BEGIN-time snapshot now treats the active txn's
+        // own id as committed, so a row stamped with that txn's id is
+        // visible to the transaction's own reads. This is the
+        // "see-your-own-writes" invariant.
         let (catalog, tables) = empty_catalog_and_tables();
         let mut mgr = TransactionManager::new();
         mgr.begin_transaction(&catalog, &tables).unwrap();
         let my_id = mgr.transaction_id().unwrap();
         let snap = mgr.current_snapshot().unwrap();
 
-        // A row stamped with our own id: my_id > xmax_committed
-        // (== my_id - 1), so visible_to returns false. Phase 1c's
-        // "see my own writes" path will be a separate clause.
+        // A row stamped with our own id: my_id == xmax_committed under
+        // the #5207-widened snapshot, so visible_to returns true.
         let mut my_row = crate::Row::new(vec![vibesql_types::SqlValue::Integer(1)]);
         my_row.xmin = my_id;
         assert!(
-            !my_row.visible_to(snap),
-            "Phase 1b predicate intentionally does not show transactions \
-             their own writes; Phase 1c will add a separate clause for that"
+            my_row.visible_to(snap),
+            "#5207 widening: a txn's own writes (xmin = self) must be visible"
         );
     }
 }

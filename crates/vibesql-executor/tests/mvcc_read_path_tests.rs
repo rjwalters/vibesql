@@ -119,34 +119,19 @@ fn transactional_writes_visible_after_commit() {
     // The committing transaction's own writes must be visible to
     // subsequent autocommit reads. With MVCC ON the new row is stamped
     // with the txn's id, so the snapshot used at read time must see it.
+    //
+    // #5207 fix: `read_snapshot` for autocommit now synthesizes a
+    // commit-time snapshot that treats every allocated txn id as
+    // committed, so the row stamped with `xmin = txn_id` is visible.
     let mut db = db_with_accounts();
 
     exec(&mut db, "BEGIN");
     exec(&mut db, "INSERT INTO accounts VALUES (2, 200)");
     exec(&mut db, "COMMIT");
 
-    // After commit, autocommit read should see the new row.
-    // Note: Phase 1d's empty-snapshot semantics may hide MVCC-stamped
-    // rows from autocommit reads. This is a known follow-up tracked
-    // in the autocommit-snapshot-widening issue. For now, document
-    // the actual behavior:
     let rows = select(&mut db, "SELECT balance FROM accounts WHERE id = 2");
-
-    #[cfg(not(feature = "mvcc_enabled"))]
-    {
-        // Off-state: definitely visible.
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0][0], SqlValue::Integer(200));
-    }
-    #[cfg(feature = "mvcc_enabled")]
-    {
-        // On-state: with the empty autocommit snapshot, MVCC-stamped
-        // rows are invisible. This is the conservative Phase 1d
-        // baseline — autocommit-snapshot widening is a tracked
-        // follow-up. Document the current behavior.
-        let _ = rows; // Either result is acceptable for this phase;
-                      // the next phase will tighten this contract.
-    }
+    assert_eq!(rows.len(), 1, "autocommit SELECT after committed txn must see the new row");
+    assert_eq!(rows[0][0], SqlValue::Integer(200));
 }
 
 // ============================================================================
@@ -167,29 +152,16 @@ fn balance(db: &mut Database) -> Option<i64> {
 #[cfg(feature = "mvcc_enabled")]
 #[test]
 fn snapshot_isolation_select_sees_stable_view_across_concurrent_commit() {
-    // This is the canonical SI demonstration: txn A reads, then a
-    // concurrent committed change happens (modelled here by a separate
-    // Database instance — single-threaded but simulating two commits),
-    // then txn A reads again and must see the BEGIN-time value.
+    // After #5207's widening, the BEGIN-time snapshot now treats the
+    // active txn's own id as committed, so the txn's UPDATE is visible
+    // to subsequent reads within the same txn. This is the
+    // "see-your-own-writes" rule.
     //
-    // Single-process model: we can simulate this within one `Database`
-    // by carefully ordering BEGIN, autocommit-write, SELECT-in-txn.
-    // Because Phase 1c keeps autocommit writes on the pre-MVCC sentinel,
-    // an autocommit insert *would* be visible to a later txn's snapshot.
-    // To exercise the snapshot-isolation invariant on MVCC-stamped rows
-    // we must use a second transaction for the writer.
-    //
-    // The flow:
-    //   1. BEGIN tx_A (snapshot captured)
-    //   2. SELECT in tx_A — sees pre-MVCC sentinel row (balance=100)
-    //   3. Within tx_A's lifetime, a separate transaction tx_B would
-    //      need to BEGIN/UPDATE/COMMIT concurrently. The single-writer
-    //      model of `Database` does not allow this in-process. The
-    //      multi-writer scenario is a future-phase test.
-    //
-    // What we CAN demonstrate today: tx_A's own writes are visible to
-    // tx_A's snapshot (the standard "see-your-own-writes" rule), and
-    // pre-MVCC rows remain visible across the txn boundary.
+    // The "stable view across concurrent commits" guarantee proper
+    // (no peer-commits leak into the snapshot) still requires the
+    // multi-writer model to actually exercise — the single-writer
+    // `Database` cannot interleave BEGIN/UPDATE/COMMIT operations
+    // in-process. That cross-txn invariant is a future-phase test.
     let mut db = db_with_accounts();
     exec(&mut db, "BEGIN");
     assert_eq!(balance(&mut db), Some(100), "pre-MVCC row visible at txn start");
@@ -197,23 +169,13 @@ fn snapshot_isolation_select_sees_stable_view_across_concurrent_commit() {
     // tx_A's own UPDATE: stamps xmin=tx_A on new row, xmax=tx_A on old.
     exec(&mut db, "UPDATE accounts SET balance = 150 WHERE id = 1");
 
-    // SELECT in tx_A: should see its own write. Whether the new row
-    // (xmin=tx_A) is visible depends on `visible_to(snapshot)` where
-    // snapshot.xmax_committed = tx_A - 1 = 0. The new row's xmin = tx_A
-    // > 0 — so under strict snapshot isolation, tx_A does NOT see it.
-    //
-    // This is the well-known "see your own writes" gap that Phase 1d
-    // does not yet close — it requires either (a) widening the snapshot
-    // to include `self.txn_id`, or (b) a separate "is self-write" pass
-    // in the predicate. Documenting the current behavior here so the
-    // follow-up has a precise reproducer:
+    // After #5207, the txn must see its own write.
     let after_update = balance(&mut db);
-    // Document the observed value without asserting a specific one —
-    // the contract being tested is "the transaction's view is stable",
-    // not the specifics of self-write visibility (which is a known
-    // follow-up). The important assertion is that we don't crash and
-    // the system remains consistent.
-    let _ = after_update;
+    assert_eq!(
+        after_update,
+        Some(150),
+        "#5207: a txn must see its own UPDATE in subsequent reads"
+    );
 
     exec(&mut db, "COMMIT");
 }
@@ -273,10 +235,9 @@ fn fk_deferred_replay_uses_commit_time_snapshot() {
     exec(&mut db, "COMMIT");
 
     let rows = select(&mut db, "SELECT id, p FROM child");
-    // Note: under the current empty-autocommit-snapshot model, the
-    // child row stamped with the txn id may not be visible to the
-    // post-commit autocommit SELECT. Either result is acceptable for
-    // this phase; the test's job is to confirm the COMMIT path runs
-    // through `capture_commit_time_snapshot` without panicking.
-    let _ = rows;
+    // #5207: autocommit reads now use a commit-time-style snapshot, so
+    // the child row stamped with the prior txn's id is visible.
+    assert_eq!(rows.len(), 1, "child row inserted by committed txn must be visible");
+    assert_eq!(rows[0][0], SqlValue::Integer(10));
+    assert_eq!(rows[0][1], SqlValue::Integer(1));
 }
