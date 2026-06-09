@@ -480,10 +480,7 @@ pub(super) fn execute_internal(
     for u in &updates {
         if u.updates_pk {
             ForeignKeyValidator::check_no_child_references(
-                database,
-                table_name,
-                &u.old_row,
-                &u.new_row,
+                database, table_name, &u.old_row, &u.new_row,
             )?;
         }
     }
@@ -1140,8 +1137,16 @@ fn execute_update_from(
         )?;
     }
 
+    // Check conflict resolution clause — matches the default UPDATE path
+    // (executor.rs:239-240). The parser populates `stmt.conflict_clause` for
+    // `UPDATE OR IGNORE ... FROM` and `UPDATE OR REPLACE ... FROM`; this dispatch
+    // path must honor it (issue #5144).
+    let use_ignore = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore));
+    let use_replace = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace));
+
     // Convert join results to update operations
-    let updates = apply_update_from_matches(&join_result.matched_rows, &stmt.assignments, schema)?;
+    let mut updates =
+        apply_update_from_matches(&join_result.matched_rows, &stmt.assignments, schema)?;
 
     if updates.is_empty() {
         // Fire AFTER STATEMENT triggers even when no rows matched
@@ -1166,47 +1171,213 @@ fn execute_update_from(
     // fail with a spurious "UNIQUE constraint failed" when intermediate states
     // transiently duplicate keys.
     //
-    // The default UPDATE path gates the deferred-UNIQUE pass on
-    // `!use_replace && !use_ignore` because OR IGNORE / OR REPLACE need per-row
-    // skip / evict semantics that don't match the post-statement model. The
-    // UPDATE FROM path here unconditionally uses the deferred-UNIQUE pass: although
-    // the parser accepts `UPDATE OR IGNORE ... FROM` and `UPDATE OR REPLACE ... FROM`
-    // (populating `stmt.conflict_clause`), this dispatch path silently drops the
-    // conflict clause — meaning IGNORE/REPLACE semantics aren't honored on
-    // UPDATE FROM today. This is a pre-existing limitation (predates #5140; the
-    // dispatch on line ~179 above never inspects `stmt.conflict_clause` before
-    // calling `execute_update_from`).
-    // TODO(#5144): honor `stmt.conflict_clause` on UPDATE FROM (skip-on-IGNORE,
-    // evict-on-REPLACE) and gate the deferred-UNIQUE pass accordingly.
+    // Issue #5144: when `stmt.conflict_clause` is IGNORE or REPLACE, the per-row
+    // skip / evict semantics replace the deferred-UNIQUE post-statement pass. The
+    // logic mirrors the default UPDATE path at executor.rs:239-468.
     let constraint_validator = ConstraintValidator::new(schema);
+
+    // Track rows to delete for REPLACE conflict resolution (before applying updates)
+    let mut rows_to_delete_for_replace: Vec<usize> = Vec::new();
 
     // Phase C2 of #5085: collect deferred FK violations during the loop
     // and queue them after the loop ends, since `database` is immutably
     // borrowed once we re-fetch `table` for the post-statement PK/UNIQUE check.
     let mut pending_deferred_violations: Vec<vibesql_storage::DeferredFkViolation> = Vec::new();
 
-    for u in &updates {
-        // Per-row: NOT NULL + CHECK only. PK / UNIQUE deferred to post-statement.
-        constraint_validator.validate_row_skip_uniqueness(table_name, &u.new_row)?;
+    if use_ignore {
+        // IGNORE: per-row validate; on any violation, skip the row entirely.
+        // FK deferred violations are collected per-row and only kept for surviving rows.
+        let table = database
+            .get_table(table_name)
+            .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
-        // Validate foreign key constraints
-        if !schema.foreign_keys.is_empty() {
-            let deferred =
-                ForeignKeyValidator::collect_constraints(database, table_name, &u.new_row.values)?;
-            pending_deferred_violations.extend(deferred);
+        let mut kept_updates: Vec<PendingUpdate> = Vec::with_capacity(updates.len());
+
+        for u in updates.drain(..) {
+            // Per-row: try full validation including PK/UNIQUE; skip on violation.
+            let validation_result = constraint_validator.validate_row(
+                table,
+                table_name,
+                u.row_index,
+                &u.new_row,
+                &u.old_row,
+            );
+            if validation_result.is_err() {
+                continue;
+            }
+
+            // Validate user-defined UNIQUE indexes
+            let unique_index_result = constraint_validator
+                .validate_unique_indexes(database, table_name, &u.new_row, &u.old_row);
+            if unique_index_result.is_err() {
+                continue;
+            }
+
+            // Validate foreign key constraints (only retain deferred violations
+            // for kept rows — FK collection is per-row, so an Err means we skip).
+            if !schema.foreign_keys.is_empty() {
+                match ForeignKeyValidator::collect_constraints(
+                    database,
+                    table_name,
+                    &u.new_row.values,
+                ) {
+                    Ok(deferred) => pending_deferred_violations.extend(deferred),
+                    Err(_) => continue,
+                }
+            }
+
+            kept_updates.push(u);
+        }
+
+        updates = kept_updates;
+
+        // Push deferred FK violations now that the immutable `table` borrow is released.
+        for v in pending_deferred_violations {
+            database.queue_deferred_fk_violation(v);
+        }
+    } else if use_replace {
+        // REPLACE: find conflicting rows for each update (to delete), validate
+        // only NOT NULL/CHECK (since conflicts will be removed by deletion).
+        {
+            let table = database
+                .get_table(table_name)
+                .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+            for u in &updates {
+                let conflicting_indices = find_conflicting_rows_for_update(
+                    table,
+                    schema,
+                    database,
+                    table_name,
+                    &u.new_row,
+                    u.row_index,
+                );
+                rows_to_delete_for_replace.extend(conflicting_indices);
+
+                // NOT NULL + CHECK only (no PK/UNIQUE — those collisions get
+                // resolved by deletion).
+                validate_non_uniqueness_constraints(schema, table_name, &u.new_row)?;
+
+                // Foreign key constraints still apply.
+                if !schema.foreign_keys.is_empty() {
+                    let deferred = ForeignKeyValidator::collect_constraints(
+                        database,
+                        table_name,
+                        &u.new_row.values,
+                    )?;
+                    pending_deferred_violations.extend(deferred);
+                }
+            }
+        }
+
+        // Push deferred FK violations now that the immutable `table` borrow is released.
+        for v in pending_deferred_violations {
+            database.queue_deferred_fk_violation(v);
+        }
+
+        // For REPLACE: handle cross-update conflicts by keeping only the last update
+        // for each PK/UNIQUE value. Earlier updates with conflicting values are
+        // removed from updates and their rows are deleted instead.
+        if updates.len() > 1 {
+            let removed_indices = resolve_cross_update_conflicts_for_replace(&mut updates, schema);
+            rows_to_delete_for_replace.extend(removed_indices);
+        }
+
+        // Pre-stage REPLACE deletions BEFORE the update apply phase. Mirrors the
+        // default path at executor.rs:411-468.
+        if !rows_to_delete_for_replace.is_empty() {
+            rows_to_delete_for_replace.sort_unstable();
+            rows_to_delete_for_replace.dedup();
+
+            // Filter out any rows that we're going to update (don't delete our own rows).
+            let update_indices: HashSet<usize> = updates.iter().map(|u| u.row_index).collect();
+            rows_to_delete_for_replace.retain(|idx| !update_indices.contains(idx));
+
+            if !rows_to_delete_for_replace.is_empty() {
+                // Get rows for index cleanup (immutable borrow scope).
+                let rows_for_index: Vec<(usize, Row)> = {
+                    let table = database
+                        .get_table(table_name)
+                        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+                    rows_to_delete_for_replace
+                        .iter()
+                        .filter_map(|&idx| table.scan().get(idx).map(|r| (idx, r.clone())))
+                        .collect()
+                };
+
+                // Update indexes before deletion
+                let rows_refs: Vec<(usize, &Row)> =
+                    rows_for_index.iter().map(|(idx, row)| (*idx, row)).collect();
+                database.batch_update_indexes_for_delete(table_name, &rows_refs);
+
+                // Maintain expression indexes for each deleted row
+                for (row_index, row) in &rows_for_index {
+                    expression_index_maintenance::maintain_expression_indexes_for_delete(
+                        database, table_name, row, *row_index,
+                    );
+                }
+
+                // Delete conflicting rows
+                let table_mut = database
+                    .get_table_mut(table_name)
+                    .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+                let delete_result = table_mut.delete_by_indices_batch(&rows_to_delete_for_replace);
+
+                // Handle index maintenance based on compaction.
+                if delete_result.compacted {
+                    database.rebuild_indexes(table_name);
+                    // KNOWN LIMITATION: same caveat as the default path — after
+                    // compaction, row indices in `updates` may be stale. This is
+                    // safe in practice because UPDATE OR REPLACE typically deletes
+                    // a small number of conflicting rows (well below the
+                    // compaction threshold).
+                } else {
+                    database.adjust_indexes_after_delete(table_name, &rows_to_delete_for_replace);
+                }
+            }
+        }
+    } else {
+        // Default: per-row NOT NULL/CHECK; PK/UNIQUE deferred to post-statement pass.
+        for u in &updates {
+            constraint_validator.validate_row_skip_uniqueness(table_name, &u.new_row)?;
+
+            // Validate foreign key constraints
+            if !schema.foreign_keys.is_empty() {
+                let deferred = ForeignKeyValidator::collect_constraints(
+                    database,
+                    table_name,
+                    &u.new_row.values,
+                )?;
+                pending_deferred_violations.extend(deferred);
+            }
+        }
+
+        // Push deferred FK violations onto the queue now that the table has not
+        // yet been re-borrowed for the post-statement uniqueness check.
+        for v in pending_deferred_violations {
+            database.queue_deferred_fk_violation(v);
         }
     }
 
-    // Push deferred FK violations onto the queue now that the table has not
-    // yet been re-borrowed for the post-statement uniqueness check.
-    for v in pending_deferred_violations {
-        database.queue_deferred_fk_violation(v);
+    // After IGNORE may have filtered to zero rows.
+    if updates.is_empty() {
+        // Fire AFTER STATEMENT triggers even when all rows skipped.
+        if has_triggers {
+            crate::TriggerFirer::execute_after_statement_triggers(
+                database,
+                table_name,
+                vibesql_ast::TriggerEvent::Update(None),
+            )?;
+        }
+        return Ok(0);
     }
 
     // Cross-update uniqueness validation: catches multiple updates landing on the
     // same final PK / UNIQUE value (e.g. `UPDATE p SET a = 5 FROM ...` matching
-    // multiple rows). This must run before the post-statement deferred check.
-    if updates.len() > 1 {
+    // multiple rows). Skip for IGNORE/REPLACE since those modes have their own
+    // per-row resolution (matches the default-path gate at executor.rs:377).
+    if !use_replace && !use_ignore && updates.len() > 1 {
         validate_cross_update_uniqueness(&updates, schema)?;
     }
 
@@ -1216,7 +1387,10 @@ fn execute_update_from(
     // excluded from "existing" entries, allowing cross-row PK shifts via FROM
     // (`UPDATE p SET a = a + delta.shift FROM delta WHERE p.a = delta.id`) to
     // succeed even when intermediate states transiently duplicate keys.
-    if !updates.is_empty() {
+    //
+    // Skipped for IGNORE/REPLACE since those modes use per-row validation/resolution
+    // (matches the default-path gate at executor.rs:388).
+    if !use_replace && !use_ignore && !updates.is_empty() {
         // Re-borrow the table — the FK queue push above released the prior immutable borrow.
         let table_for_check = database
             .get_table(table_name)
@@ -1234,10 +1408,7 @@ fn execute_update_from(
     for u in &updates {
         if u.updates_pk {
             ForeignKeyValidator::check_no_child_references(
-                database,
-                table_name,
-                &u.old_row,
-                &u.new_row,
+                database, table_name, &u.old_row, &u.new_row,
             )?;
         }
     }
