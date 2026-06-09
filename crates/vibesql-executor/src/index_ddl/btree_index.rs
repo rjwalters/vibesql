@@ -47,14 +47,18 @@ pub fn create_btree_index(
     // Convert AST IndexColumn to catalog IndexedColumn
     let catalog_columns = convert_to_catalog_columns(&stmt.columns);
 
-    // Add to catalog first (use unqualified table name as stored in catalog)
+    // Add to catalog first (use unqualified table name as stored in catalog).
+    // Partial indexes carry their WHERE predicate through to the catalog so
+    // downstream code (FK-mismatch checker, index-scan selection) can
+    // distinguish them from full-coverage indexes.
     let index_metadata = vibesql_catalog::IndexMetadata::new(
         index_name.clone(),
         table_name.to_string(),
         vibesql_catalog::IndexType::BTree,
         catalog_columns,
         unique,
-    );
+    )
+    .with_where_clause(stmt.where_clause.as_ref().map(|expr| (**expr).clone()));
     database.catalog.add_index(index_metadata)?;
 
     // Create the B-tree index

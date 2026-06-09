@@ -24,7 +24,10 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 ///       row layout has no MVCC prefix, so the read path treats absent fields
 ///       as `xmin = PRE_MVCC_TXN_ID (= 0), xmax = None` — meaning "always
 ///       committed, visible to every snapshot." Write path always emits v7.
-pub const VERSION: u8 = 7;
+/// - v8: Added partial-index WHERE clause persistence per index. v7 files
+///       remain readable: the read path treats absent partial-index data as
+///       "no WHERE clause" (full index). Issue #5181.
+pub const VERSION: u8 = 8;
 
 /// Type tags for binary serialization
 #[repr(u8)]

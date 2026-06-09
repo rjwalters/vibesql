@@ -121,6 +121,24 @@ pub(crate) fn should_use_index_scan(
 
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
+            // Skip partial indexes (CREATE INDEX ... WHERE expr): they only
+            // cover the subset of rows for which the predicate evaluates to
+            // TRUE. We don't yet have a predicate-implication checker to
+            // prove the query's WHERE clause restricts the scan to the
+            // index's covered rows, so using a partial index could silently
+            // return wrong rows. Conservative exclusion is safe and keeps
+            // the FK-mismatch fix from costing query correctness. The
+            // partial flag lives on the catalog-side `IndexMetadata` (the
+            // storage struct does not yet carry it).
+            if database
+                .catalog
+                .find_index_by_name(index_name)
+                .map(|m| m.is_partial())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
             let first_indexed_column = index_metadata.columns.first()?;
 
             // Check if this index can be used for WHERE clause
@@ -638,6 +656,17 @@ pub(crate) fn needs_temp_btree_for_order_by_eqp(
     let indexes = database.list_indexes_for_table(table_name);
     for index_name in &indexes {
         let Some(index_metadata) = database.get_index(index_name) else { continue };
+        // Skip partial indexes from EQP exemption — until the planner can
+        // prove the query predicate implies the index predicate, a partial
+        // index can't be relied on to satisfy ORDER BY.
+        if database
+            .catalog
+            .find_index_by_name(index_name)
+            .map(|m| m.is_partial())
+            .unwrap_or(false)
+        {
+            continue;
+        }
         if index_metadata.columns.is_empty() {
             continue;
         }
@@ -1013,6 +1042,24 @@ pub(crate) fn cost_based_index_selection(
 
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
+            // Skip partial indexes — see `should_use_index_scan` for rationale.
+            // Until a predicate-implication checker exists, picking a partial
+            // index could return incomplete results.
+            if database
+                .catalog
+                .find_index_by_name(index_name)
+                .map(|m| m.is_partial())
+                .unwrap_or(false)
+            {
+                if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                    eprintln!(
+                        "[INDEX_SELECT] skipping {} - partial index (WHERE clause)",
+                        index_name
+                    );
+                }
+                continue;
+            }
+
             let first_indexed_column = index_metadata.columns.first()?;
 
             // Check if this index can be used for WHERE or ORDER BY

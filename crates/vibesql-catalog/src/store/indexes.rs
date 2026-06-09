@@ -85,6 +85,41 @@ impl Catalog {
         self.indexes.values().filter(|index| index.table_name == table_name).collect()
     }
 
+    /// Look up an index by its name alone (across all tables in this catalog).
+    ///
+    /// The storage layer keys its index manager by name only (without a table
+    /// qualifier), so query-time code that has just an index name often needs
+    /// to consult the catalog for properties such as `is_partial()` or the
+    /// expression list. Returns the first match — index names are unique
+    /// within a database in SQLite-compatible mode.
+    pub fn find_index_by_name(&self, index_name: &str) -> Option<&IndexMetadata> {
+        // Index names are case-insensitive in SQLite. We match the stored
+        // catalog name case-insensitively so callers that pass either the
+        // original-case or lowercased form succeed.
+        let target = index_name.to_lowercase();
+        self.indexes.values().find(|index| index.name.to_lowercase() == target)
+    }
+
+    /// Attach (or clear) a partial-index WHERE clause on an existing index.
+    ///
+    /// Used by persistence/recovery paths that recreate indexes through the
+    /// no-WHERE-clause path and then need to graft the partial predicate on
+    /// afterwards. Returns `true` if an index with the given name was found
+    /// and updated.
+    pub fn set_index_where_clause(
+        &mut self,
+        index_name: &str,
+        where_clause: Option<vibesql_ast::Expression>,
+    ) -> bool {
+        let target = index_name.to_lowercase();
+        if let Some(meta) = self.indexes.values_mut().find(|m| m.name.to_lowercase() == target) {
+            meta.where_clause = where_clause.map(Box::new);
+            true
+        } else {
+            false
+        }
+    }
+
     /// List all indexes in the catalog
     pub fn list_all_indexes(&self) -> Vec<&IndexMetadata> {
         self.indexes.values().collect()

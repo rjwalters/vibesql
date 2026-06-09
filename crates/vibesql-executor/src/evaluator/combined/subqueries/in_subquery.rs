@@ -719,6 +719,21 @@ fn can_use_index_for_in_subquery(
     let indexes = database.list_indexes_for_table(table_name);
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
+            // Skip partial indexes: their body only covers rows matching the
+            // WHERE predicate, so they cannot answer an unrestricted IN
+            // subquery. (See follow-up: partial-index bodies still index every
+            // row today, but this preserves correctness once that is fixed.)
+            // The `is_partial` flag lives on the catalog-side `IndexMetadata`,
+            // mirroring the conservative exclusion in `index_planner` and
+            // `index_scan::selection`.
+            if database
+                .catalog
+                .find_index_by_name(index_name)
+                .map(|m| m.is_partial())
+                .unwrap_or(false)
+            {
+                continue;
+            }
             // Check if first indexed column matches our projected column
             if let Some(first_col) = index_metadata.columns.first() {
                 if first_col.expect_column_name() == column_name {
@@ -764,6 +779,15 @@ fn try_index_optimized_in_subquery(
 
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
+            // Skip partial indexes (see can_use_index_for_in_subquery).
+            if database
+                .catalog
+                .find_index_by_name(index_name)
+                .map(|m| m.is_partial())
+                .unwrap_or(false)
+            {
+                continue;
+            }
             if let Some(first_col) = index_metadata.columns.first() {
                 if first_col.expect_column_name() == column_name {
                     selected_index = Some(index_name.clone());

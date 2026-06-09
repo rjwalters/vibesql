@@ -16,6 +16,16 @@ pub struct IndexMetadata {
     pub columns: Vec<IndexedColumn>,
     /// Whether this index enforces uniqueness
     pub is_unique: bool,
+    /// Optional WHERE clause for partial indexes (CREATE INDEX ... WHERE expr).
+    ///
+    /// When present, the index is "partial" — only rows for which the
+    /// predicate evaluates to TRUE are stored in the index. Partial indexes
+    /// are recognized by the catalog but the planner conservatively excludes
+    /// them from query-execution selection (see
+    /// `vibesql-executor::select::scan::index_scan::selection`). The FK
+    /// mismatch checker also rejects partial UNIQUE indexes as FK targets to
+    /// match SQLite's behaviour (`sqlite3FkLocateIndex`).
+    pub where_clause: Option<Box<vibesql_ast::Expression>>,
 }
 
 /// Type of physical index structure
@@ -156,7 +166,21 @@ impl IndexMetadata {
         columns: Vec<IndexedColumn>,
         is_unique: bool,
     ) -> Self {
-        Self { name, table_name, index_type, columns, is_unique }
+        Self { name, table_name, index_type, columns, is_unique, where_clause: None }
+    }
+
+    /// Attach a partial-index predicate (CREATE INDEX ... WHERE expr).
+    ///
+    /// Returns `self` for builder-style chaining. Pass `None` to clear an
+    /// existing predicate (the resulting index will be treated as full).
+    pub fn with_where_clause(mut self, where_clause: Option<vibesql_ast::Expression>) -> Self {
+        self.where_clause = where_clause.map(Box::new);
+        self
+    }
+
+    /// Returns `true` when this index is partial (has a WHERE clause).
+    pub fn is_partial(&self) -> bool {
+        self.where_clause.is_some()
     }
 
     /// Get the fully qualified index name (table.index)
@@ -335,6 +359,50 @@ mod tests {
         );
         assert!(!empty_index.has_expression_columns());
         assert!(!empty_index.is_expression_index());
+    }
+
+    #[test]
+    fn test_is_partial_default_false() {
+        let index = IndexMetadata::new(
+            "idx_users_email".to_string(),
+            "users".to_string(),
+            IndexType::BTree,
+            vec![IndexedColumn::new_column("email".to_string(), SortOrder::Ascending)],
+            true,
+        );
+        assert!(!index.is_partial());
+        assert!(index.where_clause.is_none());
+    }
+
+    #[test]
+    fn test_is_partial_when_where_clause_set() {
+        // Use a literal expression as the predicate stand-in.
+        let predicate = vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1));
+        let index = IndexMetadata::new(
+            "idx_users_active".to_string(),
+            "users".to_string(),
+            IndexType::BTree,
+            vec![IndexedColumn::new_column("email".to_string(), SortOrder::Ascending)],
+            true,
+        )
+        .with_where_clause(Some(predicate.clone()));
+        assert!(index.is_partial());
+        assert_eq!(index.where_clause.as_deref(), Some(&predicate));
+    }
+
+    #[test]
+    fn test_with_where_clause_none_clears_predicate() {
+        let predicate = vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1));
+        let index = IndexMetadata::new(
+            "idx_users_active".to_string(),
+            "users".to_string(),
+            IndexType::BTree,
+            vec![IndexedColumn::new_column("email".to_string(), SortOrder::Ascending)],
+            true,
+        )
+        .with_where_clause(Some(predicate))
+        .with_where_clause(None);
+        assert!(!index.is_partial());
     }
 
     #[test]
