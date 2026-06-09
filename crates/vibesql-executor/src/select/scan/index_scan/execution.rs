@@ -235,6 +235,11 @@ pub(crate) fn execute_index_scan(
         && limit.is_none()
         && matches!(&index_predicate, Some(IndexPredicate::Range(_)));
 
+    // Phase 1d follow-up of #5136 (issue #5204): MVCC snapshot for visibility
+    // filtering on index-scan paths. With the `mvcc_enabled` feature OFF this
+    // is the same is-not-bitmap-deleted check used today.
+    let snapshot = crate::mvcc::read_snapshot(database);
+
     if can_use_streaming {
         if let Some(IndexPredicate::Range(range)) = &index_predicate {
             // Try streaming range scan
@@ -286,6 +291,12 @@ pub(crate) fn execute_index_scan(
                         let Some(idx) = idx else { break };
 
                         let t1 = Instant::now();
+                        // Issue #5204: MVCC visibility — skip rows invisible to
+                        // the current snapshot (or deleted via the bitmap).
+                        if !table.is_row_visible(idx, &snapshot) {
+                            lookup_time += t1.elapsed();
+                            continue;
+                        }
                         if let Some(row_ref) = table.get_row(idx) {
                             lookup_time += t1.elapsed();
 
@@ -326,7 +337,10 @@ pub(crate) fn execute_index_scan(
                     rows
                 } else {
                     // Issue #4954: Set row_id when cloning for rowid support
+                    // Issue #5204: filter rows invisible to the MVCC snapshot
+                    // (off-state: this is the existing not-bitmap-deleted check).
                     streaming_iter
+                        .filter(|idx| table.is_row_visible(*idx, &snapshot))
                         .filter_map(|idx| table.get_row(idx).map(|row| (idx, row)))
                         .filter(|(_, row)| {
                             // Skip rows with NULL in indexed column (SQL semantics)
@@ -549,12 +563,17 @@ pub(crate) fn execute_index_scan(
     // Zero-copy optimization: Work with row references until the final step
     // This avoids cloning rows that will be filtered out by the WHERE clause
     // Issue #3790: Use get_row() which returns None for deleted rows
+    // Issue #5204: also apply MVCC visibility to index-scan output rows.
+    //   With `mvcc_enabled` OFF, `is_row_visible` reduces to the same
+    //   is-not-bitmap-deleted check the existing `get_row` filter already
+    //   performs, so this is behavior-preserving in the off-state.
     //
     // Issue #4954: Track row indices alongside row references so we can set row_id
     // when cloning. Row indices (0-based) become rowids (1-based) for SQLite compatibility.
     // We create a mapping from row pointer to index, then look up when cloning.
     let indexed_row_refs: Vec<(usize, &Row)> = matching_row_indices
         .iter()
+        .filter(|idx| table.is_row_visible(**idx, &snapshot))
         .filter_map(|idx| table.get_row(*idx).map(|row| (*idx, row)))
         .filter(|(_, row)| {
             // Skip rows with NULL in indexed column (SQL semantics for range predicates)
@@ -1029,8 +1048,15 @@ pub(in crate::select::scan) fn execute_skip_scan(
 
     // Fetch matching rows
     // Issue #3790: Use get_row() which returns None for deleted rows
-    let row_refs: Vec<&Row> =
-        matching_row_indices.iter().filter_map(|idx| table.get_row(*idx)).collect();
+    // Issue #5204: also apply MVCC visibility filtering. With `mvcc_enabled`
+    // OFF, `is_row_visible` is equivalent to the existing not-bitmap-deleted
+    // check, so off-state behavior is preserved bit-for-bit.
+    let snapshot = crate::mvcc::read_snapshot(database);
+    let row_refs: Vec<&Row> = matching_row_indices
+        .iter()
+        .filter(|idx| table.is_row_visible(**idx, &snapshot))
+        .filter_map(|idx| table.get_row(*idx))
+        .collect();
 
     // Skip-scan doesn't fully satisfy WHERE clause, so we need to apply post-filtering
     // This handles any additional predicates not covered by the skip-scan

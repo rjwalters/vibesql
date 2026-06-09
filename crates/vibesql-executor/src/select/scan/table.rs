@@ -959,6 +959,10 @@ fn try_primary_key_lookup(
 
     // Perform O(1) lookup in primary key index
     let lookup_result = pk_index.get(&pk_values);
+    // Issue #5204: thread the MVCC snapshot through the PK fast path. Off-state
+    // (`mvcc_enabled` OFF): `is_row_visible` reduces to the existing
+    // not-bitmap-deleted check, so behavior is identical to today.
+    let snapshot = crate::mvcc::read_snapshot(database);
     let rows = match lookup_result {
         Some(&row_idx) => {
             // Found the row via PK index - but we must still apply the FULL WHERE clause
@@ -966,7 +970,12 @@ fn try_primary_key_lookup(
             // Example: SELECT * FROM stock WHERE s_w_id = 1 AND s_i_id = 123 AND s_quantity < 10
             // The PK lookup finds the row, but we must also check s_quantity < 10.
             // Issue #3790: Use get_row() which returns None for deleted rows
-            if let Some(row) = table.get_row(row_idx) {
+            // Issue #5204: also enforce MVCC visibility — a row that has been
+            // tombstoned (xmax stamped) by a concurrent txn must not surface
+            // through the PK fast path.
+            if !table.is_row_visible(row_idx, &snapshot) {
+                vec![]
+            } else if let Some(row) = table.get_row(row_idx) {
                 // Evaluate the full WHERE clause on this row
                 // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
                 let evaluator = if cte_results.is_empty() {
