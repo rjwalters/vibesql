@@ -52,8 +52,21 @@ impl CommitExecutor {
     /// semantics ("FOREIGN KEY constraint failed" raised at COMMIT).
     pub fn execute(_stmt: &CommitStmt, db: &mut Database) -> Result<String, ExecutorError> {
         // Drain and re-validate deferred FK violations before commit.
+        //
+        // Phase 1d of #5136 — FK deferred-replay coordination:
+        // Capture a fresh **commit-time** snapshot for the re-validation
+        // scan. The BEGIN-time snapshot (`db.current_snapshot()`) would
+        // miss writes committed by other transactions between BEGIN and
+        // COMMIT, which is exactly the wrong semantics for FK enforcement
+        // (we want the latest visible parent state, not a stale one).
+        //
+        // Under the current single-writer model, the commit-time snapshot
+        // treats every transaction id allocated so far as committed,
+        // making the committing transaction's own writes (stamped with
+        // `xmin = current_txn_id`) pass `visible_to`.
         let pending = db.take_deferred_fk_violations();
-        if let Some(err_msg) = check_deferred_fk_violations(db, &pending) {
+        let commit_snapshot = db.capture_commit_time_snapshot();
+        if let Some(err_msg) = check_deferred_fk_violations(db, &pending, &commit_snapshot) {
             // Deferred violation still holds at COMMIT — abort the
             // commit and roll back. SQLite raises "FOREIGN KEY
             // constraint failed" here; auto-rollback follows the same
@@ -77,9 +90,29 @@ impl CommitExecutor {
 /// state. Returns `Some(error_message)` for the first entry that still
 /// fails; returns `None` when every entry has been satisfied (because
 /// the parent row was inserted later, the child row was deleted, etc.).
+///
+/// # Phase 1d of #5136 — snapshot semantics
+///
+/// `snapshot` is the **commit-time** snapshot
+/// ([`Database::capture_commit_time_snapshot`]), not the BEGIN-time
+/// snapshot. Under MVCC, this ensures that:
+///
+/// - The child-side check sees the committing transaction's own
+///   INSERT/UPDATE (the row that triggered the deferred violation in the
+///   first place) — even though it was stamped with this txn's `xmin`,
+///   the commit-time snapshot treats this txn id as committed.
+/// - The parent-side check sees any parent rows committed by OTHER
+///   transactions between BEGIN and COMMIT — which is exactly what we
+///   want: deferred FK is checked against the latest visible state, not
+///   a stale BEGIN-time view.
+///
+/// With the `mvcc_enabled` feature OFF (default), the storage-layer
+/// `is_row_visible` reduces to a deletion-bitmap check and the snapshot
+/// argument is ignored, preserving pre-MVCC semantics.
 fn check_deferred_fk_violations(
     db: &Database,
     pending: &[vibesql_storage::DeferredFkViolation],
+    snapshot: &vibesql_storage::TxnSnapshot,
 ) -> Option<String> {
     use crate::foreign_key_check::{
         fk_values_equal, parent_collations_for_fk, resolved_parent_indices_for_fk,
@@ -121,9 +154,12 @@ fn check_deferred_fk_violations(
             continue;
         }
 
-        // Does *any* live child row still carry these FK values? If
+        // Does *any* visible child row still carry these FK values? If
         // not, the conflict has been resolved (child deleted/updated).
-        let child_still_present = child_table.scan_live().any(|(_, child_row)| {
+        // Phase 1d: use `scan_visible` so the committing txn's own
+        // child writes participate, and so a concurrent committed
+        // delete is honored.
+        let child_still_present = child_table.scan_visible(snapshot).any(|(_, child_row)| {
             fk.column_indices.iter().enumerate().all(|(i, &col_idx)| {
                 match child_row.values.get(col_idx) {
                     Some(v) => v == &snapshot_fk_values[i],
@@ -151,18 +187,48 @@ fn check_deferred_fk_violations(
         let parent_collations = parent_collations_for_fk(db, fk);
         let parent_indices = resolved_parent_indices_for_fk(db, fk);
 
-        let key_exists = parent_table.scan().iter().any(|parent_row| {
-            parent_indices.iter().zip(&snapshot_fk_values).enumerate().all(
-                |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
-                    Some(parent_val) => fk_values_equal(
-                        fk_val,
-                        parent_val,
-                        parent_collations.get(i).and_then(|c| c.as_deref()),
-                    ),
-                    None => false,
-                },
-            )
-        });
+        // Phase 1d: scan visible parent rows (commit-time snapshot).
+        // Under MVCC OFF this is equivalent to scanning all rows
+        // (matches previous behavior of `parent_table.scan().iter()`,
+        // which did not filter the deletion bitmap; we keep the
+        // pre-existing wider semantics by also looking at non-bitmap-
+        // deleted rows — the `scan_visible` iterator filters the
+        // bitmap, but pre-Phase-1d the parent scan included deleted
+        // rows too, so to preserve OFF-state semantics exactly we
+        // continue to use `scan()` when MVCC is off).
+        let key_exists = {
+            #[cfg(feature = "mvcc_enabled")]
+            {
+                parent_table.scan_visible(snapshot).any(|(_, parent_row)| {
+                    parent_indices.iter().zip(&snapshot_fk_values).enumerate().all(
+                        |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
+                            Some(parent_val) => fk_values_equal(
+                                fk_val,
+                                parent_val,
+                                parent_collations.get(i).and_then(|c| c.as_deref()),
+                            ),
+                            None => false,
+                        },
+                    )
+                })
+            }
+            #[cfg(not(feature = "mvcc_enabled"))]
+            {
+                let _ = snapshot;
+                parent_table.scan().iter().any(|parent_row| {
+                    parent_indices.iter().zip(&snapshot_fk_values).enumerate().all(
+                        |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
+                            Some(parent_val) => fk_values_equal(
+                                fk_val,
+                                parent_val,
+                                parent_collations.get(i).and_then(|c| c.as_deref()),
+                            ),
+                            None => false,
+                        },
+                    )
+                })
+            }
+        };
 
         if !key_exists {
             // Match SQLite's wording for deferred FK failure at commit.

@@ -27,6 +27,7 @@ mod insert;
 mod introspection;
 pub mod limits;
 pub mod memory;
+pub mod mvcc;
 mod optimizer;
 pub mod persistence;
 pub mod pipeline;

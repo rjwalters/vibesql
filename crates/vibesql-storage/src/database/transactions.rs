@@ -278,9 +278,9 @@ impl TransactionManager {
     /// is returned on every call within a transaction — capture is
     /// per-transaction, not per-statement.
     ///
-    /// **Phase 1b note:** no callers consume this yet. Phase 1d will
-    /// thread it through the scan path so SELECT/JOIN/subquery reads
-    /// get snapshot-isolation semantics.
+    /// Phase 1d (#5151) wires this into the SELECT scan boundary so
+    /// reads inside a transaction observe a stable snapshot-isolation
+    /// view of the database.
     ///
     /// See [`crate::mvcc::TxnSnapshot`].
     pub fn current_snapshot(&self) -> Option<&TxnSnapshot> {
@@ -288,6 +288,33 @@ impl TransactionManager {
             TransactionState::Active { snapshot, .. } => Some(snapshot),
             TransactionState::None => None,
         }
+    }
+
+    /// Capture a fresh "commit-time" MVCC snapshot.
+    ///
+    /// Phase 1d (#5151) FK deferred-replay coordination: when a deferred
+    /// FK violation is re-checked at COMMIT, the read must reflect both
+    /// the committing transaction's own writes **and** any other
+    /// transactions that have committed between BEGIN and COMMIT. The
+    /// BEGIN-time snapshot does *not* see writes committed after it,
+    /// which is exactly the wrong semantics for FK enforcement (we want
+    /// the latest visible parent state, not the BEGIN-time snapshot).
+    ///
+    /// This helper synthesizes a snapshot where every transaction id
+    /// allocated so far is considered committed (under the single-writer
+    /// model). The committing transaction's own writes pass `is_committed`
+    /// because the committing transaction's `xmin` is `<= next_transaction_id - 1`.
+    ///
+    /// Under future multi-writer / Raft, this helper becomes the chokepoint
+    /// where the "still-in-progress" set is consulted; the caller signature
+    /// does not change.
+    pub fn capture_commit_time_snapshot(&self) -> TxnSnapshot {
+        let next_id = self.next_transaction_id;
+        // xmin_active = next_id ⇒ no row's xmax can exceed it under SI,
+        // matching `capture_snapshot`'s convention.
+        // xmax_committed = next_id - 1 ⇒ every id allocated so far is
+        // committed-as-of this snapshot (single-writer invariant).
+        TxnSnapshot::new(next_id, next_id.saturating_sub(1), std::collections::HashSet::new())
     }
 
     /// Create a savepoint within the current transaction

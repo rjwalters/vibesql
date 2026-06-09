@@ -492,7 +492,9 @@ pub(crate) fn execute_table_scan(
             // Return unfiltered rows for correlated subqueries
             // Filtering will happen later with full outer row context
             // Issue #3790: Must use scan_live_vec() to filter deleted rows
-            let mut live_rows = table.scan_live_vec();
+            // Phase 1d of #5136: also apply MVCC visibility when feature is on.
+            let snapshot = crate::mvcc::read_snapshot(database);
+            let mut live_rows = table.scan_visible_vec(&snapshot);
             // sqlite_search_count: Track rows examined during table scan
             database.increment_search_count(live_rows.len() as u64);
             // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
@@ -571,9 +573,23 @@ pub(crate) fn execute_table_scan(
                     );
                 }
 
+                // Phase 1d of #5136: SIMD/columnar fast paths bypass per-row
+                // visibility checks. When the MVCC feature is OFF this is fine
+                // — visibility is a no-op. When ON, fall through to the
+                // row-based path which honors `visible_to` per row. Tracked
+                // in the follow-up "MVCC + SIMD columnar fast path"
+                // optimization issue.
+                #[cfg(not(feature = "mvcc_enabled"))]
+                let mvcc_on = false;
+                #[cfg(feature = "mvcc_enabled")]
+                let mvcc_on = true;
+
                 // For native columnar tables, use SIMD filtering on typed columns
                 // This avoids SqlValue overhead by working directly on i64/f64/String arrays
-                if table.is_native_columnar() && all_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
+                if !mvcc_on
+                    && table.is_native_columnar()
+                    && all_rows.len() >= SIMD_COLUMNAR_THRESHOLD
+                {
                     if let Ok(mut filtered_rows) =
                         filter_with_simd_columnar(table, &column_predicates)
                     {
@@ -596,7 +612,7 @@ pub(crate) fn execute_table_scan(
                 // For row-oriented tables, use cached columnar filter with late materialization
                 // Issue #4136: Use database columnar cache for SIMD filtering, clone only passing
                 // rows
-                if all_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
+                if !mvcc_on && all_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
                     if let Ok(mut filtered_rows) = filter_with_cached_columnar(
                         database,
                         table_name,
@@ -623,13 +639,15 @@ pub(crate) fn execute_table_scan(
                 let indices =
                     crate::select::columnar::apply_columnar_filter(all_rows, &column_predicates)?;
 
-                // Clone only the rows that pass the filter AND aren't deleted
-                // This is the key optimization: we skip cloning rows that don't pass
+                // Clone only the rows that pass the filter AND aren't deleted AND
+                // (under MVCC) are visible to the current snapshot.
                 // Issue #4370: Preserve row_id for ROWID pseudo-column support
                 // Issue #4536: Preserve explicit row_id from INSERT INTO t(rowid, ...) VALUES(...)
+                // Phase 1d of #5136: also apply MVCC visibility when feature is on.
+                let snapshot = crate::mvcc::read_snapshot(database);
                 let mut filtered_rows: Vec<_> = indices
                     .into_iter()
-                    .filter(|&idx| !table.is_row_deleted(idx))
+                    .filter(|&idx| table.is_row_visible(idx, &snapshot))
                     .filter_map(|idx| {
                         all_rows.get(idx).map(|row| {
                             let mut cloned = row.clone();
@@ -667,7 +685,9 @@ pub(crate) fn execute_table_scan(
             // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema
             // table names Issue #3562: Pass CTE context so IN subqueries can reference
             // CTEs
-            let live_rows = table.scan_live_vec();
+            // Phase 1d of #5136: also apply MVCC visibility when feature is on.
+            let snapshot = crate::mvcc::read_snapshot(database);
+            let live_rows = table.scan_visible_vec(&snapshot);
             // sqlite_search_count: Track rows examined during table scan
             database.increment_search_count(live_rows.len() as u64);
             let mut filtered_rows = apply_table_local_predicates(
@@ -693,7 +713,9 @@ pub(crate) fn execute_table_scan(
 
     // No table-local predicates or no WHERE clause: return live rows
     // Issue #3790: Must filter deleted rows via scan_live_vec()
-    let mut live_rows = table.scan_live_vec();
+    // Phase 1d of #5136: also apply MVCC visibility when feature is on.
+    let snapshot = crate::mvcc::read_snapshot(database);
+    let mut live_rows = table.scan_visible_vec(&snapshot);
     // sqlite_search_count: Track rows examined during table scan
     database.increment_search_count(live_rows.len() as u64);
 
@@ -1160,6 +1182,10 @@ pub(crate) fn execute_table_scan_with_bloom(
 
     // Get live rows from table
     let all_rows = table.scan();
+    // Phase 1d of #5136: thread the MVCC snapshot through the bloom-prefilter
+    // path. With the feature OFF, `is_row_visible` reduces to the same
+    // is-not-bitmap-deleted check this path already uses.
+    let snapshot = crate::mvcc::read_snapshot(database);
 
     // If we have a Bloom filter, apply it during scan
     // This is the key optimization: filter rows BEFORE they enter memory
@@ -1184,8 +1210,8 @@ pub(crate) fn execute_table_scan_with_bloom(
                 .iter()
                 .enumerate()
                 .filter(|(idx, row)| {
-                    // Skip deleted rows
-                    if table.is_row_deleted(*idx) {
+                    // Skip deleted rows and (under MVCC) rows invisible to our snapshot.
+                    if !table.is_row_visible(*idx, &snapshot) {
                         return false;
                     }
 
@@ -1211,8 +1237,8 @@ pub(crate) fn execute_table_scan_with_bloom(
                 .iter()
                 .enumerate()
                 .filter(|(idx, row)| {
-                    // Skip deleted rows
-                    if table.is_row_deleted(*idx) {
+                    // Skip deleted rows and (under MVCC) rows invisible to our snapshot.
+                    if !table.is_row_visible(*idx, &snapshot) {
                         return false;
                     }
 
@@ -1265,7 +1291,8 @@ pub(crate) fn execute_table_scan_with_bloom(
             .iter()
             .enumerate()
             .filter(|(idx, row)| {
-                !table.is_row_deleted(*idx)
+                // Phase 1d: combined deletion + MVCC visibility check.
+                table.is_row_visible(*idx, &snapshot)
                     && matches!(
                         evaluator.eval(&combined_where, row),
                         Ok(vibesql_types::SqlValue::Boolean(true))
@@ -1278,6 +1305,7 @@ pub(crate) fn execute_table_scan_with_bloom(
     }
 
     // No filters - return all live rows
-    let live_rows = table.scan_live_vec();
+    // Phase 1d of #5136: also apply MVCC visibility when feature is on.
+    let live_rows = table.scan_visible_vec(&snapshot);
     Ok(super::FromResult::from_rows(schema, live_rows))
 }
