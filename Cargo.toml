@@ -44,7 +44,7 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 glob = "0.3"
 md-5 = "0.11"
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { workspace = true }
 vibesql-cli = { version = "0.1.4", path = "crates/vibesql-cli" }
 chrono = "0.4"
 
@@ -90,6 +90,12 @@ repository = "https://github.com/rjwalters/vibesql"
 [workspace.dependencies]
 # Will add dependencies as needed for each phase
 pyo3 = { version = "0.28", features = ["extension-module", "abi3-py39"] }
+
+# Centralized so dependabot's grouped cargo updates touch a single declaration
+# — historically the root Cargo.toml drifted from the crates whenever dependabot
+# bumped rusqlite (see merged #4634 and #5170). Crates inherit via
+# `rusqlite = { workspace = true, ... }` and add `optional = true` where needed.
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 # Test declarations for integration tests
 

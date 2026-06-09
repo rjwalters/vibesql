@@ -97,7 +97,7 @@ reqwest = { version = "0.13", features = ["stream", "query"] }
 vibesql-bench-common = { version = "0.1.4", path = "../vibesql-bench-common", features = ["vibesql", "sqlite"] }
 # Additional dependencies for server benchmarks (moved from vibesql-executor)
 rand_chacha = "0.10"
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { workspace = true }
 
 [[bench]]
 name = "subscription_fanout"
