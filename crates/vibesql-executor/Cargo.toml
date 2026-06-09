@@ -45,8 +45,8 @@ mysql = { version = "28.0", optional = true }
 
 # jemalloc for better memory release characteristics in benchmarks
 # These must be in [dependencies] (not dev-dependencies) to be feature-gated
-tikv-jemallocator = { version = "0.6", optional = true }
-tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
+tikv-jemallocator = { version = "0.7", optional = true }
+tikv-jemalloc-ctl = { version = "0.7", features = ["stats"], optional = true }
 
 [dev-dependencies]
 vibesql-parser = { version = "0.1.4", path = "../vibesql-parser" }
