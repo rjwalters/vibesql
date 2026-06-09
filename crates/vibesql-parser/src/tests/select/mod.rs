@@ -5,5 +5,6 @@ mod concat;
 mod derived_columns;
 mod extract;
 mod filters;
+mod index_hints;
 mod keyword_as_identifier;
 mod position;

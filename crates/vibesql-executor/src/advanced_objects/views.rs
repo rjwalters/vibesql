@@ -22,10 +22,15 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
     // This ensures views with SELECT * preserve original column names
     // Use simple column names (without table prefix) for view schema compatibility
     let columns = if stmt.columns.is_none() {
-        // Execute the query once to derive column names
+        // Execute the query once to derive column names.
+        // SQLite-compatible: errors surfaced while compiling a view's query are
+        // prefixed with the view name (e.g. "error in view a: 1st ORDER BY term
+        // does not match any column in the result set").
         use crate::select::SelectExecutor;
         let executor = SelectExecutor::new(db);
-        let result = executor.execute_with_simple_columns(&stmt.query)?;
+        let result = executor.execute_with_simple_columns(&stmt.query).map_err(|e| {
+            ExecutorError::SqliteCompatError(format!("error in view {}: {}", stmt.view_name, e))
+        })?;
         Some(result.columns)
     } else {
         stmt.columns.clone()

@@ -78,8 +78,7 @@ fn scalar_subquery_needs_outer_rows(expr: &vibesql_ast::Expression) -> bool {
             })
         }
         Expression::BinaryOp { left, right, .. } => {
-            scalar_subquery_needs_outer_rows(left)
-                || scalar_subquery_needs_outer_rows(right)
+            scalar_subquery_needs_outer_rows(left) || scalar_subquery_needs_outer_rows(right)
         }
         Expression::UnaryOp { expr, .. } => scalar_subquery_needs_outer_rows(expr),
         Expression::Cast { expr, .. } => scalar_subquery_needs_outer_rows(expr),
@@ -111,9 +110,7 @@ fn bare_subquery_inner_has_outer_aggregate(expr: &vibesql_ast::Expression) -> bo
             if filter.as_ref().is_some_and(|f| any_column_ref(f)) {
                 return true;
             }
-            if order_by
-                .as_ref()
-                .is_some_and(|items| items.iter().any(|i| any_column_ref(&i.expr)))
+            if order_by.as_ref().is_some_and(|items| items.iter().any(|i| any_column_ref(&i.expr)))
             {
                 return true;
             }
@@ -159,9 +156,7 @@ fn any_column_ref(expr: &vibesql_ast::Expression) -> bool {
 
     match expr {
         Expression::ColumnRef(_) => true,
-        Expression::BinaryOp { left, right, .. } => {
-            any_column_ref(left) || any_column_ref(right)
-        }
+        Expression::BinaryOp { left, right, .. } => any_column_ref(left) || any_column_ref(right),
         Expression::UnaryOp { expr, .. } => any_column_ref(expr),
         Expression::Cast { expr, .. } => any_column_ref(expr),
         Expression::IsNull { expr, .. } => any_column_ref(expr),
@@ -175,15 +170,12 @@ fn any_column_ref(expr: &vibesql_ast::Expression) -> bool {
         }
         Expression::Case { operand, when_clauses, else_result } => {
             operand.as_ref().is_some_and(|e| any_column_ref(e))
-                || when_clauses.iter().any(|w| {
-                    w.conditions.iter().any(any_column_ref)
-                        || any_column_ref(&w.result)
-                })
+                || when_clauses
+                    .iter()
+                    .any(|w| w.conditions.iter().any(any_column_ref) || any_column_ref(&w.result))
                 || else_result.as_ref().is_some_and(|e| any_column_ref(e))
         }
-        Expression::Like { expr, pattern, .. } => {
-            any_column_ref(expr) || any_column_ref(pattern)
-        }
+        Expression::Like { expr, pattern, .. } => any_column_ref(expr) || any_column_ref(pattern),
         Expression::Between { expr, low, high, .. } => {
             any_column_ref(expr) || any_column_ref(low) || any_column_ref(high)
         }
@@ -192,6 +184,36 @@ fn any_column_ref(expr: &vibesql_ast::Expression) -> bool {
         }
         // Don't descend into nested subqueries or window functions (own scope).
         _ => false,
+    }
+}
+
+/// Normalize a value for comparison under a named collation.
+///
+/// NOCASE: uppercase strings for case-insensitive comparison.
+/// RTRIM: trim trailing whitespace.
+/// Any other (or no) collation leaves the value unchanged (BINARY semantics).
+fn transform_for_collation(
+    val: vibesql_types::SqlValue,
+    collation: Option<&str>,
+) -> vibesql_types::SqlValue {
+    use vibesql_types::SqlValue;
+    let Some(collation_name) = collation else {
+        return val;
+    };
+    if collation_name.eq_ignore_ascii_case("nocase") {
+        match val {
+            SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())),
+            SqlValue::Character(s) => SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase())),
+            other => other,
+        }
+    } else if collation_name.eq_ignore_ascii_case("rtrim") {
+        match val {
+            SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end())),
+            SqlValue::Character(s) => SqlValue::Character(arcstr::ArcStr::from(s.trim_end())),
+            other => other,
+        }
+    } else {
+        val
     }
 }
 
@@ -214,6 +236,12 @@ pub(super) fn evaluate_in(
     // Evaluate left-hand expression (which may be an aggregate)
     let left_val =
         executor.evaluate_with_aggregates(left_expr, group_rows, group_key, evaluator)?;
+
+    // Effective collation of the LHS — explicit COLLATE clauses propagate
+    // through single-argument aggregates (SQLite datatype3 §7.1), so e.g.
+    // max(c1 COLLATE nocase) IN (SELECT 'aBCd') compares case-insensitively.
+    let collation = evaluator.get_expression_collation(left_expr);
+    let left_val = transform_for_collation(left_val, collation.as_deref());
 
     // Execute subquery to get values to compare against
     let database = executor.database;
@@ -246,8 +274,8 @@ pub(super) fn evaluate_in(
             continue;
         }
 
-        // Compare using equality
-        if left_val == *subquery_val {
+        // Compare using equality (under the LHS collation, if any)
+        if left_val == transform_for_collation(subquery_val.clone(), collation.as_deref()) {
             return Ok(vibesql_types::SqlValue::Boolean(!negated));
         }
     }

@@ -243,6 +243,15 @@ where
     };
     let recursive_query = &set_op.right;
 
+    // SQLite compatibility: window functions are not allowed in the recursive
+    // part of a recursive CTE (window1.test 15.0). SQLite reports the exact
+    // error "cannot use window functions in recursive queries".
+    if crate::select::window::has_window_functions(&recursive_query.select_list) {
+        return Err(ExecutorError::SqliteCompatError(
+            "cannot use window functions in recursive queries".to_string(),
+        ));
+    }
+
     // Try static validation first (works for explicit column lists and VALUES)
     // This provides better SQLite compatibility by catching errors at prepare time
     // rather than waiting until runtime

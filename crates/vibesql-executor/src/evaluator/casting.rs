@@ -709,6 +709,45 @@ pub(crate) fn cast_value(
             _ => Ok(SqlValue::Blob(vec![])), // SQLite: Default to empty blob
         },
 
+        // CAST to a user-defined / unknown type name (SQLite compatibility):
+        // SQLite accepts any type name in CAST and applies its type-affinity
+        // rules derived from the name (e.g. CAST(x AS banana) → NUMERIC).
+        UserDefined { .. } => match target_type.sqlite_affinity() {
+            vibesql_types::TypeAffinity::Integer => cast_value(value, &Integer, sql_mode),
+            vibesql_types::TypeAffinity::Text => {
+                cast_value(value, &Varchar { max_length: None }, sql_mode)
+            }
+            vibesql_types::TypeAffinity::None => cast_value(value, &BinaryLargeObject, sql_mode),
+            vibesql_types::TypeAffinity::Real => cast_value(value, &DoublePrecision, sql_mode),
+            vibesql_types::TypeAffinity::Numeric => {
+                // SQLite NUMERIC cast: text converts to INTEGER when the value
+                // is integral and representable losslessly, otherwise REAL;
+                // non-numeric text converts to 0.
+                let numeric_from_text = |s: &str| -> vibesql_types::SqlValue {
+                    let (i, f, is_float) = string_to_number(s);
+                    if is_float {
+                        if f == f.trunc() && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+                            SqlValue::Integer(f as i64)
+                        } else {
+                            SqlValue::Double(f)
+                        }
+                    } else {
+                        SqlValue::Integer(i)
+                    }
+                };
+                match value {
+                    SqlValue::Varchar(s) | SqlValue::Character(s) => Ok(numeric_from_text(s)),
+                    SqlValue::Blob(bytes) => {
+                        let text = std::str::from_utf8(bytes).unwrap_or("");
+                        Ok(numeric_from_text(text))
+                    }
+                    SqlValue::Boolean(b) => Ok(SqlValue::Integer(if *b { 1 } else { 0 })),
+                    // Values that already have a numeric storage class keep it
+                    other => Ok(other.clone()),
+                }
+            }
+        },
+
         // Unsupported target types
         _ => Err(ExecutorError::UnsupportedFeature(format!(
             "CAST to {:?} not yet implemented",

@@ -130,3 +130,4 @@ mod truncate_table_tests;
 mod unique_index_tests;
 mod vector_distance_operators;
 mod view_tests;
+mod window1_quick_wins;

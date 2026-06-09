@@ -26,9 +26,9 @@ impl Parser {
                 self.advance(); // consume '('
 
                 // Check if this is a scalar subquery by peeking at next token
-                // Both SELECT and VALUES can be scalar subqueries
-                if self.peek_keyword(Keyword::Select) {
-                    // It's a scalar subquery: (SELECT ...)
+                // SELECT, WITH (CTE-prefixed SELECT), and VALUES can all be scalar subqueries
+                if self.peek_keyword(Keyword::Select) || self.peek_keyword(Keyword::With) {
+                    // It's a scalar subquery: (SELECT ...) or (WITH ... SELECT ...)
                     let select_stmt = self.parse_select_statement()?;
                     self.expect_token(Token::RParen)?;
                     Ok(Some(vibesql_ast::Expression::ScalarSubquery(Box::new(select_stmt))))
