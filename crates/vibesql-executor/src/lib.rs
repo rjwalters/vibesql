@@ -98,8 +98,8 @@ pub use select_into::SelectIntoExecutor;
 pub use session::{PreparedExecutionResult, Session, SessionError, SessionMut};
 pub use timeout::TimeoutContext;
 pub use transaction::{
-    BeginTransactionExecutor, CommitExecutor, ReleaseSavepointExecutor, RollbackExecutor,
-    RollbackToSavepointExecutor, SavepointExecutor,
+    live_deferred_fk_violation_count, BeginTransactionExecutor, CommitExecutor,
+    ReleaseSavepointExecutor, RollbackExecutor, RollbackToSavepointExecutor, SavepointExecutor,
 };
 pub use trigger_ddl::TriggerExecutor;
 pub use trigger_execution::TriggerFirer;

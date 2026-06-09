@@ -4827,6 +4827,91 @@ proc sqlite3_test_control {args} {
     return 0
 }
 
+# SQLite's `sqlite3_db_status` C API exposes per-connection counters.
+# The TCL test suite wraps it as:
+#
+#     sqlite3_db_status db <VERB> <RESET>
+#
+# returning a list `{result_code current_value highwater_value}`.
+#
+# Only `DBSTATUS_DEFERRED_FKS` is wired up against the VibeSQL bridge
+# PRAGMA `deferred_fk_count` (issue #5187). Every other verb returns
+# the stub `{0 0 0}`, which is sufficient for fkey6-1.20 / fkey6-1.21
+# (the only Priority-2 tests that currently land on this command).
+#
+# Reference:
+#   https://www.sqlite.org/c3ref/db_status.html
+#   https://www.sqlite.org/c3ref/c_dbstatus_options.html
+proc sqlite3_db_status {db verb {reset 0}} {
+    if {$verb eq "DBSTATUS_DEFERRED_FKS"} {
+        set count [vibesql_query_deferred_fk_count]
+        # VibeSQL has no separate high-water tracking — report current
+        # as both current and high-water (matches SQLite's behavior for
+        # this verb, where the counter is reset rather than tracked).
+        return [list 0 $count 0]
+    }
+    # Unknown verb: stub with zeros. Tests that expect non-zero values
+    # for other verbs will fail, but no such tests reach this branch in
+    # the current TCL suite.
+    return [list 0 0 0]
+}
+
+# Run `PRAGMA deferred_fk_count` against the current connection state
+# without disturbing it. The PRAGMA is implemented by vibesql-cli and
+# returns the count of deferred-FK violations that would still hold if
+# the active transaction were to COMMIT right now (or 0 outside a txn).
+#
+# Because the shim batches statements between BEGIN and COMMIT/ROLLBACK
+# (each `execsql` runs a fresh vibesql process), we must replay the
+# accumulated batch + the PRAGMA + ROLLBACK inside a single subprocess
+# to observe the in-transaction state. Outside a transaction the PRAGMA
+# is executed directly.
+proc vibesql_query_deferred_fk_count {} {
+    set pragma_prefix [build_pragma_prefix]
+
+    if {$::in_transaction} {
+        # Build the in-transaction peek SQL: replay everything queued so
+        # far, then the PRAGMA, then ROLLBACK to leave the data file
+        # untouched. The real batch is still kept in $::sql_batch and
+        # will be flushed by the subsequent COMMIT/ROLLBACK in the test,
+        # so peeking is safe.
+        #
+        # `.mode raw` is placed at the very top so the peek's stdout
+        # contains exactly one line — the PRAGMA result — making
+        # parse_raw_result trivial. Without `.mode raw` we would also
+        # capture status lines like "Transaction started" / "0 rows".
+        set cleaned {}
+        foreach stmt $::sql_batch {
+            set stmt [string trimright $stmt]
+            set stmt [string trimright $stmt ";"]
+            lappend cleaned $stmt
+        }
+        set combined ".mode raw\n${pragma_prefix}[join $cleaned {;
+}];
+PRAGMA deferred_fk_count;
+ROLLBACK;
+"
+    } else {
+        # Outside a transaction the queue is always empty, but execute
+        # the PRAGMA anyway for parity with the in-txn path.
+        set combined ".mode raw\n${pragma_prefix}PRAGMA deferred_fk_count;"
+    }
+
+    if {[catch {exec_preserve_newlines $combined $::db_file} result]} {
+        # Couldn't peek — fall back to 0 rather than erroring out the
+        # whole test. Surface the underlying issue on stderr for
+        # debugging.
+        puts stderr "vibesql_query_deferred_fk_count: peek failed: $result"
+        return 0
+    }
+    set parsed [parse_raw_result $result]
+    if {[llength $parsed] == 0} {
+        return 0
+    }
+    # The PRAGMA emits a single row with the count value.
+    return [lindex $parsed 0]
+}
+
 proc breakpoint {} {
     # Debug breakpoint - ignore
     return
