@@ -3,7 +3,10 @@
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
 
-use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator};
+use crate::{
+    errors::ExecutorError,
+    evaluator::{coercion::coerce_value_to_column_type, ExpressionEvaluator},
+};
 
 /// Row selector for UPDATE statements
 ///
@@ -30,6 +33,25 @@ impl<'a> RowSelector<'a> {
         // Try to use primary key index for fast lookup
         if let Some(vibesql_ast::WhereClause::Condition(where_expr)) = where_clause {
             if let Some(pk_values) = Self::extract_primary_key_lookup(where_expr, self.schema) {
+                // Coerce extracted WHERE-clause literals to match the PK column
+                // affinities. The PK index HashMap is keyed on stored (already-
+                // coerced) values, so a raw literal can silently miss when types
+                // differ — e.g. `WHERE p=1200` on a TEXT PRIMARY KEY storing
+                // "1200". See issue #5145.
+                let pk_values: Vec<SqlValue> = if let Some(pk_indices) =
+                    self.schema.get_primary_key_indices()
+                {
+                    pk_values
+                        .into_iter()
+                        .zip(pk_indices.iter())
+                        .map(|(val, &idx)| {
+                            coerce_value_to_column_type(val, &self.schema.columns[idx].data_type)
+                        })
+                        .collect()
+                } else {
+                    pk_values
+                };
+
                 // Use primary key index for O(1) lookup
                 if let Some(pk_index) = table.primary_key_index() {
                     if let Some(&row_index) = pk_index.get(&pk_values) {

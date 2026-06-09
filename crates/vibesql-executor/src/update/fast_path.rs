@@ -18,7 +18,9 @@ use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
 use crate::{
-    errors::ExecutorError, evaluator::ExpressionEvaluator, expression_index_maintenance,
+    errors::ExecutorError,
+    evaluator::{coercion::coerce_value_to_column_type, ExpressionEvaluator},
+    expression_index_maintenance,
     insert::validation::coerce_value,
 };
 
@@ -47,6 +49,22 @@ pub(super) fn try_fast_path_update(
     let pk_value = match extract_pk_equality(where_clause, schema) {
         Some(val) => val,
         None => return Ok(None), // Not a simple PK equality
+    };
+
+    // Coerce extracted WHERE-clause literals to match PK column affinities.
+    // The PK index HashMap is keyed on stored (affinity-coerced) values, so
+    // a raw literal can silently miss when types differ — e.g. `WHERE p=1200`
+    // on a TEXT PRIMARY KEY storing "1200". See issue #5145.
+    let pk_value: Vec<SqlValue> = {
+        let pk_indices = match schema.get_primary_key_indices() {
+            Some(indices) => indices,
+            None => return Ok(None),
+        };
+        pk_value
+            .into_iter()
+            .zip(pk_indices.iter())
+            .map(|(val, &idx)| coerce_value_to_column_type(val, &schema.columns[idx].data_type))
+            .collect()
     };
 
     // Get table and check for PK index, look up row index
