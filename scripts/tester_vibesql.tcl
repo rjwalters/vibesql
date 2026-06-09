@@ -3140,7 +3140,6 @@ array set vibesql_skip_tests {
     fkey5-7.2 "Cascades from skipped fkey5-7.1 (INSERT OR IGNORE with FK violation)"
     fkey5-7.3 "Cascades from skipped fkey5-7.1 (INSERT OR IGNORE with FK violation)"
 
-    fkey8-2.3.1 "WITHOUT ROWID + AFTER DELETE trigger doing INSERT OR REPLACE on parent (out of scope for #5126; trigger/WITHOUT-ROWID interaction)"
     fkey8-5.2 "UPDATE/DELETE PK affinity is fixed (#5145), but schema-reload drops DEFERRABLE INITIALLY DEFERRED so the deferred-INSERT on child fires immediately across CLI invocations — tracked separately in #5172"
 }
 
@@ -3322,8 +3321,24 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses EXPLAIN opcode checking (SQLite VDBE-specific)"]
     }
 
-    # UPDATE/INSERT OR REPLACE/IGNORE/ABORT conflict resolution - not fully supported
-    if {[regexp -nocase {(?:UPDATE|INSERT)\s+OR\s+(?:REPLACE|IGNORE|ABORT|ROLLBACK|FAIL)\s} $script]} {
+    # UPDATE/INSERT OR REPLACE/IGNORE/ABORT conflict resolution - not fully supported.
+    #
+    # IMPORTANT: This filter must NOT match conflict clauses that appear inside
+    # CREATE TRIGGER bodies. The trigger body's SQL only fires when the outer
+    # statement triggers it (e.g., AFTER DELETE), and VibeSQL handles those
+    # nested INSERT/UPDATE OR REPLACE statements correctly. Matching trigger-body
+    # text caused false-positive skips that omitted whole test setup blocks and
+    # cascaded into "no such table" failures in dependent tests (e.g. fkey8-2.3.1
+    # depends on fkey8-2.3.0 setup whose trigger body uses INSERT OR REPLACE).
+    #
+    # Specific failing top-level conflict-clause cases are already triaged
+    # individually in vibesql_skip_tests (e.g. insert-6.3, insert-6.4,
+    # fkey5-7.1..7.3) — do not broaden this filter to compensate.
+    set script_outer $script
+    regsub -all -nocase \
+        {CREATE\s+(?:TEMP\s+|TEMPORARY\s+)?TRIGGER[^;]*?BEGIN\s+.*?END\s*;} \
+        $script_outer "" script_outer
+    if {[regexp -nocase {(?:UPDATE|INSERT)\s+OR\s+(?:REPLACE|IGNORE|ABORT|ROLLBACK|FAIL)\s} $script_outer]} {
         return [list 1 "uses conflict resolution clause (not fully supported)"]
     }
 
