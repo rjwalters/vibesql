@@ -3,12 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "description": "SQL Conformance Testing Database - pnpm helper scripts for Cargo commands",
-  "pnpm": {
-    "overrides": {
-      "esbuild": ">=0.25.0",
-      "rollup": ">=4.59.0"
-    }
-  },
   "scripts": {
     "check:all": "cargo fmt -- --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test --all && cargo build --all",
     "check:ci": "cargo fmt -- --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test --all",
