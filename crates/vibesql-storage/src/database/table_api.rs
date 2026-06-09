@@ -332,7 +332,20 @@ impl Database {
     /// Insert a row into a table
     ///
     /// Temporary tables (in the "temp" schema) are not persisted to WAL.
-    pub fn insert_row(&mut self, table_name: &str, row: Row) -> Result<(), StorageError> {
+    ///
+    /// # MVCC (Phase 1c of #5136)
+    ///
+    /// When the `mvcc_enabled` feature is on and a transaction is active,
+    /// the new row is stamped with `xmin = current_txn_id` before storage.
+    /// When the feature is off (default) the row keeps the pre-MVCC
+    /// sentinel `xmin = 0` and behavior is bit-for-bit identical to
+    /// pre-MVCC. See [`crate::mvcc::stamp_xmin_for_write`].
+    pub fn insert_row(&mut self, table_name: &str, mut row: Row) -> Result<(), StorageError> {
+        // Phase 1c: stamp xmin with the active txn id when MVCC is on.
+        // No-op when the feature is off, so the off-state matches main.
+        let txn_id = self.transaction_id();
+        crate::mvcc::stamp_xmin_for_write(&mut row, txn_id);
+
         let row_index =
             self.operations.insert_row(&self.catalog, &mut self.tables, table_name, row.clone())?;
 
@@ -398,10 +411,19 @@ impl Database {
     pub fn insert_rows_batch(
         &mut self,
         table_name: &str,
-        rows: Vec<Row>,
+        mut rows: Vec<Row>,
     ) -> Result<usize, StorageError> {
         if rows.is_empty() {
             return Ok(0);
+        }
+
+        // Phase 1c (Issue #5150 / #5136): stamp xmin on every new row with
+        // the active txn id when the `mvcc_enabled` feature is on. When
+        // the feature is off this is a no-op (rows keep their constructor
+        // default `xmin = PRE_MVCC_TXN_ID`), so the off-state matches main.
+        let txn_id = self.transaction_id();
+        for row in rows.iter_mut() {
+            crate::mvcc::stamp_xmin_for_write(row, txn_id);
         }
 
         let row_indices = self.operations.insert_rows_batch(
@@ -583,6 +605,18 @@ impl Database {
             new_row.set(col_index, new_value.clone())?;
             changed_columns.insert(col_index);
         }
+
+        // Phase 1c (Issue #5150 / #5136): stamp the new row's xmin with
+        // the active txn id when MVCC is on. The new row is by definition
+        // not deleted, so xmax stays `None` regardless of feature state.
+        //
+        // Note: this fast path overwrites the row in-place. Phase 1c does
+        // NOT preserve the old version as a tombstone here — Phase 1d will
+        // revisit if true two-version retention is required for snapshot
+        // isolation across UPDATE.
+        let txn_id = self.transaction_id();
+        crate::mvcc::stamp_xmin_for_write(&mut new_row, txn_id);
+        new_row.xmax = None;
 
         // Third phase: write data (mutable borrow)
         let table_mut = self.get_table_mut(table_name).unwrap();

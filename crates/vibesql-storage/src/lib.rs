@@ -47,7 +47,7 @@ pub use database::{
 };
 pub use error::{StorageError, StorageResult};
 pub use index::{extract_mbr_from_sql_value, SpatialIndex, SpatialIndexEntry};
-pub use mvcc::TxnSnapshot;
+pub use mvcc::{mvcc_enabled, stamp_xmax_for_write, stamp_xmin_for_write, TxnSnapshot};
 pub use persistence::load::{parse_sql_statements, read_sql_dump};
 pub use query_buffer_pool::{
     QueryBufferPool, QueryBufferPoolStats, RowBufferGuard, ValueBufferGuard,

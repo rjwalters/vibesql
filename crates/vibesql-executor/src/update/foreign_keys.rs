@@ -371,8 +371,16 @@ impl ForeignKeyValidator {
             }
         }
 
-        // Apply cascade updates
-        for (table_name, updates) in cascade_updates {
+        // Apply cascade updates. Phase 1c (Issue #5150 / #5136): stamp
+        // xmin on every cascade-update new row version. Off-state is a
+        // no-op. We capture the txn id once outside the per-table loop
+        // since the txn doesn't change within an UPDATE.
+        let txn_id = db.transaction_id();
+        for (table_name, mut updates) in cascade_updates {
+            for (_row_idx, new_row) in updates.iter_mut() {
+                vibesql_storage::stamp_xmin_for_write(new_row, txn_id);
+                new_row.xmax = None;
+            }
             let child_table = db.get_table_mut(&table_name).unwrap();
             for (row_idx, new_row) in updates {
                 child_table

@@ -300,6 +300,16 @@ fn cascade_delete(
         check_no_child_references(db, child_table_name, child_row)?;
     }
 
+    // Phase 1c (Issue #5150 / #5136) note: FK cascade DELETE uses the
+    // content-matching `delete_where` predicate (not index-based), so we
+    // can't pre-stamp xmax on specific row indices the way the primary
+    // DELETE path does. With `mvcc_enabled` ON, cascade-deleted rows
+    // currently get a bitmap-delete but NO xmax stamp. Phase 1d will
+    // either thread snapshot-aware deletion through here or refactor
+    // cascade to use index-based deletion so the stamping helper applies.
+    // This is a known minor gap; cascade DELETE in a transaction with
+    // mvcc_enabled is uncommon and the off-state behavior is unchanged.
+
     // Now delete the child rows
     let child_table_mut = db.get_table_mut(child_table_name).unwrap();
     for row_to_delete in &rows_to_delete {
@@ -355,6 +365,14 @@ fn set_null(
             }
             rows_to_update.push((idx, updated_row));
         }
+    }
+
+    // Phase 1c (Issue #5150 / #5136): stamp xmin on every FK-cascaded
+    // SET NULL new row version. Off-state is a no-op.
+    let txn_id = db.transaction_id();
+    for (_, updated_row) in rows_to_update.iter_mut() {
+        vibesql_storage::stamp_xmin_for_write(updated_row, txn_id);
+        updated_row.xmax = None;
     }
 
     // Now update the rows
@@ -442,6 +460,14 @@ fn set_default(
             }
             rows_to_update.push((idx, updated_row));
         }
+    }
+
+    // Phase 1c (Issue #5150 / #5136): stamp xmin on every FK-cascaded
+    // SET DEFAULT new row version. Off-state is a no-op.
+    let txn_id = db.transaction_id();
+    for (_, updated_row) in rows_to_update.iter_mut() {
+        vibesql_storage::stamp_xmin_for_write(updated_row, txn_id);
+        updated_row.xmax = None;
     }
 
     // Now update the rows

@@ -461,10 +461,31 @@ impl DeleteExecutor {
             );
         }
 
+        // Phase 1c (Issue #5150 / #5136): stamp xmax on every row about
+        // to be bitmap-deleted with the active txn id when the
+        // `mvcc_enabled` feature is on. Fetched BEFORE the mutable borrow
+        // of `table_mut`. We keep the physical bitmap delete in place;
+        // Phase 1d's visibility filter will eventually treat the xmax
+        // stamp as the canonical deletion record. Off-state: no stamp,
+        // bit-for-bit pre-MVCC behavior.
+        #[cfg(feature = "mvcc_enabled")]
+        let mvcc_delete_txn_id = database.transaction_id();
+
         // Step 5b: Actually delete the rows using fast path (no table scan needed)
         let table_mut = database
             .get_table_mut(table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+
+        // Stamp xmax in-place on each row BEFORE bitmap-deleting. The
+        // bitmap delete leaves the row in `self.rows`, so the xmax field
+        // is observable via `Table::scan()` (which returns the raw rows
+        // slice including bitmap-deleted entries).
+        #[cfg(feature = "mvcc_enabled")]
+        if let Some(id) = mvcc_delete_txn_id {
+            for &idx in &deleted_indices {
+                table_mut.stamp_row_xmax_inplace(idx, id);
+            }
+        }
 
         // Use delete_by_indices_batch for O(d) instead of O(n) where d = deletes
         // The batch version pre-computes schema lookups for internal hash indexes,

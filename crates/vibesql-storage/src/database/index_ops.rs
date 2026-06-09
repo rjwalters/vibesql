@@ -1051,11 +1051,26 @@ impl Database {
             phase_times[2] = ps.elapsed().as_nanos(); // wal
         }
 
+        // Phase 1c (Issue #5150 / #5136): capture the current txn id
+        // before taking the mutable borrow on `table_mut`, so we can stamp
+        // xmax on the about-to-be-bitmap-deleted row when MVCC is on.
+        // Off-state is a no-op via the feature-gated branch below.
+        #[cfg(feature = "mvcc_enabled")]
+        let mvcc_delete_txn_id = self.transaction_id();
+
         // Now delete the row (this updates the internal PK hash index)
         let phase_start = start.map(|_| Instant::now());
         let table_mut = self
             .get_table_mut(table_name)
             .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
+
+        // Stamp xmax in-place on the row BEFORE bitmap-deleting. The
+        // bitmap mark preserves the row data (including xmax) in
+        // `Table::scan()`, so the tombstone is observable for Phase 1d.
+        #[cfg(feature = "mvcc_enabled")]
+        if let Some(id) = mvcc_delete_txn_id {
+            table_mut.stamp_row_xmax_inplace(row_index, id);
+        }
 
         let delete_result = table_mut.delete_by_indices(&[row_index]);
 

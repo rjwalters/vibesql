@@ -896,6 +896,45 @@ impl Table {
         }
     }
 
+    /// Stamp the xmin field of an in-storage row in place.
+    ///
+    /// Used by Phase 1c (#5150 of #5136) super-fast UPDATE paths that
+    /// mutate individual column values in-place (no row clone) and so
+    /// can't go through the normal `update_row*` flow which stamps the
+    /// new row before insertion.
+    ///
+    /// The caller is responsible for gating on the `mvcc_enabled` feature
+    /// (see [`crate::mvcc::stamp_xmin_for_write`]) — this method
+    /// unconditionally writes the field. It is a no-op if `row_index` is
+    /// out of bounds, mirroring the unchecked-style contract of
+    /// `update_column_inplace`.
+    #[inline]
+    pub fn stamp_row_xmin_inplace(&mut self, row_index: usize, txn_id: crate::row::TxnId) {
+        if let Some(row) = self.rows.get_mut(row_index) {
+            row.xmin = txn_id;
+        }
+    }
+
+    /// Stamp the xmax field of an in-storage row in place.
+    ///
+    /// Used by Phase 1c (#5150 of #5136) DELETE paths that bitmap-mark
+    /// rows as deleted (rather than physically removing them) — the xmax
+    /// stamp is the MVCC-visible deletion record that Phase 1d's
+    /// visibility filter will consult. With the `mvcc_enabled` feature
+    /// off this method should not be called (callers branch on the
+    /// feature flag); with the feature on it records `xmax = Some(txn_id)`
+    /// so the row, while still bitmap-deleted today, also carries a
+    /// proper MVCC tombstone.
+    ///
+    /// The caller is responsible for gating on the feature flag. The
+    /// method is a no-op if `row_index` is out of bounds.
+    #[inline]
+    pub fn stamp_row_xmax_inplace(&mut self, row_index: usize, txn_id: crate::row::TxnId) {
+        if let Some(row) = self.rows.get_mut(row_index) {
+            row.xmax = Some(txn_id);
+        }
+    }
+
     /// Delete rows matching a predicate
     ///
     /// Uses O(1) bitmap marking for each deleted row instead of O(n) Vec::remove().
