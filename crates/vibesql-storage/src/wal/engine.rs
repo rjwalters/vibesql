@@ -383,6 +383,7 @@ mod native {
                                 &stats,
                                 &mut pending_notifiers,
                                 true,
+                                false,
                             );
                             last_flush = Instant::now();
                         }
@@ -394,9 +395,9 @@ mod native {
                             &stats,
                             &mut pending_notifiers,
                             false,
+                            true,
                         );
                         last_flush = Instant::now();
-                        stats.lock().explicit_flushes += 1;
                     }
                     Ok(WalMessage::FlushAndNotify(notifier)) => {
                         pending_notifiers.push(notifier);
@@ -406,9 +407,9 @@ mod native {
                             &stats,
                             &mut pending_notifiers,
                             false,
+                            true,
                         );
                         last_flush = Instant::now();
-                        stats.lock().explicit_flushes += 1;
                     }
                     Ok(WalMessage::Shutdown) => {
                         // Flush remaining entries before shutdown
@@ -417,6 +418,7 @@ mod native {
                             &mut batch,
                             &stats,
                             &mut pending_notifiers,
+                            false,
                             false,
                         );
                         break;
@@ -429,6 +431,7 @@ mod native {
                                 &mut batch,
                                 &stats,
                                 &mut pending_notifiers,
+                                false,
                                 false,
                             );
                             stats.lock().time_flushes += 1;
@@ -443,6 +446,7 @@ mod native {
                             &stats,
                             &mut pending_notifiers,
                             false,
+                            false,
                         );
                         break;
                     }
@@ -453,14 +457,30 @@ mod native {
         }
 
         /// Flush a batch of entries to disk
+        ///
+        /// `is_explicit_flush` indicates the flush was triggered by an explicit
+        /// `WalMessage::Flush` or `WalMessage::FlushAndNotify`. The
+        /// `explicit_flushes` counter is incremented under the same stats-lock
+        /// acquisition that updates the other counters, and crucially BEFORE
+        /// waiters are notified. This guarantees that any caller waking from
+        /// `FlushNotifier::wait()` observes the updated counter on a subsequent
+        /// `stats.lock()`.
         fn flush_batch<W: Write + Seek>(
             writer: &mut WalWriter<W>,
             batch: &mut Vec<WalEntry>,
             stats: &Arc<Mutex<PersistenceStats>>,
             pending_notifiers: &mut Vec<FlushNotifier>,
             is_count_flush: bool,
+            is_explicit_flush: bool,
         ) {
             if batch.is_empty() {
+                // An explicit sync on an empty WAL still counts as an explicit
+                // flush. Increment the counter under the stats lock BEFORE
+                // notifying waiters so the happens-before edge into the caller
+                // includes the counter update.
+                if is_explicit_flush {
+                    stats.lock().explicit_flushes += 1;
+                }
                 // Still notify waiters even if batch is empty
                 for notifier in pending_notifiers.drain(..) {
                     notifier.notify();
@@ -498,6 +518,9 @@ mod native {
                 stats.bytes_written += bytes_written;
                 if is_count_flush {
                     stats.count_flushes += 1;
+                }
+                if is_explicit_flush {
+                    stats.explicit_flushes += 1;
                 }
                 stats.record_flush_latency(flush_duration);
             }
