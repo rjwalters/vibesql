@@ -6,7 +6,13 @@ use vibesql_types::SqlValue;
 use super::*;
 
 fn simple_table_from(name: &str) -> FromClause {
-    FromClause::Table { name: name.to_string(), alias: None, column_aliases: None, quoted: false }
+    FromClause::Table {
+        index_hint: None,
+        name: name.to_string(),
+        alias: None,
+        column_aliases: None,
+        quoted: false,
+    }
 }
 
 fn column_ref(column: &str) -> Expression {
@@ -319,6 +325,7 @@ fn test_nested_in_subquery_self_join_column_qualification() {
 
 fn table_from_with_alias(name: &str, alias: &str) -> FromClause {
     FromClause::Table {
+        index_hint: None,
         name: name.to_string(),
         alias: Some(alias.to_string()),
         column_aliases: None,

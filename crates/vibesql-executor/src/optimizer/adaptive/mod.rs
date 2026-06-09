@@ -137,6 +137,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
+                index_hint: None,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -201,6 +202,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
+                index_hint: None,
                 name: "orders".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -252,6 +254,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
+                index_hint: None,
                 name: "orders".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -285,12 +288,14 @@ mod tests {
                 left: Box::new(FromClause::Join {
                     left: Box::new(FromClause::Join {
                         left: Box::new(FromClause::Table {
+                            index_hint: None,
                             name: "t1".to_string(),
                             alias: None,
                             column_aliases: None,
                             quoted: false,
                         }),
                         right: Box::new(FromClause::Table {
+                            index_hint: None,
                             name: "t2".to_string(),
                             alias: None,
                             column_aliases: None,
@@ -303,6 +308,7 @@ mod tests {
                         alias: None,
                     }),
                     right: Box::new(FromClause::Table {
+                        index_hint: None,
                         name: "t3".to_string(),
                         alias: None,
                         column_aliases: None,
@@ -315,6 +321,7 @@ mod tests {
                     alias: None,
                 }),
                 right: Box::new(FromClause::Table {
+                    index_hint: None,
                     name: "t4".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -360,6 +367,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
+                index_hint: None,
                 name: "orders".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -400,6 +408,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
+                index_hint: None,
                 name: "orders".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -442,6 +451,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
+                index_hint: None,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -468,6 +478,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
+                index_hint: None,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,

@@ -275,6 +275,7 @@ fn test_insert_select_invalidates_cache() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "source_products".to_string(),
             alias: None,
             column_aliases: None,

@@ -52,6 +52,7 @@ fn test_like_wildcard_percent() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test".to_string(),
             alias: None,
@@ -125,6 +126,7 @@ fn test_like_wildcard_underscore() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test".to_string(),
             alias: None,
@@ -198,6 +200,7 @@ fn test_not_like() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test".to_string(),
             alias: None,
@@ -258,6 +261,7 @@ fn test_like_null_pattern() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test".to_string(),
             alias: None,
@@ -316,6 +320,7 @@ fn test_like_null_value() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test".to_string(),
             alias: None,

@@ -92,6 +92,7 @@ fn test_group_by_select_alias() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "sales".to_string(),
             alias: None,
@@ -219,6 +220,7 @@ fn test_group_by_numeric_position() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "sales".to_string(),
             alias: None,
@@ -336,6 +338,7 @@ fn test_group_by_with_count() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "sales".to_string(),
             alias: None,

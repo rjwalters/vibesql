@@ -230,6 +230,7 @@ fn try_decorrelate_subquery(
         into_table: None,
         into_variables: None,
         from: Some(FromClause::Table {
+            index_hint: None,
             name: inner_table.clone(),
             alias: original_alias, // Keep original alias so aggregate's column refs work
             column_aliases: None,
@@ -271,6 +272,7 @@ fn try_decorrelate_subquery(
 
     // Build the CTE table reference for joining
     let cte_table = FromClause::Table {
+        index_hint: None,
         name: cte_alias.clone(),
         alias: None,
         column_aliases: None,

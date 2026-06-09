@@ -206,6 +206,7 @@ fn test_before_trigger_executes_first() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "COUNTER".to_string(),
             alias: None,
@@ -234,6 +235,7 @@ fn test_before_trigger_executes_first() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "USERS".to_string(),
             alias: None,

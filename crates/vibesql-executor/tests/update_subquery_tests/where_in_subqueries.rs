@@ -58,6 +58,7 @@ fn test_update_where_in_subquery() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "active_depts".to_string(),
             alias: None,
             column_aliases: None,
@@ -152,6 +153,7 @@ fn test_update_where_not_in_subquery() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "active_depts".to_string(),
             alias: None,
             column_aliases: None,
@@ -239,6 +241,7 @@ fn test_update_where_subquery_empty_result() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "inactive_depts".to_string(),
             alias: None,
             column_aliases: None,
@@ -336,6 +339,7 @@ fn test_update_where_complex_subquery_condition() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "departments".to_string(),
             alias: None,
             column_aliases: None,
@@ -441,6 +445,7 @@ fn test_update_where_multiple_rows_in_subquery() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "active_depts".to_string(),
             alias: None,
             column_aliases: None,

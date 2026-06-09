@@ -122,12 +122,14 @@ fn test_natural_join_single_common_column() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "t1".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             right: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "t2".to_string(),
                 alias: None,
@@ -267,12 +269,14 @@ fn test_natural_join_respects_collation() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "people".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             right: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "greetings".to_string(),
                 alias: None,
@@ -375,12 +379,14 @@ fn test_using_join_respects_collation() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "people".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             right: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "greetings".to_string(),
                 alias: None,
@@ -485,24 +491,28 @@ fn test_issue_4843_inner_join_using_with_nested_left_join_nulls() {
 
     // Build the nested join structure
     let t5_ref = vibesql_ast::FromClause::Table {
+        index_hint: None,
         quoted: false,
         name: "t5".to_string(),
         alias: None,
         column_aliases: None,
     };
     let t4_ref = vibesql_ast::FromClause::Table {
+        index_hint: None,
         quoted: false,
         name: "t4".to_string(),
         alias: None,
         column_aliases: None,
     };
     let t3_ref = vibesql_ast::FromClause::Table {
+        index_hint: None,
         quoted: false,
         name: "t3".to_string(),
         alias: None,
         column_aliases: None,
     };
     let t2_ref = vibesql_ast::FromClause::Table {
+        index_hint: None,
         quoted: false,
         name: "t2".to_string(),
         alias: None,

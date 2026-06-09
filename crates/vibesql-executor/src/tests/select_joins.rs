@@ -92,12 +92,14 @@ fn test_inner_join_two_tables() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             right: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "orders".to_string(),
                 alias: None,
@@ -222,12 +224,14 @@ fn test_right_outer_join() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             right: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "orders".to_string(),
                 alias: None,
@@ -359,12 +363,14 @@ fn test_full_outer_join() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             right: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "orders".to_string(),
                 alias: None,
@@ -499,12 +505,14 @@ fn test_cross_join() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             right: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "products".to_string(),
                 alias: None,
@@ -578,12 +586,14 @@ fn test_cross_join_with_condition_works_like_inner_join() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             right: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "products".to_string(),
                 alias: None,
@@ -724,12 +734,14 @@ fn test_inner_join_null_values_dont_match() {
         ],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "t1".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             right: Box::new(vibesql_ast::FromClause::Table {
+                index_hint: None,
                 quoted: false,
                 name: "t2".to_string(),
                 alias: None,

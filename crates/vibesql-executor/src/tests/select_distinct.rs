@@ -76,6 +76,7 @@ fn test_distinct_removes_duplicate_rows() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "products".to_string(),
             alias: None,
@@ -200,6 +201,7 @@ fn test_distinct_with_multiple_columns() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "orders".to_string(),
             alias: None,
@@ -293,6 +295,7 @@ fn test_distinct_with_null_values() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "items".to_string(),
             alias: None,
@@ -360,6 +363,7 @@ fn test_distinct_false_preserves_duplicates() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "products".to_string(),
             alias: None,
@@ -451,6 +455,7 @@ fn test_distinct_with_where_clause() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "users".to_string(),
             alias: None,
@@ -550,6 +555,7 @@ fn test_distinct_with_order_by() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "products".to_string(),
             alias: None,

@@ -48,6 +48,7 @@ fn test_update_with_subquery_multiple_rows_uses_first() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "salaries".to_string(),
             alias: None,
             column_aliases: None,
@@ -143,6 +144,7 @@ fn test_update_with_subquery_multiple_columns_error() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "salaries".to_string(),
             alias: None,
             column_aliases: None,

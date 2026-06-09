@@ -97,6 +97,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "ITEM".to_string(),     // UPPERCASE table
             alias: Some("J".to_string()), // UPPERCASE alias
@@ -139,6 +140,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "ITEM".to_string(),
             alias: Some("I".to_string()),
@@ -279,6 +281,7 @@ fn test_correlated_subquery_basic() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "employees".to_string(),
             alias: None,
@@ -326,6 +329,7 @@ fn test_correlated_subquery_basic() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "employees".to_string(),
             alias: Some("e".to_string()),

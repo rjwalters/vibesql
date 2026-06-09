@@ -937,6 +937,7 @@ fn test_json_view_preservation() {
         into_table: None,
         into_variables: None,
         from: Some(FromClause::Table {
+            index_hint: None,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -1024,6 +1025,7 @@ fn test_json_view_preservation_without_sql_definition() {
         into_table: None,
         into_variables: None,
         from: Some(FromClause::Table {
+            index_hint: None,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,

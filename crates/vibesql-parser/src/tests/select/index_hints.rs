@@ -1,18 +1,29 @@
 //! Tests for SQLite index hints in FROM clauses: INDEXED BY / NOT INDEXED
 //!
-//! VibeSQL parses and ignores these hints (the planner chooses indexes
-//! independently). Regression coverage for window1.test 77.2.
+//! VibeSQL parses these hints and carries them through the AST so the
+//! executor can validate them (issue #5235: `no such index: X`). The planner
+//! chooses indexes independently. Regression coverage for window1.test 77.2.
 
 use super::super::*;
 
 fn assert_table_from(sql: &str, expected_name: &str, expected_alias: Option<&str>) {
+    assert_table_from_with_hint(sql, expected_name, expected_alias, None);
+}
+
+fn assert_table_from_with_hint(
+    sql: &str,
+    expected_name: &str,
+    expected_alias: Option<&str>,
+    expected_hint: Option<vibesql_ast::IndexHint>,
+) {
     let result = Parser::parse_sql(sql);
     assert!(result.is_ok(), "should parse: {sql}: {:?}", result);
     match result.unwrap() {
         vibesql_ast::Statement::Select(select) => match select.from {
-            Some(vibesql_ast::FromClause::Table { name, alias, .. }) => {
+            Some(vibesql_ast::FromClause::Table { name, alias, index_hint, .. }) => {
                 assert_eq!(name, expected_name);
                 assert_eq!(alias.as_deref(), expected_alias);
+                assert_eq!(index_hint, expected_hint);
             }
             other => panic!("Expected Table FROM clause, got {:?}", other),
         },
@@ -21,8 +32,13 @@ fn assert_table_from(sql: &str, expected_name: &str, expected_alias: Option<&str
 }
 
 #[test]
-fn test_indexed_by_hint_is_ignored() {
-    assert_table_from("SELECT * FROM t1 INDEXED BY t1x;", "t1", None);
+fn test_indexed_by_hint_is_captured() {
+    assert_table_from_with_hint(
+        "SELECT * FROM t1 INDEXED BY t1x;",
+        "t1",
+        None,
+        Some(vibesql_ast::IndexHint::IndexedBy("t1x".to_string())),
+    );
 }
 
 #[test]
@@ -35,12 +51,22 @@ fn test_indexed_by_hint_with_where() {
 
 #[test]
 fn test_indexed_by_hint_after_alias() {
-    assert_table_from("SELECT * FROM t1 AS a INDEXED BY t1x;", "t1", Some("a"));
+    assert_table_from_with_hint(
+        "SELECT * FROM t1 AS a INDEXED BY t1x;",
+        "t1",
+        Some("a"),
+        Some(vibesql_ast::IndexHint::IndexedBy("t1x".to_string())),
+    );
 }
 
 #[test]
-fn test_not_indexed_hint_is_ignored() {
-    assert_table_from("SELECT * FROM t1 NOT INDEXED;", "t1", None);
+fn test_not_indexed_hint_is_captured() {
+    assert_table_from_with_hint(
+        "SELECT * FROM t1 NOT INDEXED;",
+        "t1",
+        None,
+        Some(vibesql_ast::IndexHint::NotIndexed),
+    );
 }
 
 #[test]
@@ -88,15 +114,31 @@ fn test_with_subquery_in_in_predicate() {
 // ============================================================================
 
 #[test]
-fn test_arena_indexed_by_hint_is_ignored() {
+fn test_arena_indexed_by_hint_is_captured() {
     let result = crate::arena_parser::parse_select_to_owned("SELECT * FROM t1 INDEXED BY t1x");
     assert!(result.is_ok(), "arena parser should accept INDEXED BY: {:?}", result);
+    match result.unwrap().from {
+        Some(vibesql_ast::FromClause::Table { index_hint, .. }) => {
+            assert_eq!(
+                index_hint,
+                Some(vibesql_ast::IndexHint::IndexedBy("t1x".to_string())),
+                "arena parser should carry the INDEXED BY hint through conversion"
+            );
+        }
+        other => panic!("Expected Table FROM clause, got {:?}", other),
+    }
 }
 
 #[test]
-fn test_arena_not_indexed_hint_is_ignored() {
+fn test_arena_not_indexed_hint_is_captured() {
     let result = crate::arena_parser::parse_select_to_owned("SELECT * FROM t1 NOT INDEXED");
     assert!(result.is_ok(), "arena parser should accept NOT INDEXED: {:?}", result);
+    match result.unwrap().from {
+        Some(vibesql_ast::FromClause::Table { index_hint, .. }) => {
+            assert_eq!(index_hint, Some(vibesql_ast::IndexHint::NotIndexed));
+        }
+        other => panic!("Expected Table FROM clause, got {:?}", other),
+    }
 }
 
 #[test]

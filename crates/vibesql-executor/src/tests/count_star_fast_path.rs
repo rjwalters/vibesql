@@ -59,6 +59,7 @@ fn test_count_star_fast_path_simple() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test_table".to_string(),
             alias: None,
@@ -112,6 +113,7 @@ fn test_count_star_fast_path_empty_table() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "empty_table".to_string(),
             alias: None,
@@ -183,6 +185,7 @@ fn test_count_star_with_where_no_fast_path() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test_table".to_string(),
             alias: None,
@@ -301,6 +304,7 @@ fn test_count_star_with_group_by_no_fast_path() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test_table".to_string(),
             alias: None,
@@ -366,6 +370,7 @@ fn test_count_star_distinct_no_fast_path() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test_table".to_string(),
             alias: None,
@@ -429,6 +434,7 @@ fn test_count_column_no_fast_path() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test_table".to_string(),
             alias: None,
@@ -490,6 +496,7 @@ fn test_count_star_with_alias() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test_table".to_string(),
             alias: None,
@@ -576,6 +583,7 @@ fn test_count_star_multiple_select_items_no_fast_path() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             quoted: false,
             name: "test_table".to_string(),
             alias: None,

@@ -430,6 +430,7 @@ pub(super) fn rewrite_from_clause(
     match from {
         vibesql_ast::FromClause::Table { name, alias, quoted, .. } => {
             vibesql_ast::FromClause::Table {
+                index_hint: None,
                 name: name.clone(),
                 alias: alias.clone(),
                 column_aliases: None,

@@ -138,6 +138,7 @@ fn try_convert_simple_exists_to_join(
 
     // Create the right side of the join
     let right_from = FromClause::Table {
+        index_hint: None,
         name: table_name,
         alias: effective_alias,
         column_aliases: None,

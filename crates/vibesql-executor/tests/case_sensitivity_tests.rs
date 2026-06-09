@@ -260,6 +260,7 @@ fn test_view_lookup_case_insensitive_when_enabled() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -323,6 +324,7 @@ fn test_drop_view_case_insensitive_when_enabled() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
@@ -388,6 +390,7 @@ fn test_view_case_sensitive_mode() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,

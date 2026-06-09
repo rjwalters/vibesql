@@ -36,6 +36,7 @@ pub(super) fn rebuild_from_clause(tables: &[TableInfo]) -> Option<FromClause> {
     let mut iter = tables.iter();
     let first = iter.next()?;
     let mut result = FromClause::Table {
+        index_hint: None,
         name: first.name.clone(),
         alias: first.alias.clone(),
         column_aliases: None,
@@ -46,6 +47,7 @@ pub(super) fn rebuild_from_clause(tables: &[TableInfo]) -> Option<FromClause> {
         result = FromClause::Join {
             left: Box::new(result),
             right: Box::new(FromClause::Table {
+                index_hint: None,
                 name: table.name.clone(),
                 alias: table.alias.clone(),
                 column_aliases: None,
@@ -78,6 +80,7 @@ pub(super) fn build_exists_checks(eliminated: &[EliminatedTable]) -> Vec<Express
                 into_table: None,
                 into_variables: None,
                 from: Some(FromClause::Table {
+                    index_hint: None,
                     name: table.name.clone(),
                     alias: table.alias.clone(),
                     column_aliases: None,

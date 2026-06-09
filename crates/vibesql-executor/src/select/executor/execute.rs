@@ -58,6 +58,12 @@ impl SelectExecutor<'_> {
         // This catches queries like SELECT * FROM t, t, t, ... (65+ times)
         super::validation::validate_join_table_limit(stmt)?;
 
+        // Validate SQLite index hints (issue #5235)
+        // INDEXED BY must name an index that exists on that table; SQLite
+        // reports "no such index: X" at prepare time. The hint is otherwise
+        // ignored by the planner (PR #5234).
+        super::validation::validate_index_hints(stmt, self.database)?;
+
         // Validate aggregates with outer column references in subqueries (issue #4853)
         // This catches the specific case where a scalar subquery appears as an argument
         // to an outer aggregate function, and the subquery's aggregate references an
@@ -793,16 +799,15 @@ impl SelectExecutor<'_> {
             // Issue #5036: Check if any VALUES row contains window functions
             // If so, evaluate those rows via SELECT-without-FROM path which supports
             // window function evaluation, rather than the plain VALUES evaluator
-            let has_windows = values_rows.iter().any(|row| {
-                row.iter().any(crate::select::window::expression_has_window_function)
-            });
+            let has_windows = values_rows
+                .iter()
+                .any(|row| row.iter().any(crate::select::window::expression_has_window_function));
 
             let mut results = if has_windows {
                 let mut all_rows = Vec::with_capacity(values_rows.len());
                 for row_exprs in values_rows {
-                    let row_has_window = row_exprs
-                        .iter()
-                        .any(crate::select::window::expression_has_window_function);
+                    let row_has_window =
+                        row_exprs.iter().any(crate::select::window::expression_has_window_function);
                     if row_has_window {
                         // Construct a SELECT <expr1>, <expr2>, ... statement
                         // and execute via the window-aware path
@@ -838,10 +843,11 @@ impl SelectExecutor<'_> {
                         // No window functions - evaluate normally
                         let schema = crate::schema::CombinedSchema::empty();
                         let empty_row = vibesql_storage::Row::new(vec![]);
-                        let evaluator = crate::evaluator::CombinedExpressionEvaluator::with_database(
-                            &schema,
-                            self.database,
-                        );
+                        let evaluator =
+                            crate::evaluator::CombinedExpressionEvaluator::with_database(
+                                &schema,
+                                self.database,
+                            );
                         let mut values = Vec::with_capacity(row_exprs.len());
                         for expr in row_exprs {
                             let value = evaluator.eval(expr, &empty_row)?;

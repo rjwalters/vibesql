@@ -107,6 +107,7 @@ fn test_select_from_table() {
         into_table: None,
         into_variables: None,
         from: Some(FromClause::Table {
+            index_hint: None,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -138,6 +139,7 @@ fn test_select_with_where() {
         into_table: None,
         into_variables: None,
         from: Some(FromClause::Table {
+            index_hint: None,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -172,6 +174,7 @@ fn test_select_with_order_by() {
         into_table: None,
         into_variables: None,
         from: Some(FromClause::Table {
+            index_hint: None,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -213,6 +216,7 @@ fn test_select_distinct() {
         into_table: None,
         into_variables: None,
         from: Some(FromClause::Table {
+            index_hint: None,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -248,6 +252,7 @@ fn test_select_with_group_by() {
         into_table: None,
         into_variables: None,
         from: Some(FromClause::Table {
+            index_hint: None,
             name: "orders".to_string(),
             alias: None,
             column_aliases: None,
@@ -277,6 +282,7 @@ fn test_select_with_having() {
         into_table: None,
         into_variables: None,
         from: Some(FromClause::Table {
+            index_hint: None,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
@@ -316,6 +322,7 @@ fn test_select_with_limit() {
         into_table: None,
         into_variables: None,
         from: Some(FromClause::Table {
+            index_hint: None,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
@@ -343,6 +350,7 @@ fn test_select_with_offset() {
         into_table: None,
         into_variables: None,
         from: Some(FromClause::Table {
+            index_hint: None,
             name: "items".to_string(),
             alias: None,
             column_aliases: None,
@@ -370,6 +378,7 @@ fn test_order_by_desc() {
         into_table: None,
         into_variables: None,
         from: Some(FromClause::Table {
+            index_hint: None,
             name: "posts".to_string(),
             alias: None,
             column_aliases: None,
@@ -399,12 +408,14 @@ fn test_order_by_desc() {
 fn test_inner_join() {
     let from = FromClause::Join {
         left: Box::new(FromClause::Table {
+            index_hint: None,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
             quoted: false,
         }),
         right: Box::new(FromClause::Table {
+            index_hint: None,
             name: "orders".to_string(),
             alias: None,
             column_aliases: None,
@@ -434,12 +445,14 @@ fn test_inner_join() {
 fn test_left_outer_join() {
     let from = FromClause::Join {
         left: Box::new(FromClause::Table {
+            index_hint: None,
             name: "customers".to_string(),
             alias: None,
             column_aliases: None,
             quoted: false,
         }),
         right: Box::new(FromClause::Table {
+            index_hint: None,
             name: "orders".to_string(),
             alias: None,
             column_aliases: None,
@@ -461,12 +474,14 @@ fn test_left_outer_join() {
 fn test_right_outer_join() {
     let from = FromClause::Join {
         left: Box::new(FromClause::Table {
+            index_hint: None,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
             quoted: false,
         }),
         right: Box::new(FromClause::Table {
+            index_hint: None,
             name: "categories".to_string(),
             alias: None,
             column_aliases: None,
@@ -488,12 +503,14 @@ fn test_right_outer_join() {
 fn test_full_outer_join() {
     let from = FromClause::Join {
         left: Box::new(FromClause::Table {
+            index_hint: None,
             name: "table1".to_string(),
             alias: None,
             column_aliases: None,
             quoted: false,
         }),
         right: Box::new(FromClause::Table {
+            index_hint: None,
             name: "table2".to_string(),
             alias: None,
             column_aliases: None,
@@ -515,12 +532,14 @@ fn test_full_outer_join() {
 fn test_cross_join() {
     let from = FromClause::Join {
         left: Box::new(FromClause::Table {
+            index_hint: None,
             name: "colors".to_string(),
             alias: None,
             column_aliases: None,
             quoted: false,
         }),
         right: Box::new(FromClause::Table {
+            index_hint: None,
             name: "sizes".to_string(),
             alias: None,
             column_aliases: None,
@@ -553,6 +572,7 @@ fn test_from_subquery() {
         into_table: None,
         into_variables: None,
         from: Some(FromClause::Table {
+            index_hint: None,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -587,6 +607,7 @@ fn test_from_subquery() {
 #[test]
 fn test_table_with_alias() {
     let from = FromClause::Table {
+        index_hint: None,
         name: "employees".to_string(),
         alias: Some("e".to_string()),
         column_aliases: None,

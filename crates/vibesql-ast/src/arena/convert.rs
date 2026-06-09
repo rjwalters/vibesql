@@ -494,7 +494,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
 
     fn convert_from_clause(&self, from: &arena_select::FromClause<'arena>) -> FromClause {
         match from {
-            arena_select::FromClause::Table { name, alias, column_aliases, quoted } => {
+            arena_select::FromClause::Table { name, alias, column_aliases, quoted, index_hint } => {
                 FromClause::Table {
                     name: self.resolve(*name),
                     alias: self.resolve_opt(*alias),
@@ -502,6 +502,12 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                         .as_ref()
                         .map(|cols| cols.iter().map(|s| self.resolve(*s)).collect()),
                     quoted: *quoted,
+                    index_hint: index_hint.as_ref().map(|hint| match hint {
+                        arena_select::IndexHint::IndexedBy(sym) => {
+                            crate::IndexHint::IndexedBy(self.resolve(*sym))
+                        }
+                        arena_select::IndexHint::NotIndexed => crate::IndexHint::NotIndexed,
+                    }),
                 }
             }
             arena_select::FromClause::Join {

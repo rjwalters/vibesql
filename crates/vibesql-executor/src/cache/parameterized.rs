@@ -564,6 +564,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
+                index_hint: None,
                 name: "tab".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -617,6 +618,7 @@ mod tests {
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
+                index_hint: None,
                 name: "tab".to_string(),
                 alias: None,
                 column_aliases: None,

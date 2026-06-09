@@ -286,6 +286,21 @@ pub enum SelectItem {
     Expression { expr: Expression, alias: Option<String>, source_text: Option<String> },
 }
 
+/// SQLite index hint on a FROM-clause table reference.
+///
+/// `INDEXED BY <name>` requires the named index to exist on that table;
+/// `NOT INDEXED` disables index use in SQLite. VibeSQL's planner chooses
+/// indexes independently, so the hint is validated for SQLite compatibility
+/// (a nonexistent index raises `no such index: <name>`) but has no effect
+/// on plan selection.
+#[derive(Debug, Clone, PartialEq)]
+pub enum IndexHint {
+    /// `INDEXED BY <index-name>`
+    IndexedBy(String),
+    /// `NOT INDEXED`
+    NotIndexed,
+}
+
 /// FROM clause
 #[derive(Debug, Clone, PartialEq)]
 pub enum FromClause {
@@ -300,6 +315,9 @@ pub enum FromClause {
         /// - `true`: Quoted identifier (case-sensitive), e.g., `"MyTable"`
         /// - `false`: Unquoted identifier (case-insensitive), e.g., `MyTable`
         quoted: bool,
+        /// SQLite index hint: `INDEXED BY <name>` / `NOT INDEXED`.
+        /// Validated at execution time; ignored by the planner.
+        index_hint: Option<IndexHint>,
     },
     Join {
         left: Box<FromClause>,

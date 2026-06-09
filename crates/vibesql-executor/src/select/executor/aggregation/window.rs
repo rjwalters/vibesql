@@ -21,10 +21,10 @@ use crate::{
         window::{
             calculate_frame_with_exclusion, evaluate_avg_window, evaluate_count_window,
             evaluate_cume_dist, evaluate_dense_rank, evaluate_group_concat_window_with_expr,
-            evaluate_lag, evaluate_lead, evaluate_max_window, evaluate_min_window,
-            evaluate_ntile, evaluate_percent_rank, evaluate_rank, evaluate_row_number,
-            evaluate_sum_window, evaluate_total_window, partition_rows, sort_partition,
-            validate_frame, validate_range_order_by,
+            evaluate_lag, evaluate_lead, evaluate_max_window, evaluate_min_window, evaluate_ntile,
+            evaluate_percent_rank, evaluate_rank, evaluate_row_number, evaluate_sum_window,
+            evaluate_total_window, partition_rows, sort_partition, validate_frame,
+            validate_range_order_by,
         },
         CombinedExpressionEvaluator,
     },
@@ -80,14 +80,11 @@ fn build_window_map(
     let mut resolved_map: HashMap<String, WindowSpec> = HashMap::new();
 
     if let Some(defs) = window_definitions {
-        let raw_map: HashMap<String, &WindowSpec> = defs
-            .iter()
-            .map(|def| (def.name.to_lowercase(), &def.spec))
-            .collect();
+        let raw_map: HashMap<String, &WindowSpec> =
+            defs.iter().map(|def| (def.name.to_lowercase(), &def.spec)).collect();
 
         for def in defs {
-            let resolved =
-                resolve_window_spec_recursive(&def.spec, &raw_map, &resolved_map)?;
+            let resolved = resolve_window_spec_recursive(&def.spec, &raw_map, &resolved_map)?;
             resolved_map.insert(def.name.to_lowercase(), resolved);
         }
     }
@@ -130,9 +127,9 @@ fn resolve_window_spec(
 ) -> Result<WindowSpec, ExecutorError> {
     match &spec.base_window_name {
         Some(base_name) => {
-            let base_spec = window_map.get(&base_name.to_lowercase()).ok_or_else(|| {
-                ExecutorError::Other(format!("no such window: {}", base_name))
-            })?;
+            let base_spec = window_map
+                .get(&base_name.to_lowercase())
+                .ok_or_else(|| ExecutorError::Other(format!("no such window: {}", base_name)))?;
 
             Ok(WindowSpec {
                 base_window_name: None,
@@ -155,8 +152,7 @@ fn collect_window_functions(
 
     for (idx, item) in select_list.iter().enumerate() {
         if let SelectItem::Expression {
-            expr: Expression::WindowFunction { function, over },
-            ..
+            expr: Expression::WindowFunction { function, over }, ..
         } = item
         {
             let (func_name, func_type, args) = match function {
@@ -359,8 +355,7 @@ pub(super) fn apply_window_functions_to_aggregates(
                                         &win_func.args[0],
                                         Expression::ColumnRef(col_id)
                                             if col_id.column_canonical() == "*"
-                                    )
-                                {
+                                    ) {
                                     None // COUNT(*) / COUNT() - count all rows
                                 } else {
                                     Some(&arg_expr)
@@ -488,12 +483,12 @@ pub(super) fn apply_window_functions_to_aggregates(
                             let value_expr =
                                 if !mapped_args.is_empty() { &mapped_args[0] } else { &arg_expr };
                             let offset = if mapped_args.len() > 1 && !partition.is_empty() {
-                                eval_fn(&mapped_args[1], &partition.rows[0])
-                                    .ok()
-                                    .and_then(|v| match v {
+                                eval_fn(&mapped_args[1], &partition.rows[0]).ok().and_then(|v| {
+                                    match v {
                                         SqlValue::Integer(n) => Some(n),
                                         _ => None,
-                                    })
+                                    }
+                                })
                             } else {
                                 None
                             };
@@ -518,12 +513,12 @@ pub(super) fn apply_window_functions_to_aggregates(
                             let value_expr =
                                 if !mapped_args.is_empty() { &mapped_args[0] } else { &arg_expr };
                             let offset = if mapped_args.len() > 1 && !partition.is_empty() {
-                                eval_fn(&mapped_args[1], &partition.rows[0])
-                                    .ok()
-                                    .and_then(|v| match v {
+                                eval_fn(&mapped_args[1], &partition.rows[0]).ok().and_then(|v| {
+                                    match v {
                                         SqlValue::Integer(n) => Some(n),
                                         _ => None,
-                                    })
+                                    }
+                                })
                             } else {
                                 None
                             };
@@ -781,9 +776,10 @@ fn map_expr_to_result_column(
             // SELECT list expression.
             if let Expression::ColumnRef(col_id) = expr {
                 if let Expression::ColumnRef(select_col_id) = select_expr {
-                    if col_id.column_canonical().eq_ignore_ascii_case(
-                        select_col_id.column_canonical(),
-                    ) {
+                    if col_id
+                        .column_canonical()
+                        .eq_ignore_ascii_case(select_col_id.column_canonical())
+                    {
                         return make_result_col_ref(idx);
                     }
                 }
@@ -839,10 +835,7 @@ fn map_expr_to_result_column(
         // Also check column name match for GROUP BY column references
         if let Expression::ColumnRef(col_id) = expr {
             if let Expression::ColumnRef(gb_col_id) = gb_expr {
-                if col_id
-                    .column_canonical()
-                    .eq_ignore_ascii_case(gb_col_id.column_canonical())
-                {
+                if col_id.column_canonical().eq_ignore_ascii_case(gb_col_id.column_canonical()) {
                     return make_result_col_ref(select_count + i);
                 }
             }
@@ -865,8 +858,7 @@ fn map_expr_to_result_column(
     // the GROUP BY context), so if ORDER BY references the same expression, we can use that slot.
     for (idx, item) in select_list.iter().enumerate() {
         if let SelectItem::Expression {
-            expr: Expression::WindowFunction { function, .. },
-            ..
+            expr: Expression::WindowFunction { function, .. }, ..
         } = item
         {
             let win_args = match function {
@@ -903,8 +895,7 @@ fn expressions_match(expr1: &Expression, expr2: &Expression) -> bool {
                 a.canonical().eq_ignore_ascii_case(b.canonical())
             } else {
                 // If either lacks a table qualifier, just compare column names
-                a.column_canonical()
-                    .eq_ignore_ascii_case(b.column_canonical())
+                a.column_canonical().eq_ignore_ascii_case(b.column_canonical())
             }
         }
         // Literals: compare by value
@@ -915,10 +906,9 @@ fn expressions_match(expr1: &Expression, expr2: &Expression) -> bool {
             Expression::BinaryOp { left: l2, op: op2, right: r2 },
         ) => op1 == op2 && expressions_match(l1, l2) && expressions_match(r1, r2),
         // Unary operations: compare recursively
-        (
-            Expression::UnaryOp { op: op1, expr: e1 },
-            Expression::UnaryOp { op: op2, expr: e2 },
-        ) => op1 == op2 && expressions_match(e1, e2),
+        (Expression::UnaryOp { op: op1, expr: e1 }, Expression::UnaryOp { op: op2, expr: e2 }) => {
+            op1 == op2 && expressions_match(e1, e2)
+        }
         // Functions: compare by name and arguments
         (
             Expression::Function { name: n1, args: a1, .. },
@@ -930,12 +920,8 @@ fn expressions_match(expr1: &Expression, expr2: &Expression) -> bool {
         }
         // Aggregate functions: compare by name and arguments
         (
-            Expression::AggregateFunction {
-                name: n1, args: a1, distinct: d1, ..
-            },
-            Expression::AggregateFunction {
-                name: n2, args: a2, distinct: d2, ..
-            },
+            Expression::AggregateFunction { name: n1, args: a1, distinct: d1, .. },
+            Expression::AggregateFunction { name: n2, args: a2, distinct: d2, .. },
         ) => {
             n1.canonical() == n2.canonical()
                 && d1 == d2

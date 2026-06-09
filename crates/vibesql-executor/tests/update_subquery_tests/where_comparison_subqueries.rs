@@ -43,6 +43,7 @@ fn test_update_where_scalar_subquery_equal() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "config".to_string(),
             alias: None,
             column_aliases: None,
@@ -133,6 +134,7 @@ fn test_update_where_scalar_subquery_less_than() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "employees".to_string(),
             alias: None,
             column_aliases: None,
@@ -215,6 +217,7 @@ fn test_update_where_subquery_returns_null() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "config".to_string(),
             alias: None,
             column_aliases: None,
@@ -309,6 +312,7 @@ fn test_update_where_subquery_with_aggregate() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "items".to_string(),
             alias: None,
             column_aliases: None,
@@ -410,6 +414,7 @@ fn test_update_where_and_set_both_use_subqueries() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "salary_targets".to_string(),
             alias: None,
             column_aliases: None,
@@ -438,6 +443,7 @@ fn test_update_where_and_set_both_use_subqueries() {
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "active_depts".to_string(),
             alias: None,
             column_aliases: None,

@@ -118,214 +118,213 @@ impl Parser {
 
                 // Check if this is a subquery (starts with SELECT or WITH), VALUES, or a table
                 // reference/JOIN
-                let result = if self.peek_keyword(Keyword::Select)
-                    || self.peek_keyword(Keyword::With)
-                {
-                    // Parse the SELECT statement (subquery, possibly with CTE)
-                    let query = Box::new(self.parse_select_statement()?);
+                let result =
+                    if self.peek_keyword(Keyword::Select) || self.peek_keyword(Keyword::With) {
+                        // Parse the SELECT statement (subquery, possibly with CTE)
+                        let query = Box::new(self.parse_select_statement()?);
 
-                    // Expect closing ')'
-                    match self.peek() {
-                        Token::RParen => {
-                            self.advance();
+                        // Expect closing ')'
+                        match self.peek() {
+                            Token::RParen => {
+                                self.advance();
+                            }
+                            _ => {
+                                return Err(ParseError {
+                                    message: "Expected ')' after subquery".to_string(),
+                                })
+                            }
                         }
-                        _ => {
-                            return Err(ParseError {
-                                message: "Expected ')' after subquery".to_string(),
-                            })
-                        }
-                    }
 
-                    // Support both SQL:1999 (AS required) and MySQL (AS optional) modes
-                    // Parse optional AS keyword
-                    if self.peek_keyword(Keyword::As) {
-                        self.consume_keyword(Keyword::As)?;
-                    }
-
-                    // Parse alias - keywords allowed as aliases (except clause keywords)
-                    // SQLite allows derived tables without aliases; auto-generate if not provided
-                    // SQLite also allows single-quoted strings as aliases (non-standard but common)
-                    let alias = match self.peek() {
-                        Token::Identifier(id)
-                        | Token::DelimitedIdentifier(id)
-                        | Token::String(id) => {
-                            let alias = id.clone();
-                            self.advance();
-                            alias
+                        // Support both SQL:1999 (AS required) and MySQL (AS optional) modes
+                        // Parse optional AS keyword
+                        if self.peek_keyword(Keyword::As) {
+                            self.consume_keyword(Keyword::As)?;
                         }
-                        Token::Keyword { keyword: kw, .. } => {
-                            // Only consume keyword if it looks like it could be an alias
-                            // (not a SQL keyword that starts a new clause)
-                            if !matches!(
-                                kw,
-                                Keyword::Where
-                                    | Keyword::Order
-                                    | Keyword::Limit
-                                    | Keyword::Offset
-                                    | Keyword::Group
-                                    | Keyword::Having
-                                    | Keyword::Union
-                                    | Keyword::Intersect
-                                    | Keyword::Except
-                                    | Keyword::Join
-                                    | Keyword::Inner
-                                    | Keyword::Left
-                                    | Keyword::Right
-                                    | Keyword::Full
-                                    | Keyword::Cross
-                                    | Keyword::Natural
-                                    | Keyword::On
-                                    | Keyword::Using
-                            ) {
-                                let alias = kw.to_string();
+
+                        // Parse alias - keywords allowed as aliases (except clause keywords)
+                        // SQLite allows derived tables without aliases; auto-generate if not provided
+                        // SQLite also allows single-quoted strings as aliases (non-standard but common)
+                        let alias = match self.peek() {
+                            Token::Identifier(id)
+                            | Token::DelimitedIdentifier(id)
+                            | Token::String(id) => {
+                                let alias = id.clone();
                                 self.advance();
                                 alias
-                            } else {
-                                // Generate default alias for clause keywords
+                            }
+                            Token::Keyword { keyword: kw, .. } => {
+                                // Only consume keyword if it looks like it could be an alias
+                                // (not a SQL keyword that starts a new clause)
+                                if !matches!(
+                                    kw,
+                                    Keyword::Where
+                                        | Keyword::Order
+                                        | Keyword::Limit
+                                        | Keyword::Offset
+                                        | Keyword::Group
+                                        | Keyword::Having
+                                        | Keyword::Union
+                                        | Keyword::Intersect
+                                        | Keyword::Except
+                                        | Keyword::Join
+                                        | Keyword::Inner
+                                        | Keyword::Left
+                                        | Keyword::Right
+                                        | Keyword::Full
+                                        | Keyword::Cross
+                                        | Keyword::Natural
+                                        | Keyword::On
+                                        | Keyword::Using
+                                ) {
+                                    let alias = kw.to_string();
+                                    self.advance();
+                                    alias
+                                } else {
+                                    // Generate default alias for clause keywords
+                                    format!(
+                                        "(subquery-{})",
+                                        DERIVED_TABLE_COUNTER.fetch_add(1, Ordering::Relaxed)
+                                    )
+                                }
+                            }
+                            _ => {
+                                // Auto-generate unique alias for SQLite compatibility
                                 format!(
                                     "(subquery-{})",
                                     DERIVED_TABLE_COUNTER.fetch_add(1, Ordering::Relaxed)
                                 )
                             }
-                        }
-                        _ => {
-                            // Auto-generate unique alias for SQLite compatibility
-                            format!(
-                                "(subquery-{})",
-                                DERIVED_TABLE_COUNTER.fetch_add(1, Ordering::Relaxed)
-                            )
-                        }
-                    };
+                        };
 
-                    // Parse optional column aliases: AS alias (col1, col2, ...)
-                    // SQL:1999 Feature E051-09
-                    let column_aliases = self.parse_column_alias_list()?;
+                        // Parse optional column aliases: AS alias (col1, col2, ...)
+                        // SQL:1999 Feature E051-09
+                        let column_aliases = self.parse_column_alias_list()?;
 
-                    vibesql_ast::FromClause::Subquery { query, alias, column_aliases }
-                } else if self.peek_keyword(Keyword::Values) {
-                    // Parse VALUES clause as table constructor
-                    // Example: (VALUES(1,'a'), (2,'b')) AS t(x, y)
-                    let rows = self.parse_values_rows()?;
+                        vibesql_ast::FromClause::Subquery { query, alias, column_aliases }
+                    } else if self.peek_keyword(Keyword::Values) {
+                        // Parse VALUES clause as table constructor
+                        // Example: (VALUES(1,'a'), (2,'b')) AS t(x, y)
+                        let rows = self.parse_values_rows()?;
 
-                    // Expect closing ')'
-                    match self.peek() {
-                        Token::RParen => {
-                            self.advance();
+                        // Expect closing ')'
+                        match self.peek() {
+                            Token::RParen => {
+                                self.advance();
+                            }
+                            _ => {
+                                return Err(ParseError {
+                                    message: "Expected ')' after VALUES clause".to_string(),
+                                })
+                            }
                         }
-                        _ => {
-                            return Err(ParseError {
-                                message: "Expected ')' after VALUES clause".to_string(),
-                            })
-                        }
-                    }
 
-                    // Parse optional AS keyword
-                    if self.peek_keyword(Keyword::As) {
-                        self.consume_keyword(Keyword::As)?;
-                    }
-
-                    // Parse alias (optional for VALUES tables) - keywords allowed as aliases
-                    // If no alias is provided, generate a default one
-                    // SQLite also allows single-quoted strings as aliases (non-standard but common)
-                    let alias = match self.peek() {
-                        Token::Identifier(id)
-                        | Token::DelimitedIdentifier(id)
-                        | Token::String(id) => {
-                            let alias = id.clone();
-                            self.advance();
-                            alias
+                        // Parse optional AS keyword
+                        if self.peek_keyword(Keyword::As) {
+                            self.consume_keyword(Keyword::As)?;
                         }
-                        Token::Keyword { keyword: kw, .. } => {
-                            // Only consume keyword if it looks like it could be an alias
-                            // (not a SQL keyword that starts a new clause)
-                            if !matches!(
-                                kw,
-                                Keyword::Where
-                                    | Keyword::Order
-                                    | Keyword::Limit
-                                    | Keyword::Offset
-                                    | Keyword::Group
-                                    | Keyword::Having
-                                    | Keyword::Union
-                                    | Keyword::Intersect
-                                    | Keyword::Except
-                                    | Keyword::Join
-                                    | Keyword::Inner
-                                    | Keyword::Left
-                                    | Keyword::Right
-                                    | Keyword::Full
-                                    | Keyword::Cross
-                                    | Keyword::Natural
-                                    | Keyword::On
-                                    | Keyword::Using
-                            ) {
-                                let alias = kw.to_string();
+
+                        // Parse alias (optional for VALUES tables) - keywords allowed as aliases
+                        // If no alias is provided, generate a default one
+                        // SQLite also allows single-quoted strings as aliases (non-standard but common)
+                        let alias = match self.peek() {
+                            Token::Identifier(id)
+                            | Token::DelimitedIdentifier(id)
+                            | Token::String(id) => {
+                                let alias = id.clone();
                                 self.advance();
                                 alias
-                            } else {
+                            }
+                            Token::Keyword { keyword: kw, .. } => {
+                                // Only consume keyword if it looks like it could be an alias
+                                // (not a SQL keyword that starts a new clause)
+                                if !matches!(
+                                    kw,
+                                    Keyword::Where
+                                        | Keyword::Order
+                                        | Keyword::Limit
+                                        | Keyword::Offset
+                                        | Keyword::Group
+                                        | Keyword::Having
+                                        | Keyword::Union
+                                        | Keyword::Intersect
+                                        | Keyword::Except
+                                        | Keyword::Join
+                                        | Keyword::Inner
+                                        | Keyword::Left
+                                        | Keyword::Right
+                                        | Keyword::Full
+                                        | Keyword::Cross
+                                        | Keyword::Natural
+                                        | Keyword::On
+                                        | Keyword::Using
+                                ) {
+                                    let alias = kw.to_string();
+                                    self.advance();
+                                    alias
+                                } else {
+                                    // Generate default alias when no explicit alias provided
+                                    "_values_".to_string()
+                                }
+                            }
+                            _ => {
                                 // Generate default alias when no explicit alias provided
                                 "_values_".to_string()
                             }
-                        }
-                        _ => {
-                            // Generate default alias when no explicit alias provided
-                            "_values_".to_string()
-                        }
-                    };
+                        };
 
-                    // Parse optional column aliases: AS alias (col1, col2, ...)
-                    let column_aliases = self.parse_column_alias_list()?;
+                        // Parse optional column aliases: AS alias (col1, col2, ...)
+                        let column_aliases = self.parse_column_alias_list()?;
 
-                    vibesql_ast::FromClause::Values { rows, alias, column_aliases }
-                } else {
-                    // Parenthesized table reference or JOIN expression
-                    // Parse as a FROM clause (which handles JOINs)
-                    let mut from_clause = self.parse_from_clause()?;
+                        vibesql_ast::FromClause::Values { rows, alias, column_aliases }
+                    } else {
+                        // Parenthesized table reference or JOIN expression
+                        // Parse as a FROM clause (which handles JOINs)
+                        let mut from_clause = self.parse_from_clause()?;
 
-                    // Expect closing ')'
-                    match self.peek() {
-                        Token::RParen => {
-                            self.advance();
+                        // Expect closing ')'
+                        match self.peek() {
+                            Token::RParen => {
+                                self.advance();
+                            }
+                            _ => {
+                                return Err(ParseError {
+                                    message: "Expected ')' after parenthesized table reference"
+                                        .to_string(),
+                                })
+                            }
                         }
-                        _ => {
-                            return Err(ParseError {
-                                message: "Expected ')' after parenthesized table reference"
-                                    .to_string(),
-                            })
-                        }
-                    }
 
-                    // Parse optional alias for parenthesized join expressions
-                    // Example: FROM t1 JOIN (t2 JOIN t3 USING(id)) AS j1 ON j1.id=t1.id
-                    if self.peek_keyword(Keyword::As) {
-                        self.consume_keyword(Keyword::As)?;
-                        // Parse alias - must be an identifier or keyword usable as identifier
-                        let alias = self.parse_alias_name()?;
-                        // Set alias on the outermost Join node
-                        if let vibesql_ast::FromClause::Join {
-                            left,
-                            right,
-                            join_type,
-                            condition,
-                            using_columns,
-                            natural,
-                            ..
-                        } = from_clause
-                        {
-                            from_clause = vibesql_ast::FromClause::Join {
+                        // Parse optional alias for parenthesized join expressions
+                        // Example: FROM t1 JOIN (t2 JOIN t3 USING(id)) AS j1 ON j1.id=t1.id
+                        if self.peek_keyword(Keyword::As) {
+                            self.consume_keyword(Keyword::As)?;
+                            // Parse alias - must be an identifier or keyword usable as identifier
+                            let alias = self.parse_alias_name()?;
+                            // Set alias on the outermost Join node
+                            if let vibesql_ast::FromClause::Join {
                                 left,
                                 right,
                                 join_type,
                                 condition,
                                 using_columns,
                                 natural,
-                                alias: Some(alias),
-                            };
+                                ..
+                            } = from_clause
+                            {
+                                from_clause = vibesql_ast::FromClause::Join {
+                                    left,
+                                    right,
+                                    join_type,
+                                    condition,
+                                    using_columns,
+                                    natural,
+                                    alias: Some(alias),
+                                };
+                            }
                         }
-                    }
 
-                    from_clause
-                };
+                        from_clause
+                    };
 
                 Ok(result)
             }
@@ -378,14 +377,15 @@ impl Parser {
                 let column_aliases =
                     if alias.is_some() { self.parse_column_alias_list()? } else { None };
 
-                // Parse and ignore SQLite index hints: INDEXED BY <name> / NOT INDEXED
-                self.parse_index_hint()?;
+                // Parse SQLite index hints: INDEXED BY <name> / NOT INDEXED
+                let index_hint = self.parse_index_hint()?;
 
                 Ok(vibesql_ast::FromClause::Table {
                     name: table.full_name(),
                     alias,
                     column_aliases,
                     quoted: table.is_any_quoted(),
+                    index_hint,
                 })
             }
             // Allow unreserved keywords (like NULLS, TIMESTAMP, etc.) as table names
@@ -417,14 +417,15 @@ impl Parser {
                 let column_aliases =
                     if alias.is_some() { self.parse_column_alias_list()? } else { None };
 
-                // Parse and ignore SQLite index hints: INDEXED BY <name> / NOT INDEXED
-                self.parse_index_hint()?;
+                // Parse SQLite index hints: INDEXED BY <name> / NOT INDEXED
+                let index_hint = self.parse_index_hint()?;
 
                 Ok(vibesql_ast::FromClause::Table {
                     name: table.full_name(),
                     alias,
                     column_aliases,
                     quoted: table.is_any_quoted(),
+                    index_hint,
                 })
             }
             _ => Err(ParseError {
@@ -450,28 +451,35 @@ impl Parser {
         }
     }
 
-    /// Parse and ignore SQLite index hints: `INDEXED BY <index-name>` or
-    /// `NOT INDEXED`. VibeSQL's planner chooses indexes independently, so the
-    /// hint is accepted for SQLite compatibility but has no effect on planning.
-    pub(crate) fn parse_index_hint(&mut self) -> Result<(), ParseError> {
+    /// Parse SQLite index hints: `INDEXED BY <index-name>` or `NOT INDEXED`.
+    ///
+    /// The hint is carried through the AST so the executor can validate that
+    /// an `INDEXED BY` index exists on the table (SQLite: `no such index: X`).
+    /// VibeSQL's planner chooses indexes independently, so the hint has no
+    /// effect on planning.
+    pub(crate) fn parse_index_hint(
+        &mut self,
+    ) -> Result<Option<vibesql_ast::IndexHint>, ParseError> {
         if !self.peek_index_hint() {
-            return Ok(());
+            return Ok(None);
         }
         if self.peek_keyword(Keyword::Not) {
             self.advance(); // consume NOT
             self.advance(); // consume INDEXED
-            return Ok(());
+            return Ok(Some(vibesql_ast::IndexHint::NotIndexed));
         }
         self.advance(); // consume INDEXED
         self.advance(); // consume BY
         match self.peek() {
-            Token::Identifier(_) | Token::DelimitedIdentifier(_) => {
+            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                let name = name.clone();
                 self.advance();
-                Ok(())
+                Ok(Some(vibesql_ast::IndexHint::IndexedBy(name)))
             }
             Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                let name = kw.to_string();
                 self.advance();
-                Ok(())
+                Ok(Some(vibesql_ast::IndexHint::IndexedBy(name)))
             }
             _ => Err(ParseError { message: "Expected index name after INDEXED BY".to_string() }),
         }

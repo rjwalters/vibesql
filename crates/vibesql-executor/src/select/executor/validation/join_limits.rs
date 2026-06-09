@@ -55,6 +55,7 @@ mod tests {
         // Create a SELECT with 64 tables (exactly at limit) - should pass
         // SELECT * FROM t1, t2, t3, ... (64 times)
         let mut from: FromClause = FromClause::Table {
+            index_hint: None,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -64,6 +65,7 @@ mod tests {
             from = FromClause::Join {
                 left: Box::new(from),
                 right: Box::new(FromClause::Table {
+                    index_hint: None,
                     name: format!("t{}", i),
                     alias: None,
                     column_aliases: None,
@@ -101,6 +103,7 @@ mod tests {
     fn test_join_table_limit_exceeds_limit() {
         // Create a SELECT with 65 tables (exceeds limit) - should fail
         let mut from: FromClause = FromClause::Table {
+            index_hint: None,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -110,6 +113,7 @@ mod tests {
             from = FromClause::Join {
                 left: Box::new(from),
                 right: Box::new(FromClause::Table {
+                    index_hint: None,
                     name: format!("t{}", i),
                     alias: None,
                     column_aliases: None,

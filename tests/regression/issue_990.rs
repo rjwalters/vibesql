@@ -65,6 +65,7 @@ fn test_issue_990_multiple_unary_plus() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
@@ -147,6 +148,7 @@ fn test_issue_990_simpler_case() {
             source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
+            index_hint: None,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
