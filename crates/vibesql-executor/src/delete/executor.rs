@@ -7,9 +7,13 @@ use vibesql_types::SqlValue;
 
 use super::integrity::check_no_child_references;
 use crate::{
-    dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
-    expression_index_maintenance, privilege_checker::PrivilegeChecker,
-    sqlite_schema::is_sqlite_schema_table, truncate_validation::can_use_truncate,
+    dml_cost::DmlOptimizer,
+    errors::ExecutorError,
+    evaluator::{coercion::coerce_value_to_column_type, ExpressionEvaluator},
+    expression_index_maintenance,
+    privilege_checker::PrivilegeChecker,
+    sqlite_schema::is_sqlite_schema_table,
+    truncate_validation::can_use_truncate,
 };
 
 /// Executor for DELETE statements
@@ -187,6 +191,24 @@ impl DeleteExecutor {
         if procedural_context.is_none() && trigger_context.is_none() {
             if let Some(vibesql_ast::WhereClause::Condition(where_expr)) = &stmt.where_clause {
                 if let Some(pk_values) = Self::extract_primary_key_lookup(where_expr, &schema) {
+                    // Coerce extracted WHERE-clause literals to match the PK
+                    // column affinities. The PK index HashMap is keyed on
+                    // stored (already-coerced) values, so a raw literal can
+                    // silently miss when types differ — e.g. `WHERE p=1200`
+                    // on a TEXT PRIMARY KEY storing "1200". See issue #5145.
+                    let pk_values: Vec<SqlValue> =
+                        if let Some(pk_indices) = schema.get_primary_key_indices() {
+                            pk_values
+                                .into_iter()
+                                .zip(pk_indices.iter())
+                                .map(|(val, &idx)| {
+                                    coerce_value_to_column_type(val, &schema.columns[idx].data_type)
+                                })
+                                .collect()
+                        } else {
+                            pk_values
+                        };
+
                     // Check if we can use the super-fast path (no triggers, no FKs)
                     let has_triggers = database
                         .catalog
@@ -287,6 +309,24 @@ impl DeleteExecutor {
             if let Some(vibesql_ast::WhereClause::Condition(where_expr)) = &stmt.where_clause {
                 // Try primary key optimization
                 if let Some(pk_values) = Self::extract_primary_key_lookup(where_expr, &schema) {
+                    // Coerce extracted WHERE-clause literals to match the PK
+                    // column affinities. The PK index HashMap is keyed on
+                    // stored (already-coerced) values, so a raw literal can
+                    // silently miss when types differ — e.g. `WHERE p=1200` on
+                    // a TEXT PRIMARY KEY storing "1200". See issue #5145.
+                    let pk_values: Vec<SqlValue> =
+                        if let Some(pk_indices) = schema.get_primary_key_indices() {
+                            pk_values
+                                .into_iter()
+                                .zip(pk_indices.iter())
+                                .map(|(val, &idx)| {
+                                    coerce_value_to_column_type(val, &schema.columns[idx].data_type)
+                                })
+                                .collect()
+                        } else {
+                            pk_values
+                        };
+
                     if let Some(pk_index) = table.primary_key_index() {
                         if let Some(&row_index) = pk_index.get(&pk_values) {
                             // Found the row via index - single row to delete

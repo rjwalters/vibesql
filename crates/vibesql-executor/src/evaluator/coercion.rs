@@ -1,10 +1,11 @@
 //! Type coercion utilities for automatic type conversion
 //!
 //! This module provides utilities for coercing between SQL types, particularly
-//! for string-to-date conversions in date/time contexts.
+//! for string-to-date conversions in date/time contexts, and for coercing
+//! WHERE-clause literals to match column types for primary-key index lookups.
 
 use chrono::{Datelike, NaiveDate};
-use vibesql_types::SqlValue;
+use vibesql_types::{DataType, SqlValue, TypeAffinity};
 
 use crate::errors::ExecutorError;
 
@@ -61,6 +62,76 @@ fn parse_date_string(s: &str) -> Result<SqlValue, ExecutorError> {
         "Cannot parse '{}' as date. Expected format: YYYY-MM-DD",
         s
     )))
+}
+
+/// Coerce a value to match a column's data type using SQLite affinity rules.
+///
+/// This is used for PRIMARY KEY (and similar) index lookups where the literal
+/// value in the WHERE clause may have a different type than the column. The
+/// primary-key index `HashMap` is keyed on the **stored** representation of
+/// PK values, so a WHERE-clause literal must be coerced into the same affinity
+/// before the `HashMap::get(...)` call — otherwise lookups silently miss even
+/// though the row exists and would match the full WHERE clause.
+///
+/// SQLite affinity rules applied:
+/// - INTEGER/NUMERIC affinity column with string literal: try to parse as i64,
+///   then f64; if neither parses, return the original value (lookup will miss).
+/// - REAL affinity column with string literal: try to parse as f64.
+/// - TEXT affinity column with numeric literal: format the number as a string.
+/// - All other combinations: pass through unchanged.
+///
+/// # Examples
+/// - `WHERE i = '12'` on INTEGER PRIMARY KEY → coerce `'12'` to `Integer(12)`
+/// - `WHERE p = 1200` on TEXT PRIMARY KEY → coerce `1200` to `Varchar("1200")`
+///
+/// # Why this lives here
+/// Previously this helper was duplicated at two SELECT-side sites and missing
+/// entirely on the UPDATE/DELETE sites — see issue #5145. Consolidating here
+/// guarantees the same affinity rules apply everywhere we look a PK literal
+/// up in the in-memory index.
+pub fn coerce_value_to_column_type(val: SqlValue, col_type: &DataType) -> SqlValue {
+    let col_affinity = col_type.sqlite_affinity();
+
+    match (col_affinity, &val) {
+        // INTEGER/NUMERIC affinity column with string value: try to parse as number
+        (
+            TypeAffinity::Integer | TypeAffinity::Numeric,
+            SqlValue::Varchar(s) | SqlValue::Character(s),
+        ) => {
+            // Try to parse as integer first
+            if let Ok(i) = s.parse::<i64>() {
+                return SqlValue::Integer(i);
+            }
+            // Try to parse as float
+            if let Ok(f) = s.parse::<f64>() {
+                return SqlValue::Double(f);
+            }
+            // Can't convert - keep original (will fail lookup, which is correct)
+            val
+        }
+        // REAL affinity column with string value: try to parse as float
+        (TypeAffinity::Real, SqlValue::Varchar(s) | SqlValue::Character(s)) => {
+            if let Ok(f) = s.parse::<f64>() {
+                return SqlValue::Double(f);
+            }
+            val
+        }
+        // TEXT affinity column with numeric value: convert to string
+        (TypeAffinity::Text, SqlValue::Integer(i)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(i.to_string()))
+        }
+        (TypeAffinity::Text, SqlValue::Double(f)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(f.to_string()))
+        }
+        (TypeAffinity::Text, SqlValue::Float(f)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(f.to_string()))
+        }
+        (TypeAffinity::Text, SqlValue::Real(f)) => {
+            SqlValue::Varchar(arcstr::ArcStr::from(f.to_string()))
+        }
+        // No conversion needed
+        _ => val,
+    }
 }
 
 #[cfg(test)]
@@ -146,5 +217,64 @@ mod tests {
     fn test_coerce_non_leap_year_feb_29() {
         let result = coerce_to_date(&SqlValue::Varchar(arcstr::ArcStr::from("2023-02-29")));
         assert!(result.is_err());
+    }
+
+    // ----- coerce_value_to_column_type tests -----
+
+    #[test]
+    fn test_pk_coerce_text_column_integer_literal() {
+        // WHERE p = 1200 on TEXT PRIMARY KEY column: 1200 -> "1200"
+        let result = coerce_value_to_column_type(
+            SqlValue::Integer(1200),
+            &DataType::Varchar { max_length: Some(255) },
+        );
+        assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("1200")));
+    }
+
+    #[test]
+    fn test_pk_coerce_integer_column_string_literal() {
+        // WHERE i = '12' on INTEGER PRIMARY KEY column: '12' -> 12
+        let result = coerce_value_to_column_type(
+            SqlValue::Varchar(arcstr::ArcStr::from("12")),
+            &DataType::Integer,
+        );
+        assert_eq!(result, SqlValue::Integer(12));
+    }
+
+    #[test]
+    fn test_pk_coerce_integer_column_unparseable_string() {
+        // WHERE i = 'foo' on INTEGER column: 'foo' stays as Varchar (lookup will miss)
+        let result = coerce_value_to_column_type(
+            SqlValue::Varchar(arcstr::ArcStr::from("foo")),
+            &DataType::Integer,
+        );
+        assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("foo")));
+    }
+
+    #[test]
+    fn test_pk_coerce_text_column_text_literal_passthrough() {
+        // WHERE p = '1200' on TEXT column: stays as '1200'
+        let result = coerce_value_to_column_type(
+            SqlValue::Varchar(arcstr::ArcStr::from("1200")),
+            &DataType::Varchar { max_length: Some(255) },
+        );
+        assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("1200")));
+    }
+
+    #[test]
+    fn test_pk_coerce_integer_column_integer_literal_passthrough() {
+        // WHERE i = 12 on INTEGER column: stays as Integer(12)
+        let result = coerce_value_to_column_type(SqlValue::Integer(12), &DataType::Integer);
+        assert_eq!(result, SqlValue::Integer(12));
+    }
+
+    #[test]
+    fn test_pk_coerce_real_column_string_literal() {
+        // WHERE r = '1.5' on REAL column: '1.5' -> 1.5
+        let result = coerce_value_to_column_type(
+            SqlValue::Varchar(arcstr::ArcStr::from("1.5")),
+            &DataType::Real,
+        );
+        assert_eq!(result, SqlValue::Double(1.5));
     }
 }

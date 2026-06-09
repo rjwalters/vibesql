@@ -17,7 +17,7 @@ use super::predicates::{apply_table_local_predicates, filter_and_clone_rows};
 use crate::select::parallel::parallel_scan_materialize;
 use crate::{
     errors::ExecutorError,
-    evaluator::CombinedExpressionEvaluator,
+    evaluator::{coercion::coerce_value_to_column_type, CombinedExpressionEvaluator},
     information_schema::{
         execute_information_schema_query, get_information_schema_table_schema, parse_qualified_name,
     },
@@ -545,9 +545,11 @@ pub(crate) fn execute_table_scan(
         if has_filters {
             // Try columnar filter optimization for simple predicates
             // Extract predicates once and choose the best execution path (#2972)
-            if let Some(column_predicates) =
-                crate::select::columnar::extract_column_predicates(where_expr, &schema, database.case_sensitive_like())
-            {
+            if let Some(column_predicates) = crate::select::columnar::extract_column_predicates(
+                where_expr,
+                &schema,
+                database.case_sensitive_like(),
+            ) {
                 // OPTIMIZATION: Avoid double-cloning rows
                 // Before: scan_live_vec() clones ALL rows, then filter clones passing rows again
                 // After: scan() returns &[Row] references, filter returns indices,
@@ -1047,62 +1049,6 @@ fn collect_equality_predicates_recursive(
         }
         // Other expressions are not useful for PK lookup
         _ => {}
-    }
-}
-
-/// Coerce a value to match a column's data type using SQLite affinity rules.
-///
-/// This is used for PRIMARY KEY lookups where the literal value in the WHERE clause
-/// may have a different type than the column. For example:
-/// - WHERE i='12' on INTEGER column should coerce '12' to Integer(12)
-/// - WHERE s=123 on TEXT column should coerce 123 to Varchar("123")
-fn coerce_value_to_column_type(
-    val: vibesql_types::SqlValue,
-    col_type: &vibesql_types::DataType,
-) -> vibesql_types::SqlValue {
-    use vibesql_types::{SqlValue, TypeAffinity};
-
-    let col_affinity = col_type.sqlite_affinity();
-
-    match (col_affinity, &val) {
-        // INTEGER/NUMERIC affinity column with string value: try to parse as number
-        (
-            TypeAffinity::Integer | TypeAffinity::Numeric,
-            SqlValue::Varchar(s) | SqlValue::Character(s),
-        ) => {
-            // Try to parse as integer first
-            if let Ok(i) = s.parse::<i64>() {
-                return SqlValue::Integer(i);
-            }
-            // Try to parse as float
-            if let Ok(f) = s.parse::<f64>() {
-                return SqlValue::Double(f);
-            }
-            // Can't convert - keep original (will fail lookup, which is correct)
-            val
-        }
-        // REAL affinity column with string value: try to parse as float
-        (TypeAffinity::Real, SqlValue::Varchar(s) | SqlValue::Character(s)) => {
-            if let Ok(f) = s.parse::<f64>() {
-                return SqlValue::Double(f);
-            }
-            val
-        }
-        // TEXT affinity column with numeric value: convert to string
-        (TypeAffinity::Text, SqlValue::Integer(i)) => {
-            SqlValue::Varchar(arcstr::ArcStr::from(i.to_string()))
-        }
-        (TypeAffinity::Text, SqlValue::Double(f)) => {
-            SqlValue::Varchar(arcstr::ArcStr::from(f.to_string()))
-        }
-        (TypeAffinity::Text, SqlValue::Float(f)) => {
-            SqlValue::Varchar(arcstr::ArcStr::from(f.to_string()))
-        }
-        (TypeAffinity::Text, SqlValue::Real(f)) => {
-            SqlValue::Varchar(arcstr::ArcStr::from(f.to_string()))
-        }
-        // No conversion needed
-        _ => val,
     }
 }
 
