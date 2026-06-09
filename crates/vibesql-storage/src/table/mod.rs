@@ -1274,6 +1274,90 @@ impl Table {
         self.indexes.rebuild(&self.schema, &self.rows);
     }
 
+    /// MVCC garbage collection: physically remove row versions whose
+    /// deletion is committed and provably invisible to every active
+    /// reader.
+    ///
+    /// # Phase 1d follow-up (#5208)
+    ///
+    /// Walks every row currently in storage and, for any row whose
+    /// `xmax = Some(t)` with `t < horizon`, marks it for bitmap
+    /// deletion. `horizon` is computed by
+    /// [`TransactionManager::compute_gc_horizon`] — see its docs for
+    /// the meaning of "horizon."
+    ///
+    /// **What does NOT count as reclaimable:**
+    /// - Rows with `xmax = None` (still live) — never removed by GC.
+    /// - Rows with `xmax = Some(t)` where `t >= horizon` — some active
+    ///   or future reader may still need to see this row, so we leave
+    ///   it alone.
+    /// - Rows already in the deletion bitmap — counted as "already
+    ///   reclaimed."
+    ///
+    /// **Off-state (`mvcc_enabled` feature OFF):** this method is still
+    /// callable, but rows constructed by the executor have
+    /// `xmax = None` in the off-state, so the sweep finds nothing and
+    /// returns 0. Calling this is therefore harmless when MVCC is
+    /// disabled — useful for keeping the public API surface stable
+    /// across feature configurations.
+    ///
+    /// # Returns
+    ///
+    /// The number of rows newly marked deletable by this call. If that
+    /// crossed the compaction threshold (> 50% deleted), the underlying
+    /// row vector is compacted before returning, and the
+    /// [`DeleteResult::compacted`] bit is implicit in the caller's
+    /// follow-up: the caller should call
+    /// [`Database::rebuild_indexes`] on the table when this returns
+    /// non-zero, to keep user-defined B-tree indexes in sync.
+    ///
+    /// # Performance
+    ///
+    /// O(n) scan over physical rows. There is no incremental
+    /// bookkeeping — v1 GC is a single sweep. Future phases can add
+    /// per-table "needs-GC" flags / smaller per-page sweeps.
+    ///
+    /// [`TransactionManager::compute_gc_horizon`]: crate::database::transactions::TransactionManager::compute_gc_horizon
+    /// [`Database::rebuild_indexes`]: crate::Database
+    /// [`DeleteResult::compacted`]: crate::table::DeleteResult
+    pub fn gc_old_versions(&mut self, horizon: crate::row::TxnId) -> usize {
+        // Off-state: no row in the off-state carries an xmax stamp
+        // (the executor's `stamp_xmax_for_write` is a no-op when the
+        // feature is off), so the sweep predicate would find nothing.
+        // Short-circuit to skip the iteration entirely; this keeps the
+        // public API surface stable while paying zero cost when MVCC
+        // is compiled out.
+        if !cfg!(feature = "mvcc_enabled") {
+            let _ = horizon;
+            return 0;
+        }
+
+        // PRE_MVCC_TXN_ID (= 0) is the "no deleter / always committed"
+        // sentinel. The horizon is always >= 1 in any non-empty manager
+        // (next_transaction_id starts at 1), so the strict `<` check
+        // below treats sentinel-stamped deletes (which shouldn't happen
+        // in practice) as not-reclaimable — defensive against bizarre
+        // states.
+        let mut indices_to_gc: Vec<usize> = Vec::new();
+        for (idx, row) in self.rows.iter().enumerate() {
+            if self.deleted[idx] {
+                continue;
+            }
+            if let Some(xmax) = row.xmax {
+                if xmax != crate::row::PRE_MVCC_TXN_ID && xmax < horizon {
+                    indices_to_gc.push(idx);
+                }
+            }
+        }
+
+        if indices_to_gc.is_empty() {
+            return 0;
+        }
+
+        let result = self.delete_by_indices(&indices_to_gc);
+        result.deleted_count
+    }
+
     /// Check if a row at the given index is deleted
     #[inline]
     pub fn is_deleted(&self, idx: usize) -> bool {
@@ -1581,5 +1665,108 @@ mod tests {
         assert_eq!(pk_index.get(&vec![SqlValue::Integer(2)]), Some(&1));
         assert_eq!(pk_index.get(&vec![SqlValue::Integer(3)]), Some(&2));
         assert_eq!(pk_index.get(&vec![SqlValue::Integer(4)]), Some(&3));
+    }
+
+    // ========================================================================
+    // GC tests (#5208 — MVCC Phase 1d follow-up)
+    // ========================================================================
+
+    #[test]
+    fn gc_off_state_returns_zero() {
+        // Off-state: no rows carry an xmax stamp, so GC has nothing to do.
+        // The early-return in `gc_old_versions` should fire and report 0.
+        let mut table = create_test_table();
+        table.insert(create_row(1, "Alice")).unwrap();
+        table.insert(create_row(2, "Bob")).unwrap();
+        let reclaimed = table.gc_old_versions(100);
+        assert_eq!(reclaimed, 0);
+        // No rows should have been removed.
+        assert_eq!(table.row_count(), 2);
+    }
+
+    #[cfg(feature = "mvcc_enabled")]
+    #[test]
+    fn gc_reclaims_only_rows_with_xmax_below_horizon() {
+        // Three rows: one with xmax = 5 (committed before horizon),
+        // one with xmax = 10 (still in horizon — must be retained),
+        // one with xmax = None (live — must be retained).
+        let mut table = create_test_table();
+        table.insert(create_row(1, "Alice")).unwrap();
+        table.insert(create_row(2, "Bob")).unwrap();
+        table.insert(create_row(3, "Charlie")).unwrap();
+
+        // Stamp xmax directly on the underlying rows to simulate
+        // Phase 1c's UPDATE/DELETE having stamped tombstones.
+        table.stamp_row_xmax_inplace(0, 5);
+        table.stamp_row_xmax_inplace(1, 10);
+        // Row 2 left with xmax = None.
+
+        let reclaimed = table.gc_old_versions(8);
+        // Only row 0 (xmax = 5 < horizon = 8) should have been reclaimed.
+        assert_eq!(reclaimed, 1);
+        // The other two should still be present (one tombstoned, one live).
+        assert_eq!(table.row_count(), 2);
+    }
+
+    #[cfg(feature = "mvcc_enabled")]
+    #[test]
+    fn gc_reclaims_nothing_when_horizon_is_zero() {
+        // Horizon = 0 means "no reader can possibly be done with anything"
+        // — every committed deletion must be retained. The strict `<`
+        // comparison combined with the sentinel check guarantees nothing
+        // is reclaimed even if a row was somehow stamped with xmax = 0
+        // (which would be a bug; the sentinel means "no deleter").
+        let mut table = create_test_table();
+        table.insert(create_row(1, "Alice")).unwrap();
+        table.stamp_row_xmax_inplace(0, 5);
+
+        let reclaimed = table.gc_old_versions(0);
+        assert_eq!(reclaimed, 0);
+        assert_eq!(table.row_count(), 1);
+    }
+
+    #[cfg(feature = "mvcc_enabled")]
+    #[test]
+    fn gc_skips_rows_already_in_deletion_bitmap() {
+        // Row 0 is in the bitmap from a prior DELETE; row 1 has xmax
+        // stamped but no bitmap mark (the deferred case Phase 1e will
+        // produce). GC should reclaim row 1 only.
+        let mut table = create_test_table();
+        table.insert(create_row(1, "Alice")).unwrap();
+        table.insert(create_row(2, "Bob")).unwrap();
+        // Bitmap-delete row 0 the "normal" way (also stamps it in the
+        // index manager, so PK lookup is consistent).
+        let _ = table.delete_by_indices(&[0]);
+        // Row 1: stamp tombstone but don't bitmap-delete.
+        table.stamp_row_xmax_inplace(1, 4);
+
+        let reclaimed = table.gc_old_versions(10);
+        // Row 0 was already deleted — not counted again. Row 1 is now
+        // bitmap-deleted by GC.
+        assert_eq!(reclaimed, 1);
+        // Both physical slots are now in the deletion bitmap; row_count
+        // (live rows) is 0.
+        assert_eq!(table.row_count(), 0);
+    }
+
+    #[cfg(feature = "mvcc_enabled")]
+    #[test]
+    fn gc_respects_horizon_boundary() {
+        // Boundary: xmax == horizon is NOT reclaimed (only strictly less).
+        // This matches the semantics of `xmin_active`: a row whose
+        // deleter id equals an active reader's xmin_active could still
+        // be in that reader's snapshot under some future visibility
+        // rule, so we err on the side of retaining it.
+        let mut table = create_test_table();
+        table.insert(create_row(1, "Alice")).unwrap();
+        table.stamp_row_xmax_inplace(0, 7);
+
+        // Horizon == 7: row is NOT reclaimed.
+        let reclaimed = table.gc_old_versions(7);
+        assert_eq!(reclaimed, 0);
+
+        // Horizon == 8: row IS reclaimed.
+        let reclaimed = table.gc_old_versions(8);
+        assert_eq!(reclaimed, 1);
     }
 }

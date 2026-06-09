@@ -305,6 +305,54 @@ impl TransactionManager {
         }
     }
 
+    /// Compute the MVCC garbage-collection horizon.
+    ///
+    /// Returns the lowest [`TxnId`] that is **still potentially needed**
+    /// by some active reader. Any row whose `xmax` is committed and
+    /// strictly less than this value is provably invisible to every
+    /// current and future transaction, and may therefore be physically
+    /// reclaimed.
+    ///
+    /// # Semantics
+    ///
+    /// - If a transaction is active, the horizon is its snapshot's
+    ///   `xmin_active`. Under single-writer that's `txn_id + 1`, so any
+    ///   `xmax <= txn_id` (i.e. any committed deletion) would still
+    ///   technically need to be visible to the active reader if it's
+    ///   examining a pre-delete state... wait — under single-writer,
+    ///   the active txn IS the deleter, so this case is effectively
+    ///   handled by holding the horizon back to the active txn's own
+    ///   xmin_active and refusing to reclaim rows whose `xmax` equals
+    ///   the active txn id.
+    /// - If no transaction is active, the horizon is `next_transaction_id`
+    ///   (one past the highest allocated id). Under single-writer with no
+    ///   active txn, every committed deletion is invisible to every
+    ///   reader that *could* now start (since any new BEGIN would
+    ///   snapshot with an even-higher `xmin_active`), so anything stamped
+    ///   so far is safe to reclaim.
+    ///
+    /// **Multi-writer note:** when concurrent transactions are
+    /// supported, this becomes `min(xmin_active across all active txns)`
+    /// — the same primitive, computed over the active-txn registry.
+    /// The single-writer code path here naturally generalizes; the
+    /// signature does not change.
+    ///
+    /// # Phase 1d follow-up (#5208)
+    ///
+    /// This is the first half of the GC primitive. The second half is
+    /// [`Table::gc_old_versions`], which uses this horizon to pick rows
+    /// to physically reclaim. See [`crate::Database::vacuum_mvcc`] for
+    /// the user-facing entry point.
+    ///
+    /// [`Table::gc_old_versions`]: crate::Table::gc_old_versions
+    /// [`crate::Database::vacuum_mvcc`]: crate::Database
+    pub fn compute_gc_horizon(&self) -> TxnId {
+        match &self.transaction_state {
+            TransactionState::Active { snapshot, .. } => snapshot.xmin_active,
+            TransactionState::None => self.next_transaction_id,
+        }
+    }
+
     /// Capture a fresh "commit-time" MVCC snapshot.
     ///
     /// Phase 1d (#5151) FK deferred-replay coordination: when a deferred
@@ -566,5 +614,76 @@ mod snapshot_capture_tests {
             my_row.visible_to(snap),
             "#5207 widening: a txn's own writes (xmin = self) must be visible"
         );
+    }
+
+    // ========================================================================
+    // GC horizon tests (#5208 — MVCC Phase 1d follow-up)
+    // ========================================================================
+
+    #[test]
+    fn gc_horizon_with_no_transactions_is_next_txn_id() {
+        // Fresh manager: next_transaction_id = 1, no active txn.
+        // Horizon should be 1 — every committed xmax is < 1 is impossible
+        // (no commits have happened), so nothing is reclaimable, which
+        // is the correct behavior on an empty database.
+        let mgr = TransactionManager::new();
+        assert_eq!(mgr.compute_gc_horizon(), 1);
+    }
+
+    #[test]
+    fn gc_horizon_after_committed_txn_includes_that_txn() {
+        // After a transaction commits, its id (1) is < next_transaction_id (2),
+        // and there is no active reader, so anything that txn stamped is
+        // safe to reclaim. Horizon = 2.
+        let (catalog, tables) = empty_catalog_and_tables();
+        let mut mgr = TransactionManager::new();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
+        mgr.commit_transaction().unwrap();
+        assert_eq!(mgr.compute_gc_horizon(), 2);
+    }
+
+    #[test]
+    fn gc_horizon_with_active_transaction_uses_xmin_active() {
+        // While a transaction is active, the horizon must NOT advance
+        // past that transaction's snapshot's `xmin_active`, or we would
+        // risk reclaiming rows the active reader can still see.
+        // Single-writer: snapshot.xmin_active = txn_id + 1 = 2.
+        let (catalog, tables) = empty_catalog_and_tables();
+        let mut mgr = TransactionManager::new();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
+        let horizon = mgr.compute_gc_horizon();
+        let snap = mgr.current_snapshot().unwrap();
+        assert_eq!(horizon, snap.xmin_active);
+        assert_eq!(horizon, 2);
+    }
+
+    #[test]
+    fn gc_horizon_advances_across_committed_transactions() {
+        // Two committed transactions then no active: horizon = 3.
+        let (catalog, tables) = empty_catalog_and_tables();
+        let mut mgr = TransactionManager::new();
+        for _ in 0..2 {
+            mgr.begin_transaction(&catalog, &tables).unwrap();
+            mgr.commit_transaction().unwrap();
+        }
+        assert_eq!(mgr.compute_gc_horizon(), 3);
+    }
+
+    #[test]
+    fn gc_horizon_held_back_by_oldest_active_reader() {
+        // Two transactions committed, then a third starts and stays active.
+        // Horizon must be that third's `xmin_active`, not advance past it.
+        let (catalog, tables) = empty_catalog_and_tables();
+        let mut mgr = TransactionManager::new();
+        for _ in 0..2 {
+            mgr.begin_transaction(&catalog, &tables).unwrap();
+            mgr.commit_transaction().unwrap();
+        }
+        // Third txn begins (txn_id = 3), and stays active.
+        mgr.begin_transaction(&catalog, &tables).unwrap();
+        let horizon = mgr.compute_gc_horizon();
+        // Snapshot's xmin_active = txn_id + 1 = 4 under single-writer
+        // self-write widening (#5207).
+        assert_eq!(horizon, 4);
     }
 }

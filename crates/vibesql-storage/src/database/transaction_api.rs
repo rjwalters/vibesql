@@ -133,6 +133,106 @@ impl Database {
         self.lifecycle.transaction_manager().capture_commit_time_snapshot()
     }
 
+    /// Compute the MVCC garbage-collection horizon.
+    ///
+    /// See [`crate::database::transactions::TransactionManager::compute_gc_horizon`].
+    /// Mostly useful for tests and diagnostics; production callers
+    /// should prefer [`Self::vacuum_mvcc`], which uses this horizon
+    /// internally.
+    pub fn compute_gc_horizon(&self) -> crate::row::TxnId {
+        self.lifecycle.transaction_manager().compute_gc_horizon()
+    }
+
+    /// MVCC vacuum: reclaim space from row versions whose deletion is
+    /// provably invisible to every active and future transaction.
+    ///
+    /// # Phase 1d follow-up (#5208)
+    ///
+    /// This is the "minimum viable" MVCC GC: a single, on-demand sweep
+    /// across all tables. It is **not** automatic and does **not**
+    /// integrate with WAL checkpoints or background tasks — those are
+    /// tracked as follow-up work in #5208 itself.
+    ///
+    /// # Semantics
+    ///
+    /// 1. Compute the GC horizon (see
+    ///    [`TransactionManager::compute_gc_horizon`]).
+    /// 2. For each table, call [`Table::gc_old_versions(horizon)`].
+    /// 3. If any table reclaimed rows, rebuild its user-defined indexes
+    ///    (B-tree indexes managed at the Database level) to keep them
+    ///    consistent with the now-compacted row vector.
+    ///
+    /// # Refused while a transaction is active
+    ///
+    /// Returns [`StorageError::TransactionError`] when called inside an
+    /// active transaction. v1 deliberately does **not** mix GC with
+    /// in-flight writes: doing so safely requires deferring the
+    /// underlying bitmap-delete on UPDATE/DELETE so the GC sweep can
+    /// observe the tombstones, which is a larger change than this
+    /// follow-up. Callers that want to run GC mid-transaction should
+    /// COMMIT first.
+    ///
+    /// # Off-state (`mvcc_enabled` feature OFF)
+    ///
+    /// Returns `Ok(0)` immediately. No row in the off-state carries an
+    /// MVCC tombstone, so there is nothing to reclaim. The API is
+    /// stable across feature configurations.
+    ///
+    /// # Returns
+    ///
+    /// The total number of row versions reclaimed across all tables.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// // After a long-running write workload:
+    /// let reclaimed = db.vacuum_mvcc()?;
+    /// eprintln!("Reclaimed {reclaimed} old row versions");
+    /// ```
+    ///
+    /// [`TransactionManager::compute_gc_horizon`]: crate::database::transactions::TransactionManager::compute_gc_horizon
+    /// [`Table::gc_old_versions(horizon)`]: crate::Table::gc_old_versions
+    pub fn vacuum_mvcc(&mut self) -> Result<usize, StorageError> {
+        if self.in_transaction() {
+            return Err(StorageError::TransactionError(
+                "vacuum_mvcc cannot run while a transaction is active; COMMIT first".to_string(),
+            ));
+        }
+
+        // Off-state fast path: no MVCC stamping ever happened, so nothing
+        // to reclaim. Keeps the iteration overhead off the hot path when
+        // the feature is compiled out.
+        if !crate::mvcc::mvcc_enabled() {
+            return Ok(0);
+        }
+
+        let horizon = self.lifecycle.transaction_manager().compute_gc_horizon();
+
+        let table_names: Vec<String> = self.tables.keys().cloned().collect();
+        let mut total_reclaimed = 0usize;
+
+        for name in table_names {
+            let reclaimed = {
+                let table = match self.tables.get_mut(&name) {
+                    Some(t) => t,
+                    None => continue,
+                };
+                table.gc_old_versions(horizon)
+            };
+            if reclaimed > 0 {
+                total_reclaimed += reclaimed;
+                // GC may have triggered compaction, which shuffles physical
+                // row indices. Database-level user indexes must be rebuilt
+                // to track the new positions — same pattern as the DELETE
+                // path's `if delete_result.compacted` branch.
+                self.rebuild_indexes(&name);
+                self.invalidate_columnar_cache(&name);
+            }
+        }
+
+        Ok(total_reclaimed)
+    }
+
     /// Create a savepoint within the current transaction
     pub fn create_savepoint(&mut self, name: String) -> Result<(), StorageError> {
         self.lifecycle.transaction_manager_mut().create_savepoint(name)
