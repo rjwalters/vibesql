@@ -967,6 +967,62 @@ proc track_pragma_setting {sql} {
     return $found
 }
 
+proc trial_check_in_transaction {new_sql} {
+    # Trial-execute the cumulative transaction batch (existing $::sql_batch
+    # plus $new_sql) with an appended ROLLBACK, so that errors from $new_sql
+    # surface immediately (at the test boundary that submitted it) instead of
+    # being deferred to the next COMMIT.
+    #
+    # This fixes the test-attribution problem where, e.g.:
+    #
+    #   do_catchsql_test 3.2.1 { BEGIN; UPDATE p2 SET a=a-1; } \
+    #                          {1 {FOREIGN KEY constraint failed}}
+    #   do_execsql_test  3.2.2 { COMMIT }
+    #
+    # ...would batch BEGIN+UPDATE silently into 3.2.1 (returning {}), then
+    # flush the whole batch at 3.2.2 where the RESTRICT error fires --
+    # misattributing the error to 3.2.2 and failing both tests.
+    #
+    # The trial run ends with ROLLBACK so it leaves no DB state behind; the
+    # real batch is preserved in $::sql_batch and gets re-executed at the
+    # eventual COMMIT/ROLLBACK (the normal flush_batch path).
+    #
+    # Returns: a TCL error (via `error ...`) if the trial reports an error,
+    # otherwise returns silently.
+    set trial_stmts {}
+    foreach stmt $::sql_batch {
+        set s [string trimright $stmt]
+        set s [string trimright $s ";"]
+        lappend trial_stmts $s
+    }
+    set new_clean [string trimright $new_sql]
+    set new_clean [string trimright $new_clean ";"]
+    lappend trial_stmts $new_clean
+    lappend trial_stmts "ROLLBACK"
+
+    set combined [join $trial_stmts ";\n"]
+    set pragma_prefix [build_pragma_prefix]
+    set combined "${pragma_prefix}${combined}"
+
+    set tmpfile "/tmp/vibesql_trial_[pid]_[clock microseconds].sql"
+    set f [open $tmpfile w]
+    puts $f $combined
+    close $f
+
+    if {$::db_file eq ""} {
+        catch {exec $::vibesql_path < $tmpfile 2>@1} result
+    } else {
+        catch {exec $::vibesql_path $::db_file < $tmpfile 2>@1} result
+    }
+    file delete -force $tmpfile
+
+    # vibesql reports errors via lines starting with "Error executing statement"
+    # or "Error:". Detect either pattern (matches exec_preserve_newlines).
+    if {[regexp {(?m)^Error executing statement|^Error:} $result]} {
+        error [translate_error_to_sqlite $result]
+    }
+}
+
 proc flush_batch {} {
     # Execute accumulated SQL statements
     # Uses a temp file to avoid "argument list too long" errors for large batches
@@ -1249,13 +1305,32 @@ proc execsql {sql {db ""}} {
 
     if {$net_begin > 0} {
         # SQL opens a transaction (e.g., "BEGIN" or "CREATE TABLE...; BEGIN;")
-        # Add to batch and defer execution until COMMIT
+        # Trial-run the SQL with an appended ROLLBACK so any error fires now
+        # (at the test boundary that submitted this SQL) instead of being
+        # silently deferred until the next COMMIT. See trial_check_in_transaction
+        # for the full rationale (fixes fkey6 3.2.1 / 3.3.2 misattribution).
+        trial_check_in_transaction $sql
         set ::in_transaction 1
         lappend ::sql_batch $sql
         return {}
     } elseif {$net_begin < 0 || ($::in_transaction && $end_count > 0)} {
         # SQL closes a transaction (e.g., "COMMIT" or has more COMMITs than BEGINs)
-        # Flush the entire batch including this statement
+        # Flush the entire batch including this statement.
+        #
+        # Standalone COMMIT with no batched-transaction context: treat as a
+        # silent no-op. The trial-execute path above can surface an error and
+        # abort the transaction at the catchsql boundary without persisting
+        # any batch state; the test file may then issue a stray COMMIT to
+        # tidy up. Without this short-circuit the COMMIT would hit a fresh
+        # process with no active transaction and re-raise. (Mirrors the
+        # ROLLBACK no-op handling earlier in this proc.)
+        if {!$::in_transaction && [llength $::sql_batch] == 0} {
+            set sql_trim_upper [string toupper [string trim $sql " \t\n;"]]
+            if {$sql_trim_upper eq "COMMIT" || $sql_trim_upper eq "COMMIT TRANSACTION" ||
+                $sql_trim_upper eq "END" || $sql_trim_upper eq "END TRANSACTION"} {
+                return {}
+            }
+        }
         lappend ::sql_batch $sql
         set ::in_transaction 0
         if {[catch {flush_batch} result]} {
@@ -1270,7 +1345,9 @@ proc execsql {sql {db ""}} {
         # (e.g., "BEGIN; INSERT...; COMMIT;")
         # Fall through to direct execution below
     } elseif {$::in_transaction} {
-        # Inside a transaction - add to batch
+        # Inside a transaction - trial-execute first so per-statement errors
+        # surface at the submitting test, then add to batch.
+        trial_check_in_transaction $sql
         lappend ::sql_batch $sql
         return {}
     }
