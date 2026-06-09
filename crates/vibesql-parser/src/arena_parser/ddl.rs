@@ -15,6 +15,7 @@ use vibesql_ast::arena::{
     ModifyColumnStmt, OrderDirection, PragmaStmt, PragmaValue, ReferentialAction,
     ReleaseSavepointStmt, RenameTableStmt, RollbackStmt, RollbackToSavepointStmt, SavepointStmt,
     Symbol, TableConstraint, TableConstraintKind, TruncateCascadeOption, TruncateTableStmt,
+    VacuumStmt,
 };
 
 use super::ArenaParser;
@@ -962,6 +963,44 @@ impl<'arena> ArenaParser<'arena> {
         };
 
         Ok(AnalyzeStmt { table_name, columns })
+    }
+
+    // ========================================================================
+    // VACUUM Statement
+    // ========================================================================
+
+    /// Parse VACUUM statement (SQLite compatibility).
+    ///
+    /// Syntax:
+    ///   VACUUM [schema_name] [INTO 'filename']
+    pub(crate) fn parse_vacuum_statement(&mut self) -> Result<VacuumStmt, ParseError> {
+        self.consume_keyword(Keyword::Vacuum)?;
+
+        // Parse optional schema name (e.g. VACUUM main)
+        let schema_name = if let Token::Identifier(_) = self.peek() {
+            Some(self.parse_arena_identifier()?)
+        } else {
+            None
+        };
+
+        // Parse optional INTO 'filename'
+        let into_file = if self.try_consume_keyword(Keyword::Into) {
+            match self.peek().clone() {
+                Token::String(s) => {
+                    self.advance();
+                    Some(self.intern(&s))
+                }
+                _ => {
+                    return Err(ParseError {
+                        message: "Expected string literal after VACUUM INTO".to_string(),
+                    })
+                }
+            }
+        } else {
+            None
+        };
+
+        Ok(VacuumStmt { schema_name, into_file })
     }
 
     // ========================================================================

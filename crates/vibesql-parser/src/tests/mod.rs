@@ -50,6 +50,7 @@ mod translation;
 mod trigger;
 mod truncate;
 mod update;
+mod vacuum;
 mod values_statement;
 mod view;
 mod window_functions;

@@ -210,6 +210,15 @@ impl VibeSqlDB {
                     .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
                 Ok(DBOutput::StatementComplete(0))
             }
+            vibesql_ast::Statement::Vacuum(vacuum_stmt) => {
+                if vacuum_stmt.into_file.is_some() {
+                    return Err(TestError("VACUUM INTO is not supported in VibeSQL".to_string()));
+                }
+                self.db
+                    .vacuum_mvcc()
+                    .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;
+                Ok(DBOutput::StatementComplete(0))
+            }
             vibesql_ast::Statement::Analyze(analyze_stmt) => {
                 vibesql_executor::AnalyzeExecutor::execute(&analyze_stmt, &mut self.db)
                     .map_err(|e| TestError(format!("Execution error: {:?}", e)))?;

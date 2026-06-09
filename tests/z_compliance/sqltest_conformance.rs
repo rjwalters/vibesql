@@ -346,6 +346,13 @@ impl SqltestRunner {
                     .map_err(|e| format!("Execution error: {:?}", e))?;
                 Ok(true)
             }
+            vibesql_ast::Statement::Vacuum(vacuum_stmt) => {
+                if vacuum_stmt.into_file.is_some() {
+                    return Err("VACUUM INTO is not supported in VibeSQL".to_string());
+                }
+                db.vacuum_mvcc().map_err(|e| format!("Execution error: {:?}", e))?;
+                Ok(true)
+            }
             vibesql_ast::Statement::BeginTransaction(_)
             | vibesql_ast::Statement::Commit(_)
             | vibesql_ast::Statement::Rollback(_)

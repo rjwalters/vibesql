@@ -379,6 +379,17 @@ impl Session {
                 Ok(ExecutionResult::Analyze { tables_analyzed })
             }
 
+            // VACUUM maps to MVCC garbage collection (no-op when MVCC is
+            // disabled), requires write lock
+            Statement::Vacuum(vacuum_stmt) => {
+                if vacuum_stmt.into_file.is_some() {
+                    return Err(anyhow::anyhow!("VACUUM INTO is not supported in VibeSQL"));
+                }
+                let mut db = self.db.write().await;
+                let _reclaimed = db.vacuum_mvcc().map_err(|e| anyhow::anyhow!("{}", e))?;
+                Ok(ExecutionResult::Other { message: "VACUUM".to_string() })
+            }
+
             // Session-local operations (no db lock needed)
             Statement::Prepare(prepare_stmt) => self.execute_prepare(prepare_stmt),
 

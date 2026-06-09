@@ -178,6 +178,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "INDEX" => Keyword::Index,
     "ANALYZE" => Keyword::Analyze,
     "REINDEX" => Keyword::Reindex,
+    "VACUUM" => Keyword::Vacuum,
     "EXPLAIN" => Keyword::Explain,
     "ASSERTION" => Keyword::Assertion,
     // Trigger-specific keywords

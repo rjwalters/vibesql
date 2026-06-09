@@ -372,6 +372,19 @@ pub struct AnalyzeStmt<'arena> {
 }
 
 // ============================================================================
+// VACUUM
+// ============================================================================
+
+/// VACUUM statement (SQLite compatibility - maps to MVCC garbage collection)
+#[derive(Debug, Clone, PartialEq)]
+pub struct VacuumStmt {
+    /// Optional schema name target (e.g. `main`)
+    pub schema_name: Option<Symbol>,
+    /// Optional output file for VACUUM INTO (not supported at runtime)
+    pub into_file: Option<Symbol>,
+}
+
+// ============================================================================
 // PRAGMA
 // ============================================================================
 
@@ -447,4 +460,5 @@ pub enum Statement<'arena> {
 
     // SQLite compatibility
     Pragma(PragmaStmt),
+    Vacuum(VacuumStmt),
 }

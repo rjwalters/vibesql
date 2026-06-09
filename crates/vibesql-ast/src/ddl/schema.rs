@@ -345,6 +345,25 @@ pub struct ReindexStmt {
     pub target: Option<String>,
 }
 
+/// VACUUM statement
+///
+/// SQLite compatibility statement. SQLite rebuilds the database file;
+/// VibeSQL maps VACUUM to MVCC old-version garbage collection
+/// (`Database::vacuum_mvcc`), which is a no-op when MVCC is disabled.
+///
+/// Syntax:
+/// - VACUUM;                         -- Vacuum the main database
+/// - VACUUM schema_name;             -- Vacuum a specific attached schema
+/// - VACUUM INTO 'file';             -- Parsed, but rejected at runtime
+/// - VACUUM schema_name INTO 'file';
+#[derive(Debug, Clone, PartialEq)]
+pub struct VacuumStmt {
+    /// Optional schema name target (e.g. `main`)
+    pub schema_name: Option<String>,
+    /// Optional output file for VACUUM INTO (not supported at runtime)
+    pub into_file: Option<String>,
+}
+
 /// ANALYZE statement
 ///
 /// Computes table and column statistics to improve query plan optimization.

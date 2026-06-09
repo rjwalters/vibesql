@@ -767,6 +767,42 @@ impl Parser {
         Ok(vibesql_ast::ReindexStmt { target })
     }
 
+    /// Parse VACUUM statement (SQLite compatibility)
+    ///
+    /// Syntax:
+    ///   VACUUM [schema_name] [INTO 'filename']
+    pub(super) fn parse_vacuum_statement(&mut self) -> Result<vibesql_ast::VacuumStmt, ParseError> {
+        // Expect VACUUM keyword
+        self.expect_keyword(Keyword::Vacuum)?;
+
+        // Check for optional schema name (e.g. VACUUM main)
+        let schema_name = match self.peek() {
+            Token::Semicolon | Token::Eof => None,
+            Token::Keyword { keyword: Keyword::Into, .. } => None,
+            _ => Some(self.parse_identifier()?),
+        };
+
+        // Check for optional INTO 'filename'
+        let into_file = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Into, .. }) {
+            self.advance(); // consume INTO
+            match self.peek().clone() {
+                Token::String(s) => {
+                    self.advance();
+                    Some(s)
+                }
+                _ => {
+                    return Err(ParseError {
+                        message: "Expected string literal after VACUUM INTO".to_string(),
+                    })
+                }
+            }
+        } else {
+            None
+        };
+
+        Ok(vibesql_ast::VacuumStmt { schema_name, into_file })
+    }
+
     pub(super) fn parse_analyze_statement(
         &mut self,
     ) -> Result<vibesql_ast::AnalyzeStmt, ParseError> {
