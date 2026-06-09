@@ -413,6 +413,11 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {^Parse error: (too many terms in ORDER BY clause)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
+    # Unsupported use of NULLS FIRST/LAST in index/constraint/upsert positions
+    # (nulls1.test 3.1.*) — SQLite returns this verbatim, not wrapped.
+    if {[regexp -nocase {^Parse error: (unsupported use of NULLS (?:FIRST|LAST))$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
     # Fallback for other parse errors (e.g., descriptive messages like "Expected identifier")
     if {[regexp -nocase {^Parse error: (.+)$} $error_msg -> parse_msg]} {
         return "near \"$parse_msg\": syntax error"

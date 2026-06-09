@@ -400,6 +400,35 @@ impl Parser {
     /// SQLite allows expressions without parentheses, so we must detect when
     /// the token cannot be a column name (e.g., numeric literals) and parse
     /// as an expression instead.
+    /// Reject `NULLS FIRST` / `NULLS LAST` modifiers in positions where SQLite
+    /// accepts them syntactically but rejects them semantically (CREATE INDEX
+    /// column specs, PRIMARY KEY / UNIQUE constraint column specs, ON CONFLICT
+    /// upsert targets).
+    ///
+    /// Emits SQLite's canonical error string `unsupported use of NULLS FIRST`
+    /// or `unsupported use of NULLS LAST` so the TCL test suite's
+    /// error-message assertions match (nulls1.test 3.1.*).
+    pub(in crate::parser) fn reject_nulls_in_index_position(
+        &mut self,
+    ) -> Result<(), ParseError> {
+        if self.peek_keyword(Keyword::Nulls) {
+            self.advance(); // consume NULLS
+            let position = if self.peek_keyword(Keyword::First) {
+                "FIRST"
+            } else if self.peek_keyword(Keyword::Last) {
+                "LAST"
+            } else {
+                return Err(ParseError {
+                    message: "Expected FIRST or LAST after NULLS".to_string(),
+                });
+            };
+            return Err(ParseError {
+                message: format!("unsupported use of NULLS {}", position),
+            });
+        }
+        Ok(())
+    }
+
     fn parse_index_column_list(&mut self) -> Result<Vec<vibesql_ast::IndexColumn>, ParseError> {
         let mut columns = Vec::new();
         loop {
@@ -428,6 +457,8 @@ impl Parser {
                     vibesql_ast::OrderDirection::Asc
                 };
 
+                self.reject_nulls_in_index_position()?;
+
                 columns.push(vibesql_ast::IndexColumn::new_expression(expr, direction));
             } else if matches!(
                 self.peek(),
@@ -448,6 +479,8 @@ impl Parser {
                 } else {
                     vibesql_ast::OrderDirection::Asc
                 };
+
+                self.reject_nulls_in_index_position()?;
 
                 columns.push(vibesql_ast::IndexColumn::new_expression(expr, direction));
             } else {
@@ -496,6 +529,8 @@ impl Parser {
                     } else {
                         vibesql_ast::OrderDirection::Asc
                     };
+
+                    self.reject_nulls_in_index_position()?;
 
                     columns.push(vibesql_ast::IndexColumn::new_expression(expr, direction));
 
@@ -574,6 +609,8 @@ impl Parser {
                             vibesql_ast::OrderDirection::Asc
                         };
 
+                        self.reject_nulls_in_index_position()?;
+
                         columns.push(vibesql_ast::IndexColumn::new_expression(expr, direction));
 
                         if self.peek() == &Token::Comma {
@@ -607,6 +644,12 @@ impl Parser {
                 } else {
                     vibesql_ast::OrderDirection::Asc // Default
                 };
+
+                // SQLite's grammar accepts NULLS FIRST/LAST in index column
+                // specifications syntactically, then rejects them with a
+                // specific error message. Match that behavior so error-message
+                // assertions in the TCL test suite (nulls1.test) pass.
+                self.reject_nulls_in_index_position()?;
 
                 columns.push(vibesql_ast::IndexColumn::Column {
                     column_name,

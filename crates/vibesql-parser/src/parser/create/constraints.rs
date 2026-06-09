@@ -94,6 +94,8 @@ impl Parser {
                 vibesql_ast::OrderDirection::Asc
             };
 
+            self.reject_nulls_in_index_position()?;
+
             return Ok(vibesql_ast::IndexColumn::new_expression(expr, direction));
         }
 
@@ -160,6 +162,8 @@ impl Parser {
                     vibesql_ast::OrderDirection::Asc
                 };
 
+                self.reject_nulls_in_index_position()?;
+
                 return Ok(vibesql_ast::IndexColumn::new_expression(expr, direction));
             }
         } else {
@@ -176,6 +180,10 @@ impl Parser {
         } else {
             vibesql_ast::OrderDirection::Asc // Default for constraints
         };
+
+        // Reject `NULLS FIRST` / `NULLS LAST` here too — same SQLite rule as in
+        // CREATE INDEX column specs (see `parse_index_column_list`).
+        self.reject_nulls_in_index_position()?;
 
         Ok(vibesql_ast::IndexColumn::Column { column_name, direction, prefix_length })
     }
