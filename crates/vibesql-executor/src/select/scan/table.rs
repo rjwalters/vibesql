@@ -573,23 +573,41 @@ pub(crate) fn execute_table_scan(
                     );
                 }
 
-                // Phase 1d of #5136: SIMD/columnar fast paths bypass per-row
-                // visibility checks. When the MVCC feature is OFF this is fine
-                // — visibility is a no-op. When ON, fall through to the
-                // row-based path which honors `visible_to` per row. Tracked
-                // in the follow-up "MVCC + SIMD columnar fast path"
-                // optimization issue.
-                #[cfg(not(feature = "mvcc_enabled"))]
-                let mvcc_on = false;
-                #[cfg(feature = "mvcc_enabled")]
-                let mvcc_on = true;
+                // Phase 1d of #5136: SIMD/columnar fast paths originally
+                // bypassed per-row visibility checks. PR #5209 gated them to
+                // MVCC-OFF only as a conservative first step. Issue #5206
+                // (this code) re-enables them under MVCC-ON by applying a
+                // post-SIMD `is_row_visible` filter — Approach A from the
+                // issue. A follow-up tracks Approach B (pre-computed
+                // visibility bitmap ANDed into the SIMD predicate mask),
+                // which removes the post-filter pass entirely.
+                //
+                // Snapshot is captured here so both fast paths share it; with
+                // the `mvcc_enabled` feature OFF this reduces to the cheap
+                // bitmap-only check inside `Table::is_row_visible` and the
+                // snapshot is unused.
+                let snapshot = crate::mvcc::read_snapshot(database);
 
                 // For native columnar tables, use SIMD filtering on typed columns
-                // This avoids SqlValue overhead by working directly on i64/f64/String arrays
-                if !mvcc_on
-                    && table.is_native_columnar()
-                    && all_rows.len() >= SIMD_COLUMNAR_THRESHOLD
-                {
+                // This avoids SqlValue overhead by working directly on i64/f64/String arrays.
+                //
+                // MVCC safety (Issue #5206): the `native_columnar` mirror
+                // holds exactly the bitmap-live rows — INSERT appends to it,
+                // DELETE/UPDATE bitmap-deletes trigger a rebuild that excludes
+                // tombstoned rows, and ROLLBACK restores the BEGIN-time table
+                // clone (including the mirror). Under the current single-writer
+                // transaction model every bitmap-live row is visible to the
+                // active reader's snapshot: own-txn writes are visible (#5223),
+                // and any other writer must have committed before this
+                // reader's snapshot was captured. So this path needs no
+                // per-row visibility post-filter to match the row-by-row
+                // path's output. NOTE: if concurrent writers are ever
+                // introduced, this argument breaks and the post-filter from
+                // `filter_with_cached_columnar` must be applied here too
+                // (the rows materialized by `ColumnarTable::to_rows` carry
+                // the always-visible pre-MVCC sentinel, so they cannot be
+                // re-checked after materialization).
+                if table.is_native_columnar() && all_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
                     if let Ok(mut filtered_rows) =
                         filter_with_simd_columnar(table, &column_predicates)
                     {
@@ -612,12 +630,20 @@ pub(crate) fn execute_table_scan(
                 // For row-oriented tables, use cached columnar filter with late materialization
                 // Issue #4136: Use database columnar cache for SIMD filtering, clone only passing
                 // rows
-                if !mvcc_on && all_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
+                //
+                // Issue #5206: under MVCC-ON, `filter_with_cached_columnar`
+                // applies `Table::is_row_visible(idx, &snapshot)` as a
+                // post-SIMD filter so that rows tombstoned by concurrent
+                // writers or written by uncommitted/future txns are not
+                // surfaced through the columnar fast path.
+                if all_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
                     if let Ok(mut filtered_rows) = filter_with_cached_columnar(
                         database,
+                        table,
                         table_name,
                         all_rows,
                         &column_predicates,
+                        &snapshot,
                     ) {
                         // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
                         if order_by.is_none() {
@@ -644,7 +670,8 @@ pub(crate) fn execute_table_scan(
                 // Issue #4370: Preserve row_id for ROWID pseudo-column support
                 // Issue #4536: Preserve explicit row_id from INSERT INTO t(rowid, ...) VALUES(...)
                 // Phase 1d of #5136: also apply MVCC visibility when feature is on.
-                let snapshot = crate::mvcc::read_snapshot(database);
+                // Issue #5206: snapshot is already captured above (shared with the
+                // columnar fast paths) so we just reuse it here.
                 let mut filtered_rows: Vec<_> = indices
                     .into_iter()
                     .filter(|&idx| table.is_row_visible(idx, &snapshot))
@@ -800,16 +827,36 @@ fn filter_with_simd_columnar(
 /// - New: Filter on columnar (cached), clone only 150K passing = 150K clones
 /// - Expected: 5x reduction in memory allocation overhead
 ///
+/// # MVCC visibility (Issue #5206)
+///
+/// When the `mvcc_enabled` feature is ON, SIMD/columnar filtering on its
+/// own would surface rows that should be hidden from `snapshot` (rows
+/// created by uncommitted/future txns, or tombstoned by a concurrent
+/// writer). To stay correct, this function applies
+/// [`Table::is_row_visible`](vibesql_storage::Table::is_row_visible) as a
+/// post-SIMD filter on the indices that pass the predicate evaluation.
+/// This is Approach A from issue #5206; a follow-up tracks the more
+/// invasive Approach B (pre-computed visibility bitmap ANDed into the
+/// SIMD predicate mask, removing the post-filter pass entirely).
+///
+/// With the feature OFF, `Table::is_row_visible` collapses to the
+/// existing not-deletion-bitmap-tombstoned check, so behavior is
+/// identical to pre-MVCC.
+///
 /// # Arguments
 /// * `database` - Database containing the columnar cache
+/// * `table` - Table reference for `is_row_visible` lookups
 /// * `table_name` - Name of the table (for cache lookup)
 /// * `live_rows` - Reference to live rows (already collected but not yet cloned into result)
 /// * `predicates` - Column predicates for SIMD filtering
+/// * `snapshot` - MVCC snapshot for visibility filtering (ignored under `mvcc_enabled = OFF`)
 fn filter_with_cached_columnar(
     database: &vibesql_storage::Database,
+    table: &vibesql_storage::Table,
     table_name: &str,
     live_rows: &[vibesql_storage::Row],
     predicates: &[ColumnPredicate],
+    snapshot: &vibesql_storage::TxnSnapshot,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     // Step 1: Get cached columnar data from database
     // This uses the LRU columnar cache - if cached, this is O(1) Arc clone
@@ -862,8 +909,16 @@ fn filter_with_cached_columnar(
     // This is the payoff - we only clone passing_indices.len() rows instead of all rows
     // Issue #4370: Preserve row_id for ROWID pseudo-column support
     // Issue #4536: Preserve explicit row_id from INSERT INTO t(rowid, ...) VALUES(...)
+    // Issue #5206: Apply MVCC visibility as a post-SIMD filter (Approach A).
+    //
+    // The Step-2 invariant (`batch.row_count() == live_rows.len()`) plus the
+    // fact that `live_rows` is `table.scan()` in physical order means that
+    // each index produced by SIMD is also a valid physical row index for
+    // `table.is_row_visible`. With `mvcc_enabled` OFF, `is_row_visible`
+    // reduces to the not-deletion-bitmap-tombstoned check (cheap).
     let filtered_rows: Vec<vibesql_storage::Row> = passing_indices
         .into_iter()
+        .filter(|&idx| table.is_row_visible(idx, snapshot))
         .filter_map(|idx| {
             live_rows.get(idx).map(|row| {
                 let mut cloned = row.clone();
