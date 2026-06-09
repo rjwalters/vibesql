@@ -141,13 +141,14 @@ fn vibesql_value_to_string(value: &SqlValue) -> String {
         SqlValue::Float(f) => format!("{:.6}", f),
         SqlValue::Real(f) => format!("{:.6}", f),
         SqlValue::Double(f) => format!("{:.6}", f),
-        SqlValue::Character(s) | SqlValue::Varchar(s) => s.clone(),
+        SqlValue::Character(s) | SqlValue::Varchar(s) => s.to_string(),
         SqlValue::Boolean(b) => if *b { "1" } else { "0" }.to_string(),
         SqlValue::Date(d) => format!("{}", d),
         SqlValue::Time(t) => format!("{}", t),
         SqlValue::Timestamp(ts) => format!("{}", ts),
         SqlValue::Interval(i) => format!("{}", i),
         SqlValue::Vector(v) => format!("VECTOR({} dims)", v.len()),
+        SqlValue::Blob(b) => format!("BLOB({} bytes)", b.len()),
     }
 }
 

@@ -66,10 +66,10 @@ impl From<&FuzzValue> for SqlValue {
             FuzzValue::Unsigned(v) => SqlValue::Unsigned(*v),
             FuzzValue::Numeric(v) => SqlValue::Numeric(*v),
             FuzzValue::Float(v) => SqlValue::Float(*v),
-            FuzzValue::Real(v) => SqlValue::Real(*v),
+            FuzzValue::Real(v) => SqlValue::Real(f64::from(*v)),
             FuzzValue::Double(v) => SqlValue::Double(*v),
-            FuzzValue::Character(v) => SqlValue::Character(v.clone()),
-            FuzzValue::Varchar(v) => SqlValue::Varchar(v.clone()),
+            FuzzValue::Character(v) => SqlValue::Character(v.as_str().into()),
+            FuzzValue::Varchar(v) => SqlValue::Varchar(v.as_str().into()),
             FuzzValue::Boolean(v) => SqlValue::Boolean(*v),
             FuzzValue::Date { year, month, day } => {
                 // Normalize month and day to valid ranges
