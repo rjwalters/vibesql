@@ -62,11 +62,16 @@ fn execute_statement(stmt: &vibesql_ast::Statement, db: &mut Database) {
 }
 
 fn get_rows(db: &Database, table: &str) -> Vec<Vec<SqlValue>> {
+    db.get_table(table).expect("table not found").scan().iter().map(|r| r.values.to_vec()).collect()
+}
+
+/// Returns only live (non-tombstoned) rows for a table — used by tests that
+/// trigger row deletion (e.g. UPDATE OR REPLACE eviction).
+fn get_live_rows(db: &Database, table: &str) -> Vec<Vec<SqlValue>> {
     db.get_table(table)
         .expect("table not found")
-        .scan()
-        .iter()
-        .map(|r| r.values.to_vec())
+        .scan_live()
+        .map(|(_, r)| r.values.to_vec())
         .collect()
 }
 
@@ -329,14 +334,12 @@ fn update_from_pk_shift_succeeds() {
          INSERT INTO delta VALUES (1, -1);",
     );
 
-    let count = run_update(
-        &mut db,
-        "UPDATE p SET a = a + delta.shift FROM delta WHERE p.a = delta.id",
-    )
-    .expect(
-        "UPDATE FROM with PK shift driven by joined delta should succeed; intermediate \
+    let count =
+        run_update(&mut db, "UPDATE p SET a = a + delta.shift FROM delta WHERE p.a = delta.id")
+            .expect(
+                "UPDATE FROM with PK shift driven by joined delta should succeed; intermediate \
          UNIQUE collisions must be deferred until statement end (issue #5140)",
-    );
+            );
     assert_eq!(count, 2);
 
     let rows = get_rows(&db, "p");
@@ -365,11 +368,8 @@ fn update_from_pk_negation_succeeds() {
          INSERT INTO m VALUES (2, -1);",
     );
 
-    let count = run_update(
-        &mut db,
-        "UPDATE t SET a = t.a * m.mult FROM m WHERE t.a = m.id",
-    )
-    .expect("UPDATE FROM with PK negation should succeed");
+    let count = run_update(&mut db, "UPDATE t SET a = t.a * m.mult FROM m WHERE t.a = m.id")
+        .expect("UPDATE FROM with PK negation should succeed");
     assert_eq!(count, 2);
 
     let pks: Vec<i64> = get_rows(&db, "t")
@@ -398,10 +398,8 @@ fn update_from_genuine_collision_still_fails() {
          INSERT INTO delta VALUES (2, 99);",
     );
 
-    let result = run_update(
-        &mut db,
-        "UPDATE p SET a = delta.target FROM delta WHERE p.a = delta.id",
-    );
+    let result =
+        run_update(&mut db, "UPDATE p SET a = delta.target FROM delta WHERE p.a = delta.id");
     assert!(
         result.is_err(),
         "Genuine UNIQUE final-state collision via UPDATE FROM must still error"
@@ -439,10 +437,8 @@ fn update_from_collision_with_unmoved_row_still_fails() {
          INSERT INTO delta VALUES (20, 10);",
     );
 
-    let result = run_update(
-        &mut db,
-        "UPDATE p SET a = delta.target FROM delta WHERE p.a = delta.id",
-    );
+    let result =
+        run_update(&mut db, "UPDATE p SET a = delta.target FROM delta WHERE p.a = delta.id");
     assert!(
         result.is_err(),
         "UPDATE FROM landing on an unmoved row's PK must still produce a UNIQUE error"
@@ -468,11 +464,11 @@ fn update_from_unique_index_shift_succeeds() {
          INSERT INTO delta VALUES (3, -10);",
     );
 
-    let count = run_update(
-        &mut db,
-        "UPDATE u SET k = u.k + delta.shift FROM delta WHERE u.id = delta.id",
-    )
-    .expect("UPDATE FROM shift on a UNIQUE-indexed column must succeed when final state is unique");
+    let count =
+        run_update(&mut db, "UPDATE u SET k = u.k + delta.shift FROM delta WHERE u.id = delta.id")
+            .expect(
+            "UPDATE FROM shift on a UNIQUE-indexed column must succeed when final state is unique",
+        );
     assert_eq!(count, 3);
 
     let ks: Vec<i64> = get_rows(&db, "u")
@@ -530,11 +526,8 @@ fn update_from_non_pk_change_still_works() {
          INSERT INTO delta VALUES (2, 'dos');",
     );
 
-    let count = run_update(
-        &mut db,
-        "UPDATE p SET b = delta.label FROM delta WHERE p.a = delta.id",
-    )
-    .expect("UPDATE FROM on non-PK column should succeed");
+    let count = run_update(&mut db, "UPDATE p SET b = delta.label FROM delta WHERE p.a = delta.id")
+        .expect("UPDATE FROM on non-PK column should succeed");
     assert_eq!(count, 2);
 
     let labels: Vec<String> = get_rows(&db, "p")
@@ -567,14 +560,12 @@ fn update_from_composite_pk_shift_succeeds() {
          INSERT INTO delta VALUES (2, -1);",
     );
 
-    let count = run_update(
-        &mut db,
-        "UPDATE c SET b = c.b + delta.shift FROM delta WHERE c.b = delta.id",
-    )
-    .expect(
-        "UPDATE FROM composite-PK shift on column b should succeed — final keys \
+    let count =
+        run_update(&mut db, "UPDATE c SET b = c.b + delta.shift FROM delta WHERE c.b = delta.id")
+            .expect(
+                "UPDATE FROM composite-PK shift on column b should succeed — final keys \
          (1,-1)(1,0)(1,1) are unique even though intermediate states duplicate.",
-    );
+            );
     assert_eq!(count, 3);
 
     let rows = get_rows(&db, "c");
@@ -586,4 +577,257 @@ fn update_from_composite_pk_shift_succeeds() {
         })
         .collect();
     assert_eq!(pairs, vec![(1, -1), (1, 0), (1, 1)]);
+}
+
+// ---------------------------------------------------------------------------
+// Issue #5144: UPDATE OR IGNORE/REPLACE ... FROM must honor conflict_clause
+// ---------------------------------------------------------------------------
+
+#[test]
+fn update_from_or_ignore_skips_pk_collision() {
+    // From the issue body: `UPDATE OR IGNORE p SET a = delta.target FROM delta
+    // WHERE p.a = delta.id` should silently skip rows whose computed update
+    // would collide with an existing PK. Before #5144 this errored with
+    // "UNIQUE constraint failed" because the FROM dispatch path dropped the
+    // conflict_clause.
+    let mut db = Database::new();
+    run_sql(
+        &mut db,
+        "CREATE TABLE p(a INTEGER PRIMARY KEY, b TEXT); \
+         CREATE TABLE delta(id INTEGER, target INTEGER); \
+         INSERT INTO p VALUES (1, 'one'); \
+         INSERT INTO p VALUES (2, 'two'); \
+         INSERT INTO delta VALUES (1, 2);",
+    );
+
+    // The single update would shift row (1,'one') to PK=2, colliding with the
+    // existing (2,'two'). With OR IGNORE, the colliding update is silently
+    // dropped — no error and the row stays as (1,'one').
+    let count = run_update(
+        &mut db,
+        "UPDATE OR IGNORE p SET a = delta.target FROM delta WHERE p.a = delta.id",
+    )
+    .expect("UPDATE OR IGNORE ... FROM must skip PK collisions, not error");
+    assert_eq!(count, 0);
+
+    let rows = get_rows(&db, "p");
+    let pks: Vec<i64> = rows
+        .iter()
+        .map(|r| match r[0] {
+            SqlValue::Integer(n) => n,
+            _ => panic!(),
+        })
+        .collect();
+    pks.iter().for_each(|p| assert!(*p == 1 || *p == 2));
+    assert_eq!(pks.len(), 2);
+}
+
+#[test]
+fn update_from_or_ignore_partial_skip() {
+    // Mixed batch: one update collides (should be skipped), one doesn't (should apply).
+    // Verifies IGNORE works per-row across the FROM-driven update set.
+    let mut db = Database::new();
+    run_sql(
+        &mut db,
+        "CREATE TABLE p(a INTEGER PRIMARY KEY, b TEXT); \
+         CREATE TABLE delta(id INTEGER, target INTEGER); \
+         INSERT INTO p VALUES (1, 'one'); \
+         INSERT INTO p VALUES (2, 'two'); \
+         INSERT INTO p VALUES (3, 'three'); \
+         INSERT INTO delta VALUES (1, 2); \
+         INSERT INTO delta VALUES (3, 10);",
+    );
+
+    let count = run_update(
+        &mut db,
+        "UPDATE OR IGNORE p SET a = delta.target FROM delta WHERE p.a = delta.id",
+    )
+    .expect("UPDATE OR IGNORE ... FROM must skip only colliding rows");
+    assert_eq!(count, 1, "exactly one (non-colliding) update should apply");
+
+    let pks: Vec<i64> = get_rows(&db, "p")
+        .iter()
+        .map(|r| match r[0] {
+            SqlValue::Integer(n) => n,
+            _ => panic!(),
+        })
+        .collect();
+    let mut sorted = pks.clone();
+    sorted.sort();
+    assert_eq!(sorted, vec![1, 2, 10]);
+}
+
+#[test]
+fn update_from_or_ignore_skips_unique_index_collision() {
+    // OR IGNORE must also skip rows that would violate a user-defined UNIQUE index
+    // (separate from the PRIMARY KEY constraint).
+    let mut db = Database::new();
+    run_sql(
+        &mut db,
+        "CREATE TABLE p(id INTEGER PRIMARY KEY, code INTEGER); \
+         CREATE UNIQUE INDEX idx_p_code ON p(code); \
+         CREATE TABLE delta(target_id INTEGER, new_code INTEGER); \
+         INSERT INTO p VALUES (1, 100); \
+         INSERT INTO p VALUES (2, 200); \
+         INSERT INTO delta VALUES (1, 200);",
+    );
+
+    let count = run_update(
+        &mut db,
+        "UPDATE OR IGNORE p SET code = delta.new_code FROM delta WHERE p.id = delta.target_id",
+    )
+    .expect("UPDATE OR IGNORE ... FROM must skip UNIQUE index collisions");
+    assert_eq!(count, 0);
+
+    let codes: Vec<i64> = get_rows(&db, "p")
+        .iter()
+        .map(|r| match r[1] {
+            SqlValue::Integer(n) => n,
+            _ => panic!(),
+        })
+        .collect();
+    let mut sorted = codes.clone();
+    sorted.sort();
+    assert_eq!(sorted, vec![100, 200]);
+}
+
+#[test]
+fn update_from_or_ignore_skips_not_null_violation() {
+    // OR IGNORE must skip rows whose computed assignment would violate NOT NULL.
+    // From the acceptance criteria: "UPDATE OR IGNORE ... FROM skips a NOT NULL
+    // violation row but applies the rest."
+    let mut db = Database::new();
+    run_sql(
+        &mut db,
+        "CREATE TABLE p(id INTEGER PRIMARY KEY, b TEXT NOT NULL); \
+         CREATE TABLE delta(target_id INTEGER, new_b TEXT); \
+         INSERT INTO p VALUES (1, 'one'); \
+         INSERT INTO p VALUES (2, 'two'); \
+         INSERT INTO delta VALUES (1, NULL); \
+         INSERT INTO delta VALUES (2, 'TWO');",
+    );
+
+    let count = run_update(
+        &mut db,
+        "UPDATE OR IGNORE p SET b = delta.new_b FROM delta WHERE p.id = delta.target_id",
+    )
+    .expect("UPDATE OR IGNORE ... FROM must skip NOT NULL violations");
+    assert_eq!(count, 1, "only the non-NULL update applies");
+
+    let rows = get_rows(&db, "p");
+    let mut pairs: Vec<(i64, String)> = rows
+        .iter()
+        .map(|r| match (&r[0], &r[1]) {
+            (SqlValue::Integer(i), SqlValue::Varchar(s)) => (*i, s.to_string()),
+            _ => panic!("unexpected row shape: {:?}", r),
+        })
+        .collect();
+    pairs.sort();
+    assert_eq!(pairs, vec![(1, "one".to_string()), (2, "TWO".to_string())]);
+}
+
+#[test]
+fn update_from_or_replace_evicts_colliding_row() {
+    // OR REPLACE must delete the pre-existing row whose PK collides with the
+    // updated row, then apply the update. From acceptance criteria:
+    // "UPDATE OR REPLACE ... FROM evicts a colliding pre-existing row and then
+    // applies the update; row count reflects the eviction."
+    let mut db = Database::new();
+    run_sql(
+        &mut db,
+        "CREATE TABLE p(a INTEGER PRIMARY KEY, b TEXT); \
+         CREATE TABLE delta(id INTEGER, target INTEGER); \
+         INSERT INTO p VALUES (1, 'one'); \
+         INSERT INTO p VALUES (2, 'two'); \
+         INSERT INTO delta VALUES (1, 2);",
+    );
+
+    let count = run_update(
+        &mut db,
+        "UPDATE OR REPLACE p SET a = delta.target FROM delta WHERE p.a = delta.id",
+    )
+    .expect("UPDATE OR REPLACE ... FROM must evict colliding rows and apply update");
+    assert_eq!(count, 1, "one update applied");
+
+    // Use live-row scan to exclude tombstoned (evicted) rows.
+    let rows = get_live_rows(&db, "p");
+    let live: Vec<(i64, String)> = rows
+        .iter()
+        .map(|r| match (&r[0], &r[1]) {
+            (SqlValue::Integer(i), SqlValue::Varchar(s)) => (*i, s.to_string()),
+            _ => panic!("unexpected row shape: {:?}", r),
+        })
+        .collect();
+    assert_eq!(live, vec![(2, "one".to_string())]);
+}
+
+#[test]
+fn update_from_or_replace_cross_update_collision() {
+    // Cross-update REPLACE collision: two updates target the same final PK.
+    // The earlier loser must be deleted, the later winner survives. Mirrors
+    // `resolve_cross_update_conflicts_for_replace` semantics on the default path.
+    let mut db = Database::new();
+    run_sql(
+        &mut db,
+        "CREATE TABLE p(a INTEGER PRIMARY KEY, b TEXT); \
+         CREATE TABLE delta(id INTEGER, target INTEGER); \
+         INSERT INTO p VALUES (1, 'one'); \
+         INSERT INTO p VALUES (2, 'two'); \
+         INSERT INTO delta VALUES (1, 99); \
+         INSERT INTO delta VALUES (2, 99);",
+    );
+
+    let count = run_update(
+        &mut db,
+        "UPDATE OR REPLACE p SET a = delta.target FROM delta WHERE p.a = delta.id",
+    )
+    .expect("UPDATE OR REPLACE ... FROM must resolve cross-update collisions");
+    assert_eq!(count, 1, "only the surviving update is counted");
+
+    // Use live-row scan to exclude tombstoned (evicted) rows.
+    let live: Vec<(i64, String)> = get_live_rows(&db, "p")
+        .iter()
+        .map(|r| match (&r[0], &r[1]) {
+            (SqlValue::Integer(i), SqlValue::Varchar(s)) => (*i, s.to_string()),
+            _ => panic!("unexpected row shape: {:?}", r),
+        })
+        .collect();
+    assert_eq!(live.len(), 1, "exactly one row survives the cross-update collision");
+    assert_eq!(live[0].0, 99);
+}
+
+#[test]
+fn update_from_or_ignore_all_skipped_returns_zero() {
+    // Edge case: when ALL candidate rows violate constraints under OR IGNORE,
+    // the statement returns 0 rows updated without error.
+    let mut db = Database::new();
+    run_sql(
+        &mut db,
+        "CREATE TABLE p(a INTEGER PRIMARY KEY); \
+         CREATE TABLE delta(id INTEGER, target INTEGER); \
+         INSERT INTO p VALUES (1); \
+         INSERT INTO p VALUES (2); \
+         INSERT INTO delta VALUES (1, 2); \
+         INSERT INTO delta VALUES (2, 1);",
+    );
+
+    // With OR IGNORE per-row validation against original table state, both
+    // updates collide and are skipped — no error.
+    let count = run_update(
+        &mut db,
+        "UPDATE OR IGNORE p SET a = delta.target FROM delta WHERE p.a = delta.id",
+    )
+    .expect("UPDATE OR IGNORE ... FROM with all-skip must return 0, not error");
+    assert_eq!(count, 0);
+
+    let pks: Vec<i64> = get_rows(&db, "p")
+        .iter()
+        .map(|r| match r[0] {
+            SqlValue::Integer(n) => n,
+            _ => panic!(),
+        })
+        .collect();
+    let mut sorted = pks.clone();
+    sorted.sort();
+    assert_eq!(sorted, vec![1, 2]);
 }
