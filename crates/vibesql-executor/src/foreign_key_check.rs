@@ -16,7 +16,7 @@
 //! See issue #5084 for context.
 
 use vibesql_catalog::{ForeignKeyConstraint, TableSchema};
-use vibesql_storage::Database;
+use vibesql_storage::{Database, DeferredFkViolation, DeferredFkViolationKind};
 
 /// Returns `Some` (the child / parent table names to embed in the error) when
 /// the parent table does **not** have a key that exactly covers the FK's
@@ -244,6 +244,141 @@ pub fn resolved_parent_indices_for_fk(
     }
 }
 
+/// Outcome of a single-FK row-existence check on the INSERT path.
+///
+/// Encapsulates the bit-for-bit-identical steps 4-6 that
+/// [`crate::insert::foreign_keys::validate_foreign_key_constraints`] and
+/// [`crate::insert::row_validator::RowValidator::validate_foreign_keys`]
+/// previously performed inline:
+///
+/// 4. Parent-table existence check (collation-aware, via [`fk_values_equal`]).
+/// 5. Self-FK row-self check (Phase C3 of #5085 / fkey8-3.0).
+/// 6. Defer-or-error decision (`in_txn && (initially_deferred || session_defer)`).
+///
+/// The caller is responsible for either pushing the deferred violation onto
+/// the active transaction's queue (after the immutable `&Database` borrow
+/// drops — see #5125 / PR #5141) or returning the immediate error.
+#[derive(Debug)]
+pub(crate) enum FkRowCheck {
+    /// Parent key exists in the parent table, *or* the FK is self-referential
+    /// and the inserted row itself satisfies its own FK (fkey8-3.0). The
+    /// caller should proceed without queueing or erroring.
+    Ok,
+    /// Missing parent row, but the constraint is `INITIALLY DEFERRED` *or*
+    /// the session has `PRAGMA defer_foreign_keys=ON`, *and* a transaction
+    /// is active. The caller must queue this violation onto the
+    /// transaction's deferred-FK queue (after the immutable borrow drops).
+    Deferred(DeferredFkViolation),
+    /// Missing parent row and not deferrable in the current context. The
+    /// caller must return [`ExecutorError::ConstraintViolation`] with the
+    /// FK name (empty string when unnamed), child column list, and parent
+    /// table name. The helper does not construct the error itself so the
+    /// caller-side formatting stays in one place.
+    Violation,
+}
+
+/// Per-FK row-existence check that encapsulates steps 4-6 of the INSERT
+/// FK validation pipeline. Both
+/// [`crate::insert::foreign_keys::validate_foreign_key_constraints`] and
+/// [`crate::insert::row_validator::RowValidator::validate_foreign_keys`]
+/// call this; the caller-side wrapper handles the PRAGMA gate (step 1),
+/// mismatch check (step 2), NULL-skip (step 3), and the post-loop queue
+/// push (step 7).
+///
+/// # Preconditions
+///
+/// * `fk_values` must be non-empty and contain no NULLs — the caller is
+///   responsible for the NULL-skip. (NULL FK values pass FK enforcement
+///   per SQL / SQLite.)
+/// * The PRAGMA `foreign_keys` gate, schema-mismatch check, and parent-table
+///   existence must already be verified by the caller. This helper does
+///   **not** call [`detect_fk_mismatch`] and does **not** look up the
+///   parent table — the caller passes those results in.
+///
+/// # Borrow-checker pattern
+///
+/// Takes `&Database` (not `&mut`), so `RowValidator` (immutable borrow)
+/// keeps working unchanged. When the outcome is [`FkRowCheck::Deferred`],
+/// the caller appends the violation to a local `Vec<DeferredFkViolation>`
+/// accumulator and pushes onto the database's queue *after* the immutable
+/// borrow drops. This preserves the pattern introduced in #5125 / PR #5141.
+pub(crate) fn check_fk_row_existence(
+    db: &Database,
+    table_name: &str,
+    fk: &ForeignKeyConstraint,
+    fk_idx: usize,
+    fk_values: &[vibesql_types::SqlValue],
+    full_row_values: &[vibesql_types::SqlValue],
+) -> Result<FkRowCheck, crate::errors::ExecutorError> {
+    // Parent table is required for the existence scan. Caller has already
+    // confirmed schema mismatch is OK (and a mismatch error path would
+    // have returned before reaching this helper).
+    let parent_table = db.get_table(&fk.parent_table).ok_or_else(|| {
+        crate::errors::ExecutorError::TableNotFound(fk.parent_table.clone())
+    })?;
+
+    let parent_collations = parent_collations_for_fk(db, fk);
+    let parent_indices = resolved_parent_indices_for_fk(db, fk);
+
+    // Step 4: parent-table existence scan.
+    let key_exists = parent_table.scan().iter().any(|parent_row| {
+        parent_indices.iter().zip(fk_values).enumerate().all(
+            |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
+                Some(parent_val) => fk_values_equal(
+                    fk_val,
+                    parent_val,
+                    parent_collations.get(i).and_then(|c| c.as_deref()),
+                ),
+                None => false,
+            },
+        )
+    });
+    if key_exists {
+        return Ok(FkRowCheck::Ok);
+    }
+
+    // Step 5: self-FK row-self check (Phase C3 of #5085 / fkey8-3.0).
+    // When the FK points back at the table being inserted into, the row
+    // itself can satisfy the constraint (SQLite checks the parent index
+    // *after* the row is inserted). Mirror that here. Uses
+    // `full_row_values` (not the partial FK extract) so the row
+    // participates in its own FK check.
+    if fk.parent_table.eq_ignore_ascii_case(table_name) {
+        let row_satisfies_fk = parent_indices.iter().zip(fk_values).enumerate().all(
+            |(i, (&parent_idx, fk_val))| match full_row_values.get(parent_idx) {
+                Some(parent_val) => fk_values_equal(
+                    fk_val,
+                    parent_val,
+                    parent_collations.get(i).and_then(|c| c.as_deref()),
+                ),
+                None => false,
+            },
+        );
+        if row_satisfies_fk {
+            return Ok(FkRowCheck::Ok);
+        }
+    }
+
+    // Step 6: defer-or-error decision. Outside a transaction, deferred
+    // constraints still error immediately (matches SQLite — deferred
+    // enforcement requires a transaction context). Mismatch errors are
+    // never deferred, but the caller already filtered those out before
+    // reaching this helper.
+    let session_defer = db.defer_foreign_keys();
+    let in_txn = db.in_transaction();
+    let should_defer = in_txn && (fk.initially_deferred || session_defer);
+    if should_defer {
+        return Ok(FkRowCheck::Deferred(DeferredFkViolation {
+            child_table: table_name.to_string(),
+            fk_index: fk_idx,
+            child_row: full_row_values.to_vec(),
+            kind: DeferredFkViolationKind::ChildInsertOrUpdate,
+        }));
+    }
+
+    Ok(FkRowCheck::Violation)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,5 +438,192 @@ mod tests {
         let parent = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("bar"));
         assert!(!fk_values_equal(&child, &parent, None));
         assert!(!fk_values_equal(&child, &parent, Some("nocase")));
+    }
+
+    // -----------------------------------------------------------------
+    // check_fk_row_existence tests — one per FkRowCheck variant.
+    // -----------------------------------------------------------------
+
+    use vibesql_catalog::{ColumnSchema, ReferentialAction};
+    use vibesql_storage::Row;
+    use vibesql_types::{DataType, SqlValue};
+
+    fn child_fk() -> ForeignKeyConstraint {
+        ForeignKeyConstraint {
+            name: Some("fk_c_pid".to_string()),
+            column_names: vec!["pid".to_string()],
+            column_indices: vec![1],
+            parent_table: "p".to_string(),
+            parent_column_names: vec!["id".to_string()],
+            parent_column_indices: vec![0],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        }
+    }
+
+    fn setup_parent_child(parent_rows: &[i64]) -> (Database, ForeignKeyConstraint) {
+        let mut db = Database::new();
+        db.set_foreign_keys_enabled(true);
+
+        // Parent: p(id INTEGER PRIMARY KEY)
+        let p = TableSchema::with_primary_key(
+            "p".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+            vec!["id".to_string()],
+        );
+        db.create_table(p).unwrap();
+
+        // Child: c(id INTEGER PRIMARY KEY, pid INTEGER REFERENCES p(id))
+        let child_fk = child_fk();
+        let child_columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("pid".to_string(), DataType::Integer, true),
+        ];
+        let mut c = TableSchema::with_primary_key(
+            "c".to_string(),
+            child_columns,
+            vec!["id".to_string()],
+        );
+        c.foreign_keys.push(child_fk.clone());
+        db.create_table(c).unwrap();
+
+        for id in parent_rows {
+            db.insert_row("p", Row::new(vec![SqlValue::Integer(*id)])).unwrap();
+        }
+
+        (db, child_fk)
+    }
+
+    #[test]
+    fn check_fk_row_existence_ok_parent_exists() {
+        let (db, fk) = setup_parent_child(&[1, 2, 3]);
+        let full_row = vec![SqlValue::Integer(10), SqlValue::Integer(2)];
+        let fk_values = vec![SqlValue::Integer(2)];
+
+        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row).unwrap();
+        assert!(matches!(outcome, FkRowCheck::Ok), "expected Ok, got {:?}", outcome);
+    }
+
+    #[test]
+    fn check_fk_row_existence_ok_self_row_self_check() {
+        // Self-referential FK: t(id INTEGER PRIMARY KEY, parent INTEGER REFERENCES t(id)).
+        // INSERT (5, 5) — the row satisfies its own FK (fkey8-3.0 pattern).
+        let mut db = Database::new();
+        db.set_foreign_keys_enabled(true);
+
+        let fk = ForeignKeyConstraint {
+            name: Some("fk_t_self".to_string()),
+            column_names: vec!["parent".to_string()],
+            column_indices: vec![1],
+            parent_table: "t".to_string(),
+            parent_column_names: vec!["id".to_string()],
+            parent_column_indices: vec![0],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+        let cols = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("parent".to_string(), DataType::Integer, true),
+        ];
+        let mut t = TableSchema::with_primary_key("t".to_string(), cols, vec!["id".to_string()]);
+        t.foreign_keys.push(fk.clone());
+        db.create_table(t).unwrap();
+        // Parent table is empty — only the row-self check should rescue us.
+
+        let full_row = vec![SqlValue::Integer(5), SqlValue::Integer(5)];
+        let fk_values = vec![SqlValue::Integer(5)];
+
+        let outcome = check_fk_row_existence(&db, "t", &fk, 0, &fk_values, &full_row).unwrap();
+        assert!(
+            matches!(outcome, FkRowCheck::Ok),
+            "self-FK row-self check must accept, got {:?}",
+            outcome
+        );
+    }
+
+    #[test]
+    fn check_fk_row_existence_violation_immediate() {
+        // Missing parent row, no transaction, no deferral — immediate violation.
+        let (db, fk) = setup_parent_child(&[1, 2, 3]);
+        let full_row = vec![SqlValue::Integer(10), SqlValue::Integer(999)];
+        let fk_values = vec![SqlValue::Integer(999)];
+
+        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row).unwrap();
+        assert!(matches!(outcome, FkRowCheck::Violation), "expected Violation, got {:?}", outcome);
+    }
+
+    #[test]
+    fn check_fk_row_existence_violation_when_deferred_outside_transaction() {
+        // INITIALLY DEFERRED but no transaction — should still error immediately
+        // (matches SQLite: deferred enforcement requires a transaction context).
+        // `check_fk_row_existence` reads the `fk` parameter directly (it does
+        // not re-fetch from the catalog), so we only need to flip the local
+        // copy of the constraint here.
+        let (db, mut fk) = setup_parent_child(&[1]);
+        fk.is_deferrable = true;
+        fk.initially_deferred = true;
+
+        let full_row = vec![SqlValue::Integer(10), SqlValue::Integer(999)];
+        let fk_values = vec![SqlValue::Integer(999)];
+
+        assert!(!db.in_transaction(), "test precondition: no transaction");
+        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row).unwrap();
+        assert!(
+            matches!(outcome, FkRowCheck::Violation),
+            "deferred-but-outside-txn must error immediately, got {:?}",
+            outcome
+        );
+    }
+
+    #[test]
+    fn check_fk_row_existence_deferred_initially_deferred_in_txn() {
+        // INITIALLY DEFERRED + transaction active — caller should queue.
+        let (mut db, mut fk) = setup_parent_child(&[1]);
+        fk.is_deferrable = true;
+        fk.initially_deferred = true;
+
+        // Open a transaction so in_transaction() == true.
+        db.begin_transaction().unwrap();
+        assert!(db.in_transaction());
+
+        let full_row = vec![SqlValue::Integer(10), SqlValue::Integer(999)];
+        let fk_values = vec![SqlValue::Integer(999)];
+
+        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row).unwrap();
+        match outcome {
+            FkRowCheck::Deferred(v) => {
+                assert_eq!(v.child_table, "c");
+                assert_eq!(v.fk_index, 0);
+                assert_eq!(v.child_row, full_row);
+                assert_eq!(v.kind, DeferredFkViolationKind::ChildInsertOrUpdate);
+            }
+            other => panic!("expected Deferred, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn check_fk_row_existence_deferred_via_session_pragma() {
+        // Constraint is NOT deferrable, but the session pragma
+        // defer_foreign_keys=ON overrides per-constraint defaults
+        // (and we're inside a transaction).
+        let (mut db, fk) = setup_parent_child(&[1]);
+        db.set_defer_foreign_keys(true);
+
+        db.begin_transaction().unwrap();
+        assert!(db.in_transaction());
+
+        let full_row = vec![SqlValue::Integer(10), SqlValue::Integer(999)];
+        let fk_values = vec![SqlValue::Integer(999)];
+
+        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row).unwrap();
+        assert!(
+            matches!(outcome, FkRowCheck::Deferred(_)),
+            "session pragma must defer, got {:?}",
+            outcome
+        );
     }
 }
