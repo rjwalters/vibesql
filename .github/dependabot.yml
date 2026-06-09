@@ -19,6 +19,26 @@ updates:
       prefix: "chore(deps)"
       include: "scope"
 
+  # Cargo dependency updates for the fuzz workspace (separate cargo workspace,
+  # cannot inherit [workspace.dependencies] from the root)
+  - package-ecosystem: "cargo"
+    directory: "/fuzz"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      dependencies:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "loom:review-requested"
+    reviewers:
+      - "rwalters"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
   # npm/pnpm dependency updates for web-demo
   - package-ecosystem: "npm"
     directory: "/web-demo"

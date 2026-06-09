@@ -29,7 +29,7 @@ path = "../crates/vibesql-types"
 
 # SQLite for differential testing
 [dependencies.rusqlite]
-version = "0.31"
+version = "0.40"
 features = ["bundled"]
 
 # Prevent this from interfering with workspaces

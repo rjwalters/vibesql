@@ -26,6 +26,7 @@ jobs:
           - sql_parser
           - expr_eval
           - type_convert
+          - differential_sqlite
     steps:
       - name: Free disk space
         run: |
@@ -66,6 +67,11 @@ jobs:
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: |
             fuzz-corpus-${{ matrix.target }}-
+
+      - name: Check all fuzz targets compile
+        run: |
+          cd fuzz
+          cargo +nightly check --bins
 
       - name: Run fuzzer - ${{ matrix.target }}
         id: fuzz
