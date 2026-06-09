@@ -1015,6 +1015,28 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "DEFERRED_FK_COUNT" => {
+                    // VibeSQL-specific PRAGMA used as a bridge for the TCL
+                    // shim's `sqlite3_db_status db DBSTATUS_DEFERRED_FKS`
+                    // helper (issue #5187). Returns the number of deferred
+                    // FK violations that would still fail if the current
+                    // transaction were to COMMIT right now — i.e., entries
+                    // whose child row still exists and whose missing parent
+                    // row has not been (re)inserted. Returns 0 outside an
+                    // active transaction.
+                    //
+                    // See SQLite's DBSTATUS_DEFERRED_FKS:
+                    //   https://www.sqlite.org/c3ref/c_dbstatus_options.html
+                    let count =
+                        vibesql_executor::live_deferred_fk_violation_count(&self.db) as i64;
+                    Ok(QueryResult {
+                        columns: vec!["deferred_fk_count".to_string()],
+                        rows: vec![vec![Some(count.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 _ => {
                     // Unknown pragma - return empty result for compatibility
                     Ok(QueryResult {

@@ -239,6 +239,129 @@ fn check_deferred_fk_violations(
     None
 }
 
+/// Count deferred FK violations whose constraints would still fail
+/// against the current visible state of the database.
+///
+/// This mirrors SQLite's `DBSTATUS_DEFERRED_FKS` semantics: entries
+/// whose child row has since been deleted/updated, or whose missing
+/// parent row has since been (re)inserted, are *not* counted because
+/// they would no longer fail a COMMIT-time replay. Entries with NULL
+/// FK columns are also skipped because the FK never applied to them.
+///
+/// Returns 0 when no transaction is active.
+///
+/// # Relationship to [`check_deferred_fk_violations`]
+///
+/// Both walk the same `deferred_fk_violations` queue and apply the
+/// child-side / parent-side checks. The differences are:
+///
+/// 1. This function is purely read-only and never drains the queue.
+/// 2. Both child- and parent-side scans use `scan_live()` (bitmap-
+///    filtered) so that DELETEs performed earlier in the current
+///    transaction are honored. The COMMIT path's parent scan
+///    intentionally includes soft-deleted rows under the MVCC-OFF
+///    feature flag for backward-compatibility — for status reporting
+///    we want the SQLite-compatible "is there a live parent right
+///    now?" answer instead.
+///
+/// Backs the `PRAGMA deferred_fk_count` bridge that the TCL shim
+/// translates `sqlite3_db_status db DBSTATUS_DEFERRED_FKS` into
+/// (issue #5187).
+pub fn live_deferred_fk_violation_count(db: &Database) -> usize {
+    use crate::foreign_key_check::{
+        fk_values_equal, parent_collations_for_fk, resolved_parent_indices_for_fk,
+    };
+
+    let pending = db.deferred_fk_violations();
+    if pending.is_empty() {
+        return 0;
+    }
+
+    let mut live = 0usize;
+    for violation in pending {
+        let child_schema = match db.catalog.get_table(&violation.child_table) {
+            Some(s) => s,
+            None => continue, // child table dropped — violation no longer applies
+        };
+        let fk = match child_schema.foreign_keys.get(violation.fk_index) {
+            Some(fk) => fk,
+            None => continue, // schema changed — violation gone
+        };
+
+        let child_table = match db.get_table(&violation.child_table) {
+            Some(t) => t,
+            None => continue,
+        };
+
+        let snapshot_fk_values: Vec<vibesql_types::SqlValue> = fk
+            .column_indices
+            .iter()
+            .map(|&idx| {
+                violation.child_row.get(idx).cloned().unwrap_or(vibesql_types::SqlValue::Null)
+            })
+            .collect();
+
+        // NULLs in FK columns mean the constraint never applied.
+        if snapshot_fk_values.iter().any(|v| v.is_null()) {
+            continue;
+        }
+
+        // Child still present? Use `scan_live` (bitmap-filtered) so that a
+        // sibling DELETE in the same transaction is honored — that is the
+        // resolution path exercised by fkey6-1.21.
+        let child_still_present = child_table.scan_live().any(|(_, child_row)| {
+            fk.column_indices.iter().enumerate().all(
+                |(i, &col_idx)| match child_row.values.get(col_idx) {
+                    Some(v) => v == &snapshot_fk_values[i],
+                    None => false,
+                },
+            )
+        });
+        if !child_still_present {
+            continue;
+        }
+
+        // Parent now exists?
+        let parent_table = match db.get_table(&fk.parent_table) {
+            Some(t) => t,
+            None => {
+                // Parent table missing — definite violation.
+                live += 1;
+                continue;
+            }
+        };
+
+        let parent_collations = parent_collations_for_fk(db, fk);
+        let parent_indices = resolved_parent_indices_for_fk(db, fk);
+
+        // Parent-side check uses `scan_live` (bitmap-filtered) so that the
+        // parent DELETE that originally triggered the deferred violation
+        // is honored. Note this differs from the COMMIT-time replay path
+        // (`check_deferred_fk_violations`), which deliberately includes
+        // soft-deleted parent rows under the MVCC-OFF feature for
+        // backward-compatibility reasons; for status reporting we want
+        // SQLite-compatible "is there a live parent right now" semantics.
+        let key_exists = parent_table.scan_live().any(|(_, parent_row)| {
+            parent_indices.iter().zip(&snapshot_fk_values).enumerate().all(
+                |(i, (&parent_idx, fk_val))| match parent_row.values.get(parent_idx) {
+                    Some(parent_val) => fk_values_equal(
+                        fk_val,
+                        parent_val,
+                        parent_collations.get(i).and_then(|c| c.as_deref()),
+                    ),
+                    None => false,
+                },
+            )
+        });
+
+        if !key_exists {
+            live += 1;
+        }
+    }
+
+    live
+}
+
 /// Executor for ROLLBACK statements
 pub struct RollbackExecutor;
 

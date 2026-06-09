@@ -22,9 +22,10 @@
 
 use vibesql_ast::Statement;
 use vibesql_executor::{
-    BeginTransactionExecutor, CommitExecutor, CreateIndexExecutor, CreateTableExecutor,
-    DeleteExecutor, InsertExecutor, IntrospectionExecutor, ReleaseSavepointExecutor,
-    RollbackExecutor, RollbackToSavepointExecutor, SavepointExecutor, UpdateExecutor,
+    live_deferred_fk_violation_count, BeginTransactionExecutor, CommitExecutor,
+    CreateIndexExecutor, CreateTableExecutor, DeleteExecutor, InsertExecutor,
+    IntrospectionExecutor, ReleaseSavepointExecutor, RollbackExecutor, RollbackToSavepointExecutor,
+    SavepointExecutor, UpdateExecutor,
 };
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
@@ -384,4 +385,95 @@ fn deferred_fk_violation_resolved_by_later_parent_insert_commits() {
     let p = db.get_table("p").unwrap();
     assert_eq!(c.scan().len(), 1);
     assert_eq!(p.scan().len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// 7. live_deferred_fk_violation_count semantics — backs the
+//    `PRAGMA deferred_fk_count` bridge for `sqlite3_db_status
+//    DBSTATUS_DEFERRED_FKS` (issue #5187 / fkey6-1.20 + fkey6-1.21).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn live_deferred_fk_count_zero_outside_transaction() {
+    let db = fresh_db();
+    assert_eq!(live_deferred_fk_violation_count(&db), 0);
+}
+
+#[test]
+fn live_deferred_fk_count_zero_with_empty_queue() {
+    let mut db = fresh_db();
+    run(&mut db, "CREATE TABLE p (id INTEGER PRIMARY KEY)").unwrap();
+    run(&mut db, "BEGIN").unwrap();
+    assert_eq!(live_deferred_fk_violation_count(&db), 0);
+}
+
+#[test]
+fn live_deferred_fk_count_reports_parent_delete_violation() {
+    // Mirrors fkey6-1.20: parent DELETE leaves an orphan child; the live
+    // count must be 1 while the txn is open.
+    let mut db = fresh_db();
+    run(&mut db, "CREATE TABLE t1 (x INTEGER PRIMARY KEY)").unwrap();
+    run(
+        &mut db,
+        "CREATE TABLE t2 (y INTEGER PRIMARY KEY, z INTEGER REFERENCES t1(x) DEFERRABLE INITIALLY DEFERRED)",
+    )
+    .unwrap();
+    run(&mut db, "CREATE INDEX t2z ON t2(z)").unwrap();
+    run(&mut db, "INSERT INTO t1 VALUES (1), (2)").unwrap();
+    run(&mut db, "INSERT INTO t2 VALUES (1, 1)").unwrap();
+
+    run(&mut db, "BEGIN").unwrap();
+    run(&mut db, "DELETE FROM t1 WHERE x = 1").unwrap();
+
+    // Raw queue contains 1 entry; the live count agrees because the
+    // child (1,1) still references the (now-deleted) parent x=1.
+    assert_eq!(db.deferred_fk_violations().len(), 1);
+    assert_eq!(live_deferred_fk_violation_count(&db), 1);
+}
+
+#[test]
+fn live_deferred_fk_count_drops_when_child_deleted() {
+    // Mirrors fkey6-1.21: after the orphan child is also deleted, the
+    // queue still carries the original entry, but the live count must be
+    // 0 because that entry no longer matches any live child row.
+    let mut db = fresh_db();
+    run(&mut db, "CREATE TABLE t1 (x INTEGER PRIMARY KEY)").unwrap();
+    run(
+        &mut db,
+        "CREATE TABLE t2 (y INTEGER PRIMARY KEY, z INTEGER REFERENCES t1(x) DEFERRABLE INITIALLY DEFERRED)",
+    )
+    .unwrap();
+    run(&mut db, "CREATE INDEX t2z ON t2(z)").unwrap();
+    run(&mut db, "INSERT INTO t1 VALUES (1), (2)").unwrap();
+    run(&mut db, "INSERT INTO t2 VALUES (1, 1)").unwrap();
+
+    run(&mut db, "BEGIN").unwrap();
+    run(&mut db, "DELETE FROM t1 WHERE x = 1").unwrap();
+    assert_eq!(live_deferred_fk_violation_count(&db), 1);
+
+    run(&mut db, "DELETE FROM t2 WHERE y = 1").unwrap();
+    // Raw queue may still contain the entry, but the live check must
+    // drop it because the child row is gone.
+    assert_eq!(live_deferred_fk_violation_count(&db), 0);
+}
+
+#[test]
+fn live_deferred_fk_count_drops_when_parent_reinserted() {
+    // The other "resolution" path: a deferred child INSERT whose parent
+    // is then inserted before COMMIT. The live count must drop to 0
+    // because the FK now resolves.
+    let mut db = fresh_db();
+    run(&mut db, "CREATE TABLE p (id INTEGER PRIMARY KEY)").unwrap();
+    run(
+        &mut db,
+        "CREATE TABLE c (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES p(id) DEFERRABLE INITIALLY DEFERRED)",
+    )
+    .unwrap();
+
+    run(&mut db, "BEGIN").unwrap();
+    run(&mut db, "INSERT INTO c VALUES (1, 42)").unwrap();
+    assert_eq!(live_deferred_fk_violation_count(&db), 1);
+
+    run(&mut db, "INSERT INTO p VALUES (42)").unwrap();
+    assert_eq!(live_deferred_fk_violation_count(&db), 0);
 }
