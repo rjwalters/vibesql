@@ -227,7 +227,7 @@ pub(crate) fn gather_column_with_nulls(
     indices: &[u32],
 ) -> Result<ColumnArray, ExecutorError> {
     match column {
-        ColumnArray::Int64(values, _existing_nulls) => {
+        ColumnArray::Int64(values, existing_nulls) => {
             let mut gathered = Vec::with_capacity(indices.len());
             let mut nulls = Vec::with_capacity(indices.len());
 
@@ -236,14 +236,18 @@ pub(crate) fn gather_column_with_nulls(
                     gathered.push(0); // placeholder
                     nulls.push(true);
                 } else {
-                    gathered.push(values[idx as usize]);
-                    nulls.push(false);
+                    let i = idx as usize;
+                    gathered.push(values[i]);
+                    // Preserve source NULL bits (issue #5189) — without this,
+                    // pre-existing NULLs in matched rows of an outer join were
+                    // dropped and rendered as the default placeholder value (0).
+                    nulls.push(existing_nulls.as_ref().is_some_and(|n| n[i]));
                 }
             }
 
             Ok(ColumnArray::Int64(Arc::new(gathered), Some(Arc::new(nulls))))
         }
-        ColumnArray::Int32(values, _existing_nulls) => {
+        ColumnArray::Int32(values, existing_nulls) => {
             let mut gathered = Vec::with_capacity(indices.len());
             let mut nulls = Vec::with_capacity(indices.len());
 
@@ -252,14 +256,15 @@ pub(crate) fn gather_column_with_nulls(
                     gathered.push(0);
                     nulls.push(true);
                 } else {
-                    gathered.push(values[idx as usize]);
-                    nulls.push(false);
+                    let i = idx as usize;
+                    gathered.push(values[i]);
+                    nulls.push(existing_nulls.as_ref().is_some_and(|n| n[i]));
                 }
             }
 
             Ok(ColumnArray::Int32(Arc::new(gathered), Some(Arc::new(nulls))))
         }
-        ColumnArray::Float64(values, _existing_nulls) => {
+        ColumnArray::Float64(values, existing_nulls) => {
             let mut gathered = Vec::with_capacity(indices.len());
             let mut nulls = Vec::with_capacity(indices.len());
 
@@ -268,14 +273,15 @@ pub(crate) fn gather_column_with_nulls(
                     gathered.push(0.0);
                     nulls.push(true);
                 } else {
-                    gathered.push(values[idx as usize]);
-                    nulls.push(false);
+                    let i = idx as usize;
+                    gathered.push(values[i]);
+                    nulls.push(existing_nulls.as_ref().is_some_and(|n| n[i]));
                 }
             }
 
             Ok(ColumnArray::Float64(Arc::new(gathered), Some(Arc::new(nulls))))
         }
-        ColumnArray::Float32(values, _existing_nulls) => {
+        ColumnArray::Float32(values, existing_nulls) => {
             let mut gathered = Vec::with_capacity(indices.len());
             let mut nulls = Vec::with_capacity(indices.len());
 
@@ -284,14 +290,15 @@ pub(crate) fn gather_column_with_nulls(
                     gathered.push(0.0);
                     nulls.push(true);
                 } else {
-                    gathered.push(values[idx as usize]);
-                    nulls.push(false);
+                    let i = idx as usize;
+                    gathered.push(values[i]);
+                    nulls.push(existing_nulls.as_ref().is_some_and(|n| n[i]));
                 }
             }
 
             Ok(ColumnArray::Float32(Arc::new(gathered), Some(Arc::new(nulls))))
         }
-        ColumnArray::String(values, _existing_nulls) => {
+        ColumnArray::String(values, existing_nulls) => {
             let mut gathered: Vec<std::sync::Arc<str>> = Vec::with_capacity(indices.len());
             let mut nulls = Vec::with_capacity(indices.len());
 
@@ -300,14 +307,15 @@ pub(crate) fn gather_column_with_nulls(
                     gathered.push(Arc::from(""));
                     nulls.push(true);
                 } else {
-                    gathered.push(values[idx as usize].clone());
-                    nulls.push(false);
+                    let i = idx as usize;
+                    gathered.push(values[i].clone());
+                    nulls.push(existing_nulls.as_ref().is_some_and(|n| n[i]));
                 }
             }
 
             Ok(ColumnArray::String(Arc::new(gathered), Some(Arc::new(nulls))))
         }
-        ColumnArray::FixedString(values, _existing_nulls) => {
+        ColumnArray::FixedString(values, existing_nulls) => {
             let mut gathered: Vec<std::sync::Arc<str>> = Vec::with_capacity(indices.len());
             let mut nulls = Vec::with_capacity(indices.len());
 
@@ -316,14 +324,15 @@ pub(crate) fn gather_column_with_nulls(
                     gathered.push(Arc::from(""));
                     nulls.push(true);
                 } else {
-                    gathered.push(values[idx as usize].clone());
-                    nulls.push(false);
+                    let i = idx as usize;
+                    gathered.push(values[i].clone());
+                    nulls.push(existing_nulls.as_ref().is_some_and(|n| n[i]));
                 }
             }
 
             Ok(ColumnArray::FixedString(Arc::new(gathered), Some(Arc::new(nulls))))
         }
-        ColumnArray::Date(values, _existing_nulls) => {
+        ColumnArray::Date(values, existing_nulls) => {
             let mut gathered = Vec::with_capacity(indices.len());
             let mut nulls = Vec::with_capacity(indices.len());
 
@@ -332,14 +341,15 @@ pub(crate) fn gather_column_with_nulls(
                     gathered.push(0);
                     nulls.push(true);
                 } else {
-                    gathered.push(values[idx as usize]);
-                    nulls.push(false);
+                    let i = idx as usize;
+                    gathered.push(values[i]);
+                    nulls.push(existing_nulls.as_ref().is_some_and(|n| n[i]));
                 }
             }
 
             Ok(ColumnArray::Date(Arc::new(gathered), Some(Arc::new(nulls))))
         }
-        ColumnArray::Timestamp(values, _existing_nulls) => {
+        ColumnArray::Timestamp(values, existing_nulls) => {
             let mut gathered = Vec::with_capacity(indices.len());
             let mut nulls = Vec::with_capacity(indices.len());
 
@@ -348,14 +358,15 @@ pub(crate) fn gather_column_with_nulls(
                     gathered.push(0);
                     nulls.push(true);
                 } else {
-                    gathered.push(values[idx as usize]);
-                    nulls.push(false);
+                    let i = idx as usize;
+                    gathered.push(values[i]);
+                    nulls.push(existing_nulls.as_ref().is_some_and(|n| n[i]));
                 }
             }
 
             Ok(ColumnArray::Timestamp(Arc::new(gathered), Some(Arc::new(nulls))))
         }
-        ColumnArray::Boolean(values, _existing_nulls) => {
+        ColumnArray::Boolean(values, existing_nulls) => {
             let mut gathered = Vec::with_capacity(indices.len());
             let mut nulls = Vec::with_capacity(indices.len());
 
@@ -364,8 +375,9 @@ pub(crate) fn gather_column_with_nulls(
                     gathered.push(0);
                     nulls.push(true);
                 } else {
-                    gathered.push(values[idx as usize]);
-                    nulls.push(false);
+                    let i = idx as usize;
+                    gathered.push(values[i]);
+                    nulls.push(existing_nulls.as_ref().is_some_and(|n| n[i]));
                 }
             }
 
