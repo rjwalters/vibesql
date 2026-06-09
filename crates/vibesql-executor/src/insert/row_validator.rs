@@ -356,26 +356,32 @@ impl<'a> RowValidator<'a> {
     /// [`DeferredFkViolation`] is appended to `deferred_violations` and
     /// the caller pushes it onto the active transaction's queue. The
     /// queue is drained and re-checked at COMMIT.
+    ///
+    /// Steps 4-6 (parent-existence scan, self-FK row-self check,
+    /// defer-or-error) are factored into
+    /// [`crate::foreign_key_check::check_fk_row_existence`] and shared with
+    /// the free-function [`super::foreign_keys::validate_foreign_key_constraints`].
+    /// This wrapper handles the PRAGMA gate, schema-mismatch check, and the
+    /// NULL-skip (via the `Option` representation of `fk_keys`); the caller
+    /// drains `deferred_violations` after our immutable `&Database` borrow
+    /// drops (preserves the pattern from #5125 / PR #5141).
     fn validate_foreign_keys(
         &self,
         full_row_values: &[vibesql_types::SqlValue],
         fk_keys: &[Option<Vec<vibesql_types::SqlValue>>],
         deferred_violations: &mut Vec<DeferredFkViolation>,
     ) -> Result<(), ExecutorError> {
-        // Skip FK enforcement when PRAGMA foreign_keys is OFF (default)
+        // Step 1: skip FK enforcement when PRAGMA foreign_keys is OFF (default).
         if !self.db.foreign_keys_enabled() {
             return Ok(());
         }
 
-        let session_defer = self.db.defer_foreign_keys();
-        let in_txn = self.db.in_transaction();
-
         for (fk_idx, fk_values) in fk_keys.iter().enumerate() {
             let fk = &self.schema.foreign_keys[fk_idx];
 
-            // Mismatch check runs before any row-existence test so that bad
-            // FK targets are reported even when the parent table is empty
-            // (matches SQLite behaviour and fkey1-6.1 / fkey5-11.1).
+            // Step 2: mismatch check runs before any row-existence test so
+            // that bad FK targets are reported even when the parent table is
+            // empty (matches SQLite behaviour and fkey1-6.1 / fkey5-11.1).
             // Mismatch is a schema-level error and is *never* deferred:
             // SQLite reports it immediately even with INITIALLY DEFERRED.
             if let Some((child, parent)) =
@@ -384,80 +390,35 @@ impl<'a> RowValidator<'a> {
                 return Err(ExecutorError::ForeignKeyMismatch { child, parent });
             }
 
-            // Skip row-existence check if any FK value is NULL (stored as None)
+            // Step 3: skip row-existence check if any FK value is NULL
+            // (stored as None by the column-pass phase).
             let Some(ref fk_values) = fk_values else {
                 continue;
             };
 
-            // Check if the referenced key exists in the parent table
-            let parent_table = self
-                .db
-                .get_table(&fk.parent_table)
-                .ok_or_else(|| ExecutorError::TableNotFound(fk.parent_table.clone()))?;
-
-            let parent_collations = crate::foreign_key_check::parent_collations_for_fk(self.db, fk);
-            let parent_indices =
-                crate::foreign_key_check::resolved_parent_indices_for_fk(self.db, fk);
-
-            let key_exists = parent_table.scan().iter().any(|parent_row| {
-                parent_indices.iter().zip(fk_values).enumerate().all(
-                    |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
-                        Some(parent_val) => crate::foreign_key_check::fk_values_equal(
-                            fk_val,
-                            parent_val,
-                            parent_collations.get(i).and_then(|c| c.as_deref()),
-                        ),
-                        None => false,
-                    },
-                )
-            });
-
-            if key_exists {
-                continue;
-            }
-
-            // Phase C3 of #5085 / fkey8-3.0: self-referential FK. When the
-            // FK points back at the table being inserted into, the row
-            // itself can satisfy the constraint (SQLite checks the parent
-            // index *after* the row is inserted). Mirror that here.
-            if fk.parent_table.eq_ignore_ascii_case(self.table_name) {
-                let row_satisfies_fk = parent_indices.iter().zip(fk_values).enumerate().all(
-                    |(i, (&parent_idx, fk_val))| match full_row_values.get(parent_idx) {
-                        Some(parent_val) => crate::foreign_key_check::fk_values_equal(
-                            fk_val,
-                            parent_val,
-                            parent_collations.get(i).and_then(|c| c.as_deref()),
-                        ),
-                        None => false,
-                    },
-                );
-                if row_satisfies_fk {
+            // Steps 4-6: shared per-FK row-existence + self-FK + defer decision.
+            match crate::foreign_key_check::check_fk_row_existence(
+                self.db,
+                self.table_name,
+                fk,
+                fk_idx,
+                fk_values,
+                full_row_values,
+            )? {
+                crate::foreign_key_check::FkRowCheck::Ok => continue,
+                crate::foreign_key_check::FkRowCheck::Deferred(v) => {
+                    deferred_violations.push(v);
                     continue;
                 }
+                crate::foreign_key_check::FkRowCheck::Violation => {
+                    return Err(ExecutorError::ConstraintViolation(format!(
+                        "FOREIGN KEY constraint '{}' violated: key ({}) not found in table '{}'",
+                        fk.name.as_deref().unwrap_or(""),
+                        fk.column_names.join(", "),
+                        fk.parent_table
+                    )));
+                }
             }
-
-            // FK row-existence violation. Defer if the constraint is
-            // INITIALLY DEFERRED or the session has defer_foreign_keys=ON,
-            // *and* we're inside a transaction. Outside a transaction we
-            // fall through to the immediate-error path, matching SQLite:
-            // deferred enforcement requires a transaction context.
-            let should_defer = in_txn && (fk.initially_deferred || session_defer);
-            if should_defer {
-                deferred_violations.push(DeferredFkViolation {
-                    child_table: self.table_name.to_string(),
-                    fk_index: fk_idx,
-                    child_row: full_row_values.to_vec(),
-                    kind: vibesql_storage::DeferredFkViolationKind::ChildInsertOrUpdate,
-                });
-                continue;
-            }
-
-            return Err(ExecutorError::ConstraintViolation(format!(
-                "FOREIGN KEY constraint '{}' violated: key ({}) not found in table '{}'",
-                fk.name.as_deref().unwrap_or(""),
-                fk.column_names.join(", "),
-                fk.parent_table
-            )));
         }
 
         Ok(())
