@@ -189,9 +189,15 @@ pub(super) fn execute_internal(
         );
     }
 
-    // Step 4: Select rows to update using RowSelector
+    // Step 4: Select rows to update using RowSelector.
+    //
+    // Phase 1d follow-up (#5205): thread the active MVCC snapshot into
+    // row selection so the WHERE-clause scan + PK fast path honor
+    // visibility. Off-state collapses to the pre-MVCC live-row filter.
+    let snapshot = crate::mvcc::read_snapshot(database);
     let row_selector = RowSelector::new(schema);
-    let candidate_rows = row_selector.select_rows(table, &stmt.where_clause, &mut evaluator)?;
+    let candidate_rows =
+        row_selector.select_rows(table, &stmt.where_clause, &mut evaluator, &snapshot)?;
 
     // Estimate DML cost for query analysis and optimization decisions
     if std::env::var("DML_COST_DEBUG").is_ok() && !candidate_rows.is_empty() {

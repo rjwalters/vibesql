@@ -269,6 +269,12 @@ impl DeleteExecutor {
             .get_table(table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
+        // Phase 1d follow-up (#5205): capture the active MVCC snapshot
+        // once so both the PK fast path and the WHERE-clause scan agree
+        // on visibility. Off-state collapses to the pre-MVCC live-row
+        // filter; the snapshot argument is ignored by the storage layer.
+        let snapshot = crate::mvcc::read_snapshot(database);
+
         // Execute CTEs if present (WITH clause support)
         let cte_results = if let Some(ref cte_list) = stmt.with_clause {
             Some(crate::select::cte::execute_ctes(cte_list, |cte_query, prior_ctes| {
@@ -337,9 +343,15 @@ impl DeleteExecutor {
 
                     if let Some(pk_index) = table.primary_key_index() {
                         if let Some(&row_index) = pk_index.get(&pk_values) {
-                            // Found the row via index - single row to delete
-                            rows_and_indices_to_delete
-                                .push((row_index, table.scan()[row_index].clone()));
+                            // Phase 1d follow-up (#5205): the PK fast
+                            // path must honor MVCC visibility — a row
+                            // whose xmax is committed under our snapshot
+                            // must not be picked for DELETE. Off-state
+                            // collapses to a deletion-bitmap check.
+                            if table.is_row_visible(row_index, &snapshot) {
+                                rows_and_indices_to_delete
+                                    .push((row_index, table.scan()[row_index].clone()));
+                            }
                         }
                         // If not found, rows_and_indices_to_delete stays empty (no rows to delete)
                     } else {
@@ -349,6 +361,7 @@ impl DeleteExecutor {
                             &stmt.where_clause,
                             &mut evaluator,
                             &mut rows_and_indices_to_delete,
+                            &snapshot,
                         )?;
                     }
                 } else {
@@ -358,6 +371,7 @@ impl DeleteExecutor {
                         &stmt.where_clause,
                         &mut evaluator,
                         &mut rows_and_indices_to_delete,
+                        &snapshot,
                     )?;
                 }
             } else {
@@ -367,6 +381,7 @@ impl DeleteExecutor {
                     &stmt.where_clause,
                     &mut evaluator,
                     &mut rows_and_indices_to_delete,
+                    &snapshot,
                 )?;
             }
         } else {
@@ -376,6 +391,7 @@ impl DeleteExecutor {
                 &stmt.where_clause,
                 &mut evaluator,
                 &mut rows_and_indices_to_delete,
+                &snapshot,
             )?;
         }
 
@@ -694,15 +710,19 @@ impl DeleteExecutor {
         }
     }
 
-    /// Collect rows using table scan (fallback when PK optimization can't be used)
+    /// Collect rows using table scan (fallback when PK optimization can't be used).
+    ///
+    /// Phase 1d follow-up (#5205): uses `scan_visible(snapshot)` so the
+    /// WHERE-clause scan honors MVCC visibility. Off-state reduces to
+    /// `scan_live` (deletion-bitmap filter), preserving pre-MVCC semantics.
     fn collect_rows_with_scan(
         table: &vibesql_storage::Table,
         where_clause: &Option<vibesql_ast::WhereClause>,
         evaluator: &mut ExpressionEvaluator,
         rows_and_indices: &mut Vec<(usize, vibesql_storage::Row)>,
+        snapshot: &vibesql_storage::TxnSnapshot,
     ) -> Result<(), ExecutorError> {
-        // Use scan_live() to skip already-deleted rows
-        for (index, row) in table.scan_live() {
+        for (index, row) in table.scan_visible(snapshot) {
             // Clear CSE cache before evaluating each row to prevent column values
             // from being incorrectly cached across different rows
             evaluator.clear_cse_cache();

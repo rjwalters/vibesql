@@ -60,6 +60,14 @@ pub fn check_no_child_references(
     let session_defer = db.defer_foreign_keys();
     let in_txn = db.in_transaction();
 
+    // Phase 1d follow-up (#5205): capture the active snapshot once so
+    // every child-reference scan in this DELETE path sees a consistent
+    // MVCC view. With the `mvcc_enabled` feature OFF, `scan_visible`
+    // reduces to `scan_live` (deleted-bitmap filter only) and the
+    // snapshot is unused — behavior is bit-for-bit identical to the
+    // previous `scan_live()` callers.
+    let snapshot = crate::mvcc::read_snapshot(db);
+
     // Collect all child tables that reference this parent row
     // We need to collect first to avoid borrowing issues when we mutate.
     //
@@ -110,10 +118,12 @@ pub fn check_no_child_references(
             let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
 
             // Check if any row in the child table references this parent
-            // row's FK-target columns. Use scan_live() to skip
-            // soft-deleted rows.
+            // row's FK-target columns. Phase 1d follow-up (#5205): use
+            // `scan_visible(&snapshot)` so the MVCC visibility filter
+            // applies. With MVCC OFF, this reduces to `scan_live` and
+            // behavior is unchanged.
             let child_table = db.get_table(&table_name).unwrap();
-            let has_references = child_table.scan_live().any(|(_, child_row)| {
+            let has_references = child_table.scan_visible(&snapshot).any(|(_, child_row)| {
                 let child_fk_values: Vec<SqlValue> =
                     fk.column_indices.iter().map(|&idx| child_row.values[idx].clone()).collect();
 
@@ -213,6 +223,10 @@ fn queue_orphaned_children(
     // inside the scan loop only sees the child table (#5147).
     let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
 
+    // Phase 1d follow-up (#5205): respect MVCC visibility when
+    // identifying orphaned children. Off-state collapses to scan_live.
+    let snapshot = crate::mvcc::read_snapshot(db);
+
     // Snapshot the orphaned child rows first to release the immutable
     // borrow before queueing (which mutates the transaction state).
     let orphaned: Vec<Vec<SqlValue>> = {
@@ -221,7 +235,7 @@ fn queue_orphaned_children(
             None => return,
         };
         child_table
-            .scan_live()
+            .scan_visible(&snapshot)
             .filter_map(|(_, child_row)| {
                 let child_fk_values: Vec<SqlValue> =
                     fk.column_indices.iter().map(|&idx| child_row.values[idx].clone()).collect();
@@ -267,11 +281,15 @@ fn cascade_delete(
     // FK comparisons honor NOCASE/RTRIM (#5147).
     let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
 
-    // Find rows to delete (use scan_live to skip soft-deleted rows)
+    // Phase 1d follow-up (#5205): respect MVCC visibility when picking
+    // CASCADE-delete targets. Off-state collapses to scan_live.
+    let snapshot = crate::mvcc::read_snapshot(db);
+
+    // Find rows to delete (visibility-filtered).
     let child_table = db.get_table(child_table_name).unwrap();
     let mut rows_to_delete: Vec<vibesql_storage::Row> = Vec::new();
 
-    for (_, child_row) in child_table.scan_live() {
+    for (_, child_row) in child_table.scan_visible(&snapshot) {
         let child_fk_values: Vec<SqlValue> =
             fk.column_indices.iter().map(|&idx| child_row.values[idx].clone()).collect();
 
@@ -334,12 +352,15 @@ fn set_null(
     // FK comparisons honor NOCASE/RTRIM (#5147).
     let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
 
-    // Collect indices of rows to update
+    // Phase 1d follow-up (#5205): respect MVCC visibility when picking
+    // SET NULL targets. Off-state collapses to scan_live.
+    let snapshot = crate::mvcc::read_snapshot(db);
+
+    // Collect indices of rows to update.
     let child_table = db.get_table(child_table_name).unwrap();
     let mut rows_to_update: Vec<(usize, vibesql_storage::Row)> = Vec::new();
 
-    // Use scan_live() to skip deleted rows and get correct physical indices
-    for (idx, child_row) in child_table.scan_live() {
+    for (idx, child_row) in child_table.scan_visible(&snapshot) {
         let child_fk_values: Vec<SqlValue> =
             fk.column_indices.iter().map(|&idx| child_row.values[idx].clone()).collect();
 
@@ -429,12 +450,15 @@ fn set_default(
     // FK comparisons honor NOCASE/RTRIM (#5147).
     let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
 
-    // Collect indices of rows to update
+    // Phase 1d follow-up (#5205): respect MVCC visibility when picking
+    // SET DEFAULT targets. Off-state collapses to scan_live.
+    let snapshot = crate::mvcc::read_snapshot(db);
+
+    // Collect indices of rows to update.
     let child_table = db.get_table(child_table_name).unwrap();
     let mut rows_to_update: Vec<(usize, vibesql_storage::Row)> = Vec::new();
 
-    // Use scan_live() to skip deleted rows and get correct physical indices
-    for (idx, child_row) in child_table.scan_live() {
+    for (idx, child_row) in child_table.scan_visible(&snapshot) {
         let child_fk_values: Vec<SqlValue> =
             fk.column_indices.iter().map(|&idx| child_row.values[idx].clone()).collect();
 

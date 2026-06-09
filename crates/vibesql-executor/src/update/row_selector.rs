@@ -1,6 +1,7 @@
 //! Row selection logic for UPDATE operations
 
 use vibesql_ast::{BinaryOperator, Expression};
+use vibesql_storage::TxnSnapshot;
 use vibesql_types::SqlValue;
 
 use crate::{
@@ -21,14 +22,19 @@ impl<'a> RowSelector<'a> {
         Self { schema }
     }
 
-    /// Select rows to update based on WHERE clause
+    /// Select rows to update based on WHERE clause.
     ///
-    /// Uses primary key index optimization when possible, otherwise falls back to table scan.
+    /// Uses primary key index optimization when possible, otherwise falls back
+    /// to table scan. Both paths honor the MVCC `snapshot`: the PK fast path
+    /// calls `Table::is_row_visible` and the fallback scan uses
+    /// `Table::scan_visible`. With `mvcc_enabled` OFF, both reduce to the
+    /// pre-MVCC live-row check.
     pub fn select_rows(
         &self,
         table: &vibesql_storage::Table,
         where_clause: &Option<vibesql_ast::WhereClause>,
         evaluator: &mut ExpressionEvaluator,
+        snapshot: &TxnSnapshot,
     ) -> Result<Vec<(usize, vibesql_storage::Row)>, ExecutorError> {
         // Try to use primary key index for fast lookup
         if let Some(vibesql_ast::WhereClause::Condition(where_expr)) = where_clause {
@@ -55,6 +61,14 @@ impl<'a> RowSelector<'a> {
                 // Use primary key index for O(1) lookup
                 if let Some(pk_index) = table.primary_key_index() {
                     if let Some(&row_index) = pk_index.get(&pk_values) {
+                        // Phase 1d follow-up (#5205): the PK fast path must
+                        // honor MVCC visibility — a row whose xmax is
+                        // committed (tombstone) under our snapshot must not
+                        // be selected for UPDATE. Off-state collapses to a
+                        // deletion-bitmap check.
+                        if !table.is_row_visible(row_index, snapshot) {
+                            return Ok(vec![]);
+                        }
                         // Found the row via index - single row to update
                         // Clone and set row_id for ROWID pseudo-column support
                         let mut cloned_row = table.scan()[row_index].clone();
@@ -72,7 +86,7 @@ impl<'a> RowSelector<'a> {
         }
 
         // Fall back to table scan
-        Self::collect_candidate_rows(table, where_clause, evaluator)
+        Self::collect_candidate_rows(table, where_clause, evaluator, snapshot)
     }
 
     /// Analyze WHERE expression to see if it can use primary key index for fast lookup
@@ -201,16 +215,20 @@ impl<'a> RowSelector<'a> {
         }
     }
 
-    /// Collect candidate rows that match the WHERE clause (fallback for non-indexed queries)
+    /// Collect candidate rows that match the WHERE clause (fallback for non-indexed queries).
+    ///
+    /// Phase 1d follow-up (#5205): uses `scan_visible(snapshot)` so the
+    /// WHERE-clause scan honors MVCC visibility. Off-state reduces to
+    /// `scan_live` (deletion-bitmap filter), preserving pre-MVCC semantics.
     fn collect_candidate_rows(
         table: &vibesql_storage::Table,
         where_clause: &Option<vibesql_ast::WhereClause>,
         evaluator: &mut ExpressionEvaluator,
+        snapshot: &TxnSnapshot,
     ) -> Result<Vec<(usize, vibesql_storage::Row)>, ExecutorError> {
         let mut candidate_rows = Vec::new();
 
-        // Use scan_live() to skip deleted rows and get correct physical indices
-        for (row_index, row) in table.scan_live() {
+        for (row_index, row) in table.scan_visible(snapshot) {
             // Clear CSE cache before evaluating each row to prevent column values
             // from being incorrectly cached across different rows
             evaluator.clear_cse_cache();

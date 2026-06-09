@@ -335,18 +335,49 @@ pub(crate) fn check_fk_row_existence(
     let parent_indices = resolved_parent_indices_for_fk(db, fk);
 
     // Step 4: parent-table existence scan.
-    let key_exists = parent_table.scan().iter().any(|parent_row| {
-        parent_indices.iter().zip(fk_values).enumerate().all(
-            |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
-                Some(parent_val) => fk_values_equal(
-                    fk_val,
-                    parent_val,
-                    parent_collations.get(i).and_then(|c| c.as_deref()),
-                ),
-                None => false,
-            },
-        )
-    });
+    //
+    // Phase 1d follow-up (#5205): under MVCC the parent-existence check
+    // must respect the active snapshot — an INSERT on the child must not
+    // "see" a parent row inserted by an uncommitted concurrent
+    // transaction (it would otherwise let the child slip past FK
+    // enforcement only to be orphaned at the other side's rollback).
+    // Off-state (`mvcc_enabled` OFF): the previous code scanned every
+    // physical row via `scan()` (including bitmap-deleted ones); we
+    // preserve that exactly with `#[cfg]`-gated branches.
+    let snapshot = crate::mvcc::read_snapshot(db);
+    let key_exists = {
+        #[cfg(feature = "mvcc_enabled")]
+        {
+            parent_table.scan_visible(&snapshot).any(|(_, parent_row)| {
+                parent_indices.iter().zip(fk_values).enumerate().all(
+                    |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
+                        Some(parent_val) => fk_values_equal(
+                            fk_val,
+                            parent_val,
+                            parent_collations.get(i).and_then(|c| c.as_deref()),
+                        ),
+                        None => false,
+                    },
+                )
+            })
+        }
+        #[cfg(not(feature = "mvcc_enabled"))]
+        {
+            let _ = &snapshot;
+            parent_table.scan().iter().any(|parent_row| {
+                parent_indices.iter().zip(fk_values).enumerate().all(
+                    |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
+                        Some(parent_val) => fk_values_equal(
+                            fk_val,
+                            parent_val,
+                            parent_collations.get(i).and_then(|c| c.as_deref()),
+                        ),
+                        None => false,
+                    },
+                )
+            })
+        }
+    };
     if key_exists {
         return Ok(FkRowCheck::Ok);
     }
