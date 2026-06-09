@@ -44,22 +44,33 @@ pub fn enforce_primary_key_constraint(
             return Ok(());
         }
 
+        // Issue #5204: Under MVCC we must treat tombstoned rows (xmax stamped
+        // by a committed concurrent txn / visible-as-deleted to our snapshot)
+        // as "not present" for uniqueness purposes — otherwise an UPDATE that
+        // moves a row to a unique key currently held by a deleted row would
+        // erroneously fail. Off-state (`mvcc_enabled` OFF): `is_row_visible`
+        // reduces to the existing not-bitmap-deleted check.
+        let snapshot = crate::mvcc::read_snapshot(db);
+
         // Use the primary key index for O(1) lookup instead of O(n) scan
         if let Some(pk_index) = table.primary_key_index() {
-            if pk_index.contains_key(&new_pk_values) {
-                let pk_col_names: Vec<String> = schema.primary_key.as_ref().unwrap().clone();
-                // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
-                let qualified_cols: Vec<String> =
-                    pk_col_names.iter().map(|col| format!("{}.{}", table_name, col)).collect();
-                // SQLite-compatible: output the message as-is without prefix
-                return Err(ExecutorError::SqliteCompatError(format!(
-                    "UNIQUE constraint failed: {}",
-                    qualified_cols.join(", ")
-                )));
+            if let Some(&row_idx) = pk_index.get(&new_pk_values) {
+                if table.is_row_visible(row_idx, &snapshot) {
+                    let pk_col_names: Vec<String> = schema.primary_key.as_ref().unwrap().clone();
+                    // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
+                    let qualified_cols: Vec<String> =
+                        pk_col_names.iter().map(|col| format!("{}.{}", table_name, col)).collect();
+                    // SQLite-compatible: output the message as-is without prefix
+                    return Err(ExecutorError::SqliteCompatError(format!(
+                        "UNIQUE constraint failed: {}",
+                        qualified_cols.join(", ")
+                    )));
+                }
             }
         } else {
             // Fallback to table scan if index not available (should not happen in normal operation)
-            for existing_row in table.scan() {
+            // Issue #5204: respect MVCC visibility — iterate visible rows only.
+            for (_idx, existing_row) in table.scan_visible(&snapshot) {
                 let existing_pk_values: Vec<vibesql_types::SqlValue> =
                     pk_indices.iter().filter_map(|&idx| existing_row.get(idx).cloned()).collect();
 
@@ -124,24 +135,34 @@ pub fn enforce_unique_constraints(
             .get_table(table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
+        // Issue #5204: under MVCC a tombstoned existing row must not block a
+        // new row with the same unique key. Off-state (`mvcc_enabled` OFF):
+        // `is_row_visible` is the existing not-bitmap-deleted check.
+        let snapshot = crate::mvcc::read_snapshot(db);
+
         // Use the unique constraint index for O(1) lookup instead of O(n) scan
         if constraint_idx < table.unique_indexes().len() {
             let unique_index = &table.unique_indexes()[constraint_idx];
-            if unique_index.contains_key(&new_unique_values) {
-                let unique_col_names: Vec<String> =
-                    schema.unique_constraints[constraint_idx].clone();
-                // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
-                let qualified_cols: Vec<String> =
-                    unique_col_names.iter().map(|col| format!("{}.{}", table_name, col)).collect();
-                // SQLite-compatible: output the message as-is without prefix
-                return Err(ExecutorError::SqliteCompatError(format!(
-                    "UNIQUE constraint failed: {}",
-                    qualified_cols.join(", ")
-                )));
+            if let Some(&row_idx) = unique_index.get(&new_unique_values) {
+                if table.is_row_visible(row_idx, &snapshot) {
+                    let unique_col_names: Vec<String> =
+                        schema.unique_constraints[constraint_idx].clone();
+                    // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
+                    let qualified_cols: Vec<String> = unique_col_names
+                        .iter()
+                        .map(|col| format!("{}.{}", table_name, col))
+                        .collect();
+                    // SQLite-compatible: output the message as-is without prefix
+                    return Err(ExecutorError::SqliteCompatError(format!(
+                        "UNIQUE constraint failed: {}",
+                        qualified_cols.join(", ")
+                    )));
+                }
             }
         } else {
             // Fallback to table scan if index not available (should not happen in normal operation)
-            for existing_row in table.scan() {
+            // Issue #5204: iterate only rows visible to our MVCC snapshot.
+            for (_idx, existing_row) in table.scan_visible(&snapshot) {
                 let existing_unique_values: Vec<vibesql_types::SqlValue> = unique_indices
                     .iter()
                     .filter_map(|&idx| existing_row.get(idx).cloned())
@@ -215,6 +236,13 @@ pub fn enforce_unique_indexes(
     // Get all indexes for this table
     let indexes_for_table = db.list_indexes_for_table(table_name);
 
+    // Issue #5204: under MVCC a unique index lookup may return row indices
+    // that point to tombstoned (xmax-stamped) rows. Such rows must NOT block
+    // a new row with the same unique key. Off-state (`mvcc_enabled` OFF):
+    // `is_row_visible` is the existing not-bitmap-deleted check.
+    let snapshot = crate::mvcc::read_snapshot(db);
+    let table = db.get_table(table_name);
+
     for index_name in indexes_for_table {
         if let Some(index_metadata) = db.get_index(&index_name) {
             // Only check unique indexes
@@ -249,19 +277,32 @@ pub fn enforce_unique_indexes(
 
             // Check if this key already exists in the index
             if let Some(index_data) = db.get_index_data(&index_name) {
-                if index_data.contains_key(&key_values) {
-                    // SQLite format: "UNIQUE constraint failed: table.col1, table.col2"
-                    let columns_str = index_metadata
-                        .columns
-                        .iter()
-                        .map(|col| format!("{}.{}", table_name, col.expect_column_name()))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    // SQLite-compatible: output the message as-is without prefix
-                    return Err(ExecutorError::SqliteCompatError(format!(
-                        "UNIQUE constraint failed: {}",
-                        columns_str
-                    )));
+                // Look up the actual row indices behind the key so we can
+                // verify at least one of them is MVCC-visible. If every
+                // matching row is tombstoned from our snapshot's perspective,
+                // the key is effectively unused and we must not raise a
+                // violation.
+                if let Some(row_indices) = index_data.get(&key_values) {
+                    let key_is_live = match table {
+                        Some(t) => {
+                            row_indices.iter().any(|&idx| t.is_row_visible(idx, &snapshot))
+                        }
+                        None => !row_indices.is_empty(),
+                    };
+                    if key_is_live {
+                        // SQLite format: "UNIQUE constraint failed: table.col1, table.col2"
+                        let columns_str = index_metadata
+                            .columns
+                            .iter()
+                            .map(|col| format!("{}.{}", table_name, col.expect_column_name()))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        // SQLite-compatible: output the message as-is without prefix
+                        return Err(ExecutorError::SqliteCompatError(format!(
+                            "UNIQUE constraint failed: {}",
+                            columns_str
+                        )));
+                    }
                 }
             }
         }
