@@ -214,6 +214,91 @@ impl TxnSnapshot {
     }
 }
 
+// ============================================================================
+// Write-path stamping helpers (Phase 1c of #5136)
+// ============================================================================
+//
+// These helpers are the single source of truth for "should this write stamp
+// xmin/xmax with the current transaction id?". The decision is gated on the
+// `mvcc_enabled` feature flag:
+//
+// - Feature OFF (default): all helpers are no-ops. Rows pass through with
+//   their constructor defaults (xmin = PRE_MVCC_TXN_ID, xmax = None). This
+//   preserves bit-for-bit pre-MVCC behavior.
+// - Feature ON: when called with `Some(txn_id)`, the helpers stamp the
+//   row with the active transaction id. When called with `None` (autocommit
+//   path with no active transaction), the row keeps the pre-MVCC sentinel.
+//   Phase 1d will revisit autocommit semantics; this is the conservative
+//   choice for Phase 1c.
+//
+// The helpers operate by `&mut Row` so the caller can choose where they
+// fit into the write pipeline (validators may run before or after
+// stamping; the stamp is purely additive to existing row state).
+
+use crate::row::Row;
+
+/// Stamp `row.xmin = txn_id` (when MVCC is enabled and a transaction is
+/// active). For INSERT / UPDATE-new-version writes.
+///
+/// With the `mvcc_enabled` feature OFF this is a no-op — the row keeps
+/// whatever `xmin` it came in with, which for executor-produced rows is
+/// always [`PRE_MVCC_TXN_ID`](crate::row::PRE_MVCC_TXN_ID).
+///
+/// With the feature ON and `txn_id = Some(t)`, the row's xmin field is
+/// set to `t`. With the feature ON and `txn_id = None` (no active
+/// transaction at write time — e.g. autocommit) the row is left with
+/// the pre-MVCC sentinel; Phase 1d will revisit autocommit semantics.
+#[inline]
+pub fn stamp_xmin_for_write(row: &mut Row, txn_id: Option<TxnId>) {
+    #[cfg(feature = "mvcc_enabled")]
+    {
+        if let Some(id) = txn_id {
+            row.xmin = id;
+        }
+    }
+    #[cfg(not(feature = "mvcc_enabled"))]
+    {
+        // Suppress unused-variable warnings in the off-state.
+        let _ = (row, txn_id);
+    }
+}
+
+/// Stamp `row.xmax = Some(txn_id)` (when MVCC is enabled and a
+/// transaction is active). For UPDATE-old-version and DELETE writes.
+///
+/// With the `mvcc_enabled` feature OFF this is a no-op — the row keeps
+/// `xmax = None`, matching the pre-MVCC contract that "live rows have no
+/// deleter."
+///
+/// With the feature ON and `txn_id = Some(t)`, the row's xmax field is
+/// set to `Some(t)`. The physical storage layer continues to remove or
+/// overwrite the row as before; the stamp is purely additive metadata
+/// that Phase 1d's visibility filter will consult. With the feature ON
+/// and `txn_id = None` (autocommit), the row is left with `xmax = None`.
+#[inline]
+pub fn stamp_xmax_for_write(row: &mut Row, txn_id: Option<TxnId>) {
+    #[cfg(feature = "mvcc_enabled")]
+    {
+        if let Some(id) = txn_id {
+            row.xmax = Some(id);
+        }
+    }
+    #[cfg(not(feature = "mvcc_enabled"))]
+    {
+        let _ = (row, txn_id);
+    }
+}
+
+/// Returns true when the `mvcc_enabled` feature is compiled in.
+///
+/// This is a compile-time constant exposed as a runtime fn so callers
+/// outside this crate can branch on feature state without re-declaring
+/// the `#[cfg]` themselves.
+#[inline]
+pub const fn mvcc_enabled() -> bool {
+    cfg!(feature = "mvcc_enabled")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,5 +343,95 @@ mod tests {
         assert_eq!(s.xmin_active, s2.xmin_active);
         assert_eq!(s.xmax_committed, s2.xmax_committed);
         assert_eq!(s.in_progress, s2.in_progress);
+    }
+
+    // ========================================================================
+    // Write-path stamping helpers (Phase 1c of #5136)
+    // ========================================================================
+    //
+    // These tests check the contract documented on `stamp_xmin_for_write` and
+    // `stamp_xmax_for_write`: both helpers are no-ops without the feature
+    // flag, and stamp the row's MVCC fields when the flag is on AND a txn
+    // id is supplied.
+
+    use vibesql_types::SqlValue;
+
+    use crate::row::PRE_MVCC_TXN_ID;
+
+    fn fresh_row() -> Row {
+        Row::new(vec![SqlValue::Integer(42)])
+    }
+
+    #[test]
+    fn stamp_xmin_with_none_is_noop() {
+        let mut r = fresh_row();
+        stamp_xmin_for_write(&mut r, None);
+        assert_eq!(r.xmin, PRE_MVCC_TXN_ID);
+    }
+
+    #[test]
+    fn stamp_xmax_with_none_is_noop() {
+        let mut r = fresh_row();
+        stamp_xmax_for_write(&mut r, None);
+        assert_eq!(r.xmax, None);
+    }
+
+    #[cfg(not(feature = "mvcc_enabled"))]
+    #[test]
+    fn stamp_xmin_off_state_is_noop_even_with_some() {
+        // With feature OFF, even Some(t) must be ignored — this preserves
+        // bit-for-bit pre-MVCC row construction.
+        let mut r = fresh_row();
+        stamp_xmin_for_write(&mut r, Some(7));
+        assert_eq!(r.xmin, PRE_MVCC_TXN_ID, "xmin must remain pre-MVCC sentinel");
+    }
+
+    #[cfg(not(feature = "mvcc_enabled"))]
+    #[test]
+    fn stamp_xmax_off_state_is_noop_even_with_some() {
+        let mut r = fresh_row();
+        stamp_xmax_for_write(&mut r, Some(7));
+        assert_eq!(r.xmax, None, "xmax must remain None");
+    }
+
+    #[cfg(feature = "mvcc_enabled")]
+    #[test]
+    fn stamp_xmin_on_state_writes_txn_id() {
+        let mut r = fresh_row();
+        stamp_xmin_for_write(&mut r, Some(42));
+        assert_eq!(r.xmin, 42);
+        assert_eq!(r.xmax, None, "stamping xmin must not touch xmax");
+    }
+
+    #[cfg(feature = "mvcc_enabled")]
+    #[test]
+    fn stamp_xmax_on_state_writes_txn_id() {
+        let mut r = fresh_row();
+        stamp_xmax_for_write(&mut r, Some(99));
+        assert_eq!(r.xmax, Some(99));
+        assert_eq!(r.xmin, PRE_MVCC_TXN_ID, "stamping xmax must not touch xmin");
+    }
+
+    #[cfg(feature = "mvcc_enabled")]
+    #[test]
+    fn stamp_both_xmin_and_xmax_independently() {
+        // Models the UPDATE old-version case: caller may want both fields
+        // stamped on the same row (e.g. for a two-version replay buffer).
+        let mut r = fresh_row();
+        stamp_xmin_for_write(&mut r, Some(3));
+        stamp_xmax_for_write(&mut r, Some(7));
+        assert_eq!(r.xmin, 3);
+        assert_eq!(r.xmax, Some(7));
+    }
+
+    #[test]
+    fn mvcc_enabled_const_matches_feature() {
+        // Sanity check: the const fn agrees with the cfg() the rest of the
+        // module uses. Keeps the helper from drifting if the feature name
+        // changes.
+        #[cfg(feature = "mvcc_enabled")]
+        assert!(mvcc_enabled());
+        #[cfg(not(feature = "mvcc_enabled"))]
+        assert!(!mvcc_enabled());
     }
 }

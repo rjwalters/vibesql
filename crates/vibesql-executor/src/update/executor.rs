@@ -437,10 +437,23 @@ pub(super) fn execute_internal(
                 );
             }
 
+            // Phase 1c (Issue #5150 / #5136): capture the active txn id
+            // before the mutable borrow so we can stamp xmax on the
+            // REPLACE-conflict tombstones when MVCC is on.
+            #[cfg(feature = "mvcc_enabled")]
+            let mvcc_delete_txn_id = database.transaction_id();
+
             // Delete conflicting rows
             let table_mut = database
                 .get_table_mut(table_name)
                 .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+
+            #[cfg(feature = "mvcc_enabled")]
+            if let Some(id) = mvcc_delete_txn_id {
+                for &idx in &rows_to_delete_for_replace {
+                    table_mut.stamp_row_xmax_inplace(idx, id);
+                }
+            }
 
             let delete_result = table_mut.delete_by_indices_batch(&rows_to_delete_for_replace);
 
@@ -524,6 +537,20 @@ pub(super) fn execute_internal(
 
     // Step 8: Apply all updates (after evaluation phase completes)
     let update_count = updates.len();
+
+    // Phase 1c (Issue #5150 / #5136): stamp xmin on every new row with
+    // the active txn id when the `mvcc_enabled` feature is on. We must
+    // fetch the txn id here, *before* taking the mutable borrow on
+    // `table_mut`, because `database.transaction_id()` borrows the
+    // database immutably. When the feature is off this is a no-op so
+    // the off-state matches main bit-for-bit.
+    let txn_id = database.transaction_id();
+    for u in updates.iter_mut() {
+        vibesql_storage::stamp_xmin_for_write(&mut u.new_row, txn_id);
+        // The new version is by definition live; xmax must be None
+        // regardless of feature state.
+        u.new_row.xmax = None;
+    }
 
     // Get mutable table reference
     let table_mut = database
@@ -1317,10 +1344,23 @@ fn execute_update_from(
                     );
                 }
 
+                // Phase 1c (Issue #5150 / #5136): capture the active txn
+                // id before the mutable borrow so we can stamp xmax on
+                // the REPLACE-conflict tombstones when MVCC is on.
+                #[cfg(feature = "mvcc_enabled")]
+                let mvcc_delete_txn_id = database.transaction_id();
+
                 // Delete conflicting rows
                 let table_mut = database
                     .get_table_mut(table_name)
                     .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+                #[cfg(feature = "mvcc_enabled")]
+                if let Some(id) = mvcc_delete_txn_id {
+                    for &idx in &rows_to_delete_for_replace {
+                        table_mut.stamp_row_xmax_inplace(idx, id);
+                    }
+                }
 
                 let delete_result = table_mut.delete_by_indices_batch(&rows_to_delete_for_replace);
 
@@ -1428,6 +1468,17 @@ fn execute_update_from(
 
     // Apply all updates
     let update_count = updates.len();
+
+    // Phase 1c (Issue #5150 / #5136): stamp xmin on every new row with
+    // the active txn id when the `mvcc_enabled` feature is on. Fetch the
+    // txn id before taking the mutable borrow on `table_mut`. Off-state
+    // is a no-op.
+    let txn_id = database.transaction_id();
+    for u in updates.iter_mut() {
+        vibesql_storage::stamp_xmin_for_write(&mut u.new_row, txn_id);
+        u.new_row.xmax = None;
+    }
+
     let table_mut = database
         .get_table_mut(table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;

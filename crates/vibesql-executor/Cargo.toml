@@ -72,6 +72,11 @@ default = ["parallel", "spatial", "native-columnar"]
 parallel = ["rayon", "crossbeam-deque"]
 # Spatial/geospatial query support (optional, reduces binary size)
 spatial = ["geo", "rstar"]
+# MVCC machinery toggle (Phase 1 of #5136). Off by default.
+# Phase 1c enables write-path xmin/xmax stamping in INSERT/UPDATE/DELETE
+# when this flag is on; reads are still unfiltered until Phase 1d.
+# See `crates/vibesql-storage/Cargo.toml` for full documentation.
+mvcc_enabled = ["vibesql-storage/mvcc_enabled"]
 
 # VibeSQL performance features (for benchmarks)
 # Native columnar execution (Phase 2b - zero row materialization)

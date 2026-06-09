@@ -224,6 +224,13 @@ pub(super) fn try_fast_path_update(
         database, table_name, &old_row, &new_row, row_index,
     );
 
+    // Phase 1c (Issue #5150 / #5136): stamp the new row's xmin with the
+    // active txn id when the `mvcc_enabled` feature is on. Off-state is a
+    // no-op, preserving pre-MVCC behavior bit-for-bit.
+    let txn_id = database.transaction_id();
+    vibesql_storage::stamp_xmin_for_write(&mut new_row, txn_id);
+    new_row.xmax = None;
+
     // Apply the update directly (transfers ownership of new_row, no clone needed)
     let table_mut = database
         .get_table_mut(table_name)
@@ -319,6 +326,13 @@ fn try_super_fast_path(
         return Ok(None); // No updates to apply
     }
 
+    // Phase 1c (Issue #5150 / #5136): the super-fast in-place path doesn't
+    // produce a "new row" object — it mutates column values directly. To
+    // record the MVCC version transition we stamp xmin on the same physical
+    // row after applying the column writes. Off-state: no stamping.
+    #[cfg(feature = "mvcc_enabled")]
+    let txn_id = database.transaction_id();
+
     let table_mut = database
         .get_table_mut(table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
@@ -326,6 +340,16 @@ fn try_super_fast_path(
     // Apply all column updates in-place (no row cloning!)
     for (col_index, new_value) in inplace_updates {
         table_mut.update_column_inplace(row_index, col_index, new_value);
+    }
+
+    // Stamp xmin on the in-place row. The row also remains live, so xmax
+    // is left at its current value (typically None; if it had previously
+    // been stamped by a rolled-back delete we'd be losing that, but the
+    // rollback path restores tables wholesale, so this can't actually
+    // arise — see TransactionManager::rollback_transaction).
+    #[cfg(feature = "mvcc_enabled")]
+    if let Some(id) = txn_id {
+        table_mut.stamp_row_xmin_inplace(row_index, id);
     }
 
     Ok(Some(1))

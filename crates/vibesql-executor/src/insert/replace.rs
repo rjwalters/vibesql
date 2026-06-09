@@ -193,10 +193,25 @@ pub fn handle_replace_conflicts(
     let mut deleted_indices: Vec<usize> = rows_to_delete.iter().map(|(idx, _)| *idx).collect();
     deleted_indices.sort_unstable();
 
+    // Phase 1c (Issue #5150 / #5136): capture the active txn id before
+    // taking the mutable borrow on `table_mut`. The REPLACE-conflict path
+    // bitmap-deletes the conflicting old version; we stamp xmax on the
+    // tombstone when MVCC is on so visibility-aware reads (Phase 1d) can
+    // tell who superseded the row.
+    #[cfg(feature = "mvcc_enabled")]
+    let mvcc_delete_txn_id = db.transaction_id();
+
     // Delete the conflicting rows using the fast path
     let table_mut = db
         .get_table_mut(table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+    #[cfg(feature = "mvcc_enabled")]
+    if let Some(id) = mvcc_delete_txn_id {
+        for &idx in &deleted_indices {
+            table_mut.stamp_row_xmax_inplace(idx, id);
+        }
+    }
 
     let delete_result = table_mut.delete_by_indices_batch(&deleted_indices);
 
