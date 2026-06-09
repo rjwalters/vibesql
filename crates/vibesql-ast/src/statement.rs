@@ -17,7 +17,7 @@ use crate::{
     SavepointStmt, ScheduleAfterStmt, ScheduleAtStmt, SelectStmt, SetCatalogStmt, SetNamesStmt,
     SetSchemaStmt, SetTimeZoneStmt, SetTransactionStmt, SetVariableStmt, ShowColumnsStmt,
     ShowCreateTableStmt, ShowDatabasesStmt, ShowIndexStmt, ShowTablesStmt, TruncateTableStmt,
-    UpdateStmt,
+    UpdateStmt, VacuumStmt,
 };
 
 // ============================================================================
@@ -75,6 +75,7 @@ pub enum Statement {
     CreateIndex(CreateIndexStmt),
     DropIndex(DropIndexStmt),
     Reindex(ReindexStmt),
+    Vacuum(VacuumStmt),
     Analyze(AnalyzeStmt),
     CreateAssertion(CreateAssertionStmt),
     DropAssertion(DropAssertionStmt),

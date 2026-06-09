@@ -373,6 +373,21 @@ pub fn execute_sql(
                 .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
             Ok(DBOutput::StatementComplete(0))
         }
+        vibesql_ast::Statement::Vacuum(vacuum_stmt) => {
+            // VACUUM maps to MVCC garbage collection (no-op when MVCC is disabled).
+            // Commit any pending implicit transaction first - vacuum_mvcc errors
+            // if a transaction is active.
+            batching_manager.commit_if_needed(db)?;
+
+            if vacuum_stmt.into_file.is_some() {
+                return Err(TestError::Execution(
+                    "VACUUM INTO is not supported in VibeSQL".to_string(),
+                ));
+            }
+            db.vacuum_mvcc()
+                .map_err(|e| TestError::Execution(format!("Execution error: {:?}", e)))?;
+            Ok(DBOutput::StatementComplete(0))
+        }
         vibesql_ast::Statement::ShowTables(stmt) => {
             // Commit any pending implicit transaction before introspection
             batching_manager.commit_if_needed(db)?;

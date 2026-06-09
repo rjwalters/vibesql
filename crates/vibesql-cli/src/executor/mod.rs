@@ -350,6 +350,20 @@ impl SqlExecutor {
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
             }
+            vibesql_ast::Statement::Vacuum(vacuum_stmt) => {
+                // SQLite compatibility: VACUUM maps to MVCC old-version
+                // garbage collection (a no-op when MVCC is disabled).
+                if vacuum_stmt.into_file.is_some() {
+                    return Err(anyhow::anyhow!("VACUUM INTO is not supported in VibeSQL"));
+                }
+                match self.db.vacuum_mvcc() {
+                    Ok(_reclaimed) => {
+                        result.message = Some("VACUUM completed".to_string());
+                        result.row_count = 0; // VACUUM doesn't return rows
+                    }
+                    Err(e) => return Err(anyhow::anyhow!("{}", e)),
+                }
+            }
             vibesql_ast::Statement::Explain(explain_stmt) => {
                 match vibesql_executor::ExplainExecutor::execute(&explain_stmt, &self.db) {
                     Ok(explain_result) => {

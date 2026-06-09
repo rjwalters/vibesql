@@ -177,8 +177,8 @@ pub use ddl::{
     SetSchemaStmt, SetTimeZoneStmt, SetTransactionStmt, SetVariableStmt, SqlSecurity,
     StorageFormat, TableConstraint, TableConstraintKind, TableOption, TimeZoneSpec,
     TransactionAccessMode, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming,
-    TruncateCascadeOption, TruncateTableStmt, TypeAttribute, TypeDefinition, VariableScope,
-    VectorDistanceMetric,
+    TruncateCascadeOption, TruncateTableStmt, TypeAttribute, TypeDefinition, VacuumStmt,
+    VariableScope, VectorDistanceMetric,
 };
 pub use dml::{
     Assignment, ConflictClause, DeleteStmt, InsertSource, InsertStmt, OnConflictAction,

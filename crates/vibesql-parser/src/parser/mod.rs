@@ -310,6 +310,10 @@ impl Parser {
                 let reindex_stmt = self.parse_reindex_statement()?;
                 Ok(vibesql_ast::Statement::Reindex(reindex_stmt))
             }
+            Token::Keyword { keyword: Keyword::Vacuum, .. } => {
+                let vacuum_stmt = self.parse_vacuum_statement()?;
+                Ok(vibesql_ast::Statement::Vacuum(vacuum_stmt))
+            }
             Token::Keyword { keyword: Keyword::Analyze, .. } => {
                 let analyze_stmt = self.parse_analyze_statement()?;
                 Ok(vibesql_ast::Statement::Analyze(analyze_stmt))
