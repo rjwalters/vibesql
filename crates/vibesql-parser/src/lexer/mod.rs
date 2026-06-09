@@ -200,8 +200,15 @@ impl<'a> Lexer<'a> {
                 if next.map(|b| b.is_ascii_digit()).unwrap_or(false) {
                     // PostgreSQL-style numbered placeholder ($1, $2, etc.)
                     self.tokenize_numbered_placeholder()
-                } else if next.map(|b| b.is_ascii_alphabetic() || b == b'_').unwrap_or(false) {
-                    // SQLite/TCL-style named placeholder ($name, $x1, etc.)
+                } else if next
+                    .map(|b| b.is_ascii_alphabetic() || b == b'_' || !b.is_ascii())
+                    .unwrap_or(false)
+                {
+                    // SQLite/TCL-style named placeholder ($name, $x1, etc.).
+                    // SQLite's IdChar macro treats any byte >= 0x80 as an
+                    // identifier char, so non-ASCII starts a named variable
+                    // (e.g. `$Ց`). The first byte of a multi-byte UTF-8 char
+                    // is always >= 0x80, so the byte-level check is correct.
                     self.tokenize_dollar_named_placeholder()
                 } else if next == Some(b':') {
                     // TCL global variable syntax ($::name) - treat as named placeholder
@@ -217,8 +224,13 @@ impl<'a> Lexer<'a> {
                 }
             }
             ':' => {
-                // Check if followed by alphabetic character or underscore for named placeholder
-                if self.peek_byte(1).map(|b| b.is_ascii_alphabetic() || b == b'_').unwrap_or(false)
+                // Check if followed by alphabetic character, underscore, or a
+                // non-ASCII byte (SQLite's IdChar accepts bytes >= 0x80) for a
+                // named placeholder (e.g. `:name`, `:Ց`)
+                if self
+                    .peek_byte(1)
+                    .map(|b| b.is_ascii_alphabetic() || b == b'_' || !b.is_ascii())
+                    .unwrap_or(false)
                 {
                     self.tokenize_named_placeholder()
                 } else {
@@ -381,7 +393,10 @@ impl<'a> Lexer<'a> {
 
         let start = self.byte_pos;
 
-        // Read the variable name (which may include scope prefix like 'global' or 'session')
+        // Read the variable name (which may include scope prefix like 'global'
+        // or 'session'). Deliberately ASCII-only: `@@` is a MySQL extension
+        // (SQLite rejects it entirely) and MySQL system variable names are
+        // ASCII, so SQLite's IdChar non-ASCII rule does not apply here.
         while !self.is_eof() {
             let ch = self.current_char();
             if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' {
@@ -409,10 +424,11 @@ impl<'a> Lexer<'a> {
 
         let start = self.byte_pos;
 
-        // Read the variable name
+        // Read the variable name. Like SQLite's IdChar, any non-ASCII char is
+        // part of the name (e.g. `@tՑ`).
         while !self.is_eof() {
             let ch = self.current_char();
-            if ch.is_ascii_alphanumeric() || ch == '_' {
+            if ch.is_ascii_alphanumeric() || ch == '_' || !ch.is_ascii() {
                 self.advance();
             } else {
                 break;
@@ -482,10 +498,11 @@ impl<'a> Lexer<'a> {
 
         let mut name = String::new();
 
-        // Read the identifier (alphanumeric or underscore)
+        // Read the identifier (alphanumeric, underscore, or non-ASCII —
+        // SQLite's IdChar accepts any byte >= 0x80, e.g. `:tՑ`)
         while !self.is_eof() {
             let ch = self.current_char();
-            if ch.is_ascii_alphanumeric() || ch == '_' {
+            if ch.is_ascii_alphanumeric() || ch == '_' || !ch.is_ascii() {
                 name.push(ch);
                 self.advance();
             } else {
@@ -511,10 +528,11 @@ impl<'a> Lexer<'a> {
 
         let mut name = String::new();
 
-        // Read the identifier (alphanumeric or underscore)
+        // Read the identifier (alphanumeric, underscore, or non-ASCII —
+        // SQLite's IdChar accepts any byte >= 0x80, e.g. `$tՑ`)
         while !self.is_eof() {
             let ch = self.current_char();
-            if ch.is_ascii_alphanumeric() || ch == '_' {
+            if ch.is_ascii_alphanumeric() || ch == '_' || !ch.is_ascii() {
                 name.push(ch);
                 self.advance();
             } else {
@@ -541,10 +559,12 @@ impl<'a> Lexer<'a> {
 
         let mut name = String::new();
 
-        // Consume the :: prefix and any subsequent ::namespace:: parts
+        // Consume the :: prefix and any subsequent ::namespace:: parts.
+        // Non-ASCII chars are part of the name (SQLite's IdChar accepts any
+        // byte >= 0x80, e.g. `$::Ց`).
         while !self.is_eof() {
             let ch = self.current_char();
-            if ch == ':' || ch.is_ascii_alphanumeric() || ch == '_' {
+            if ch == ':' || ch.is_ascii_alphanumeric() || ch == '_' || !ch.is_ascii() {
                 name.push(ch);
                 self.advance();
             } else {
