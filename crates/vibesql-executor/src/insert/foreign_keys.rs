@@ -54,7 +54,11 @@ pub fn validate_foreign_key_constraints(
         }
 
         // Steps 4-6: shared per-FK row-existence + self-FK + defer decision.
-        match check_fk_row_existence(db, table_name, fk, fk_idx, &fk_values, row_values)? {
+        // The bulk-transfer path validates one row at a time and does not
+        // stage a batch, so pass an empty slice for `batch_full_rows`. The
+        // multi-row self-FK sibling rescue (fkey1-5.1) only triggers on
+        // the `RowValidator` VALUES-list path.
+        match check_fk_row_existence(db, table_name, fk, fk_idx, &fk_values, row_values, &[])? {
             FkRowCheck::Ok => continue,
             FkRowCheck::Deferred(v) => {
                 deferred.push(v);

@@ -232,6 +232,10 @@ fn execute_insert_internal(
     } else {
         vec![Vec::new(); schema.get_unique_constraint_indices().len()]
     }; // Track UNIQUE values for each constraint
+    // Track previously-validated full rows for self-referential FK lookups
+    // (fkey1-5.1: `INSERT INTO t VALUES (1,NULL),(2,1),(3,2)` where t.parent
+    // references t.x — row N must find its parent among rows 0..N-1).
+    let mut batch_full_rows: Vec<Vec<vibesql_types::SqlValue>> = Vec::new();
 
     // Check if IGNORE conflict clause is set - if so, skip rows with constraint violations
     // Also treat ON CONFLICT ... DO NOTHING as equivalent to IGNORE
@@ -586,6 +590,7 @@ fn execute_insert_internal(
             &storage_table_name,
             &primary_key_values,
             &unique_constraint_values,
+            &batch_full_rows,
             skip_duplicate_checks,
         );
 
@@ -629,6 +634,10 @@ fn execute_insert_internal(
         for v in validation_result.deferred_fk_violations {
             db.queue_deferred_fk_violation(v);
         }
+
+        // Track row for self-referential FK lookups by later rows in the
+        // same batch (see fkey1-5.1 note above).
+        batch_full_rows.push(full_row_values.clone());
 
         // Store validated row for insertion (with optional explicit rowid)
         validated_rows.push((full_row_values, explicit_rowid));

@@ -295,6 +295,18 @@ pub(crate) enum FkRowCheck {
 ///   **not** call [`detect_fk_mismatch`] and does **not** look up the
 ///   parent table — the caller passes those results in.
 ///
+/// # Self-referential multi-row INSERT (fkey1-5.1)
+///
+/// `batch_full_rows` carries the previously-validated rows from the same
+/// multi-row VALUES list. When the FK is self-referential (`fk.parent_table`
+/// equals `table_name`), the self-FK row-self check (step 5) also searches
+/// the batch so row N can resolve its FK against rows 0..N-1 — matching
+/// SQLite's insert-in-declaration-order semantics for
+/// `INSERT INTO t11 VALUES (1,NULL),(2,1),(3,2)` where `t11.parent`
+/// references `t11.x`. Callers that do not stage a batch (e.g. the
+/// bulk-transfer path in `validate_foreign_key_constraints`) pass an
+/// empty slice and get the original single-row behaviour.
+///
 /// # Borrow-checker pattern
 ///
 /// Takes `&Database` (not `&mut`), so `RowValidator` (immutable borrow)
@@ -309,6 +321,7 @@ pub(crate) fn check_fk_row_existence(
     fk_idx: usize,
     fk_values: &[vibesql_types::SqlValue],
     full_row_values: &[vibesql_types::SqlValue],
+    batch_full_rows: &[Vec<vibesql_types::SqlValue>],
 ) -> Result<FkRowCheck, crate::errors::ExecutorError> {
     // Parent table is required for the existence scan. Caller has already
     // confirmed schema mismatch is OK (and a mismatch error path would
@@ -337,24 +350,31 @@ pub(crate) fn check_fk_row_existence(
         return Ok(FkRowCheck::Ok);
     }
 
-    // Step 5: self-FK row-self check (Phase C3 of #5085 / fkey8-3.0).
-    // When the FK points back at the table being inserted into, the row
-    // itself can satisfy the constraint (SQLite checks the parent index
-    // *after* the row is inserted). Mirror that here. Uses
-    // `full_row_values` (not the partial FK extract) so the row
-    // participates in its own FK check.
+    // Step 5: self-FK row-self check (Phase C3 of #5085 / fkey8-3.0) +
+    // multi-row sibling check (fkey1-5.1). When the FK points back at the
+    // table being inserted into, two extra rescue paths apply:
+    //   (a) The row itself can satisfy the constraint — SQLite checks the
+    //       parent index *after* the row is inserted.
+    //   (b) For multi-row INSERTs, an earlier row in the same VALUES list
+    //       may have been the intended parent; SQLite inserts rows in
+    //       declaration order and a later row's FK target can resolve to
+    //       a sibling already inserted in the same statement.
+    // Both checks use full-row values (not the partial FK extract) so the
+    // candidate row participates as a whole row in its own FK check.
     if fk.parent_table.eq_ignore_ascii_case(table_name) {
-        let row_satisfies_fk = parent_indices.iter().zip(fk_values).enumerate().all(
-            |(i, (&parent_idx, fk_val))| match full_row_values.get(parent_idx) {
-                Some(parent_val) => fk_values_equal(
-                    fk_val,
-                    parent_val,
-                    parent_collations.get(i).and_then(|c| c.as_deref()),
-                ),
-                None => false,
-            },
-        );
-        if row_satisfies_fk {
+        let row_matches = |candidate: &[vibesql_types::SqlValue]| -> bool {
+            parent_indices.iter().zip(fk_values).enumerate().all(
+                |(i, (&parent_idx, fk_val))| match candidate.get(parent_idx) {
+                    Some(parent_val) => fk_values_equal(
+                        fk_val,
+                        parent_val,
+                        parent_collations.get(i).and_then(|c| c.as_deref()),
+                    ),
+                    None => false,
+                },
+            )
+        };
+        if row_matches(full_row_values) || batch_full_rows.iter().any(|r| row_matches(r)) {
             return Ok(FkRowCheck::Ok);
         }
     }
@@ -502,7 +522,7 @@ mod tests {
         let full_row = vec![SqlValue::Integer(10), SqlValue::Integer(2)];
         let fk_values = vec![SqlValue::Integer(2)];
 
-        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row).unwrap();
+        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row, &[]).unwrap();
         assert!(matches!(outcome, FkRowCheck::Ok), "expected Ok, got {:?}", outcome);
     }
 
@@ -537,11 +557,66 @@ mod tests {
         let full_row = vec![SqlValue::Integer(5), SqlValue::Integer(5)];
         let fk_values = vec![SqlValue::Integer(5)];
 
-        let outcome = check_fk_row_existence(&db, "t", &fk, 0, &fk_values, &full_row).unwrap();
+        let outcome = check_fk_row_existence(&db, "t", &fk, 0, &fk_values, &full_row, &[]).unwrap();
         assert!(
             matches!(outcome, FkRowCheck::Ok),
             "self-FK row-self check must accept, got {:?}",
             outcome
+        );
+    }
+
+    #[test]
+    fn check_fk_row_existence_ok_self_fk_sibling_in_batch() {
+        // fkey1-5.1: multi-row INSERT into a self-referential parent.
+        // t(x INTEGER PRIMARY KEY, parent INTEGER REFERENCES t(x)).
+        // INSERT VALUES (1, NULL), (2, 1), (3, 2).
+        // Row (2, 1) is validated with batch_full_rows = [(1, NULL)] in scope;
+        // the parent table is still empty, the self-row doesn't match
+        // (parent_idx=0 holds 2, fk_val=1), so the sibling rescue must catch it.
+        let mut db = Database::new();
+        db.set_foreign_keys_enabled(true);
+
+        let fk = ForeignKeyConstraint {
+            name: Some("fk_t_self".to_string()),
+            column_names: vec!["parent".to_string()],
+            column_indices: vec![1],
+            parent_table: "t".to_string(),
+            parent_column_names: vec!["x".to_string()],
+            parent_column_indices: vec![0],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+        let cols = vec![
+            ColumnSchema::new("x".to_string(), DataType::Integer, false),
+            ColumnSchema::new("parent".to_string(), DataType::Integer, true),
+        ];
+        let mut t = TableSchema::with_primary_key("t".to_string(), cols, vec!["x".to_string()]);
+        t.foreign_keys.push(fk.clone());
+        db.create_table(t).unwrap();
+
+        let earlier_row = vec![SqlValue::Integer(1), SqlValue::Null];
+        let batch = vec![earlier_row];
+
+        let full_row = vec![SqlValue::Integer(2), SqlValue::Integer(1)];
+        let fk_values = vec![SqlValue::Integer(1)];
+
+        let outcome =
+            check_fk_row_existence(&db, "t", &fk, 0, &fk_values, &full_row, &batch).unwrap();
+        assert!(
+            matches!(outcome, FkRowCheck::Ok),
+            "multi-row self-FK sibling rescue must accept, got {:?}",
+            outcome
+        );
+
+        // Empty batch (single-row path) must still fail for the same row.
+        let outcome_no_batch =
+            check_fk_row_existence(&db, "t", &fk, 0, &fk_values, &full_row, &[]).unwrap();
+        assert!(
+            matches!(outcome_no_batch, FkRowCheck::Violation),
+            "without batch_full_rows the same row must violate, got {:?}",
+            outcome_no_batch
         );
     }
 
@@ -552,7 +627,7 @@ mod tests {
         let full_row = vec![SqlValue::Integer(10), SqlValue::Integer(999)];
         let fk_values = vec![SqlValue::Integer(999)];
 
-        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row).unwrap();
+        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row, &[]).unwrap();
         assert!(matches!(outcome, FkRowCheck::Violation), "expected Violation, got {:?}", outcome);
     }
 
@@ -571,7 +646,7 @@ mod tests {
         let fk_values = vec![SqlValue::Integer(999)];
 
         assert!(!db.in_transaction(), "test precondition: no transaction");
-        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row).unwrap();
+        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row, &[]).unwrap();
         assert!(
             matches!(outcome, FkRowCheck::Violation),
             "deferred-but-outside-txn must error immediately, got {:?}",
@@ -593,7 +668,7 @@ mod tests {
         let full_row = vec![SqlValue::Integer(10), SqlValue::Integer(999)];
         let fk_values = vec![SqlValue::Integer(999)];
 
-        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row).unwrap();
+        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row, &[]).unwrap();
         match outcome {
             FkRowCheck::Deferred(v) => {
                 assert_eq!(v.child_table, "c");
@@ -619,7 +694,7 @@ mod tests {
         let full_row = vec![SqlValue::Integer(10), SqlValue::Integer(999)];
         let fk_values = vec![SqlValue::Integer(999)];
 
-        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row).unwrap();
+        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row, &[]).unwrap();
         assert!(
             matches!(outcome, FkRowCheck::Deferred(_)),
             "session pragma must defer, got {:?}",
