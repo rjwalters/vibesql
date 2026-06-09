@@ -309,3 +309,79 @@ fn test_create_trigger_body_with_string_literal() {
         _ => panic!("Expected CreateTrigger statement"),
     }
 }
+
+#[test]
+fn test_create_temp_trigger_after_insert() {
+    let sql = "CREATE TEMP TRIGGER tr2 AFTER INSERT ON t1 BEGIN UPDATE t1 SET b = 1; END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    let stmt = result.unwrap();
+    match stmt {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.trigger_name, "tr2");
+            assert_eq!(trigger.timing, TriggerTiming::After);
+            assert_eq!(trigger.event, TriggerEvent::Insert);
+            assert_eq!(trigger.table_name, "t1");
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_temporary_trigger_after_insert() {
+    let sql = "CREATE TEMPORARY TRIGGER tr2 AFTER INSERT ON t1 BEGIN UPDATE t1 SET b = 1; END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    let stmt = result.unwrap();
+    match stmt {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.trigger_name, "tr2");
+            assert_eq!(trigger.timing, TriggerTiming::After);
+            assert_eq!(trigger.event, TriggerEvent::Insert);
+            assert_eq!(trigger.table_name, "t1");
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_temp_trigger_omitted_timing_defaults_to_before() {
+    let sql = "CREATE TEMP TRIGGER tr3 UPDATE ON t1 BEGIN SELECT 1; END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    let stmt = result.unwrap();
+    match stmt {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.trigger_name, "tr3");
+            assert_eq!(trigger.timing, TriggerTiming::Before);
+            assert!(matches!(trigger.event, TriggerEvent::Update(None)));
+            assert_eq!(trigger.table_name, "t1");
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_temp_table_and_view_still_parse() {
+    // Regression checks: the CREATE TEMP dispatch must keep routing TABLE and
+    // VIEW correctly after learning about TRIGGER.
+    let table = Parser::parse_sql("CREATE TEMP TABLE t1(a INTEGER);");
+    assert!(
+        matches!(table, Ok(Statement::CreateTable(_))),
+        "CREATE TEMP TABLE failed: {:?}",
+        table
+    );
+
+    let temporary_table = Parser::parse_sql("CREATE TEMPORARY TABLE t1(a INTEGER);");
+    assert!(
+        matches!(temporary_table, Ok(Statement::CreateTable(_))),
+        "CREATE TEMPORARY TABLE failed: {:?}",
+        temporary_table
+    );
+
+    let view = Parser::parse_sql("CREATE TEMP VIEW v1 AS SELECT 1;");
+    assert!(matches!(view, Ok(Statement::CreateView(_))), "CREATE TEMP VIEW failed: {:?}", view);
+}
