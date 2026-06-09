@@ -2,3 +2,4 @@
 pub mod core_tests;
 pub mod indexes;
 pub mod reset_catalog;
+pub mod vacuum;
