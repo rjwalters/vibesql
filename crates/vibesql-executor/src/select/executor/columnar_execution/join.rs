@@ -413,8 +413,22 @@ impl SelectExecutor<'_> {
                 let buffer_pool = self.database.query_buffer_pool();
 
                 let rows = filtered_batch.to_rows()?;
-                let mut projected_rows = Vec::with_capacity(rows.len());
-                for row in &rows {
+
+                // Apply ORDER BY BEFORE projection so sort expressions can reference
+                // columns from the full combined schema (e.g. `ORDER BY c` where `c`
+                // is not in the SELECT list). The row-oriented path in
+                // `nonagg/materialized.rs` follows the same sort-then-project order.
+                // See issue #5189: projecting first produced "Column index out of
+                // bounds" errors when ORDER BY referenced columns dropped by the
+                // projection.
+                let sorted_rows = if let Some(order_by) = &stmt.order_by {
+                    self.apply_columnar_join_order_by(rows, order_by, &stmt.select_list, &combined_schema)?
+                } else {
+                    rows
+                };
+
+                let mut projected_rows = Vec::with_capacity(sorted_rows.len());
+                for row in &sorted_rows {
                     let projected = project_row_combined(
                         row,
                         &stmt.select_list,
@@ -430,14 +444,7 @@ impl SelectExecutor<'_> {
                 let final_rows =
                     if stmt.distinct { apply_distinct(projected_rows) } else { projected_rows };
 
-                // Apply ORDER BY if present (#5033)
-                let sorted_rows = if let Some(order_by) = &stmt.order_by {
-                    self.apply_columnar_join_order_by(final_rows, order_by, &stmt.select_list, &combined_schema)?
-                } else {
-                    final_rows
-                };
-
-                Ok(Some(sorted_rows))
+                Ok(Some(final_rows))
             }
         }
     }

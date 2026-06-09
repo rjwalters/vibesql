@@ -374,4 +374,50 @@ mod tests {
         assert!(matches!(bob.get(2), Some(vibesql_types::SqlValue::Null)));
         assert!(matches!(bob.get(3), Some(vibesql_types::SqlValue::Null)));
     }
+
+    /// Regression test for issue #5189: LEFT OUTER JOIN must preserve pre-existing
+    /// NULL values in matched rows. Previously, `gather_column_with_nulls` ignored
+    /// the source's null bitmap and unconditionally wrote `false` (not-null) for
+    /// every matched index, so a NULL value in the matched right-side data was
+    /// rendered as the type's default placeholder (e.g. `0` for Int64).
+    #[test]
+    fn test_columnar_hash_join_left_outer_preserves_matched_nulls() {
+        // Left: a single row with key 'X'
+        let left_columns = vec![ColumnArray::String(Arc::new(vec!["X".into()]), None)];
+        let left_batch =
+            ColumnarBatch::from_columns(left_columns, Some(vec!["x".into()])).unwrap();
+
+        // Right: three rows all matching key 'X', but row index 1 has c = NULL.
+        // c is the value column (col 0), d is the join key (col 1).
+        let right_columns = vec![
+            ColumnArray::Int64(
+                Arc::new(vec![5, 0, 7]),                  // 0 is placeholder for NULL
+                Some(Arc::new(vec![false, true, false])), // row 1 is NULL
+            ),
+            ColumnArray::String(
+                Arc::new(vec!["X".into(), "X".into(), "X".into()]),
+                None,
+            ),
+        ];
+        let right_batch =
+            ColumnarBatch::from_columns(right_columns, Some(vec!["c".into(), "d".into()]))
+                .unwrap();
+
+        // LEFT JOIN t1 ON d = x — three matches.
+        // left key col = 0 (x), right key col = 1 (d).
+        let result = columnar_hash_join_left_outer(&left_batch, &right_batch, 0, 1).unwrap();
+        assert_eq!(result.row_count(), 3);
+
+        let rows = result.to_rows().unwrap();
+        // Result columns are: x (0), c (1), d (2). Exactly one c must be NULL.
+        let null_c_count = rows
+            .iter()
+            .filter(|r| matches!(r.get(1), Some(vibesql_types::SqlValue::Null)))
+            .count();
+        assert_eq!(
+            null_c_count, 1,
+            "matched-row NULL in c must be preserved; got rows: {:?}",
+            rows
+        );
+    }
 }
