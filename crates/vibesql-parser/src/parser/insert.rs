@@ -380,17 +380,46 @@ impl Parser {
             self.advance(); // consume CONFLICT
 
             // Parse optional conflict target (column list)
+            //
+            // SQLite's grammar for an upsert conflict target allows each
+            // column to be followed by an optional `COLLATE name` and an
+            // optional `ASC | DESC`. It also accepts `NULLS FIRST | LAST`
+            // syntactically and then rejects it with the canonical
+            // "unsupported use of NULLS FIRST/LAST" error. We mirror that
+            // behavior so nulls1.test 3.1.11 / 3.1.12 see the expected
+            // error message.
             let conflict_target = if matches!(self.peek(), Token::LParen) {
                 self.advance(); // consume (
-                let cols = self.parse_comma_separated_list(|p| match p.peek() {
-                    Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
-                        let name = col.clone();
-                        p.advance();
-                        Ok(name)
+                let cols = self.parse_comma_separated_list(|p| {
+                    let name = match p.peek() {
+                        Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
+                            let name = col.clone();
+                            p.advance();
+                            name
+                        }
+                        _ => {
+                            return Err(ParseError {
+                                message: "Expected column name in ON CONFLICT".to_string(),
+                            });
+                        }
+                    };
+
+                    // Optional COLLATE collation_name
+                    if p.peek_keyword(Keyword::Collate) {
+                        p.advance(); // consume COLLATE
+                        let _collation = p.parse_identifier()?;
                     }
-                    _ => Err(ParseError {
-                        message: "Expected column name in ON CONFLICT".to_string(),
-                    }),
+
+                    // Optional ASC | DESC
+                    if p.peek_keyword(Keyword::Asc) || p.peek_keyword(Keyword::Desc) {
+                        p.advance();
+                    }
+
+                    // SQLite accepts NULLS here only to emit a specific
+                    // error message.
+                    p.reject_nulls_in_index_position()?;
+
+                    Ok(name)
                 })?;
                 self.expect_token(Token::RParen)?;
                 Some(cols)

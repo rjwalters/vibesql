@@ -216,7 +216,29 @@ impl Parser {
                         vibesql_ast::OrderDirection::Asc // Default
                     };
 
-                order_items.push(vibesql_ast::OrderByItem { expr, direction, nulls_order: None });
+                // Window ORDER BY supports NULLS FIRST/LAST (SQL:2003).
+                let nulls_order =
+                    if matches!(self.peek(), Token::Keyword { keyword: Keyword::Nulls, .. }) {
+                        self.advance(); // consume NULLS
+                        if matches!(self.peek(), Token::Keyword { keyword: Keyword::First, .. }) {
+                            self.advance();
+                            Some(vibesql_ast::NullsOrder::First)
+                        } else if matches!(
+                            self.peek(),
+                            Token::Keyword { keyword: Keyword::Last, .. }
+                        ) {
+                            self.advance();
+                            Some(vibesql_ast::NullsOrder::Last)
+                        } else {
+                            return Err(ParseError {
+                                message: "Expected FIRST or LAST after NULLS".to_string(),
+                            });
+                        }
+                    } else {
+                        None
+                    };
+
+                order_items.push(vibesql_ast::OrderByItem { expr, direction, nulls_order });
 
                 if matches!(self.peek(), Token::Comma) {
                     self.advance();
@@ -532,8 +554,34 @@ impl Parser {
                                 vibesql_ast::OrderDirection::Asc
                             };
 
-                        order_items
-                            .push(vibesql_ast::OrderByItem { expr, direction, nulls_order: None });
+                        // Window ORDER BY supports NULLS FIRST/LAST (SQL:2003).
+                        let nulls_order = if matches!(
+                            self.peek(),
+                            Token::Keyword { keyword: Keyword::Nulls, .. }
+                        ) {
+                            self.advance(); // consume NULLS
+                            if matches!(
+                                self.peek(),
+                                Token::Keyword { keyword: Keyword::First, .. }
+                            ) {
+                                self.advance();
+                                Some(vibesql_ast::NullsOrder::First)
+                            } else if matches!(
+                                self.peek(),
+                                Token::Keyword { keyword: Keyword::Last, .. }
+                            ) {
+                                self.advance();
+                                Some(vibesql_ast::NullsOrder::Last)
+                            } else {
+                                return Err(ParseError {
+                                    message: "Expected FIRST or LAST after NULLS".to_string(),
+                                });
+                            }
+                        } else {
+                            None
+                        };
+
+                        order_items.push(vibesql_ast::OrderByItem { expr, direction, nulls_order });
 
                         if matches!(self.peek(), Token::Comma) {
                             self.advance();
