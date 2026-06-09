@@ -68,6 +68,10 @@ pub struct PlanNode {
     pub index_predicates: Vec<IndexPredicate>,
     /// Whether this query requires a temp B-tree for ORDER BY
     pub needs_temp_btree_for_order_by: bool,
+    /// Number of distinct window-function sorting passes (PARTITION BY +
+    /// ORDER BY keys) not satisfied by an index. Each contributes one
+    /// `USE TEMP B-TREE FOR ORDER BY` entry in EQP output.
+    pub window_sort_count: usize,
     /// Set operation type for compound queries (UNION, INTERSECT, EXCEPT)
     pub set_operation_type: Option<String>,
     /// Whether this is a compound query root
@@ -86,6 +90,7 @@ impl PlanNode {
             index_name: None,
             index_predicates: Vec::new(),
             needs_temp_btree_for_order_by: false,
+            window_sort_count: 0,
             set_operation_type: None,
             is_compound_query: false,
         }
@@ -498,6 +503,14 @@ fn collect_eqp_entries(node: &PlanNode) -> Vec<String> {
         entries.push(format_sqlite_eqp_node(scan_node));
     }
 
+    // Add one TEMP B-TREE entry per distinct window sort key not satisfied
+    // by an index. Window sorting passes run before the statement-level
+    // ORDER BY, and SQLite never dedups them against it — they are
+    // separate passes.
+    for _ in 0..node.window_sort_count {
+        entries.push("USE TEMP B-TREE FOR ORDER BY".to_string());
+    }
+
     // Add TEMP B-TREE entry if needed for ORDER BY
     if node.needs_temp_btree_for_order_by {
         entries.push("USE TEMP B-TREE FOR ORDER BY".to_string());
@@ -763,6 +776,11 @@ impl ExplainExecutor {
             root.needs_temp_btree_for_order_by = needs_temp;
         }
 
+        // Count window-function sorting passes for EQP output. SQLite emits
+        // one "USE TEMP B-TREE FOR ORDER BY" entry per distinct window sort
+        // key not satisfied by an index (window1.test section 23).
+        root.window_sort_count = Self::count_window_sorts(stmt, database);
+
         // Add WHERE clause info
         if stmt.where_clause.is_some() {
             root.details.push("Filter: <where clause>".to_string());
@@ -854,6 +872,70 @@ impl ExplainExecutor {
         }
 
         Ok(root)
+    }
+
+    /// Count the distinct window-function sorting passes required by the
+    /// SELECT list that are not satisfied by an index.
+    ///
+    /// SQLite semantics (window1.test section 23, `do_ordercount_test`):
+    /// - The sort key for a window is its PARTITION BY expressions (treated
+    ///   as ASC with default null ordering) followed by its ORDER BY items.
+    ///   `OVER (PARTITION BY a ORDER BY b)` and `OVER (ORDER BY a, b)` share
+    ///   the key `(a, b)`.
+    /// - Keys are deduplicated by exact structural equality (including
+    ///   direction and COLLATE); frame clauses are ignored entirely.
+    /// - Windows with neither PARTITION BY nor ORDER BY (`OVER ()`) need no
+    ///   sorting pass.
+    /// - A key satisfied by an index scan order is suppressed (e.g. key
+    ///   `(a, b)` with index `t5ab(a, b)`).
+    fn count_window_sorts(stmt: &SelectStmt, database: &Database) -> usize {
+        let Ok(specs) = crate::select::window::collect_resolved_window_specs(
+            &stmt.select_list,
+            stmt.window_definitions.as_ref(),
+        ) else {
+            // Resolution errors (e.g. unknown named window) surface during
+            // execution; EXPLAIN just shows no window sorts.
+            return 0;
+        };
+
+        let mut distinct_keys: Vec<Vec<vibesql_ast::OrderByItem>> = Vec::new();
+        for spec in &specs {
+            // Combined sort key: PARTITION BY exprs (ASC) + window ORDER BY.
+            let mut key: Vec<vibesql_ast::OrderByItem> = Vec::new();
+            if let Some(partition_by) = &spec.partition_by {
+                for expr in partition_by {
+                    key.push(vibesql_ast::OrderByItem {
+                        expr: expr.clone(),
+                        direction: vibesql_ast::OrderDirection::Asc,
+                        nulls_order: None,
+                    });
+                }
+            }
+            if let Some(order_by) = &spec.order_by {
+                key.extend(order_by.iter().cloned());
+            }
+
+            // OVER () — no partitioning or ordering — needs no sort pass.
+            if key.is_empty() {
+                continue;
+            }
+
+            if !distinct_keys.contains(&key) {
+                distinct_keys.push(key);
+            }
+        }
+
+        distinct_keys
+            .iter()
+            .filter(|key| {
+                Self::needs_temp_btree_for_order_by(
+                    stmt.from.as_ref(),
+                    stmt.where_clause.as_ref(),
+                    key,
+                    database,
+                )
+            })
+            .count()
     }
 
     /// Check if ORDER BY requires a temp B-tree (sorting pass) for EQP rendering.

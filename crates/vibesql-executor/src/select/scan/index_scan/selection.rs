@@ -671,7 +671,15 @@ pub(crate) fn needs_temp_btree_for_order_by_eqp(
             continue;
         }
         let pinned_columns = count_pinned_index_columns(where_clause, &index_metadata.columns);
-        if pinned_columns == 0 {
+        // With a WHERE clause and no leading pinned column, the planner may
+        // choose a different (filtering) index, so the EQP exception only
+        // applies when leading columns are pinned. Without a WHERE clause
+        // there is no competing access path: a structural prefix match alone
+        // means the index's natural traversal yields the requested order
+        // (e.g. window1.test 23.1: index t5ab(a, b) serves key (a, b) with
+        // no predicate), so SQLite's EQP shows no temp B-tree even when the
+        // columns are nullable and a runtime stabilization sort still runs.
+        if pinned_columns == 0 && where_clause.is_some() {
             continue; // No leading pin → no EQP exception applies.
         }
 
