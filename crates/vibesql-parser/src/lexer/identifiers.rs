@@ -17,12 +17,20 @@ impl<'a> Lexer<'a> {
     /// but identifiers preserve their original case from the SQL text. This matches
     /// SQLite's behavior where `SELECT col FROM t` returns "col" as the column name
     /// (preserving the case from the query for display purposes).
+    ///
+    /// **Non-ASCII handling**: SQLite treats any byte >= 0x80 as an identifier
+    /// character (its `IdChar` macro), so identifiers like `tՑ` or `t1Ցam` are
+    /// valid. We match that by accepting any non-ASCII char as an identifier
+    /// continuation character. `advance()` steps by `char::len_utf8()`, so slice
+    /// boundaries always stay on UTF-8 char boundaries.
     pub(super) fn tokenize_identifier_or_keyword(&mut self) -> Result<Token, LexerError> {
         let start = self.position();
 
         while !self.is_eof() {
             let ch = self.current_char();
-            if ch.is_ascii_alphanumeric() || ch == '_' {
+            // Note: at EOF current_char() returns '\0' (ASCII), but the loop
+            // already guards with !self.is_eof(), so termination is unaffected.
+            if ch.is_ascii_alphanumeric() || ch == '_' || !ch.is_ascii() {
                 self.advance();
             } else {
                 break;
@@ -39,7 +47,12 @@ impl<'a> Lexer<'a> {
             for (i, b) in text.bytes().enumerate() {
                 upper_buf[i] = b.to_ascii_uppercase();
             }
-            // SAFETY: Converting ASCII to uppercase produces valid UTF-8.
+            // SAFETY: `to_ascii_uppercase` maps ASCII bytes to ASCII bytes and
+            // leaves non-ASCII bytes (>= 0x80) unchanged, so the buffer is a
+            // byte-for-byte copy of valid UTF-8 except for ASCII case changes,
+            // which preserves UTF-8 validity. (Keywords are all pure ASCII, so
+            // an identifier containing non-ASCII bytes can never falsely match
+            // a keyword.)
             let upper = unsafe { std::str::from_utf8_unchecked(&upper_buf[..text.len()]) };
 
             // Try keyword lookup first (case-insensitive)

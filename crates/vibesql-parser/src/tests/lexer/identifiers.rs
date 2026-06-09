@@ -32,6 +32,123 @@ fn test_tokenize_identifier_starting_with_underscore() {
 }
 
 // ============================================================================
+// Multi-byte UTF-8 Identifier Tests (issue #5236)
+//
+// SQLite treats any byte >= 0x80 as an identifier character (its IdChar
+// macro), so identifiers may contain arbitrary non-ASCII characters.
+// ============================================================================
+
+#[test]
+fn test_tokenize_multibyte_identifier_middle() {
+    // Fuzzer reproducer: `t1Ցam` used to panic on a non-char-boundary slice.
+    // It must lex as ONE identifier (matching SQLite), not split at `Ց`.
+    let mut lexer = Lexer::new("t1Ցam");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[0], Token::Identifier("t1Ցam".to_string()));
+    assert_eq!(tokens[1], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_multibyte_identifier_leading() {
+    // A leading multi-byte char starts an identifier
+    let mut lexer = Lexer::new("Ցam");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[0], Token::Identifier("Ցam".to_string()));
+    assert_eq!(tokens[1], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_multibyte_identifier_at_end_of_input() {
+    // Multi-byte char as the final bytes of input, no trailing whitespace
+    let mut lexer = Lexer::new("t1Ց");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[0], Token::Identifier("t1Ց".to_string()));
+    assert_eq!(tokens[1], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_identifier_with_4byte_utf8() {
+    // 4-byte UTF-8 sequence (U+1F600) inside an identifier
+    let mut lexer = Lexer::new("table😀x");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[0], Token::Identifier("table😀x".to_string()));
+    assert_eq!(tokens[1], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_mixed_ascii_multibyte_identifier() {
+    let mut lexer = Lexer::new("tableՑ_2");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[0], Token::Identifier("tableՑ_2".to_string()));
+    assert_eq!(tokens[1], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_multibyte_identifier_stack_buffer_path() {
+    // Exactly 32 bytes (16 x 2-byte chars): exercises the stack-buffer
+    // keyword-lookup path with non-ASCII bytes (must not corrupt UTF-8)
+    let ident = "Ց".repeat(16);
+    assert_eq!(ident.len(), 32);
+    let mut lexer = Lexer::new(&ident);
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[0], Token::Identifier(ident.clone()));
+}
+
+#[test]
+fn test_tokenize_long_multibyte_identifier_heap_fallback() {
+    // > 32 bytes: exercises the heap-allocation keyword-lookup fallback
+    let ident = format!("col_{}", "Ց".repeat(20)); // 4 + 40 = 44 bytes
+    let mut lexer = Lexer::new(&ident);
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[0], Token::Identifier(ident.clone()));
+}
+
+#[test]
+fn test_tokenize_select_with_multibyte_identifier() {
+    // Full fuzzer reproducer statement: must tokenize without panicking,
+    // with `t1Ցam` as a single identifier (SQLite reports
+    // "no such column: t1Ցam" — a semantic error, not a parse error)
+    let mut lexer = Lexer::new("SELECT t1Ցam;");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(
+        tokens[0],
+        Token::Keyword { keyword: Keyword::Select, original: "SELECT".to_string() }
+    );
+    assert_eq!(tokens[1], Token::Identifier("t1Ցam".to_string()));
+    assert_eq!(tokens[2], Token::Semicolon);
+}
+
+#[test]
+fn test_tokenize_create_table_with_multibyte_identifier() {
+    // `CREATE TABLE tՑ(x INT)` is valid in SQLite
+    let mut lexer = Lexer::new("CREATE TABLE tՑ(x INT)");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(
+        tokens[0],
+        Token::Keyword { keyword: Keyword::Create, original: "CREATE".to_string() }
+    );
+    assert_eq!(
+        tokens[1],
+        Token::Keyword { keyword: Keyword::Table, original: "TABLE".to_string() }
+    );
+    assert_eq!(tokens[2], Token::Identifier("tՑ".to_string()));
+    assert_eq!(tokens[3], Token::LParen);
+}
+
+#[test]
+fn test_keyword_matching_unchanged_for_ascii() {
+    // ASCII keyword recognition must be unaffected by non-ASCII support
+    let mut lexer = Lexer::new("select Select SELECT");
+    let tokens = lexer.tokenize().unwrap();
+    for (i, original) in ["select", "Select", "SELECT"].iter().enumerate() {
+        assert_eq!(
+            tokens[i],
+            Token::Keyword { keyword: Keyword::Select, original: original.to_string() }
+        );
+    }
+}
+
+// ============================================================================
 // Delimited Identifier Tests
 // ============================================================================
 
