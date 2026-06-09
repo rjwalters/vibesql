@@ -766,14 +766,29 @@ impl ExplainExecutor {
         // clause is passed through so the planner can pin leading index columns
         // and accept trailing ORDER BY columns that would otherwise be rejected
         // due to nullability.
+        //
+        // The entry is also suppressed when the statement-level ORDER BY is a
+        // structural prefix of (or equal to) the FIRST SELECT-list window's
+        // combined sort key. SQLite's window co-routine rewrite places the
+        // first window's sorting pass outermost, so its key is the final
+        // output order and the outer sort is satisfied without a second temp
+        // B-tree (verified against sqlite3 3.51.0). An empty key (`OVER ()`)
+        // never suppresses; extensions, direction/COLLATE mismatches, and
+        // matches against later windows do not suppress.
         if let Some(ref order_by) = stmt.order_by {
-            let needs_temp = Self::needs_temp_btree_for_order_by(
-                stmt.from.as_ref(),
-                stmt.where_clause.as_ref(),
-                order_by,
-                database,
-            );
-            root.needs_temp_btree_for_order_by = needs_temp;
+            let satisfied_by_window_sort =
+                Self::first_window_combined_key(stmt).is_some_and(|key| {
+                    !key.is_empty()
+                        && order_by.len() <= key.len()
+                        && key[..order_by.len()] == order_by[..]
+                });
+            root.needs_temp_btree_for_order_by = !satisfied_by_window_sort
+                && Self::needs_temp_btree_for_order_by(
+                    stmt.from.as_ref(),
+                    stmt.where_clause.as_ref(),
+                    order_by,
+                    database,
+                );
         }
 
         // Count window-function sorting passes for EQP output. SQLite emits
@@ -900,20 +915,7 @@ impl ExplainExecutor {
 
         let mut distinct_keys: Vec<Vec<vibesql_ast::OrderByItem>> = Vec::new();
         for spec in &specs {
-            // Combined sort key: PARTITION BY exprs (ASC) + window ORDER BY.
-            let mut key: Vec<vibesql_ast::OrderByItem> = Vec::new();
-            if let Some(partition_by) = &spec.partition_by {
-                for expr in partition_by {
-                    key.push(vibesql_ast::OrderByItem {
-                        expr: expr.clone(),
-                        direction: vibesql_ast::OrderDirection::Asc,
-                        nulls_order: None,
-                    });
-                }
-            }
-            if let Some(order_by) = &spec.order_by {
-                key.extend(order_by.iter().cloned());
-            }
+            let key = Self::window_combined_key(spec);
 
             // OVER () — no partitioning or ordering — needs no sort pass.
             if key.is_empty() {
@@ -936,6 +938,40 @@ impl ExplainExecutor {
                 )
             })
             .count()
+    }
+
+    /// Build the combined sort key for a window spec: PARTITION BY
+    /// expressions (treated as ASC with default null ordering) followed by
+    /// the window's ORDER BY items. `OVER ()` yields an empty key.
+    fn window_combined_key(spec: &vibesql_ast::WindowSpec) -> Vec<vibesql_ast::OrderByItem> {
+        let mut key: Vec<vibesql_ast::OrderByItem> = Vec::new();
+        if let Some(partition_by) = &spec.partition_by {
+            for expr in partition_by {
+                key.push(vibesql_ast::OrderByItem {
+                    expr: expr.clone(),
+                    direction: vibesql_ast::OrderDirection::Asc,
+                    nulls_order: None,
+                });
+            }
+        }
+        if let Some(order_by) = &spec.order_by {
+            key.extend(order_by.iter().cloned());
+        }
+        key
+    }
+
+    /// Combined sort key of the FIRST window function in the SELECT list, if
+    /// any. SELECT-list order is preserved by
+    /// `collect_resolved_window_specs`, and SQLite's co-routine rewrite makes
+    /// the first window's sorting pass the outermost one — its key is the
+    /// order of the final output.
+    fn first_window_combined_key(stmt: &SelectStmt) -> Option<Vec<vibesql_ast::OrderByItem>> {
+        let specs = crate::select::window::collect_resolved_window_specs(
+            &stmt.select_list,
+            stmt.window_definitions.as_ref(),
+        )
+        .ok()?;
+        specs.first().map(Self::window_combined_key)
     }
 
     /// Check if ORDER BY requires a temp B-tree (sorting pass) for EQP rendering.
