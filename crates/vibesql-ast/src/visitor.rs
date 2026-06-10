@@ -1107,6 +1107,17 @@ fn walk_delete<V: ExpressionVisitor>(visitor: &mut V, stmt: &DeleteStmt) {
     if let Some(offset) = &stmt.offset {
         walk_expression(visitor, offset);
     }
+    // Walk RETURNING expressions
+    if let Some(items) = &stmt.returning {
+        for item in items {
+            if let SelectItem::Expression { expr, .. } = item {
+                let result = walk_expression(visitor, expr);
+                if result.should_stop() {
+                    return;
+                }
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -1433,6 +1444,19 @@ pub fn transform_delete<V: ExpressionMutVisitor>(visitor: &mut V, stmt: DeleteSt
         }),
         limit: stmt.limit.map(|e| transform_expression(visitor, e)),
         offset: stmt.offset.map(|e| transform_expression(visitor, e)),
+        returning: stmt.returning.map(|items| {
+            items
+                .into_iter()
+                .map(|item| match item {
+                    SelectItem::Expression { expr, alias, source_text } => SelectItem::Expression {
+                        expr: transform_expression(visitor, expr),
+                        alias,
+                        source_text,
+                    },
+                    other => other,
+                })
+                .collect()
+        }),
     }
 }
 

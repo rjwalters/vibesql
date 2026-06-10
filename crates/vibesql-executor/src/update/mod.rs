@@ -29,7 +29,6 @@ mod fast_path;
 mod foreign_keys;
 mod from_clause;
 mod index_sync;
-mod returning;
 mod row_selector;
 mod triggers;
 mod value_updater;

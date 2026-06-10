@@ -181,6 +181,7 @@ fn bind_delete(stmt: &DeleteStmt, params: &[SqlValue]) -> DeleteStmt {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     }
 }
 

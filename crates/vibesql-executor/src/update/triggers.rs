@@ -103,7 +103,7 @@ pub(super) fn execute_update_on_view(
     // updated view row per trigger fire, not whatever the trigger body did).
     let returning = if let Some(items) = &stmt.returning {
         let new_rows: Vec<&Row> = updates.iter().map(|(_, new_row)| new_row).collect();
-        Some(super::returning::project_returning(
+        Some(crate::dml_returning::project_returning(
             items,
             &view_schema,
             database,

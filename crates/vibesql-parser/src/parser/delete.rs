@@ -117,6 +117,15 @@ impl Parser {
             None
         };
 
+        // Parse optional RETURNING clause (SQLite 3.35.0+)
+        // Syntax: DELETE FROM ... [WHERE ...] RETURNING expr [, expr ...]
+        let returning = if self.peek_keyword(Keyword::Returning) {
+            self.consume_keyword(Keyword::Returning)?;
+            Some(self.parse_select_list()?)
+        } else {
+            None
+        };
+
         // Expect semicolon or EOF
         if matches!(self.peek(), Token::Semicolon) {
             self.advance();
@@ -131,6 +140,7 @@ impl Parser {
             order_by,
             limit,
             offset,
+            returning,
         })
     }
 
@@ -250,6 +260,15 @@ impl Parser {
             None
         };
 
+        // Parse optional RETURNING clause (SQLite 3.35.0+)
+        // Syntax: DELETE FROM ... [WHERE ...] RETURNING expr [, expr ...]
+        let returning = if self.peek_keyword(Keyword::Returning) {
+            self.consume_keyword(Keyword::Returning)?;
+            Some(self.parse_select_list()?)
+        } else {
+            None
+        };
+
         // Expect semicolon or EOF
         if matches!(self.peek(), Token::Semicolon) {
             self.advance();
@@ -264,6 +283,7 @@ impl Parser {
             order_by,
             limit,
             offset,
+            returning,
         })
     }
 }

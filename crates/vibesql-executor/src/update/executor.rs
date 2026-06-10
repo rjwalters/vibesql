@@ -669,7 +669,7 @@ pub(super) fn execute_internal(
     // Project RETURNING items against the NEW rows (SQLite 3.35.0+).
     let returning = if let Some(items) = &stmt.returning {
         let new_rows: Vec<&Row> = updates.iter().map(|u| &u.new_row).collect();
-        Some(super::returning::project_returning(
+        Some(crate::dml_returning::project_returning(
             items,
             schema,
             database,
@@ -1603,7 +1603,7 @@ fn execute_update_from(
     // Project RETURNING items against the NEW rows (SQLite 3.35.0+).
     let returning = if let Some(items) = &stmt.returning {
         let new_rows: Vec<&Row> = updates.iter().map(|u| &u.new_row).collect();
-        Some(super::returning::project_returning(
+        Some(crate::dml_returning::project_returning(
             items,
             schema,
             database,
@@ -1628,7 +1628,13 @@ fn empty_returning(
     stmt.returning
         .as_ref()
         .map(|items| {
-            super::returning::project_returning(items, schema, database, stmt.alias.as_deref(), &[])
+            crate::dml_returning::project_returning(
+                items,
+                schema,
+                database,
+                stmt.alias.as_deref(),
+                &[],
+            )
         })
         .transpose()
 }

@@ -99,6 +99,14 @@ impl<'arena> ArenaParser<'arena> {
             None
         };
 
+        // Parse optional RETURNING clause (SQLite 3.35.0+)
+        // Syntax: DELETE FROM ... [WHERE ...] RETURNING expr [, expr ...]
+        let returning = if self.try_consume_keyword(Keyword::Returning) {
+            Some(self.parse_select_list()?)
+        } else {
+            None
+        };
+
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
 
@@ -111,6 +119,7 @@ impl<'arena> ArenaParser<'arena> {
             order_by,
             limit,
             offset,
+            returning,
         };
 
         Ok(self.arena.alloc(stmt))

@@ -22,6 +22,7 @@ fn test_delete_all_rows() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -52,6 +53,7 @@ fn test_delete_with_simple_where() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -93,6 +95,7 @@ fn test_delete_with_boolean_where() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -132,6 +135,7 @@ fn test_delete_multiple_rows() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();

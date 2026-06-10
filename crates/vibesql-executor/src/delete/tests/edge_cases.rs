@@ -21,6 +21,7 @@ fn test_delete_table_not_found() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     let result = DeleteExecutor::execute(&stmt, &mut db);
@@ -49,6 +50,7 @@ fn test_delete_no_matching_rows() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -80,6 +82,7 @@ fn test_delete_from_empty_table() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -108,6 +111,7 @@ fn test_delete_column_not_found() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     // Column validation happens upfront - should return NoSuchColumn error

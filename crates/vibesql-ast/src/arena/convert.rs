@@ -726,6 +726,10 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 .map(|v| v.iter().map(|item| self.convert_order_by_item(item)).collect()),
             limit: stmt.limit.as_ref().map(|e| self.convert_expression(e)),
             offset: stmt.offset.as_ref().map(|e| self.convert_expression(e)),
+            returning: stmt
+                .returning
+                .as_ref()
+                .map(|items| items.iter().map(|item| self.convert_select_item(item)).collect()),
         }
     }
 }
