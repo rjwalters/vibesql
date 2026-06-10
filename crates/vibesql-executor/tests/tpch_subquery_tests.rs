@@ -24,14 +24,28 @@ use tpch::{queries::*, schema::load_vibesql};
 
 /// Helper to execute a TPC-H query and return row count
 fn execute_tpch_query(db: &Database, sql: &str) -> Result<usize, String> {
+    execute_tpch_query_rows(db, sql).map(|rows| rows.len())
+}
+
+/// Helper to execute a TPC-H query and return the result rows
+fn execute_tpch_query_rows(db: &Database, sql: &str) -> Result<Vec<vibesql_storage::Row>, String> {
     let stmt = Parser::parse_sql(sql).map_err(|e| format!("Parse error: {:?}", e))?;
 
     if let vibesql_ast::Statement::Select(select) = stmt {
         let executor = SelectExecutor::new(db);
-        let result = executor.execute(&select).map_err(|e| format!("Execution error: {:?}", e))?;
-        Ok(result.len())
+        executor.execute(&select).map_err(|e| format!("Execution error: {:?}", e))
     } else {
         Err("Not a SELECT statement".to_string())
+    }
+}
+
+/// Extract a string value from a row column
+fn string_value(value: &vibesql_types::SqlValue) -> String {
+    match value {
+        vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+            s.as_str().to_string()
+        }
+        other => panic!("Expected string value, got {:?}", other),
     }
 }
 
@@ -115,22 +129,81 @@ fn test_q20_nested_in_subqueries() {
     // Tests nested IN subqueries with correlated scalar subquery
     // Pattern: IN with nested IN, plus correlated scalar subquery
     // Performance: Fast (~3s on SF 0.01) with semi-join optimization (#2405, #2475)
+    //
+    // Issue #5274: the scalar-comparison decorrelation rewrote
+    // `ps_availqty > (SELECT 0.5*SUM(l_quantity) ...)` as
+    // `ps_availqty > COALESCE(__scalar_agg, 0)`, turning empty-group NULL
+    // (row must be excluded) into 0 (row always passes), so Q20 returned 4
+    // suppliers instead of 1. Expected values below were computed by running
+    // the identical deterministic SF 0.01 dataset (ChaCha8 seed 42, via
+    // vibesql_bench_common::tpch::schema::load_sqlite) through SQLite.
 
     let db = load_vibesql(0.01);
 
-    let result = execute_tpch_query(&db, TPCH_Q20);
+    let rows = execute_tpch_query_rows(&db, TPCH_Q20).expect("Q20 should execute");
+    println!("Q20 executed successfully: {} rows", rows.len());
 
-    match result {
-        Ok(count) => {
-            println!("Q20 executed successfully: {} rows", count);
-            // Q20 may return 0 rows on small dataset if no suppliers meet criteria
-            // Just verify it doesn't crash
-            println!("Q20 completed without errors (row count: {})", count);
-        }
-        Err(e) => {
-            panic!("Q20 failed to execute: {}", e);
-        }
-    }
+    // SQLite ground truth on this exact dataset: exactly 1 supplier
+    assert_eq!(
+        rows.len(),
+        1,
+        "Q20 must return exactly 1 row (SQLite-validated). Extra rows indicate \
+         empty-group NULL thresholds incorrectly passing the > comparison (issue #5274)"
+    );
+    assert_eq!(string_value(&rows[0].values[0]), "Supplier#000000029", "Q20 s_name mismatch");
+    assert_eq!(
+        string_value(&rows[0].values[1]),
+        "cnGWR5ROtq0v0HwBFsXzIA0BEnfgkFqjLXWVBB",
+        "Q20 s_address mismatch"
+    );
+}
+
+#[test]
+fn test_q20_scalar_comparison_null_semantics() {
+    // Issue #5274: directly exercise the decorrelated correlated-SUM threshold
+    // comparison from Q20 in both directions. Counts are SQLite ground truth
+    // on the identical deterministic SF 0.01 dataset.
+
+    let db = load_vibesql(0.01);
+
+    // `>` direction: rows whose 1994 lineitem window is empty produce a NULL
+    // threshold and must be excluded. With the buggy COALESCE(.., 0) rewrite
+    // this returned every partsupp row with ps_availqty > 0 instead.
+    let gt_count = execute_tpch_query(
+        &db,
+        r#"
+        SELECT ps_partkey FROM partsupp
+        WHERE ps_availqty > (
+            SELECT 0.5 * SUM(l_quantity)
+            FROM lineitem
+            WHERE l_partkey = ps_partkey
+                AND l_suppkey = ps_suppkey
+                AND l_shipdate >= '1994-01-01'
+                AND l_shipdate < '1995-01-01'
+        )
+    "#,
+    )
+    .expect("> comparison should execute");
+    assert_eq!(gt_count, 1966, "ps_availqty > (corr SUM) must match SQLite (1966 rows)");
+
+    // `<` direction: NULL thresholds are excluded either way, so this count
+    // was already correct before the fix and must stay correct.
+    let lt_count = execute_tpch_query(
+        &db,
+        r#"
+        SELECT ps_partkey FROM partsupp
+        WHERE ps_availqty < (
+            SELECT 0.5 * SUM(l_quantity)
+            FROM lineitem
+            WHERE l_partkey = ps_partkey
+                AND l_suppkey = ps_suppkey
+                AND l_shipdate >= '1994-01-01'
+                AND l_shipdate < '1995-01-01'
+        )
+    "#,
+    )
+    .expect("< comparison should execute");
+    assert_eq!(lt_count, 13, "ps_availqty < (corr SUM) must match SQLite (13 rows)");
 }
 
 #[test]

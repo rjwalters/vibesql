@@ -30,8 +30,25 @@
 //!     GROUP BY l_partkey, l_suppkey
 //! ) AS __scalar_subq ON ps_partkey = __scalar_subq.l_partkey
 //!                    AND ps_suppkey = __scalar_subq.l_suppkey
-//! WHERE ps_availqty > COALESCE(__scalar_subq.__scalar_agg, 0)
+//! WHERE ps_availqty > __scalar_subq.__scalar_agg
 //! ```
+//!
+//! ## NULL Semantics for Empty Groups
+//!
+//! When the correlated subquery matches no rows, a scalar aggregate like
+//! `SUM`/`AVG`/`MIN`/`MAX` evaluates to NULL, so the comparison is NULL and the
+//! outer row is excluded. The LEFT JOIN reproduces this: missing groups yield a
+//! NULL `__scalar_agg`, and the comparison stays NULL. We must NOT wrap the
+//! column in `COALESCE(.., 0)` — doing so would turn `x > NULL` (row excluded)
+//! into `x > 0` (row usually included), which produced wrong results for
+//! TPC-H Q20 (issue #5274).
+//!
+//! The one exception is a bare `COUNT(...)` (or SQLite's `TOTAL`), which
+//! evaluates to 0 (not NULL) over an empty group. For those we keep
+//! `COALESCE(__scalar_agg, 0)`. If COUNT/TOTAL appears nested inside a larger
+//! expression (e.g. `COUNT(*) + 5`), neither NULL nor 0 is the correct
+//! empty-group value, so we skip the transformation entirely and fall back to
+//! per-row correlated execution.
 //!
 //! ## Why This Is Faster
 //!
@@ -60,7 +77,8 @@ static SCALAR_SUBQ_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub(super) struct ScalarComparisonResult {
     /// The new FROM clause with the LEFT JOIN
     pub from: FromClause,
-    /// The replacement expression (using COALESCE on the derived column)
+    /// The replacement expression comparing against the derived aggregate
+    /// column (wrapped in COALESCE(.., 0) only for bare COUNT/TOTAL)
     pub replacement_expr: Expression,
 }
 
@@ -137,6 +155,19 @@ pub(super) fn try_convert_scalar_comparison_to_join(
 
     if verbose {
         eprintln!("[SCALAR_COMPARISON] Expression contains aggregate function");
+    }
+
+    // Determine how the aggregate behaves over an empty group, so the
+    // replacement predicate preserves scalar-subquery NULL semantics.
+    let empty_group_behavior = classify_empty_group_behavior(&agg_expr);
+    if matches!(empty_group_behavior, EmptyGroupBehavior::Unsupported) {
+        if verbose {
+            eprintln!(
+                "[SCALAR_COMPARISON] COUNT/TOTAL nested in expression - cannot represent \
+                 empty-group value after LEFT JOIN, skipping"
+            );
+        }
+        return None;
     }
 
     // Skip if subquery has LIMIT, OFFSET, GROUP BY, HAVING, or set operations
@@ -307,22 +338,30 @@ pub(super) fn try_convert_scalar_comparison_to_join(
         alias: None,
     };
 
-    // Create the replacement expression: left op COALESCE(alias.__scalar_agg, 0)
+    // Create the replacement expression: left op alias.__scalar_agg
     let agg_ref =
         Expression::ColumnRef(ColumnIdentifier::qualified(&alias, false, &agg_column_name, false));
 
-    // Use COALESCE to handle NULL when there's no matching row
-    // For comparisons like >, >=, we use 0 as default (conservative)
-    let coalesced = Expression::Function {
-        name: FunctionIdentifier::new("COALESCE"),
-        args: vec![agg_ref, Expression::Literal(SqlValue::Integer(0))],
-        character_unit: None,
+    // For NULL-on-empty aggregates (SUM/AVG/MIN/MAX/...), compare directly:
+    // a missing LEFT JOIN match yields NULL, the comparison evaluates to NULL,
+    // and the row is excluded — matching correlated scalar subquery semantics.
+    // Only a bare COUNT/TOTAL evaluates to 0 over an empty group, so only then
+    // do we substitute 0 for the missing match via COALESCE.
+    let comparison_rhs = match empty_group_behavior {
+        EmptyGroupBehavior::PropagateNull => agg_ref,
+        EmptyGroupBehavior::DefaultZero => Expression::Function {
+            name: FunctionIdentifier::new("COALESCE"),
+            args: vec![agg_ref, Expression::Literal(SqlValue::Integer(0))],
+            character_unit: None,
+        },
+        // Rejected earlier in this function
+        EmptyGroupBehavior::Unsupported => unreachable!(),
     };
 
     let replacement_expr = Expression::BinaryOp {
         op: op.clone(),
         left: Box::new(left.clone()),
-        right: Box::new(coalesced),
+        right: Box::new(comparison_rhs),
     };
 
     if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
@@ -360,6 +399,77 @@ fn contains_aggregate(expr: &Expression) -> bool {
                     w.conditions.iter().any(contains_aggregate) || contains_aggregate(&w.result)
                 })
                 || else_result.as_ref().map(|e| contains_aggregate(e)).unwrap_or(false)
+        }
+        _ => false,
+    }
+}
+
+/// How the subquery's SELECT expression behaves when the correlated group is
+/// empty (i.e., the LEFT JOIN finds no matching derived-table row).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmptyGroupBehavior {
+    /// Aggregate yields NULL over an empty group (SUM/AVG/MIN/MAX/...),
+    /// including when nested in a larger expression (e.g. `0.5 * SUM(x)`,
+    /// which is NULL when SUM(x) is NULL). Compare directly against the
+    /// joined column so NULL propagates and excludes the row.
+    PropagateNull,
+    /// Bare COUNT/TOTAL yields 0 (not NULL) over an empty group, so the
+    /// missing LEFT JOIN match must be defaulted with COALESCE(.., 0).
+    DefaultZero,
+    /// COUNT/TOTAL nested inside a larger expression (e.g. `COUNT(*) + 5`):
+    /// neither NULL nor 0 is the correct empty-group value, so the
+    /// transformation must be skipped.
+    Unsupported,
+}
+
+/// Classify how an aggregate SELECT expression behaves over an empty group
+fn classify_empty_group_behavior(expr: &Expression) -> EmptyGroupBehavior {
+    if is_bare_zero_on_empty_aggregate(expr) {
+        EmptyGroupBehavior::DefaultZero
+    } else if contains_zero_on_empty_aggregate(expr) {
+        EmptyGroupBehavior::Unsupported
+    } else {
+        EmptyGroupBehavior::PropagateNull
+    }
+}
+
+/// Check if a function name is an aggregate that returns 0 (not NULL) over an
+/// empty group: COUNT and SQLite's TOTAL
+fn is_zero_on_empty_name(name: &FunctionIdentifier) -> bool {
+    matches!(name.canonical().to_uppercase().as_str(), "COUNT" | "TOTAL")
+}
+
+/// Check if the expression IS (at the top level) a bare COUNT/TOTAL call
+fn is_bare_zero_on_empty_aggregate(expr: &Expression) -> bool {
+    match expr {
+        Expression::AggregateFunction { name, .. } => is_zero_on_empty_name(name),
+        Expression::Function { name, .. } => is_zero_on_empty_name(name),
+        _ => false,
+    }
+}
+
+/// Check if the expression CONTAINS a COUNT/TOTAL call anywhere
+fn contains_zero_on_empty_aggregate(expr: &Expression) -> bool {
+    match expr {
+        Expression::AggregateFunction { name, .. } => is_zero_on_empty_name(name),
+        Expression::Function { name, args, .. } => {
+            is_zero_on_empty_name(name) || args.iter().any(contains_zero_on_empty_aggregate)
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            contains_zero_on_empty_aggregate(left) || contains_zero_on_empty_aggregate(right)
+        }
+        Expression::UnaryOp { expr, .. } => contains_zero_on_empty_aggregate(expr),
+        Expression::Cast { expr, .. } => contains_zero_on_empty_aggregate(expr),
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().map(|o| contains_zero_on_empty_aggregate(o)).unwrap_or(false)
+                || when_clauses.iter().any(|w| {
+                    w.conditions.iter().any(contains_zero_on_empty_aggregate)
+                        || contains_zero_on_empty_aggregate(&w.result)
+                })
+                || else_result
+                    .as_ref()
+                    .map(|e| contains_zero_on_empty_aggregate(e))
+                    .unwrap_or(false)
         }
         _ => false,
     }
@@ -610,6 +720,192 @@ fn build_join_condition(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vibesql_ast::SelectItem;
+
+    /// Build a Q20-style correlated scalar subquery:
+    /// SELECT <select_expr> FROM lineitem WHERE l_partkey = ps_partkey
+    fn correlated_lineitem_subquery(select_expr: Expression) -> SelectStmt {
+        SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Expression {
+                expr: select_expr,
+                alias: None,
+                source_text: None,
+            }],
+            into_table: None,
+            into_variables: None,
+            from: Some(FromClause::Table {
+                index_hint: None,
+                name: "lineitem".to_string(),
+                alias: None,
+                column_aliases: None,
+                quoted: false,
+            }),
+            where_clause: Some(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("l_partkey", false))),
+                right: Box::new(Expression::ColumnRef(ColumnIdentifier::simple(
+                    "ps_partkey",
+                    false,
+                ))),
+            }),
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: None,
+        }
+    }
+
+    /// Run the transform for: ps_availqty > (SELECT <select_expr> FROM lineitem
+    /// WHERE l_partkey = ps_partkey), against outer table partsupp
+    fn transform_with_select_expr(select_expr: Expression) -> Option<ScalarComparisonResult> {
+        let from = FromClause::Table {
+            index_hint: None,
+            name: "partsupp".to_string(),
+            alias: None,
+            column_aliases: None,
+            quoted: false,
+        };
+        let left = Expression::ColumnRef(ColumnIdentifier::simple("ps_availqty", false));
+        let right = Expression::ScalarSubquery(Box::new(correlated_lineitem_subquery(select_expr)));
+        try_convert_scalar_comparison_to_join(&from, &BinaryOperator::GreaterThan, &left, &right)
+    }
+
+    fn sum_quantity() -> Expression {
+        Expression::AggregateFunction {
+            name: FunctionIdentifier::new("SUM"),
+            distinct: false,
+            args: vec![Expression::ColumnRef(ColumnIdentifier::simple("l_quantity", false))],
+            order_by: None,
+            filter: None,
+        }
+    }
+
+    fn count_star() -> Expression {
+        Expression::AggregateFunction {
+            name: FunctionIdentifier::new("COUNT"),
+            distinct: false,
+            args: vec![Expression::Wildcard],
+            order_by: None,
+            filter: None,
+        }
+    }
+
+    /// Extract the right-hand side of the replacement comparison expression
+    fn replacement_rhs(result: &ScalarComparisonResult) -> &Expression {
+        match &result.replacement_expr {
+            Expression::BinaryOp { right, .. } => right.as_ref(),
+            other => panic!("Expected BinaryOp replacement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_sum_comparison_has_no_coalesce() {
+        // x > (SELECT SUM(...) correlated): SUM over an empty group is NULL,
+        // so the comparison must reference the joined column directly —
+        // COALESCE(.., 0) would wrongly include rows with no matching group
+        // (TPC-H Q20 bug, issue #5274)
+        let result = transform_with_select_expr(sum_quantity()).expect("transform should apply");
+        match replacement_rhs(&result) {
+            Expression::ColumnRef(col) => {
+                assert_eq!(col.column_canonical(), "__scalar_agg");
+            }
+            other => panic!("Expected bare column ref (no COALESCE), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_sum_in_expression_has_no_coalesce() {
+        // x > (SELECT 0.5 * SUM(...) correlated): NULL propagates through the
+        // multiplication, so no COALESCE either (exact TPC-H Q20 shape)
+        let half_sum = Expression::BinaryOp {
+            op: BinaryOperator::Multiply,
+            left: Box::new(Expression::Literal(SqlValue::Float(0.5))),
+            right: Box::new(sum_quantity()),
+        };
+        let result = transform_with_select_expr(half_sum).expect("transform should apply");
+        match replacement_rhs(&result) {
+            Expression::ColumnRef(col) => {
+                assert_eq!(col.column_canonical(), "__scalar_agg");
+            }
+            other => panic!("Expected bare column ref (no COALESCE), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_bare_count_comparison_keeps_coalesce_zero() {
+        // x > (SELECT COUNT(*) correlated): COUNT over an empty group is 0,
+        // so the missing LEFT JOIN match must default to 0 via COALESCE
+        let result = transform_with_select_expr(count_star()).expect("transform should apply");
+        match replacement_rhs(&result) {
+            Expression::Function { name, args, .. } => {
+                assert_eq!(name.canonical().to_uppercase(), "COALESCE");
+                assert_eq!(args.len(), 2);
+                assert!(
+                    matches!(&args[1], Expression::Literal(SqlValue::Integer(0))),
+                    "COALESCE default must be 0, got {:?}",
+                    args[1]
+                );
+            }
+            other => panic!("Expected COALESCE(.., 0), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_count_in_expression_skips_transformation() {
+        // x > (SELECT COUNT(*) + 5 correlated): the empty-group value is 5
+        // (neither NULL nor 0), which the LEFT JOIN cannot represent — must
+        // bail out and fall back to per-row correlated execution
+        let count_plus_five = Expression::BinaryOp {
+            op: BinaryOperator::Plus,
+            left: Box::new(count_star()),
+            right: Box::new(Expression::Literal(SqlValue::Integer(5))),
+        };
+        assert!(
+            transform_with_select_expr(count_plus_five).is_none(),
+            "COUNT nested in expression must skip the transformation"
+        );
+    }
+
+    #[test]
+    fn test_classify_empty_group_behavior() {
+        // Bare COUNT/TOTAL → DefaultZero
+        assert_eq!(classify_empty_group_behavior(&count_star()), EmptyGroupBehavior::DefaultZero);
+        let total = Expression::Function {
+            name: FunctionIdentifier::new("TOTAL"),
+            args: vec![Expression::ColumnRef(ColumnIdentifier::simple("qty", false))],
+            character_unit: None,
+        };
+        assert_eq!(classify_empty_group_behavior(&total), EmptyGroupBehavior::DefaultZero);
+
+        // SUM (bare or nested) → PropagateNull
+        assert_eq!(
+            classify_empty_group_behavior(&sum_quantity()),
+            EmptyGroupBehavior::PropagateNull
+        );
+        let half_sum = Expression::BinaryOp {
+            op: BinaryOperator::Multiply,
+            left: Box::new(Expression::Literal(SqlValue::Float(0.5))),
+            right: Box::new(sum_quantity()),
+        };
+        assert_eq!(classify_empty_group_behavior(&half_sum), EmptyGroupBehavior::PropagateNull);
+
+        // COUNT nested in expression → Unsupported
+        let count_plus_five = Expression::BinaryOp {
+            op: BinaryOperator::Plus,
+            left: Box::new(count_star()),
+            right: Box::new(Expression::Literal(SqlValue::Integer(5))),
+        };
+        assert_eq!(
+            classify_empty_group_behavior(&count_plus_five),
+            EmptyGroupBehavior::Unsupported
+        );
+    }
 
     #[test]
     fn test_contains_aggregate() {
