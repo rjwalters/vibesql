@@ -83,7 +83,7 @@ impl Parser {
             // Parse VALUES using the full statement parser to handle compound operators
             // allow_order_limit=false: INSERT VALUES doesn't support ORDER BY/LIMIT
             // validate_end_tokens=false: INSERT has additional tokens after VALUES
-            let values_stmt = self.parse_values_statement_internal(false, false)?;
+            let values_stmt = self.parse_values_statement_internal(false, false, true)?;
 
             // If there's a set operation (UNION/INTERSECT/EXCEPT), use Select source
             // Otherwise, extract the values directly for the Values source
@@ -103,7 +103,7 @@ impl Parser {
             }
         } else if self.peek_keyword(Keyword::Select) || self.peek_keyword(Keyword::With) {
             // Parse SELECT
-            let select_stmt = self.parse_select_statement()?;
+            let select_stmt = self.parse_dml_source_select_statement()?;
             vibesql_ast::InsertSource::Select(Box::new(select_stmt))
         } else {
             return Err(ParseError {
@@ -226,7 +226,7 @@ impl Parser {
             vibesql_ast::InsertSource::DefaultValues
         } else if self.peek_keyword(Keyword::Values) {
             // Parse VALUES using the full statement parser to handle compound operators
-            let values_stmt = self.parse_values_statement_internal(false, false)?;
+            let values_stmt = self.parse_values_statement_internal(false, false, true)?;
 
             // If there's a set operation (UNION/INTERSECT/EXCEPT), use Select source
             if values_stmt.set_operation.is_some() {
@@ -243,7 +243,7 @@ impl Parser {
             }
         } else if self.peek_keyword(Keyword::Select) {
             // Parse SELECT without consuming WITH (already parsed)
-            let select_stmt = self.parse_select_statement()?;
+            let select_stmt = self.parse_dml_source_select_statement()?;
             vibesql_ast::InsertSource::Select(Box::new(select_stmt))
         } else {
             return Err(ParseError {
@@ -336,7 +336,7 @@ impl Parser {
             vibesql_ast::InsertSource::DefaultValues
         } else if self.peek_keyword(Keyword::Values) {
             // Parse VALUES using the full statement parser to handle compound operators
-            let values_stmt = self.parse_values_statement_internal(false, false)?;
+            let values_stmt = self.parse_values_statement_internal(false, false, true)?;
 
             // If there's a set operation (UNION/INTERSECT/EXCEPT), use Select source
             if values_stmt.set_operation.is_some() {
@@ -352,7 +352,7 @@ impl Parser {
                 }
             }
         } else if self.peek_keyword(Keyword::Select) || self.peek_keyword(Keyword::With) {
-            let select_stmt = self.parse_select_statement()?;
+            let select_stmt = self.parse_dml_source_select_statement()?;
             vibesql_ast::InsertSource::Select(Box::new(select_stmt))
         } else {
             return Err(ParseError {

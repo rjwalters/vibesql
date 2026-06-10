@@ -362,3 +362,49 @@ fn test_parse_insert_without_returning_is_none() {
         _ => panic!("Expected INSERT statement"),
     }
 }
+
+#[test]
+fn test_parse_insert_select_returning() {
+    // The RETURNING keyword terminates the embedded SELECT source and belongs
+    // to the outer INSERT (issue #5263); this must keep working after the
+    // bare-SELECT RETURNING fix (issue #5271).
+    let result = Parser::parse_sql("INSERT INTO t1 SELECT a FROM t2 RETURNING a;");
+    assert!(result.is_ok(), "INSERT ... SELECT ... RETURNING should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => {
+            assert!(matches!(insert.source, vibesql_ast::InsertSource::Select(_)));
+            let returning = insert.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 1);
+        }
+        _ => panic!("Expected INSERT statement"),
+    }
+}
+
+#[test]
+fn test_parse_insert_compound_select_returning() {
+    // RETURNING after a compound SELECT source: the keyword follows the right
+    // side of the set operation, so the allow_returning flag must propagate
+    // through nested set-operation parsing (issue #5271).
+    let result = Parser::parse_sql("INSERT INTO t1 SELECT 1 UNION SELECT 2 RETURNING a;");
+    assert!(result.is_ok(), "compound SELECT source + RETURNING should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => {
+            let returning = insert.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 1);
+        }
+        _ => panic!("Expected INSERT statement"),
+    }
+}
+
+#[test]
+fn test_parse_insert_compound_values_returning() {
+    let result = Parser::parse_sql("INSERT INTO t1 VALUES (1) UNION VALUES (2) RETURNING a;");
+    assert!(result.is_ok(), "compound VALUES source + RETURNING should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => {
+            let returning = insert.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 1);
+        }
+        _ => panic!("Expected INSERT statement"),
+    }
+}
