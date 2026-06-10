@@ -28,8 +28,10 @@ serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
 serde_json = "1.0"
 
-# Enable wasm_js backend for getrandom 0.3.x (required by rand, uuid, ahash, etc.)
+# Enable wasm_js backend on BOTH getrandom major versions in the tree:
+# 0.4.x is used by rand 0.10; 0.3.x is pulled by ahash 0.8.12 (via arrow 58)
 getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 
 # Optional i18n support
 vibesql-l10n = { version = "0.1.4", path = "../vibesql-l10n", optional = true }
