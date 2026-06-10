@@ -259,6 +259,7 @@ fn test_not_in_delete_where() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     let deleted_count = delete::DeleteExecutor::execute(&stmt, &mut db).unwrap();

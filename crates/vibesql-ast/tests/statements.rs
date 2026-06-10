@@ -88,6 +88,7 @@ fn test_create_delete_statement() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     });
 
     match stmt {

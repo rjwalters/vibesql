@@ -230,6 +230,7 @@ mod in_subquery {
             order_by: None,
             limit: None,
             offset: None,
+            returning: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -301,6 +302,7 @@ mod in_subquery {
             order_by: None,
             limit: None,
             offset: None,
+            returning: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -383,6 +385,7 @@ mod scalar_subquery {
             order_by: None,
             limit: None,
             offset: None,
+            returning: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -467,6 +470,7 @@ mod scalar_subquery {
             order_by: None,
             limit: None,
             offset: None,
+            returning: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -542,6 +546,7 @@ mod scalar_subquery {
             order_by: None,
             limit: None,
             offset: None,
+            returning: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -616,6 +621,7 @@ mod empty_subquery {
             order_by: None,
             limit: None,
             offset: None,
+            returning: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -707,6 +713,7 @@ mod complex_subquery {
             order_by: None,
             limit: None,
             offset: None,
+            returning: None,
         };
 
         let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();

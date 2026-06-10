@@ -88,12 +88,27 @@ impl DeleteExecutor {
     ///     order_by: None,
     ///     limit: None,
     ///     offset: None,
+    ///     returning: None,
     /// };
     ///
     /// let count = DeleteExecutor::execute(&stmt, &mut db).unwrap();
     /// assert_eq!(count, 1);
     /// ```
     pub fn execute(stmt: &DeleteStmt, database: &mut Database) -> Result<usize, ExecutorError> {
+        Self::execute_internal(stmt, database, None, None).map(|(count, _)| count)
+    }
+
+    /// Execute a DELETE statement, capturing RETURNING rows (SQLite 3.35.0+)
+    ///
+    /// Returns the number of deleted rows plus, when the statement carries a
+    /// RETURNING clause, the projected OLD rows (values before deletion) —
+    /// one per deleted row, or one per INSTEAD OF trigger fire for views.
+    ///
+    /// When the statement has no RETURNING clause the second element is `None`.
+    pub fn execute_returning(
+        stmt: &DeleteStmt,
+        database: &mut Database,
+    ) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
         Self::execute_internal(stmt, database, None, None)
     }
 
@@ -105,6 +120,7 @@ impl DeleteExecutor {
         procedural_context: &crate::procedural::ExecutionContext,
     ) -> Result<usize, ExecutorError> {
         Self::execute_internal(stmt, database, Some(procedural_context), None)
+            .map(|(count, _)| count)
     }
 
     /// Execute a DELETE statement with trigger context
@@ -114,7 +130,7 @@ impl DeleteExecutor {
         database: &mut Database,
         trigger_context: &crate::trigger_execution::TriggerContext,
     ) -> Result<usize, ExecutorError> {
-        Self::execute_internal(stmt, database, None, Some(trigger_context))
+        Self::execute_internal(stmt, database, None, Some(trigger_context)).map(|(count, _)| count)
     }
 
     /// Internal implementation supporting procedural context and trigger context
@@ -123,7 +139,7 @@ impl DeleteExecutor {
         database: &mut Database,
         procedural_context: Option<&crate::procedural::ExecutionContext>,
         trigger_context: Option<&crate::trigger_execution::TriggerContext>,
-    ) -> Result<usize, ExecutorError> {
+    ) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
         // Note: stmt.only is currently ignored (treated as false)
         // ONLY keyword is used in table inheritance to exclude derived tables.
         // Since table inheritance is not yet implemented, we treat all deletes the same.
@@ -166,13 +182,15 @@ impl DeleteExecutor {
 
         // Fast path: DELETE FROM table (no WHERE clause)
         // Use TRUNCATE-style optimization for 100-1000x performance improvement
-        // Only use truncate if there's no ORDER BY or LIMIT (which would restrict which rows to delete)
+        // Only use truncate if there's no ORDER BY or LIMIT (which would restrict which rows to
+        // delete). RETURNING needs the standard scan path so the OLD rows can be captured.
         if stmt.where_clause.is_none()
             && stmt.order_by.is_none()
             && stmt.limit.is_none()
+            && stmt.returning.is_none()
             && can_use_truncate(database, &stmt.table_name)?
         {
-            return execute_truncate(database, &stmt.table_name);
+            return execute_truncate(database, &stmt.table_name).map(|count| (count, None));
         }
 
         // Step 1: Get schema (clone to avoid borrow issues)
@@ -188,7 +206,8 @@ impl DeleteExecutor {
 
         // Fast path: Single-row PK delete without triggers/FKs
         // This avoids ExpressionEvaluator creation and row cloning
-        if procedural_context.is_none() && trigger_context.is_none() {
+        // RETURNING needs the standard path so the OLD row can be captured
+        if procedural_context.is_none() && trigger_context.is_none() && stmt.returning.is_none() {
             if let Some(vibesql_ast::WhereClause::Condition(where_expr)) = &stmt.where_clause {
                 if let Some(pk_values) = Self::extract_primary_key_lookup(where_expr, &schema) {
                     // Coerce extracted WHERE-clause literals to match the PK
@@ -252,7 +271,7 @@ impl DeleteExecutor {
                                 crate::advanced_objects::AssertionChecker::check_all_assertions(
                                     database,
                                 )?;
-                                return Ok(count);
+                                return Ok((count, None));
                             }
                             Err(_) => {
                                 // Fall through to standard path on error
@@ -571,7 +590,21 @@ impl DeleteExecutor {
         // This ensures database-wide integrity constraints are maintained
         crate::advanced_objects::AssertionChecker::check_all_assertions(database)?;
 
-        Ok(delete_result.deleted_count)
+        // Project RETURNING items against the OLD rows (SQLite 3.35.0+).
+        // Rows are projected in collection order (ORDER BY/LIMIT already
+        // applied); zero deleted rows yields an empty result whose column
+        // names are still derived from the RETURNING items.
+        let returning = if let Some(items) = &stmt.returning {
+            let old_rows: Vec<&vibesql_storage::Row> =
+                rows_and_indices_to_delete.iter().map(|(_, row)| row).collect();
+            Some(crate::dml_returning::project_returning(
+                items, &schema, database, None, &old_rows,
+            )?)
+        } else {
+            None
+        };
+
+        Ok((delete_result.deleted_count, returning))
     }
 
     /// Extract primary key value from WHERE expression if it's a simple equality
@@ -930,7 +963,7 @@ fn execute_delete_on_view(
     view_def: &vibesql_catalog::ViewDefinition,
     procedural_context: Option<&crate::procedural::ExecutionContext>,
     trigger_context: Option<&crate::trigger_execution::TriggerContext>,
-) -> Result<usize, ExecutorError> {
+) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
     use vibesql_ast::TriggerTiming;
 
     // Find INSTEAD OF DELETE triggers for this view
@@ -993,13 +1026,29 @@ fn execute_delete_on_view(
 
     // Now fire triggers (database can be mutably borrowed)
     let rows_processed = rows_to_delete.len();
-    for old_row in rows_to_delete {
+    for old_row in &rows_to_delete {
         for trigger in &triggers {
-            crate::TriggerFirer::execute_trigger(database, trigger, Some(&old_row), None)?;
+            crate::TriggerFirer::execute_trigger(database, trigger, Some(old_row), None)?;
         }
     }
 
-    Ok(rows_processed)
+    // Project RETURNING items against the OLD view rows (SQLite 3.35.0+):
+    // the OLD view row is returned once per trigger fire, regardless of
+    // what the trigger body actually does.
+    let returning = if let Some(items) = &stmt.returning {
+        let old_rows: Vec<&vibesql_storage::Row> = rows_to_delete.iter().collect();
+        Some(crate::dml_returning::project_returning(
+            items,
+            &view_schema,
+            database,
+            None,
+            &old_rows,
+        )?)
+    } else {
+        None
+    };
+
+    Ok((rows_processed, returning))
 }
 
 /// Build a pseudo TableSchema from a view definition
@@ -1015,16 +1064,17 @@ fn build_view_schema(
     let column_names: Vec<String> =
         if let Some(ref cols) = view_def.columns { cols.clone() } else { result.columns.clone() };
 
-    // Build columns with a generic data type (we just need names for trigger binding)
+    // Build columns with NONE affinity (DataType::Null), mirroring the
+    // UPDATE-on-view pseudo-schema (#5233/#5260). The pseudo-schema mainly
+    // provides column names for trigger binding, but its data types feed
+    // SQLite affinity rules during WHERE evaluation: declaring the columns
+    // as Varchar gave them TEXT affinity, which converted numeric literals
+    // to text and made comparisons like `WHERE b=4` never match. NONE
+    // affinity compares values by their actual types, matching bare
+    // (undeclared) columns in SQLite.
     let columns: Vec<vibesql_catalog::ColumnSchema> = column_names
         .into_iter()
-        .map(|name| {
-            vibesql_catalog::ColumnSchema::new(
-                name,
-                vibesql_types::DataType::Varchar { max_length: None },
-                true,
-            )
-        })
+        .map(|name| vibesql_catalog::ColumnSchema::new(name, vibesql_types::DataType::Null, true))
         .collect();
 
     Ok(vibesql_catalog::TableSchema::new(view_def.name.clone(), columns))

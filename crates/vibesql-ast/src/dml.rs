@@ -198,4 +198,8 @@ pub struct DeleteStmt {
     /// Optional OFFSET clause (SQLite extension for DELETE)
     /// When used with ORDER BY and LIMIT, skips rows before deleting
     pub offset: Option<Expression>,
+    /// Optional RETURNING clause (SQLite 3.35.0+)
+    /// Syntax: DELETE FROM table [WHERE ...] RETURNING expr [, expr ...]
+    /// Returns the OLD row values (before deletion) for each deleted row.
+    pub returning: Option<Vec<SelectItem>>,
 }

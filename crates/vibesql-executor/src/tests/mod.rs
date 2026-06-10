@@ -75,6 +75,7 @@ mod covering_index_tests;
 mod create_table_constraints;
 mod create_table_tests;
 mod cte_scalar_subquery_tests;
+mod delete_returning;
 mod error_display;
 mod expression_eval;
 mod expression_index_dml_tests;

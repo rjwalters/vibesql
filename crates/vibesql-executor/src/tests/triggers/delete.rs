@@ -69,6 +69,7 @@ fn test_after_delete_trigger_fires() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
     DeleteExecutor::execute(&delete, &mut db).expect("Failed to delete");
 
@@ -137,6 +138,7 @@ fn test_before_delete_trigger_fires() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
     DeleteExecutor::execute(&delete, &mut db).expect("Failed to delete");
 

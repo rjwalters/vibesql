@@ -51,6 +51,7 @@ fn test_truncate_optimization_basic() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -130,6 +131,7 @@ fn test_truncate_blocked_by_fk_reference() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     let result = DeleteExecutor::execute(&stmt, &mut db);
@@ -205,6 +207,7 @@ fn test_truncate_allowed_when_no_fk_references() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -269,6 +272,7 @@ fn test_truncate_blocked_by_delete_trigger() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -331,6 +335,7 @@ fn test_truncate_allowed_with_insert_trigger() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
@@ -379,6 +384,7 @@ fn test_truncate_performance() {
         order_by: None,
         limit: None,
         offset: None,
+        returning: None,
     };
 
     // Time the deletion

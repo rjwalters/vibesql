@@ -141,3 +141,116 @@ fn test_parse_delete_only_no_table() {
     let result = Parser::parse_sql("DELETE FROM ONLY;");
     assert!(result.is_err(), "Should fail when table name is missing after ONLY");
 }
+
+// ========================================================================
+// RETURNING Clause Tests (SQLite 3.35.0+, issue #5262)
+// ========================================================================
+
+#[test]
+fn test_parse_delete_returning_star() {
+    let result = Parser::parse_sql("DELETE FROM t1 WHERE a = 4 RETURNING *;");
+    assert!(result.is_ok(), "RETURNING * should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => {
+            let returning = delete.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 1);
+            assert!(matches!(returning[0], vibesql_ast::SelectItem::Wildcard { .. }));
+        }
+        _ => panic!("Expected DELETE statement"),
+    }
+}
+
+#[test]
+fn test_parse_delete_returning_expression_list() {
+    let result = Parser::parse_sql("DELETE FROM t1 WHERE a = 4 RETURNING *, a + 1;");
+    assert!(result.is_ok(), "RETURNING expr list should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => {
+            let returning = delete.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 2);
+            assert!(matches!(returning[0], vibesql_ast::SelectItem::Wildcard { .. }));
+            assert!(matches!(returning[1], vibesql_ast::SelectItem::Expression { .. }));
+        }
+        _ => panic!("Expected DELETE statement"),
+    }
+}
+
+#[test]
+fn test_parse_delete_returning_with_alias() {
+    let result = Parser::parse_sql("DELETE FROM t1 RETURNING a AS old_a, a + 1 incremented;");
+    assert!(result.is_ok(), "RETURNING aliases should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => {
+            let returning = delete.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 2);
+            match &returning[0] {
+                vibesql_ast::SelectItem::Expression { alias, .. } => {
+                    assert_eq!(alias.as_deref(), Some("old_a"));
+                }
+                other => panic!("Expected expression item, got {:?}", other),
+            }
+            match &returning[1] {
+                vibesql_ast::SelectItem::Expression { alias, .. } => {
+                    assert_eq!(alias.as_deref(), Some("incremented"));
+                }
+                other => panic!("Expected expression item, got {:?}", other),
+            }
+        }
+        _ => panic!("Expected DELETE statement"),
+    }
+}
+
+#[test]
+fn test_parse_delete_returning_after_order_by_limit() {
+    let result = Parser::parse_sql("DELETE FROM t1 ORDER BY a DESC LIMIT 2 RETURNING a;");
+    assert!(result.is_ok(), "RETURNING after ORDER BY/LIMIT should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => {
+            assert!(delete.order_by.is_some());
+            assert!(delete.limit.is_some());
+            let returning = delete.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 1);
+        }
+        _ => panic!("Expected DELETE statement"),
+    }
+}
+
+#[test]
+fn test_parse_delete_returning_with_cte() {
+    let result = Parser::parse_sql(
+        "WITH doomed AS (SELECT 1 AS x) DELETE FROM t1 WHERE a IN (SELECT x FROM doomed) RETURNING *;",
+    );
+    assert!(result.is_ok(), "RETURNING with CTE should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => {
+            assert!(delete.with_clause.is_some());
+            let returning = delete.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 1);
+        }
+        _ => panic!("Expected DELETE statement"),
+    }
+}
+
+#[test]
+fn test_parse_delete_returning_arena_parser() {
+    // The CLI path goes through parse_with_arena_fallback; make sure the
+    // arena parser captures RETURNING too.
+    let result = crate::parse_with_arena_fallback("DELETE FROM t1 WHERE a = 4 RETURNING *, a + 1");
+    assert!(result.is_ok(), "arena parser should handle RETURNING: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => {
+            let returning = delete.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 2);
+        }
+        _ => panic!("Expected DELETE statement"),
+    }
+}
+
+#[test]
+fn test_parse_delete_without_returning_is_none() {
+    let result = Parser::parse_sql("DELETE FROM t1 WHERE a = 4;");
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => assert!(delete.returning.is_none()),
+        _ => panic!("Expected DELETE statement"),
+    }
+}

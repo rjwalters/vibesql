@@ -1,10 +1,14 @@
-//! RETURNING clause projection for UPDATE statements (SQLite 3.35.0+)
+//! RETURNING clause projection for DML statements (SQLite 3.35.0+)
 //!
-//! SQLite semantics: RETURNING yields one result row per updated row,
-//! evaluated against the NEW row values (after SET assignments). For
-//! UPDATEs on views routed through INSTEAD OF triggers, the NEW view row
+//! SQLite semantics: RETURNING yields one result row per affected row.
+//! UPDATE evaluates against the NEW row values (after SET assignments);
+//! DELETE evaluates against the OLD row values (before deletion). For
+//! statements on views routed through INSTEAD OF triggers, the view row
 //! is returned once per trigger fire, regardless of what the trigger body
 //! actually does.
+//!
+//! The projection itself is statement-agnostic: callers pass the rows to
+//! evaluate against (NEW rows for UPDATE, OLD rows for DELETE).
 
 use vibesql_ast::{Expression, SelectItem};
 use vibesql_catalog::TableSchema;
@@ -12,13 +16,13 @@ use vibesql_storage::{Database, Row};
 
 use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator, select::SelectResult};
 
-/// Project RETURNING select items against a set of NEW rows.
+/// Project RETURNING select items against a set of rows.
 ///
 /// `rows` must contain values in `schema` column order (one entry per
-/// updated row / trigger fire). Returns a `SelectResult` whose columns are
+/// affected row / trigger fire). Returns a `SelectResult` whose columns are
 /// derived from the RETURNING items (aliases win, then original source
 /// text, then the expression's column name).
-pub(super) fn project_returning(
+pub(crate) fn project_returning(
     items: &[SelectItem],
     schema: &TableSchema,
     database: &Database,
@@ -66,7 +70,7 @@ pub(super) fn project_returning(
         }
     }
 
-    // Evaluate each item against each NEW row.
+    // Evaluate each item against each row.
     let mut result_rows: Vec<Row> = Vec::with_capacity(rows.len());
     for row in rows {
         // Clear the CSE cache so expression results from the previous row
@@ -96,7 +100,7 @@ pub(super) fn project_returning(
     Ok(SelectResult { columns, rows: result_rows })
 }
 
-/// Validate that a qualified wildcard (`t.*`) refers to the updated table.
+/// Validate that a qualified wildcard (`t.*`) refers to the target table.
 fn validate_wildcard_qualifier(
     qualifier: &str,
     schema: &TableSchema,
