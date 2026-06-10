@@ -901,8 +901,13 @@ impl ExplainExecutor {
     ///   direction and COLLATE); frame clauses are ignored entirely.
     /// - Windows with neither PARTITION BY nor ORDER BY (`OVER ()`) need no
     ///   sorting pass.
-    /// - A key satisfied by an index scan order is suppressed (e.g. key
-    ///   `(a, b)` with index `t5ab(a, b)`).
+    /// - Only the INNERMOST sorting pass scans the base table and can be
+    ///   satisfied by an index (e.g. key `(a, b)` with index `t5ab(a, b)`).
+    ///   SQLite's nested co-routine rewrite emits passes in reverse
+    ///   SELECT-list order, so the innermost pass corresponds to the LAST
+    ///   distinct key (by first occurrence). All outer passes read
+    ///   co-routine output and always need a temp B-tree, even if their key
+    ///   matches an index.
     fn count_window_sorts(stmt: &SelectStmt, database: &Database) -> usize {
         let Ok(specs) = crate::select::window::collect_resolved_window_specs(
             &stmt.select_list,
@@ -927,15 +932,21 @@ impl ExplainExecutor {
             }
         }
 
+        // Only the innermost pass — the last distinct key — scans the base
+        // table; it alone is eligible for index suppression. Outer passes
+        // read co-routine output, so their keys always count.
+        let last_index = distinct_keys.len().wrapping_sub(1);
         distinct_keys
             .iter()
-            .filter(|key| {
-                Self::needs_temp_btree_for_order_by(
-                    stmt.from.as_ref(),
-                    stmt.where_clause.as_ref(),
-                    key,
-                    database,
-                )
+            .enumerate()
+            .filter(|(i, key)| {
+                *i != last_index
+                    || Self::needs_temp_btree_for_order_by(
+                        stmt.from.as_ref(),
+                        stmt.where_clause.as_ref(),
+                        key,
+                        database,
+                    )
             })
             .count()
     }
