@@ -949,3 +949,122 @@ fn test_conjunction_multiple_subqueries_iterative() {
     // Remaining WHERE should have just the one predicate
     assert!(transformed.where_clause.is_some(), "Simple predicate should remain in WHERE clause");
 }
+
+// =============================================================================
+// Window function guard tests (issue #5231)
+//
+// Window functions in an IN-subquery's SELECT list are computed over the
+// subquery's entire result set, so they cannot be hoisted into a per-row
+// join ON condition. The transform must be skipped so evaluation falls back
+// to row-by-row IN evaluation (eval_in_subquery), which handles both
+// correlated and uncorrelated forms correctly.
+// =============================================================================
+
+fn row_number_over(order_by_column: &str) -> Expression {
+    Expression::WindowFunction {
+        function: vibesql_ast::WindowFunctionSpec::Ranking {
+            name: vibesql_ast::FunctionIdentifier::new("row_number"),
+            args: vec![],
+        },
+        over: vibesql_ast::WindowSpec {
+            base_window_name: None,
+            partition_by: None,
+            order_by: Some(vec![vibesql_ast::OrderByItem {
+                expr: column_ref(order_by_column),
+                direction: vibesql_ast::OrderDirection::Asc,
+                nulls_order: None,
+            }]),
+            frame: None,
+        },
+    }
+}
+
+/// Build a single-item SELECT over `table` whose select expression is `expr`
+fn select_with_expr(table: &str, expr: Expression) -> SelectStmt {
+    let mut stmt = simple_select(table, "placeholder");
+    stmt.select_list =
+        vec![SelectItem::Expression { expr, alias: None, source_text: None }];
+    stmt
+}
+
+#[test]
+fn test_in_subquery_with_window_function_not_transformed() {
+    // SELECT t1_id FROM t1 WHERE t1_id IN (SELECT row_number() OVER (ORDER BY t3_id) FROM t3)
+    let mut stmt = simple_select("t1", "t1_id");
+    let subquery = select_with_expr("t3", row_number_over("t3_id"));
+
+    stmt.where_clause = Some(Expression::In {
+        expr: Box::new(column_ref("t1_id")),
+        subquery: Box::new(subquery),
+        negated: false,
+    });
+
+    let transformed = transform_subqueries_to_joins(&stmt);
+
+    // The transform must be skipped: WHERE clause keeps the IN subquery and
+    // the FROM clause stays a plain table scan.
+    assert!(
+        matches!(transformed.where_clause, Some(Expression::In { .. })),
+        "IN subquery with window function must not be transformed"
+    );
+    assert!(
+        matches!(transformed.from, Some(FromClause::Table { .. })),
+        "FROM clause must remain a plain table (no semi-join)"
+    );
+}
+
+#[test]
+fn test_in_subquery_with_nested_window_function_not_transformed() {
+    // SELECT t1_id FROM t1 WHERE t1_id IN
+    //   (SELECT t1_id + row_number() OVER (ORDER BY t1_id) FROM t3)
+    // The window function is nested inside a binary expression and the
+    // ORDER BY references a correlated outer column.
+    let mut stmt = simple_select("t1", "t1_id");
+    let nested = Expression::BinaryOp {
+        op: BinaryOperator::Plus,
+        left: Box::new(column_ref("t1_id")),
+        right: Box::new(row_number_over("t1_id")),
+    };
+    let subquery = select_with_expr("t3", nested);
+
+    stmt.where_clause = Some(Expression::In {
+        expr: Box::new(column_ref("t1_id")),
+        subquery: Box::new(subquery),
+        negated: false,
+    });
+
+    let transformed = transform_subqueries_to_joins(&stmt);
+
+    assert!(
+        matches!(transformed.where_clause, Some(Expression::In { .. })),
+        "IN subquery with nested window function must not be transformed"
+    );
+    assert!(
+        matches!(transformed.from, Some(FromClause::Table { .. })),
+        "FROM clause must remain a plain table (no semi-join)"
+    );
+}
+
+#[test]
+fn test_not_in_subquery_with_window_function_not_transformed() {
+    // NOT IN goes through the same code path (ANTI join) and must share the guard.
+    let mut stmt = simple_select("t1", "t1_id");
+    let subquery = select_with_expr("t3", row_number_over("t3_id"));
+
+    stmt.where_clause = Some(Expression::In {
+        expr: Box::new(column_ref("t1_id")),
+        subquery: Box::new(subquery),
+        negated: true,
+    });
+
+    let transformed = transform_subqueries_to_joins(&stmt);
+
+    assert!(
+        matches!(transformed.where_clause, Some(Expression::In { negated: true, .. })),
+        "NOT IN subquery with window function must not be transformed"
+    );
+    assert!(
+        matches!(transformed.from, Some(FromClause::Table { .. })),
+        "FROM clause must remain a plain table (no anti-join)"
+    );
+}

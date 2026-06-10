@@ -97,8 +97,19 @@ pub(crate) fn resolve_position_to_column_name(
 pub(crate) enum ResolvedPosition<'a> {
     /// The expression at the position (for regular SELECT items)
     Expression(&'a vibesql_ast::Expression),
-    /// A column name resolved from a wildcard expansion
-    ColumnName(String),
+    /// A column resolved from a wildcard expansion.
+    ///
+    /// The column is qualified with the canonical name of the table it came
+    /// from (when known) so downstream name resolution does not trip the
+    /// ambiguity check when the same column name exists in multiple tables
+    /// (issue #5231: `SELECT * FROM b, (SELECT x FROM a) ORDER BY 1` must not
+    /// fail with "ambiguous column name: x").
+    ColumnName {
+        /// Canonical table name the column belongs to, if known
+        table: Option<String>,
+        /// The column name
+        column: String,
+    },
     /// Position not found (shouldn't happen if validation passed)
     NotFound,
 }
@@ -128,19 +139,24 @@ pub(crate) fn resolve_position_with_wildcards<'a>(
                     // The position is within this wildcard's expanded columns
                     if let Some(s) = schema {
                         let offset_in_wildcard = target_col - current_col;
-                        // Collect all columns from all tables in schema order
-                        let mut all_columns: Vec<(usize, String)> = Vec::new();
-                        for (start_idx, table_schema) in s.table_schemas.values() {
+                        // Collect all columns from all tables in schema order,
+                        // tracking which table each column belongs to so the
+                        // result can be table-qualified (issue #5231)
+                        let mut all_columns: Vec<(usize, String, String)> = Vec::new();
+                        for (table_id, (start_idx, table_schema)) in &s.table_schemas {
                             for (i, col) in table_schema.columns.iter().enumerate() {
-                                all_columns.push((start_idx + i, col.name.clone()));
+                                all_columns.push((
+                                    start_idx + i,
+                                    table_id.table_canonical().to_string(),
+                                    col.name.clone(),
+                                ));
                             }
                         }
-                        all_columns.sort_by_key(|(idx, _)| *idx);
+                        all_columns.sort_by_key(|(idx, _, _)| *idx);
 
                         if offset_in_wildcard < all_columns.len() {
-                            return ResolvedPosition::ColumnName(
-                                all_columns[offset_in_wildcard].1.clone(),
-                            );
+                            let (_, table, column) = all_columns[offset_in_wildcard].clone();
+                            return ResolvedPosition::ColumnName { table: Some(table), column };
                         }
                     }
                     return ResolvedPosition::NotFound;
@@ -161,9 +177,14 @@ pub(crate) fn resolve_position_with_wildcards<'a>(
                         if let Some((_, table_schema)) = s.get_table(qualifier) {
                             let offset = target_col - current_col;
                             if offset < table_schema.columns.len() {
-                                return ResolvedPosition::ColumnName(
-                                    table_schema.columns[offset].name.clone(),
-                                );
+                                // Qualify with the (canonicalized) qualifier so
+                                // downstream resolution is unambiguous (#5231).
+                                // get_table resolves via TableIdentifier::unquoted,
+                                // so lowercase folding matches its lookup.
+                                return ResolvedPosition::ColumnName {
+                                    table: Some(qualifier.to_ascii_lowercase()),
+                                    column: table_schema.columns[offset].name.clone(),
+                                };
                             }
                         }
                     }

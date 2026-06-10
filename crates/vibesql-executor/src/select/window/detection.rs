@@ -23,7 +23,7 @@ pub(in crate::select) fn has_window_functions(select_list: &[SelectItem]) -> boo
 /// `QuantifiedComparison`) are intentionally treated as leaves: a window
 /// inside a subquery belongs to the subquery's own scope, not the outer
 /// SELECT's.
-pub(in crate::select) fn expression_has_window_function(expr: &Expression) -> bool {
+pub(crate) fn expression_has_window_function(expr: &Expression) -> bool {
     match expr {
         Expression::WindowFunction { .. } => true,
         Expression::BinaryOp { left, right, .. } => {

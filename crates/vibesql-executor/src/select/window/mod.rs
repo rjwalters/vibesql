@@ -11,8 +11,10 @@ mod types;
 
 use std::collections::HashMap;
 
-// Re-export detection helpers for use by select module
-pub(super) use detection::{expression_has_window_function, has_window_functions};
+// Re-export detection helpers for use by the select module and the
+// subquery-to-join optimizer (issue #5231)
+pub(crate) use detection::expression_has_window_function;
+pub(super) use detection::has_window_functions;
 // Re-export ORDER BY support functions
 pub(super) use order_by::{collect_order_by_window_functions, evaluate_order_by_window_functions};
 // Re-export public types
