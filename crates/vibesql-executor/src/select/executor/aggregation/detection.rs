@@ -22,37 +22,7 @@ fn expression_contains_outer_aggregate_collapse(
     use vibesql_ast::Expression;
 
     match expr {
-        Expression::ScalarSubquery(stmt) => {
-            // Bare (FROM-less) subquery: an aggregate in the projection that
-            // references a column is necessarily outer-correlated (no inner
-            // tables) → triggers collapse.
-            if stmt.from.is_none() {
-                for item in &stmt.select_list {
-                    if let vibesql_ast::SelectItem::Expression { expr: inner, .. } = item {
-                        if expr_has_column_referencing_aggregate(inner) {
-                            return true;
-                        }
-                        // Recurse: nested scalar subqueries.
-                        if expression_contains_outer_aggregate_collapse(inner, database) {
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            }
-
-            // FROM-bearing subquery: walk the SELECT list, FROM, WHERE,
-            // HAVING, and ORDER BY of the inner query, tracking the chain
-            // of inner FROM scopes. If we find an aggregate whose column
-            // reference does not resolve to any inner scope along the chain,
-            // it is outer-correlated to the surrounding query → triggers
-            // collapse. (#5135 / window1.test 57.3.)
-            //
-            // The scope chain is initialized with this subquery's own FROM
-            // scope; nested subqueries extend the chain with their own FROM
-            // scopes when descending.
-            scope_chain_contains_outer_correlated_aggregate(stmt, &[], database)
-        }
+        Expression::ScalarSubquery(stmt) => subquery_stmt_triggers_collapse(stmt, database),
         // Recurse into compound expressions.
         Expression::BinaryOp { left, right, .. } => {
             expression_contains_outer_aggregate_collapse(left, database)
@@ -80,7 +50,16 @@ fn expression_contains_outer_aggregate_collapse(
             expression_contains_outer_aggregate_collapse(expr, database)
                 || values.iter().any(|v| expression_contains_outer_aggregate_collapse(v, database))
         }
-        Expression::In { expr, .. } => expression_contains_outer_aggregate_collapse(expr, database),
+        // IN with subquery: the collapse trigger can hide in the LHS *or* in
+        // the IN-subquery itself (window1.test 44.x:
+        // `SELECT (0,0) IN (SELECT MIN(c0), NTILE(1) OVER()) FROM t0`).
+        // The FROM-less IN subquery's MIN(c0) references an outer column, so
+        // the outer query collapses to a single-row implicit aggregate.
+        // (#5232)
+        Expression::In { expr, subquery, .. } => {
+            expression_contains_outer_aggregate_collapse(expr, database)
+                || subquery_stmt_triggers_collapse(subquery, database)
+        }
         Expression::Case { operand, when_clauses, else_result } => {
             operand
                 .as_ref()
@@ -151,6 +130,43 @@ fn expression_contains_outer_aggregate_collapse(
         // Other leaf expressions can't contain a scalar subquery.
         _ => false,
     }
+}
+
+/// Check whether a subquery (scalar or IN) triggers SQLite's
+/// implicit-outer-aggregate-collapse semantics.
+///
+/// Bare (FROM-less) subquery: an aggregate in the projection that references
+/// a column is necessarily outer-correlated (no inner tables) → triggers
+/// collapse.
+///
+/// FROM-bearing subquery: walk the SELECT list, FROM, WHERE, HAVING, and
+/// ORDER BY of the inner query, tracking the chain of inner FROM scopes. If
+/// we find an aggregate whose column reference does not resolve to any inner
+/// scope along the chain, it is outer-correlated to the surrounding query →
+/// triggers collapse. (#5135 / window1.test 57.3.)
+fn subquery_stmt_triggers_collapse(
+    stmt: &vibesql_ast::SelectStmt,
+    database: &vibesql_storage::Database,
+) -> bool {
+    if stmt.from.is_none() {
+        for item in &stmt.select_list {
+            if let vibesql_ast::SelectItem::Expression { expr: inner, .. } = item {
+                if expr_has_column_referencing_aggregate(inner) {
+                    return true;
+                }
+                // Recurse: nested scalar subqueries.
+                if expression_contains_outer_aggregate_collapse(inner, database) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // The scope chain is initialized with this subquery's own FROM scope;
+    // nested subqueries extend the chain with their own FROM scopes when
+    // descending.
+    scope_chain_contains_outer_correlated_aggregate(stmt, &[], database)
 }
 
 // ------------------------------------------------------------------------
@@ -736,8 +752,52 @@ fn expr_has_column_referencing_aggregate(expr: &vibesql_ast::Expression) -> bool
                 })
                 || else_result.as_ref().is_some_and(|e| expr_has_column_referencing_aggregate(e))
         }
-        // Don't descend into inner subqueries / window functions — they have
-        // their own scope. Stop here.
+        // Window function: the collapse trigger can hide inside the window's
+        // args or its OVER (PARTITION BY / ORDER BY / frame) expressions,
+        // e.g. `SELECT (SELECT count(a) OVER (ORDER BY sum(a))) FROM t1`
+        // (window1.test 61.4.2). Only *plain* AggregateFunction nodes found
+        // by the recursion trigger collapse — the window function itself
+        // (e.g. `total(a) OVER()`, a `WindowFunctionSpec::Aggregate`) must
+        // NOT trigger (window1.test 61.3.1). (#5232)
+        Expression::WindowFunction { function, over } => {
+            let args = match function {
+                vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
+            };
+            if args.iter().any(expr_has_column_referencing_aggregate) {
+                return true;
+            }
+            if over.partition_by.as_ref().is_some_and(|exprs| {
+                exprs.iter().any(expr_has_column_referencing_aggregate)
+            }) {
+                return true;
+            }
+            if over.order_by.as_ref().is_some_and(|items| {
+                items.iter().any(|i| expr_has_column_referencing_aggregate(&i.expr))
+            }) {
+                return true;
+            }
+            if let Some(frame) = &over.frame {
+                if let vibesql_ast::FrameBound::Preceding(e)
+                | vibesql_ast::FrameBound::Following(e) = &frame.start
+                {
+                    if expr_has_column_referencing_aggregate(e) {
+                        return true;
+                    }
+                }
+                if let Some(vibesql_ast::FrameBound::Preceding(e))
+                | Some(vibesql_ast::FrameBound::Following(e)) = &frame.end
+                {
+                    if expr_has_column_referencing_aggregate(e) {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+        // Don't descend into inner subqueries — they have their own scope.
+        // Stop here.
         _ => false,
     }
 }
@@ -883,14 +943,26 @@ impl SelectExecutor<'_> {
             }
             // Window functions may contain nested aggregates in their arguments
             // e.g., min(sum(a)) OVER () — the sum(a) is an aggregate that must be
-            // evaluated in the aggregation path before the window function is applied
-            vibesql_ast::Expression::WindowFunction { function, .. } => {
+            // evaluated in the aggregation path before the window function is applied.
+            // Aggregates can also hide in the OVER clause's PARTITION BY / ORDER BY,
+            // e.g. `count(a) OVER (ORDER BY sum(a))` — per SQLite this makes the
+            // query an aggregate query (one row per group). (#5232 / window1.test
+            // 61.4.2.) Note: ScalarSubquery is not descended into anywhere in this
+            // function, so `OVER (ORDER BY (SELECT sum(y) FROM t2))` does NOT make
+            // the outer query an aggregate (window1.test 61.3.1).
+            vibesql_ast::Expression::WindowFunction { function, over } => {
                 let args = match function {
                     vibesql_ast::WindowFunctionSpec::Aggregate { args, .. } => args,
                     vibesql_ast::WindowFunctionSpec::Ranking { args, .. } => args,
                     vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
                 };
                 args.iter().any(|arg| self.expression_has_aggregate(arg))
+                    || over.partition_by.as_ref().is_some_and(|exprs| {
+                        exprs.iter().any(|e| self.expression_has_aggregate(e))
+                    })
+                    || over.order_by.as_ref().is_some_and(|items| {
+                        items.iter().any(|i| self.expression_has_aggregate(&i.expr))
+                    })
             }
             // DuplicateKeyValue references a column from INSERT VALUES
             vibesql_ast::Expression::DuplicateKeyValue { .. } => false,
@@ -1203,6 +1275,131 @@ mod tests {
             "An aggregate referencing both an outer column (a from t1) and an \
              inner column (x from t2) must NOT trigger collapse — it's a normal \
              correlated aggregate evaluated per outer row"
+        );
+    }
+
+    /// Build a window-function expression `name(args) OVER (ORDER BY order_by_expr)`.
+    fn window_fn(
+        function: vibesql_ast::WindowFunctionSpec,
+        order_by_expr: Option<Expression>,
+    ) -> Expression {
+        Expression::WindowFunction {
+            function,
+            over: vibesql_ast::WindowSpec {
+                base_window_name: None,
+                partition_by: None,
+                order_by: order_by_expr.map(|e| {
+                    vec![vibesql_ast::OrderByItem {
+                        expr: e,
+                        direction: vibesql_ast::OrderDirection::Asc,
+                        nulls_order: None,
+                    }]
+                }),
+                frame: None,
+            },
+        }
+    }
+
+    /// Gap 2 (#5232, window1.test 44.x): the collapse trigger must be
+    /// detected through an IN subquery:
+    /// `SELECT (0, 0) IN (SELECT MIN(c0), NTILE(1) OVER()) FROM t0`.
+    #[test]
+    fn collapse_detected_through_in_subquery() {
+        let db = setup_db_t1_t2();
+
+        // Inner (FROM-less): SELECT MIN(a), NTILE(1) OVER()
+        let mut inner = empty_select_stmt();
+        inner.select_list.push(SelectItem::Expression {
+            expr: agg("min", col("a")),
+            alias: None,
+            source_text: None,
+        });
+        inner.select_list.push(SelectItem::Expression {
+            expr: window_fn(
+                vibesql_ast::WindowFunctionSpec::Ranking {
+                    name: FunctionIdentifier::new("ntile"),
+                    args: vec![Expression::Literal(vibesql_types::SqlValue::Integer(1))],
+                },
+                None,
+            ),
+            alias: None,
+            source_text: None,
+        });
+
+        let in_expr = Expression::In {
+            expr: Box::new(Expression::RowValueConstructor(vec![
+                Expression::Literal(vibesql_types::SqlValue::Integer(0)),
+                Expression::Literal(vibesql_types::SqlValue::Integer(0)),
+            ])),
+            subquery: Box::new(inner),
+            negated: false,
+        };
+
+        assert!(
+            expression_contains_outer_aggregate_collapse(&in_expr, &db),
+            "(0,0) IN (SELECT MIN(a), NTILE(1) OVER()) must trigger collapse — \
+             the FROM-less IN subquery aggregates over an outer column"
+        );
+    }
+
+    /// Gap 3 (#5232, window1.test 61.4.2): the collapse trigger must be
+    /// detected when the aggregate hides inside a window function's
+    /// OVER (ORDER BY ...): `SELECT (SELECT count(a) OVER (ORDER BY sum(a))) FROM t1`.
+    #[test]
+    fn collapse_detected_for_aggregate_inside_over_order_by() {
+        let db = setup_db_t1_t2();
+
+        let mut inner = empty_select_stmt();
+        inner.select_list.push(SelectItem::Expression {
+            expr: window_fn(
+                vibesql_ast::WindowFunctionSpec::Aggregate {
+                    name: FunctionIdentifier::new("count"),
+                    args: vec![col("a")],
+                    filter: None,
+                },
+                Some(agg("sum", col("a"))),
+            ),
+            alias: None,
+            source_text: None,
+        });
+
+        let outer_subq = Expression::ScalarSubquery(Box::new(inner));
+
+        assert!(
+            expression_contains_outer_aggregate_collapse(&outer_subq, &db),
+            "(SELECT count(a) OVER (ORDER BY sum(a))) must trigger collapse — \
+             sum(a) inside the OVER ORDER BY is an outer-correlated aggregate"
+        );
+    }
+
+    /// Guard (#5232, window1.test 61.3.1): a window-aggregate like
+    /// `total(a) OVER()` is a `WindowFunctionSpec::Aggregate`, NOT a plain
+    /// `AggregateFunction`, and must NOT trigger collapse —
+    /// `SELECT (SELECT total(a) OVER()) FROM t1` returns 0 rows on empty t1.
+    #[test]
+    fn no_collapse_for_window_aggregate_spec() {
+        let db = setup_db_t1_t2();
+
+        let mut inner = empty_select_stmt();
+        inner.select_list.push(SelectItem::Expression {
+            expr: window_fn(
+                vibesql_ast::WindowFunctionSpec::Aggregate {
+                    name: FunctionIdentifier::new("total"),
+                    args: vec![col("a")],
+                    filter: None,
+                },
+                None,
+            ),
+            alias: None,
+            source_text: None,
+        });
+
+        let outer_subq = Expression::ScalarSubquery(Box::new(inner));
+
+        assert!(
+            !expression_contains_outer_aggregate_collapse(&outer_subq, &db),
+            "(SELECT total(a) OVER()) must NOT trigger collapse — the window \
+             aggregate has its own scope and is not a plain aggregate"
         );
     }
 }

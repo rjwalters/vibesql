@@ -72,6 +72,300 @@ fn is_window_function(expr: &Expression) -> bool {
     matches!(expr, Expression::WindowFunction { .. })
 }
 
+// ------------------------------------------------------------------------
+// Embedded window functions in aggregate SELECT items (#5232)
+// ------------------------------------------------------------------------
+//
+// A window function can appear *inside* a larger expression in an aggregate
+// SELECT, e.g. `SELECT lead(2) OVER() + sum(c) FROM a`. During the GROUP BY
+// pass, `evaluate_with_aggregates` evaluates the WindowFunction node to a
+// placeholder (its first argument), expecting the post-aggregation window
+// pass to fix it up — but that pass historically handled only *top-level*
+// window SELECT items. The machinery below decomposes such expressions:
+//
+// 1. Each maximal window-free subexpression becomes a hidden "component"
+//    column, evaluated per group during aggregation (e.g. `sum(c)` → 4).
+// 2. Each embedded WindowFunction node becomes a hidden component column
+//    holding its placeholder, which the window pass later overwrites with
+//    the real window value (same contract as top-level windows).
+// 3. The original expression is rewritten into a "residual" expression that
+//    references the hidden columns; it is re-evaluated per row after the
+//    window pass and stored into the SELECT slot.
+
+/// One hidden component column backing an embedded-window rewrite.
+pub(in crate::select::executor) struct EmbeddedWindowComponent {
+    /// The original subexpression. Evaluated per group via
+    /// `evaluate_with_aggregates` (for window components this naturally
+    /// yields the placeholder value — the window's first argument).
+    pub expr: Expression,
+    /// True when this component is a WindowFunction node whose hidden column
+    /// must be overwritten by the post-aggregation window pass.
+    pub is_window: bool,
+}
+
+/// A SELECT item whose expression embeds window functions.
+pub(in crate::select::executor) struct EmbeddedWindowRewrite {
+    /// Index of the SELECT item to overwrite with the residual's value.
+    pub select_index: usize,
+    /// The original expression with components replaced by hidden-column
+    /// references into the synthetic post-aggregation result schema.
+    pub residual: Expression,
+}
+
+/// Decomposition plan for all embedded-window SELECT items.
+#[derive(Default)]
+pub(in crate::select::executor) struct EmbeddedWindowPlan {
+    pub rewrites: Vec<EmbeddedWindowRewrite>,
+    pub components: Vec<EmbeddedWindowComponent>,
+}
+
+impl EmbeddedWindowPlan {
+    pub fn is_empty(&self) -> bool {
+        self.rewrites.is_empty()
+    }
+}
+
+/// Check whether an expression contains a window function anywhere within it,
+/// WITHOUT descending into subqueries (which have their own scope).
+pub(in crate::select::executor) fn expression_contains_window_function(
+    expr: &Expression,
+) -> bool {
+    match expr {
+        Expression::WindowFunction { .. } => true,
+        Expression::BinaryOp { left, right, .. } => {
+            expression_contains_window_function(left)
+                || expression_contains_window_function(right)
+        }
+        Expression::UnaryOp { expr, .. }
+        | Expression::Cast { expr, .. }
+        | Expression::IsNull { expr, .. }
+        | Expression::IsTruthValue { expr, .. }
+        | Expression::Collate { expr, .. } => expression_contains_window_function(expr),
+        Expression::IsDistinctFrom { left, right, .. } => {
+            expression_contains_window_function(left)
+                || expression_contains_window_function(right)
+        }
+        Expression::Function { args, .. } => {
+            args.iter().any(expression_contains_window_function)
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|e| expression_contains_window_function(e))
+                || when_clauses.iter().any(|w| {
+                    w.conditions.iter().any(expression_contains_window_function)
+                        || expression_contains_window_function(&w.result)
+                })
+                || else_result
+                    .as_ref()
+                    .is_some_and(|e| expression_contains_window_function(e))
+        }
+        Expression::Between { expr, low, high, .. } => {
+            expression_contains_window_function(expr)
+                || expression_contains_window_function(low)
+                || expression_contains_window_function(high)
+        }
+        Expression::InList { expr, values, .. } => {
+            expression_contains_window_function(expr)
+                || values.iter().any(expression_contains_window_function)
+        }
+        Expression::Like { expr, pattern, .. } | Expression::Glob { expr, pattern, .. } => {
+            expression_contains_window_function(expr)
+                || expression_contains_window_function(pattern)
+        }
+        Expression::Conjunction(exprs)
+        | Expression::Disjunction(exprs)
+        | Expression::RowValueConstructor(exprs) => {
+            exprs.iter().any(expression_contains_window_function)
+        }
+        // IN / quantified comparison: only the LHS shares this scope.
+        Expression::In { expr, .. } | Expression::QuantifiedComparison { expr, .. } => {
+            expression_contains_window_function(expr)
+        }
+        // Aggregate args cannot legally contain window functions (SQLite
+        // rejects them at parse/resolve time) — don't descend.
+        // Subqueries (ScalarSubquery / Exists) have their own scope.
+        _ => false,
+    }
+}
+
+/// Build the decomposition plan for SELECT items that embed window functions
+/// inside larger expressions. `hidden_base` is the absolute column index in
+/// the post-aggregation row layout where the embedded component columns
+/// start (after SELECT items, GROUP BY columns, ORDER BY aggregates, and
+/// window aggregates).
+pub(in crate::select::executor) fn plan_embedded_window_rewrites(
+    select_list: &[SelectItem],
+    hidden_base: usize,
+) -> EmbeddedWindowPlan {
+    let mut plan = EmbeddedWindowPlan::default();
+
+    for (idx, item) in select_list.iter().enumerate() {
+        if let SelectItem::Expression { expr, .. } = item {
+            // Top-level window functions are handled by the existing
+            // select-slot placeholder machinery.
+            if is_window_function(expr) {
+                continue;
+            }
+            if !expression_contains_window_function(expr) {
+                continue;
+            }
+            let residual = rewrite_embedded_expression(expr, hidden_base, &mut plan.components);
+            plan.rewrites.push(EmbeddedWindowRewrite { select_index: idx, residual });
+        }
+    }
+
+    plan
+}
+
+/// Create a column reference into the synthetic post-aggregation result schema.
+fn embedded_col_ref(idx: usize) -> Expression {
+    Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+        "result",
+        false,
+        &format!("col{}", idx),
+        false,
+    ))
+}
+
+/// Rewrite an expression containing embedded window functions: WindowFunction
+/// nodes and maximal window-free subexpressions are replaced with hidden
+/// column references, registering each as a component to be computed per
+/// group during aggregation.
+fn rewrite_embedded_expression(
+    expr: &Expression,
+    hidden_base: usize,
+    components: &mut Vec<EmbeddedWindowComponent>,
+) -> Expression {
+    // Window function: becomes a hidden placeholder column that the window
+    // pass overwrites with the computed window value.
+    if is_window_function(expr) {
+        let idx = hidden_base + components.len();
+        components.push(EmbeddedWindowComponent { expr: expr.clone(), is_window: true });
+        return embedded_col_ref(idx);
+    }
+
+    // Maximal window-free subexpression: computed per group during
+    // aggregation (may contain aggregates, subqueries, literals, ...).
+    if !expression_contains_window_function(expr) {
+        let idx = hidden_base + components.len();
+        components.push(EmbeddedWindowComponent { expr: expr.clone(), is_window: false });
+        return embedded_col_ref(idx);
+    }
+
+    // Otherwise recurse structurally (the expression contains a window
+    // function somewhere below).
+    match expr {
+        Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
+            left: Box::new(rewrite_embedded_expression(left, hidden_base, components)),
+            op: op.clone(),
+            right: Box::new(rewrite_embedded_expression(right, hidden_base, components)),
+        },
+        Expression::UnaryOp { op, expr } => Expression::UnaryOp {
+            op: op.clone(),
+            expr: Box::new(rewrite_embedded_expression(expr, hidden_base, components)),
+        },
+        Expression::Cast { expr, data_type } => Expression::Cast {
+            expr: Box::new(rewrite_embedded_expression(expr, hidden_base, components)),
+            data_type: data_type.clone(),
+        },
+        Expression::Collate { expr, collation } => Expression::Collate {
+            expr: Box::new(rewrite_embedded_expression(expr, hidden_base, components)),
+            collation: collation.clone(),
+        },
+        Expression::IsNull { expr, negated } => Expression::IsNull {
+            expr: Box::new(rewrite_embedded_expression(expr, hidden_base, components)),
+            negated: *negated,
+        },
+        Expression::IsDistinctFrom { left, right, negated } => Expression::IsDistinctFrom {
+            left: Box::new(rewrite_embedded_expression(left, hidden_base, components)),
+            right: Box::new(rewrite_embedded_expression(right, hidden_base, components)),
+            negated: *negated,
+        },
+        Expression::IsTruthValue { expr, truth_value, negated } => Expression::IsTruthValue {
+            expr: Box::new(rewrite_embedded_expression(expr, hidden_base, components)),
+            truth_value: truth_value.clone(),
+            negated: *negated,
+        },
+        Expression::Function { name, args, character_unit } => Expression::Function {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|a| rewrite_embedded_expression(a, hidden_base, components))
+                .collect(),
+            character_unit: character_unit.clone(),
+        },
+        Expression::Case { operand, when_clauses, else_result } => Expression::Case {
+            operand: operand
+                .as_ref()
+                .map(|e| Box::new(rewrite_embedded_expression(e, hidden_base, components))),
+            when_clauses: when_clauses
+                .iter()
+                .map(|w| vibesql_ast::CaseWhen {
+                    conditions: w
+                        .conditions
+                        .iter()
+                        .map(|c| rewrite_embedded_expression(c, hidden_base, components))
+                        .collect(),
+                    result: rewrite_embedded_expression(&w.result, hidden_base, components),
+                })
+                .collect(),
+            else_result: else_result
+                .as_ref()
+                .map(|e| Box::new(rewrite_embedded_expression(e, hidden_base, components))),
+        },
+        Expression::Between { expr, low, high, negated, symmetric } => Expression::Between {
+            expr: Box::new(rewrite_embedded_expression(expr, hidden_base, components)),
+            low: Box::new(rewrite_embedded_expression(low, hidden_base, components)),
+            high: Box::new(rewrite_embedded_expression(high, hidden_base, components)),
+            negated: *negated,
+            symmetric: *symmetric,
+        },
+        Expression::InList { expr, values, negated } => Expression::InList {
+            expr: Box::new(rewrite_embedded_expression(expr, hidden_base, components)),
+            values: values
+                .iter()
+                .map(|v| rewrite_embedded_expression(v, hidden_base, components))
+                .collect(),
+            negated: *negated,
+        },
+        Expression::Like { expr, pattern, negated, escape } => Expression::Like {
+            expr: Box::new(rewrite_embedded_expression(expr, hidden_base, components)),
+            pattern: Box::new(rewrite_embedded_expression(pattern, hidden_base, components)),
+            negated: *negated,
+            escape: escape.clone(),
+        },
+        Expression::Conjunction(exprs) => Expression::Conjunction(
+            exprs
+                .iter()
+                .map(|e| rewrite_embedded_expression(e, hidden_base, components))
+                .collect(),
+        ),
+        Expression::Disjunction(exprs) => Expression::Disjunction(
+            exprs
+                .iter()
+                .map(|e| rewrite_embedded_expression(e, hidden_base, components))
+                .collect(),
+        ),
+        Expression::RowValueConstructor(exprs) => Expression::RowValueConstructor(
+            exprs
+                .iter()
+                .map(|e| rewrite_embedded_expression(e, hidden_base, components))
+                .collect(),
+        ),
+        Expression::In { expr, subquery, negated } => Expression::In {
+            expr: Box::new(rewrite_embedded_expression(expr, hidden_base, components)),
+            subquery: subquery.clone(),
+            negated: *negated,
+        },
+        // Fallback: treat as an opaque window-free component (preserves the
+        // pre-#5232 placeholder behavior for exotic shapes).
+        other => {
+            let idx = hidden_base + components.len();
+            components.push(EmbeddedWindowComponent { expr: other.clone(), is_window: false });
+            embedded_col_ref(idx)
+        }
+    }
+}
+
 /// Build a map of window names to their resolved definitions
 /// This handles window inheritance (e.g., WINDOW win AS (...), win2 AS (win ORDER BY x))
 fn build_window_map(
@@ -142,10 +436,46 @@ fn resolve_window_spec(
     }
 }
 
-/// Collect all window functions from the SELECT list, resolving named window references
+/// Build a `PostAggregateWindowFunction` for a WindowFunction expression
+/// whose placeholder value lives at `target_index` in the result rows.
+fn make_post_aggregate_window_fn(
+    function: &WindowFunctionSpec,
+    over: &WindowSpec,
+    target_index: usize,
+    window_map: &HashMap<String, WindowSpec>,
+) -> Result<PostAggregateWindowFunction, ExecutorError> {
+    let (func_name, func_type, args) = match function {
+        WindowFunctionSpec::Aggregate { name, args, .. } => {
+            (name.to_string(), WindowFunctionType::Aggregate, args.clone())
+        }
+        WindowFunctionSpec::Ranking { name, args } => {
+            (name.to_string(), WindowFunctionType::Ranking, args.clone())
+        }
+        WindowFunctionSpec::Value { name, args } => {
+            (name.to_string(), WindowFunctionType::Value, args.clone())
+        }
+    };
+
+    // Resolve named window references
+    let resolved_spec = resolve_window_spec(over, window_map)?;
+
+    Ok(PostAggregateWindowFunction {
+        select_index: target_index,
+        func_name,
+        func_type,
+        args,
+        window_spec: resolved_spec,
+    })
+}
+
+/// Collect all window functions from the SELECT list, resolving named window
+/// references. Includes embedded window functions from the decomposition plan
+/// (#5232), whose placeholder/result slot is their hidden component column.
 fn collect_window_functions(
     select_list: &[SelectItem],
     window_definitions: Option<&Vec<WindowDefinition>>,
+    embedded_plan: &EmbeddedWindowPlan,
+    embedded_hidden_base: usize,
 ) -> Result<Vec<PostAggregateWindowFunction>, ExecutorError> {
     let window_map = build_window_map(window_definitions)?;
     let mut result = Vec::new();
@@ -155,28 +485,23 @@ fn collect_window_functions(
             expr: Expression::WindowFunction { function, over }, ..
         } = item
         {
-            let (func_name, func_type, args) = match function {
-                WindowFunctionSpec::Aggregate { name, args, .. } => {
-                    (name.to_string(), WindowFunctionType::Aggregate, args.clone())
-                }
-                WindowFunctionSpec::Ranking { name, args } => {
-                    (name.to_string(), WindowFunctionType::Ranking, args.clone())
-                }
-                WindowFunctionSpec::Value { name, args } => {
-                    (name.to_string(), WindowFunctionType::Value, args.clone())
-                }
-            };
+            result.push(make_post_aggregate_window_fn(function, over, idx, &window_map)?);
+        }
+    }
 
-            // Resolve named window references
-            let resolved_spec = resolve_window_spec(over, &window_map)?;
-
-            result.push(PostAggregateWindowFunction {
-                select_index: idx,
-                func_name,
-                func_type,
-                args,
-                window_spec: resolved_spec,
-            });
+    // Embedded window functions (#5232): their placeholder lives in a hidden
+    // component column, which the window pass overwrites in place.
+    for (i, comp) in embedded_plan.components.iter().enumerate() {
+        if !comp.is_window {
+            continue;
+        }
+        if let Expression::WindowFunction { function, over } = &comp.expr {
+            result.push(make_post_aggregate_window_fn(
+                function,
+                over,
+                embedded_hidden_base + i,
+                &window_map,
+            )?);
         }
     }
 
@@ -204,21 +529,32 @@ pub(super) fn apply_window_functions_to_aggregates(
     group_by_exprs: &[Expression],
     order_by_aggregates_count: usize,
     window_aggregates: &[Expression],
+    embedded_plan: &EmbeddedWindowPlan,
 ) -> Result<Vec<Row>, ExecutorError> {
-    let window_funcs = collect_window_functions(select_list, window_definitions)?;
+    let embedded_hidden_base = select_list.len()
+        + group_by_exprs.len()
+        + order_by_aggregates_count
+        + window_aggregates.len();
+    let window_funcs = collect_window_functions(
+        select_list,
+        window_definitions,
+        embedded_plan,
+        embedded_hidden_base,
+    )?;
 
-    if window_funcs.is_empty() {
+    if window_funcs.is_empty() && embedded_plan.is_empty() {
         return Ok(rows);
     }
 
     // Build a schema for the aggregate result rows
-    // Each column corresponds to a SELECT list item, plus hidden GROUP BY columns
-    // and window-aggregate columns.
+    // Each column corresponds to a SELECT list item, plus hidden GROUP BY columns,
+    // window-aggregate columns, and embedded-window component columns (#5232).
     let result_schema = build_aggregate_result_schema(
         select_list,
         group_by_exprs,
         order_by_aggregates_count,
         window_aggregates,
+        embedded_plan.components.len(),
     );
     let evaluator = CombinedExpressionEvaluator::with_database(&result_schema, database);
 
@@ -456,8 +792,12 @@ pub(super) fn apply_window_functions_to_aggregates(
                                 } else {
                                     1
                                 };
+                                // SqliteCompatError keeps the bare SQLite message
+                                // (e.g. "argument of ntile must be a positive
+                                // integer") — mirrors the non-aggregate path in
+                                // select/window/evaluation.rs. (window1.test 44.2.2)
                                 evaluate_ntile(partition, n_val)
-                                    .map_err(ExecutorError::UnsupportedExpression)?
+                                    .map_err(ExecutorError::SqliteCompatError)?
                             }
                         }
                         other => {
@@ -641,6 +981,19 @@ pub(super) fn apply_window_functions_to_aggregates(
         }
     }
 
+    // Re-evaluate residual expressions for SELECT items with embedded window
+    // functions (#5232). At this point the hidden component columns hold the
+    // computed window values (for window components) and the per-group values
+    // (for window-free components), so the residual evaluates to the final
+    // SELECT value.
+    for rewrite in &embedded_plan.rewrites {
+        for row in rows.iter_mut() {
+            evaluator.clear_cse_cache();
+            let value = evaluator.eval(&rewrite.residual, row)?;
+            row.values[rewrite.select_index] = value;
+        }
+    }
+
     Ok(rows)
 }
 
@@ -655,6 +1008,7 @@ fn build_aggregate_result_schema(
     group_by_exprs: &[Expression],
     order_by_aggregates_count: usize,
     window_aggregates: &[Expression],
+    embedded_component_count: usize,
 ) -> CombinedSchema {
     let mut columns = Vec::new();
 
@@ -695,6 +1049,19 @@ fn build_aggregate_result_schema(
     let window_offset = order_by_offset + order_by_aggregates_count;
     for i in 0..window_aggregates.len() {
         let column_name = format!("col{}", window_offset + i);
+        columns.push(ColumnSchema::new(
+            column_name,
+            DataType::Varchar { max_length: Some(255) },
+            true,
+        ));
+    }
+
+    // Hidden embedded-window component columns (#5232): placeholders for
+    // embedded window functions and per-group values for window-free
+    // subexpressions of SELECT items that mix windows with aggregates.
+    let embedded_offset = window_offset + window_aggregates.len();
+    for i in 0..embedded_component_count {
+        let column_name = format!("col{}", embedded_offset + i);
         columns.push(ColumnSchema::new(
             column_name,
             DataType::Varchar { max_length: Some(255) },

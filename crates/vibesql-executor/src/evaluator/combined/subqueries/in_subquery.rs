@@ -343,7 +343,19 @@ impl CombinedExpressionEvaluator<'_> {
         // Pass CTE context for queries referencing CTEs from outer scope (#3044)
         let select_executor =
             if let (Some(ref schema), Some(ref outer_row)) = (&merged_schema, &merged_row) {
-                if let Some(cte_ctx) = self.cte_context {
+                if let Some(outer_rows) = self.outer_rows {
+                    // Pass outer_rows for outer-correlated aggregates inside the
+                    // IN-subquery (issues #4930 / #5232).
+                    if let Some(cte_ctx) = self.cte_context {
+                        crate::select::SelectExecutor::new_with_outer_rows_and_cte_and_depth(
+                            database, outer_row, schema, outer_rows, cte_ctx, self.depth,
+                        )
+                    } else {
+                        crate::select::SelectExecutor::new_with_outer_rows_and_depth(
+                            database, outer_row, schema, outer_rows, self.depth,
+                        )
+                    }
+                } else if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
                         database, outer_row, schema, cte_ctx, self.depth,
                     )
@@ -412,12 +424,8 @@ impl CombinedExpressionEvaluator<'_> {
 
         // Evaluate all elements of the left row value
         let mut expr_values = Vec::with_capacity(expected_columns);
-        let mut has_null_element = false;
         for elem_expr in expr_elements {
             let val = self.eval(elem_expr, row)?;
-            if matches!(val, SqlValue::Null) {
-                has_null_element = true;
-            }
             expr_values.push(val);
         }
 
@@ -438,7 +446,21 @@ impl CombinedExpressionEvaluator<'_> {
 
         let select_executor =
             if let (Some(ref schema), Some(ref outer_row)) = (&merged_schema, &merged_row) {
-                if let Some(cte_ctx) = self.cte_context {
+                if let Some(outer_rows) = self.outer_rows {
+                    // Pass outer_rows for outer-correlated aggregates inside the
+                    // IN-subquery (issues #4930 / #5232 — e.g.
+                    // `(0,0) IN (SELECT MIN(c0), NTILE(1) OVER())` where MIN(c0)
+                    // aggregates over all outer rows).
+                    if let Some(cte_ctx) = self.cte_context {
+                        crate::select::SelectExecutor::new_with_outer_rows_and_cte_and_depth(
+                            database, outer_row, schema, outer_rows, cte_ctx, self.depth,
+                        )
+                    } else {
+                        crate::select::SelectExecutor::new_with_outer_rows_and_depth(
+                            database, outer_row, schema, outer_rows, self.depth,
+                        )
+                    }
+                } else if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
                         database, outer_row, schema, cte_ctx, self.depth,
                     )
@@ -475,7 +497,14 @@ impl CombinedExpressionEvaluator<'_> {
         }
 
         let sql_mode = database.sql_mode();
-        let mut found_null_in_subquery = false;
+        // Whether any row compared as UNKNOWN (all non-NULL elements equal,
+        // but at least one element comparison involved NULL). Rows that are
+        // definitively FALSE (some element definitively unequal) do NOT make
+        // the overall result UNKNOWN — SQL three-valued AND semantics:
+        // (0,0) IN (SELECT NULL, 1) is FALSE (0=1 is false), while
+        // (0,0) IN (SELECT NULL, 0) is NULL (0=NULL is unknown). (#5232,
+        // window1.test 44.3.2)
+        let mut found_unknown_row = false;
 
         // Compare with each row from the subquery using element-wise equality
         for subquery_row in &rows {
@@ -490,9 +519,6 @@ impl CombinedExpressionEvaluator<'_> {
                 // NULL on either side propagates as UNKNOWN for this element
                 if matches!(expr_val, SqlValue::Null) || matches!(subquery_val, SqlValue::Null) {
                     has_null_comparison = true;
-                    if matches!(subquery_val, SqlValue::Null) {
-                        found_null_in_subquery = true;
-                    }
                     continue;
                 }
 
@@ -508,7 +534,7 @@ impl CombinedExpressionEvaluator<'_> {
                         // Equal at this position - continue
                     }
                     SqlValue::Boolean(false) => {
-                        // Not equal - this row can't match
+                        // Not equal - this row is definitively FALSE
                         all_equal = false;
                         break;
                     }
@@ -524,15 +550,19 @@ impl CombinedExpressionEvaluator<'_> {
                 }
             }
 
-            if all_equal && !has_null_comparison {
-                // Found an exact match
-                return Ok(SqlValue::Boolean(!negated));
+            if all_equal {
+                if !has_null_comparison {
+                    // Found an exact match
+                    return Ok(SqlValue::Boolean(!negated));
+                }
+                // No element definitively unequal, but some comparison was
+                // UNKNOWN — this row's match is UNKNOWN.
+                found_unknown_row = true;
             }
         }
 
         // No exact match found
-        if has_null_element || found_null_in_subquery {
-            // Any NULL involvement makes the result UNKNOWN
+        if found_unknown_row {
             Ok(SqlValue::Null)
         } else {
             Ok(SqlValue::Boolean(negated))

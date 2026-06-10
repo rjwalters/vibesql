@@ -49,6 +49,20 @@ pub(super) fn evaluate_scalar(
             return overridden.eval(expr, row);
         }
         evaluator.eval(expr, row)
+    } else if scalar_subquery_needs_outer_rows(expr) {
+        // Issue #5232 (window1.test 61.4.2): empty group, but the subquery
+        // triggers implicit-outer-aggregate-collapse — the aggregation still
+        // produces exactly one row, with the inner aggregate computed over
+        // zero outer rows. Evaluate against an all-NULL stand-in row so
+        // outer column references resolve to NULL while the inner aggregate
+        // iterates the (empty) outer_rows.
+        let mut overridden = evaluator.clone_for_new_expression();
+        overridden.set_outer_rows(group_rows);
+        let null_row = vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Null;
+            evaluator.get_schema().total_columns
+        ]);
+        overridden.eval(expr, &null_row)
     } else {
         Ok(vibesql_types::SqlValue::Null)
     }
@@ -144,9 +158,45 @@ fn bare_subquery_inner_has_outer_aggregate(expr: &vibesql_ast::Expression) -> bo
                 })
                 || else_result.as_ref().is_some_and(|e| bare_subquery_inner_has_outer_aggregate(e))
         }
-        // Don't descend into nested subqueries / window functions (own scope).
+        // Window function: the outer aggregate can hide inside the window's
+        // args or its OVER (PARTITION BY / ORDER BY / frame), e.g.
+        // `(SELECT count(a) OVER (ORDER BY sum(a)))` (window1.test 61.4.2).
+        // Only *plain* aggregates found by the recursion count — the window
+        // function itself (e.g. `total(a) OVER()`) does not. (#5232)
+        Expression::WindowFunction { function, over, .. } => {
+            let args = match function {
+                vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
+            };
+            args.iter().any(bare_subquery_inner_has_outer_aggregate)
+                || over.partition_by.as_ref().is_some_and(|exprs| {
+                    exprs.iter().any(bare_subquery_inner_has_outer_aggregate)
+                })
+                || over.order_by.as_ref().is_some_and(|items| {
+                    items.iter().any(|i| bare_subquery_inner_has_outer_aggregate(&i.expr))
+                })
+        }
+        // Don't descend into nested subqueries (own scope).
         _ => false,
     }
+}
+
+/// Check whether an IN-subquery triggers SQLite's
+/// implicit-outer-aggregate-collapse semantics (#5232, window1.test 44.x):
+/// a bare (FROM-less) subquery whose SELECT list contains an aggregate
+/// referencing an outer column, e.g.
+/// `(0, 0) IN (SELECT MIN(c0), NTILE(1) OVER())`.
+fn in_subquery_needs_outer_rows(subquery: &vibesql_ast::SelectStmt) -> bool {
+    if subquery.from.is_some() {
+        return false;
+    }
+    subquery.select_list.iter().any(|item| match item {
+        vibesql_ast::SelectItem::Expression { expr: inner, .. } => {
+            bare_subquery_inner_has_outer_aggregate(inner)
+        }
+        _ => false,
+    })
 }
 
 /// Recursively check whether `expr` contains any column reference. Used inside
@@ -232,6 +282,40 @@ pub(super) fn evaluate_in(
         }
         _ => unreachable!("evaluate_in called with non-IN expression"),
     };
+
+    // Issue #5232 (window1.test 44.x): when the IN-subquery is a bare
+    // (FROM-less) subquery whose body has an aggregate referencing an outer
+    // column, SQLite's implicit-outer-aggregate-collapse applies: the inner
+    // aggregate is computed over the current group's rows. Delegate the
+    // whole IN expression to the combined evaluator (which supports
+    // row-value LHS and propagates outer context to the subquery) with
+    // `outer_rows` overridden to the group rows — mirroring the scalar
+    // subquery path above.
+    if in_subquery_needs_outer_rows(subquery) {
+        let mut overridden = evaluator.clone_for_new_expression();
+        overridden.set_outer_rows(group_rows);
+
+        let representative_row = if let Some(idx) = executor.get_aggregate_representative_row() {
+            group_rows.get(idx)
+        } else {
+            group_rows.first()
+        };
+
+        return match representative_row {
+            Some(row) => overridden.eval(expr, row),
+            None => {
+                // Empty group: the collapsed aggregation still produces one
+                // row; evaluate against an all-NULL stand-in row so outer
+                // column references resolve to NULL while inner aggregates
+                // iterate the (empty) outer_rows.
+                let null_row = vibesql_storage::Row::new(vec![
+                    vibesql_types::SqlValue::Null;
+                    evaluator.get_schema().total_columns
+                ]);
+                overridden.eval(expr, &null_row)
+            }
+        };
+    }
 
     // Evaluate left-hand expression (which may be an aggregate)
     let left_val =
