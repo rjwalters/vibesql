@@ -572,8 +572,17 @@ impl CombinedSchema {
         // Not found at current level - search outer scopes via chain
         // This enables nested correlated subqueries to reference columns
         // from multiple enclosing scopes (issue #4493)
+        //
+        // Index convention (window1.test 61.1): the row paired with a chained
+        // schema is laid out as `current.values ++ outer.values` (see
+        // `build_merged_outer_row`), so indices resolved in the outer chain
+        // must be offset by this level's column span. This keeps the current
+        // level's 0-based indices valid both against the merged row (current
+        // values form the prefix) and against raw current-level rows (as used
+        // by the outer-correlated aggregate path over `outer_rows`, #4930 /
+        // window1.test 53.0).
         if let Some(outer) = &self.outer_schema {
-            return outer.get_column_index(table, column);
+            return outer.get_column_index(table, column).map(|idx| self.total_columns + idx);
         }
 
         // Not found anywhere in the chain

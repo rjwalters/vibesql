@@ -6,26 +6,46 @@
 
 use vibesql_types::SqlValue;
 
-use crate::{errors::ExecutorError, evaluator::casting::to_i64};
+use crate::{
+    errors::ExecutorError,
+    evaluator::casting::{string_to_number, to_i64},
+};
 
 /// Bitwise operations (SQLite compatible)
 pub(crate) struct BitwiseOps;
+
+/// Convert an operand to i64 with SQLite bitwise-operator semantics.
+///
+/// SQLite coerces text/blob operands with string-to-number conversion
+/// (`SELECT 'seventeen' & 5` → 0, `SELECT '5' | 0` → 5) instead of
+/// erroring, so bitwise operands get a lenient conversion rather than
+/// the strict numeric `to_i64`.
+fn to_i64_bitwise(value: &SqlValue) -> Result<i64, ExecutorError> {
+    match value {
+        SqlValue::Varchar(s) | SqlValue::Character(s) => Ok(string_to_number(s).0),
+        SqlValue::Blob(bytes) => {
+            let text = std::str::from_utf8(bytes).unwrap_or("");
+            Ok(string_to_number(text).0)
+        }
+        _ => to_i64(value),
+    }
+}
 
 impl BitwiseOps {
     /// Bitwise OR operator (|)
     #[inline]
     pub fn or(left: &SqlValue, right: &SqlValue) -> Result<SqlValue, ExecutorError> {
         // NULL propagation is handled at the registry level
-        let left_i64 = to_i64(left)?;
-        let right_i64 = to_i64(right)?;
+        let left_i64 = to_i64_bitwise(left)?;
+        let right_i64 = to_i64_bitwise(right)?;
         Ok(SqlValue::Integer(left_i64 | right_i64))
     }
 
     /// Bitwise AND operator (&)
     #[inline]
     pub fn and(left: &SqlValue, right: &SqlValue) -> Result<SqlValue, ExecutorError> {
-        let left_i64 = to_i64(left)?;
-        let right_i64 = to_i64(right)?;
+        let left_i64 = to_i64_bitwise(left)?;
+        let right_i64 = to_i64_bitwise(right)?;
         Ok(SqlValue::Integer(left_i64 & right_i64))
     }
 
@@ -34,15 +54,15 @@ impl BitwiseOps {
     #[inline]
     #[allow(dead_code)] // Provided for completeness; will be used when unary ~ is implemented
     pub fn not(value: &SqlValue) -> Result<SqlValue, ExecutorError> {
-        let val_i64 = to_i64(value)?;
+        let val_i64 = to_i64_bitwise(value)?;
         Ok(SqlValue::Integer(!val_i64))
     }
 
     /// Left shift operator (<<)
     #[inline]
     pub fn left_shift(left: &SqlValue, right: &SqlValue) -> Result<SqlValue, ExecutorError> {
-        let left_i64 = to_i64(left)?;
-        let right_i64 = to_i64(right)?;
+        let left_i64 = to_i64_bitwise(left)?;
+        let right_i64 = to_i64_bitwise(right)?;
 
         // Handle i64::MIN specially - shifting by this extreme amount returns 0
         if right_i64 == i64::MIN {
@@ -84,8 +104,8 @@ impl BitwiseOps {
     /// SQLite uses arithmetic (signed) right shift
     #[inline]
     pub fn right_shift(left: &SqlValue, right: &SqlValue) -> Result<SqlValue, ExecutorError> {
-        let left_i64 = to_i64(left)?;
-        let right_i64 = to_i64(right)?;
+        let left_i64 = to_i64_bitwise(left)?;
+        let right_i64 = to_i64_bitwise(right)?;
 
         // Handle i64::MIN specially - shifting by this extreme amount returns 0
         // (or -1 for negative left values in left_shift direction)

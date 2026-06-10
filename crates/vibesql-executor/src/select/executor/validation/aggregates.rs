@@ -1526,52 +1526,65 @@ pub fn validate_subquery_context_misuse(
 ) -> Result<(), ExecutorError> {
     match expr {
         Expression::ScalarSubquery(stmt) => {
-            // Only "bare" subqueries (no FROM) re-borrow the outer context.
-            if stmt.from.is_none() {
-                // Check for row value misuse (sole projection is a row value
-                // constructor with multiple elements). This is an error in
-                // any context.
-                if stmt.select_list.len() == 1 {
-                    if let SelectItem::Expression {
-                        expr: Expression::RowValueConstructor(items),
-                        ..
-                    } = &stmt.select_list[0]
-                    {
-                        if items.len() > 1 {
-                            return Err(ExecutorError::RowValueMisused);
-                        }
-                    }
-                }
-
-                // Check each projection for an aggregate function. We only
-                // flag aggregates whose body references something outside the
-                // bare subquery's own scope (i.e., references a column — the
-                // bare subquery has no tables, so any column is an outer ref).
-                //
-                // In SELECT-list context, this is *not* a misuse; it triggers
-                // implicit-outer-aggregate-collapse instead (#5104). Skip the
-                // rejection so the executor's collapse path can handle it.
-                if context == SubqueryContext::WhereOrEqual {
-                    for item in &stmt.select_list {
-                        if let SelectItem::Expression { expr: inner, .. } = item {
-                            if let Some(name) = find_outer_referencing_aggregate(inner) {
-                                return Err(ExecutorError::MisuseOfAggregateContext {
-                                    function_name: name,
-                                });
+            // Walk the full compound chain: the head SELECT plus every
+            // set-operation arm (UNION/INTERSECT/EXCEPT). Each arm carries
+            // its own FROM clause, and SQLite flags misuse in *any* FROM-less
+            // arm — e.g. `(SELECT 2,2 UNION SELECT sum(b),... )` errors even
+            // though the head arm is clean (window1.test 71.0).
+            let mut arm: &vibesql_ast::SelectStmt = stmt;
+            loop {
+                // Only "bare" arms (no FROM) re-borrow the outer context.
+                if arm.from.is_none() {
+                    // Check for row value misuse (sole projection is a row value
+                    // constructor with multiple elements). This is an error in
+                    // any context.
+                    if arm.select_list.len() == 1 {
+                        if let SelectItem::Expression {
+                            expr: Expression::RowValueConstructor(items),
+                            ..
+                        } = &arm.select_list[0]
+                        {
+                            if items.len() > 1 {
+                                return Err(ExecutorError::RowValueMisused);
                             }
                         }
                     }
+
+                    // Check each projection for an aggregate function. We only
+                    // flag aggregates whose body references something outside the
+                    // bare subquery's own scope (i.e., references a column — the
+                    // bare subquery has no tables, so any column is an outer ref).
+                    //
+                    // In SELECT-list context, this is *not* a misuse; it triggers
+                    // implicit-outer-aggregate-collapse instead (#5104). Skip the
+                    // rejection so the executor's collapse path can handle it.
+                    if context == SubqueryContext::WhereOrEqual {
+                        for item in &arm.select_list {
+                            if let SelectItem::Expression { expr: inner, .. } = item {
+                                if let Some(name) = find_outer_referencing_aggregate(inner) {
+                                    return Err(ExecutorError::MisuseOfAggregateContext {
+                                        function_name: name,
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    // Recurse into nested expressions inside the bare arm's
+                    // SELECT list as well — e.g. (SELECT (SELECT sum(x))).
+                    // Inner subqueries inherit the same context: nested bare
+                    // subqueries in a SELECT-list context still treat their own
+                    // SELECT-list position as SELECT-list.
+                    for item in &arm.select_list {
+                        if let SelectItem::Expression { expr: inner, .. } = item {
+                            validate_subquery_context_misuse(inner, context)?;
+                        }
+                    }
                 }
 
-                // Recurse into nested expressions inside the bare subquery's
-                // SELECT list as well — e.g. (SELECT (SELECT sum(x))).
-                // Inner subqueries inherit the same context: nested bare
-                // subqueries in a SELECT-list context still treat their own
-                // SELECT-list position as SELECT-list.
-                for item in &stmt.select_list {
-                    if let SelectItem::Expression { expr: inner, .. } = item {
-                        validate_subquery_context_misuse(inner, context)?;
-                    }
+                match arm.set_operation.as_ref() {
+                    Some(set_op) => arm = &set_op.right,
+                    None => break,
                 }
             }
             Ok(())

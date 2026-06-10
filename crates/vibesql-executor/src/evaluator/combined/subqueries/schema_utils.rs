@@ -37,6 +37,27 @@ use crate::{errors::ExecutorError, select::cte::CteResult};
 /// 2. Follow outer_schema chain to Level 1 [t2, t1] - FOUND in t2!
 ///
 /// No HashMap collision because each level keeps its own tables!
+///
+/// # Index alignment with the merged row (window1.test 61.1)
+///
+/// [`build_merged_outer_row`] lays the row out as `current.values ++
+/// outer.values` — the current level's values form the *prefix* and the
+/// outer chain's values the *suffix*. This matches
+/// [`CombinedSchema::get_column_index`](crate::schema::CombinedSchema::get_column_index)'s
+/// index space: current-level tables keep their 0-based `start_index`
+/// values (so the merged schema also stays aligned with *raw* current-level
+/// rows, as used by the outer-correlated aggregate path over `outer_rows`,
+/// issue #4930 / window1.test 53.0), while lookups that resolve in the
+/// outer chain are offset by the current level's `total_columns` (and so
+/// land in the outer suffix; by induction the outer row is itself merged
+/// with this same convention at the previous nesting level).
+///
+/// Before this convention was made consistent, the merged row put the
+/// outer values first while the schema kept current-level indices 0-based,
+/// so a correlated reference that should resolve to the nearest enclosing
+/// scope read the outermost scope's value instead — e.g.
+/// `SELECT (SELECT sum(a IN (SELECT sum(a) OVER() FROM (SELECT 1 AS x))) FROM t1) FROM t1`
+/// bound the inner `a` to the outermost t1 row (window1.test 61.1).
 pub(super) fn build_merged_outer_schema<'a>(
     current_schema: &'a crate::schema::CombinedSchema,
     outer_schema: Option<&'a crate::schema::CombinedSchema>,
@@ -58,6 +79,13 @@ pub(super) fn build_merged_outer_schema<'a>(
 /// When we merge schemas from multiple levels, we must also merge the corresponding
 /// rows so that column indices align correctly.
 ///
+/// Layout: `current.values ++ outer.values`. The current level's values form
+/// the prefix (aligned with the merged schema's 0-based current-level
+/// `start_index` values); the outer chain's values form the suffix (reached
+/// via the `total_columns` offset applied by
+/// [`CombinedSchema::get_column_index`](crate::schema::CombinedSchema::get_column_index)
+/// when delegating to the outer chain). See [`build_merged_outer_schema`].
+///
 /// # Arguments
 /// * `current_row` - Row from the current level
 /// * `outer_row` - Optional row from outer level(s)
@@ -69,9 +97,9 @@ pub(super) fn build_merged_outer_row<'a>(
     outer_row: Option<&'a vibesql_storage::Row>,
 ) -> std::borrow::Cow<'a, vibesql_storage::Row> {
     if let Some(outer) = outer_row {
-        // Merge: outer row values + current row values
-        let mut merged_values = outer.values.clone();
-        merged_values.extend(current_row.values.iter().cloned());
+        // Merge: current row values + outer row values (current is the prefix)
+        let mut merged_values = current_row.values.clone();
+        merged_values.extend(outer.values.iter().cloned());
 
         std::borrow::Cow::Owned(vibesql_storage::Row::new(merged_values))
     } else {

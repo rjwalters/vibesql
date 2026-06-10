@@ -156,10 +156,13 @@ impl Parser {
                 self.expect_keyword(Keyword::As)?;
 
                 // Parse the target data type.
-                // SQLite tolerates a missing type name: CAST(x AS ) parses with
-                // no affinity (treated like CAST(x AS ANY) — value passes through).
+                // SQLite tolerates a missing type name: CAST(x AS ) gets
+                // NUMERIC affinity, same as an unrecognized type name
+                // (sqlite3AffinityType("") falls through to NUMERIC).
+                // Verified against SQLite 3.51: CAST('seventeen' AS ) → 0
+                // (typeof integer), CAST('5.5' AS ) → 5.5 (typeof real).
                 let data_type = if matches!(self.peek(), Token::RParen) {
-                    vibesql_types::DataType::BinaryLargeObject
+                    vibesql_types::DataType::Numeric { precision: 38, scale: 0 }
                 } else {
                     self.parse_data_type()?
                 };
