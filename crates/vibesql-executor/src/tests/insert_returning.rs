@@ -28,6 +28,14 @@ fn execute_sql(db: &mut vibesql_storage::Database, sql: &str) -> Vec<vibesql_sto
             InsertExecutor::execute(db, &s).expect("INSERT failed");
             vec![]
         }
+        Statement::CreateView(s) => {
+            crate::advanced_objects::execute_create_view(&s, db).expect("CREATE VIEW failed");
+            vec![]
+        }
+        Statement::CreateTrigger(s) => {
+            crate::advanced_objects::execute_create_trigger(&s, db).expect("CREATE TRIGGER failed");
+            vec![]
+        }
         Statement::Select(s) => SelectExecutor::new(db).execute(&s).expect("SELECT failed"),
         other => panic!("Unsupported statement in test helper: {:?}", other),
     }
@@ -278,6 +286,38 @@ fn test_insert_without_returning_yields_none() {
     let (count, returning) = execute_insert_returning(&mut db, "INSERT INTO t1 VALUES (1)");
     assert_eq!(count, 1);
     assert!(returning.is_none(), "no RETURNING clause, no result expected");
+}
+
+#[test]
+fn test_insert_returning_through_instead_of_trigger() {
+    // Issue #5272: view path parity with delete_returning.rs. INSERT into a
+    // view with an INSTEAD OF INSERT trigger projects RETURNING against the
+    // NEW view rows, one result row per trigger fire.
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE base(a INT, b TEXT)");
+    execute_sql(&mut db, "CREATE VIEW v1 AS SELECT a, b FROM base");
+    execute_sql(
+        &mut db,
+        "CREATE TRIGGER v1_tr INSTEAD OF INSERT ON v1 \
+         BEGIN INSERT INTO base VALUES(NEW.a, NEW.b); END",
+    );
+
+    let (count, returning) = execute_insert_returning(
+        &mut db,
+        "INSERT INTO v1 VALUES (1, 'x'), (2, 'y') RETURNING a, b",
+    );
+    assert_eq!(count, 2);
+    let returning = returning.expect("RETURNING clause should produce a result");
+    assert_eq!(returning.columns, vec!["a".to_string(), "b".to_string()]);
+    assert_eq!(returning.rows.len(), 2, "one RETURNING row per INSTEAD OF trigger fire");
+    assert_eq!(returning.rows[0].values[0], SqlValue::Integer(1));
+    assert_eq!(string_value(&returning.rows[0].values[1]), "x");
+    assert_eq!(returning.rows[1].values[0], SqlValue::Integer(2));
+    assert_eq!(string_value(&returning.rows[1].values[1]), "y");
+
+    // The trigger actually inserted both rows into the base table.
+    let rows = execute_sql(&mut db, "SELECT a FROM base");
+    assert_eq!(rows.len(), 2, "INSTEAD OF trigger should fire once per inserted view row");
 }
 
 #[test]

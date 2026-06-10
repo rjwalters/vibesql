@@ -3,7 +3,20 @@ use super::*;
 impl Parser {
     /// Parse SELECT statement (public entry point)
     pub(crate) fn parse_select_statement(&mut self) -> Result<vibesql_ast::SelectStmt, ParseError> {
-        self.parse_select_statement_internal(true, true)
+        self.parse_select_statement_internal(true, true, false)
+    }
+
+    /// Parse a SELECT statement used as the source of a DML statement
+    /// (e.g., INSERT INTO t SELECT ... RETURNING ...).
+    ///
+    /// Unlike `parse_select_statement`, a trailing RETURNING keyword is accepted
+    /// as a valid end token because the clause belongs to the outer DML statement
+    /// (issue #5263). Bare SELECT statements must NOT use this entry point, since
+    /// SQLite rejects RETURNING outside DML (issue #5271).
+    pub(crate) fn parse_dml_source_select_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::SelectStmt, ParseError> {
+        self.parse_select_statement_internal(true, true, true)
     }
 
     /// Parse SELECT or VALUES statement when embedded in another statement (cursor, view, etc.)
@@ -17,9 +30,9 @@ impl Parser {
     ) -> Result<vibesql_ast::SelectStmt, ParseError> {
         if self.peek_keyword(Keyword::Values) {
             // Handle VALUES clause as view source (e.g., CREATE VIEW dual(dummy) AS VALUES('x'))
-            self.parse_values_statement_internal(true, false)
+            self.parse_values_statement_internal(true, false, false)
         } else {
-            self.parse_select_statement_internal(true, false)
+            self.parse_select_statement_internal(true, false, false)
         }
     }
 
@@ -33,10 +46,17 @@ impl Parser {
     /// unexpected tokens follow the SELECT statement. This is set to false when parsing
     /// SELECT as part of another statement (cursor, view, etc.) where additional tokens
     /// belong to the outer statement.
+    ///
+    /// The `allow_returning` parameter controls whether a trailing RETURNING keyword
+    /// is accepted as a valid end token. This is true only when the SELECT/VALUES is
+    /// the source of a DML statement (INSERT INTO t SELECT ... RETURNING ..., issue
+    /// #5263). For bare SELECT statements it must be false so that SQLite-incompatible
+    /// input like `SELECT 1 RETURNING a` is rejected (issue #5271).
     fn parse_select_statement_internal(
         &mut self,
         allow_order_limit: bool,
         validate_end_tokens: bool,
+        allow_returning: bool,
     ) -> Result<vibesql_ast::SelectStmt, ParseError> {
         // Parse optional WITH clause (CTEs)
         let with_clause = if self.peek_keyword(Keyword::With) {
@@ -183,9 +203,9 @@ impl Parser {
             let right = if matches!(self.peek(), Token::LParen) {
                 self.advance(); // consume '('
                 let stmt = if self.peek_keyword(Keyword::Values) {
-                    self.parse_values_statement_internal(false, true)?
+                    self.parse_values_statement_internal(false, true, false)?
                 } else {
-                    self.parse_select_statement_internal(false, true)?
+                    self.parse_select_statement_internal(false, true, false)?
                 };
                 if !matches!(self.peek(), Token::RParen) {
                     return Err(ParseError {
@@ -196,9 +216,9 @@ impl Parser {
                 self.advance(); // consume ')'
                 Box::new(stmt)
             } else if self.peek_keyword(Keyword::Values) {
-                Box::new(self.parse_values_statement_internal(false, true)?)
+                Box::new(self.parse_values_statement_internal(false, true, allow_returning)?)
             } else {
-                Box::new(self.parse_select_statement_internal(false, true)?)
+                Box::new(self.parse_select_statement_internal(false, true, allow_returning)?)
             };
 
             Some(vibesql_ast::SetOperation { op, all, right })
@@ -379,16 +399,16 @@ impl Parser {
         if validate_end_tokens {
             if allow_order_limit {
                 // Top-level: only allow semicolon, EOF, or ) (for subqueries/CTEs).
-                // RETURNING is allowed because the SELECT may be the source of
+                // RETURNING is allowed only when the SELECT is the source of
                 // INSERT INTO t SELECT ... RETURNING ... (the clause belongs to
-                // the outer INSERT, issue #5263).
-                if !matches!(
-                    self.peek(),
-                    Token::Semicolon
-                        | Token::Eof
-                        | Token::RParen
-                        | Token::Keyword { keyword: Keyword::Returning, .. }
-                ) {
+                // the outer INSERT, issue #5263). For a bare SELECT, a trailing
+                // RETURNING is a syntax error, matching SQLite (issue #5271).
+                let valid_end_token = match self.peek() {
+                    Token::Semicolon | Token::Eof | Token::RParen => true,
+                    Token::Keyword { keyword: Keyword::Returning, .. } if allow_returning => true,
+                    _ => false,
+                };
+                if !valid_end_token {
                     return Err(ParseError { message: self.peek().syntax_error() });
                 }
             } else {
@@ -398,6 +418,10 @@ impl Parser {
                     Token::Keyword { keyword: Keyword::Order, .. }
                     | Token::Keyword { keyword: Keyword::Limit, .. }
                     | Token::Keyword { keyword: Keyword::Offset, .. } => {}
+                    // RETURNING belongs to an outer DML statement when this SELECT
+                    // is the right side of a set operation in its source, e.g.
+                    // INSERT INTO t SELECT 1 UNION SELECT 2 RETURNING a (issue #5263)
+                    Token::Keyword { keyword: Keyword::Returning, .. } if allow_returning => {}
                     _ => return Err(ParseError { message: self.peek().syntax_error() }),
                 }
             }
@@ -554,7 +578,7 @@ impl Parser {
     /// - VALUES(1),(2),(3);
     /// - VALUES(1) UNION VALUES(2);
     pub(crate) fn parse_values_statement(&mut self) -> Result<vibesql_ast::SelectStmt, ParseError> {
-        self.parse_values_statement_internal(true, true)
+        self.parse_values_statement_internal(true, true, false)
     }
 
     /// Internal VALUES parser with control over ORDER BY/LIMIT parsing
@@ -562,12 +586,18 @@ impl Parser {
     /// The `validate_end_tokens` parameter controls whether to validate that no
     /// unexpected tokens follow the statement.
     ///
+    /// The `allow_returning` parameter controls whether a trailing RETURNING keyword
+    /// is accepted as a valid end token (only when the VALUES is the source of a DML
+    /// statement, issue #5263). For bare VALUES statements it must be false (issue
+    /// #5271).
+    ///
     /// This is used by INSERT parser to handle compound VALUES statements like:
     /// `INSERT INTO t VALUES(1) UNION VALUES(2)`
     pub(crate) fn parse_values_statement_internal(
         &mut self,
         allow_order_limit: bool,
         validate_end_tokens: bool,
+        allow_returning: bool,
     ) -> Result<vibesql_ast::SelectStmt, ParseError> {
         // Parse the VALUES rows
         let rows = self.parse_values_rows()?;
@@ -602,9 +632,9 @@ impl Parser {
             let right = if matches!(self.peek(), Token::LParen) {
                 self.advance(); // consume '('
                 let stmt = if self.peek_keyword(Keyword::Values) {
-                    self.parse_values_statement_internal(false, true)?
+                    self.parse_values_statement_internal(false, true, false)?
                 } else {
-                    self.parse_select_statement_internal(false, true)?
+                    self.parse_select_statement_internal(false, true, false)?
                 };
                 if !matches!(self.peek(), Token::RParen) {
                     return Err(ParseError {
@@ -615,9 +645,9 @@ impl Parser {
                 self.advance(); // consume ')'
                 Box::new(stmt)
             } else if self.peek_keyword(Keyword::Values) {
-                Box::new(self.parse_values_statement_internal(false, true)?)
+                Box::new(self.parse_values_statement_internal(false, true, allow_returning)?)
             } else {
-                Box::new(self.parse_select_statement_internal(false, true)?)
+                Box::new(self.parse_select_statement_internal(false, true, allow_returning)?)
             };
 
             Some(vibesql_ast::SetOperation { op, all, right })
@@ -730,8 +760,10 @@ impl Parser {
             let valid_end_token = match self.peek() {
                 Token::Semicolon | Token::Eof | Token::RParen => true,
                 // RETURNING belongs to an outer INSERT (INSERT INTO t VALUES
-                // ... RETURNING ..., issue #5263).
-                Token::Keyword { keyword: Keyword::Returning, .. } => true,
+                // ... RETURNING ..., issue #5263). For a bare VALUES statement a
+                // trailing RETURNING is a syntax error, matching SQLite (issue
+                // #5271).
+                Token::Keyword { keyword: Keyword::Returning, .. } if allow_returning => true,
                 // When nested, allow ORDER BY/LIMIT/OFFSET for outer statement
                 Token::Keyword { keyword: Keyword::Order, .. }
                 | Token::Keyword { keyword: Keyword::Limit, .. }

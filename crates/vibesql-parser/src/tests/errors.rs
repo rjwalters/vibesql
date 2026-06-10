@@ -518,3 +518,41 @@ fn test_issue_4467_mixed_case_keyword_error() {
         error_msg
     );
 }
+
+// ========================================================================
+// Issue #5271: bare SELECT/VALUES with a trailing RETURNING clause must be
+// a syntax error (SQLite: Parse error: near "RETURNING": syntax error).
+// RETURNING is only valid as part of a DML statement (INSERT/UPDATE/DELETE).
+// ========================================================================
+
+#[test]
+fn test_issue_5271_bare_select_returning_is_error() {
+    let result = Parser::parse_sql("SELECT 1 RETURNING a;");
+    assert!(result.is_err(), "bare SELECT ... RETURNING should be a syntax error");
+}
+
+#[test]
+fn test_issue_5271_bare_select_from_returning_is_error() {
+    let result = Parser::parse_sql("SELECT * FROM t RETURNING;");
+    assert!(result.is_err(), "bare SELECT ... RETURNING should be a syntax error");
+}
+
+#[test]
+fn test_issue_5271_bare_values_returning_is_error() {
+    let result = Parser::parse_sql("VALUES(1) RETURNING a;");
+    assert!(result.is_err(), "bare VALUES ... RETURNING should be a syntax error");
+}
+
+#[test]
+fn test_issue_5271_bare_compound_select_returning_is_error() {
+    let result = Parser::parse_sql("SELECT 1 UNION SELECT 2 RETURNING a;");
+    assert!(result.is_err(), "bare compound SELECT ... RETURNING should be a syntax error");
+}
+
+#[test]
+fn test_issue_5271_bare_select_returning_arena_fallback_is_error() {
+    // The CLI path goes through parse_with_arena_fallback; the arena parser
+    // rejects this on its own, but the owned-parser fallback must reject it too.
+    let result = crate::parse_with_arena_fallback("SELECT 1 RETURNING a");
+    assert!(result.is_err(), "bare SELECT ... RETURNING should be a syntax error in both parsers");
+}
