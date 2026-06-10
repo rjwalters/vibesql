@@ -229,12 +229,36 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::Update(update_stmt) => {
-                match vibesql_executor::UpdateExecutor::execute(&update_stmt, &mut self.db) {
-                    Ok(affected_rows) => {
+                match vibesql_executor::UpdateExecutor::execute_returning(
+                    &update_stmt,
+                    &mut self.db,
+                ) {
+                    Ok((affected_rows, returning)) => {
                         // Track changes count for changes() and total_changes() functions
                         self.db.set_last_changes_count(affected_rows);
                         self.db.increment_total_changes_count(affected_rows);
                         result.row_count = affected_rows;
+
+                        // RETURNING clause: render the projected NEW rows like
+                        // a SELECT result (SQLite 3.35.0+ semantics).
+                        if let Some(returning_result) = returning {
+                            result.row_count = returning_result.rows.len();
+                            result.columns = returning_result.columns;
+                            for row in returning_result.rows {
+                                let row_strs: Vec<Option<String>> = row
+                                    .values
+                                    .iter()
+                                    .map(|v| {
+                                        if v.is_null() {
+                                            None
+                                        } else {
+                                            Some(format_sql_value(v))
+                                        }
+                                    })
+                                    .collect();
+                                result.rows.push(row_strs);
+                            }
+                        }
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }

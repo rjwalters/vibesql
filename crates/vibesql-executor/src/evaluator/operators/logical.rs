@@ -29,6 +29,41 @@ pub fn is_truthy_string(s: &str) -> bool {
     parse_leading_numeric(s) != 0.0
 }
 
+/// Check if a SqlValue is truthy using SQLite truthiness rules.
+///
+/// SQLite rules:
+/// - `Boolean(true)` → true
+/// - `Boolean(false)` → false
+/// - `Null` → false (NULL is not truthy for WHERE clause purposes)
+/// - `0` and `0.0` → false
+/// - Any other numeric value → true
+/// - Strings → parse leading numeric, non-zero is true, 0 or non-numeric is false
+///
+/// Shared by row-selection paths (DELETE, UPDATE-on-view) so comparison
+/// results that surface as `Integer(1)`/`Integer(0)` (SQLite-style) are
+/// treated identically to `Boolean(true)`/`Boolean(false)`.
+pub fn is_truthy(value: &SqlValue) -> bool {
+    use SqlValue::*;
+    match value {
+        Boolean(b) => *b,
+        Null => false, // NULL is not truthy for row selection
+        // Integer types: 0 is false, non-zero is true
+        Integer(n) => *n != 0,
+        Smallint(n) => *n != 0,
+        Bigint(n) => *n != 0,
+        Unsigned(n) => *n != 0,
+        // Floating point types: 0.0 is false, non-zero is true
+        Float(f) => *f != 0.0,
+        Real(f) => *f != 0.0,
+        Double(f) => *f != 0.0,
+        Numeric(f) => *f != 0.0,
+        // String types: SQLite parses leading numeric portion
+        Varchar(s) | Character(s) => is_truthy_string(s),
+        // Other types are not truthy (conservative default)
+        _ => false,
+    }
+}
+
 fn parse_leading_numeric(s: &str) -> f64 {
     let s = s.trim_start();
     if s.is_empty() {

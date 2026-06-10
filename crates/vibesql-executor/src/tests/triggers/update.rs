@@ -78,6 +78,7 @@ fn test_after_update_trigger_fires() {
             },
         )),
         conflict_clause: None,
+        returning: None,
     };
     UpdateExecutor::execute(&update, &mut db).expect("Failed to update");
 
@@ -151,6 +152,7 @@ fn test_before_update_trigger_fires() {
             },
         )),
         conflict_clause: None,
+        returning: None,
     };
     UpdateExecutor::execute(&update, &mut db).expect("Failed to update");
 
@@ -306,9 +308,7 @@ fn test_update_from_on_view_zero_matches() {
         table_name: "V1".to_string(),
         granularity: TriggerGranularity::Row,
         when_condition: None,
-        triggered_action: TriggerAction::RawSql(
-            "INSERT INTO log VALUES('fired')".to_string(),
-        ),
+        triggered_action: TriggerAction::RawSql("INSERT INTO log VALUES('fired')".to_string()),
     };
     advanced_objects::execute_create_trigger(&trigger_stmt, &mut db)
         .expect("Failed to create INSTEAD OF trigger");

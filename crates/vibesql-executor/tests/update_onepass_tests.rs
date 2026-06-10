@@ -128,6 +128,7 @@ fn test_onepass_multiple_literal_assignments() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -170,6 +171,7 @@ fn test_onepass_single_literal_assignment() {
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -204,6 +206,7 @@ fn test_onepass_pk_not_found_returns_zero() {
             right: Box::new(Expression::Literal(SqlValue::Integer(999))),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -247,6 +250,7 @@ fn test_onepass_not_null_constraint_enforced() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let result = UpdateExecutor::execute(&stmt, &mut db);
@@ -292,6 +296,7 @@ fn test_composite_pk_update_both_columns_specified() {
             }),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -343,6 +348,7 @@ fn test_composite_pk_update_reversed_order() {
             }),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -379,6 +385,7 @@ fn test_composite_pk_partial_match_uses_scan() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -426,6 +433,7 @@ fn test_composite_pk_not_found_returns_zero() {
             }),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -472,6 +480,7 @@ fn test_composite_pk_multiple_columns_updated() {
             }),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();

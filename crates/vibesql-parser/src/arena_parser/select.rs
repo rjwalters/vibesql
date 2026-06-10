@@ -361,7 +361,10 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse select list.
-    fn parse_select_list(&mut self) -> Result<BumpVec<'arena, SelectItem<'arena>>, ParseError> {
+    /// Also used for RETURNING clauses on DML statements (same item grammar).
+    pub(crate) fn parse_select_list(
+        &mut self,
+    ) -> Result<BumpVec<'arena, SelectItem<'arena>>, ParseError> {
         let mut items = BumpVec::new_in(self.arena);
 
         loop {

@@ -1070,7 +1070,21 @@ fn walk_update<V: ExpressionVisitor>(visitor: &mut V, stmt: &UpdateStmt) {
         }
     }
     if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
-        walk_expression(visitor, expr);
+        let result = walk_expression(visitor, expr);
+        if result.should_stop() {
+            return;
+        }
+    }
+    // Walk RETURNING expressions
+    if let Some(items) = &stmt.returning {
+        for item in items {
+            if let SelectItem::Expression { expr, .. } = item {
+                let result = walk_expression(visitor, expr);
+                if result.should_stop() {
+                    return;
+                }
+            }
+        }
     }
 }
 
@@ -1368,6 +1382,19 @@ pub fn transform_update<V: ExpressionMutVisitor>(visitor: &mut V, stmt: UpdateSt
             other => other,
         }),
         conflict_clause: stmt.conflict_clause,
+        returning: stmt.returning.map(|items| {
+            items
+                .into_iter()
+                .map(|item| match item {
+                    SelectItem::Expression { expr, alias, source_text } => SelectItem::Expression {
+                        expr: transform_expression(visitor, expr),
+                        alias,
+                        source_text,
+                    },
+                    other => other,
+                })
+                .collect()
+        }),
     }
 }
 

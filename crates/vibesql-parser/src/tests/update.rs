@@ -167,3 +167,100 @@ fn test_parse_update_without_conflict_clause() {
         _ => panic!("Expected UPDATE statement"),
     }
 }
+
+// ========================================================================
+// RETURNING Clause Tests (SQLite 3.35.0+, issue #5233)
+// ========================================================================
+
+#[test]
+fn test_parse_update_returning_star() {
+    let result = Parser::parse_sql("UPDATE t1 SET a = 5 WHERE a = 4 RETURNING *;");
+    assert!(result.is_ok(), "RETURNING * should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            let returning = update.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 1);
+            assert!(matches!(returning[0], vibesql_ast::SelectItem::Wildcard { .. }));
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_returning_expression_list() {
+    let result = Parser::parse_sql("UPDATE t1 SET a = 5 WHERE a = 4 RETURNING *, a + 1;");
+    assert!(result.is_ok(), "RETURNING expr list should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            let returning = update.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 2);
+            assert!(matches!(returning[0], vibesql_ast::SelectItem::Wildcard { .. }));
+            assert!(matches!(returning[1], vibesql_ast::SelectItem::Expression { .. }));
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_returning_with_alias() {
+    let result = Parser::parse_sql("UPDATE t1 SET a = 5 RETURNING a AS new_a, a + 1 incremented;");
+    assert!(result.is_ok(), "RETURNING aliases should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            let returning = update.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 2);
+            match &returning[0] {
+                vibesql_ast::SelectItem::Expression { alias, .. } => {
+                    assert_eq!(alias.as_deref(), Some("new_a"));
+                }
+                other => panic!("Expected expression item, got {:?}", other),
+            }
+            match &returning[1] {
+                vibesql_ast::SelectItem::Expression { alias, .. } => {
+                    assert_eq!(alias.as_deref(), Some("incremented"));
+                }
+                other => panic!("Expected expression item, got {:?}", other),
+            }
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_returning_arena_parser() {
+    // The CLI path goes through parse_with_arena_fallback; make sure the
+    // arena parser captures RETURNING too.
+    let result =
+        crate::parse_with_arena_fallback("UPDATE t1 SET a = 5 WHERE a = 4 RETURNING *, a + 1");
+    assert!(result.is_ok(), "arena parser should handle RETURNING: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            let returning = update.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 2);
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_without_returning_is_none() {
+    let result = Parser::parse_sql("UPDATE t1 SET a = 5 WHERE a = 4;");
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => assert!(update.returning.is_none()),
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_returning_still_usable_as_identifier() {
+    // RETURNING is a fallback keyword in SQLite: it must remain usable as a
+    // column name outside the DML RETURNING position.
+    let result = Parser::parse_sql("UPDATE t1 SET returning = 5 WHERE returning = 4;");
+    assert!(result.is_ok(), "'returning' as column name should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            assert_eq!(update.assignments[0].column, "returning");
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}

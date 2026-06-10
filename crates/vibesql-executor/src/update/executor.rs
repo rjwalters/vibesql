@@ -34,13 +34,16 @@ use super::{
 
 /// Internal implementation supporting both schema caching, procedural context, and trigger
 /// context
+///
+/// Returns the number of updated rows plus, when the statement carries a
+/// RETURNING clause, the projected NEW rows (SQLite 3.35.0+ semantics).
 pub(super) fn execute_internal(
     stmt: &UpdateStmt,
     database: &mut Database,
     schema: Option<&vibesql_catalog::TableSchema>,
     procedural_context: Option<&crate::procedural::ExecutionContext>,
     trigger_context: Option<&crate::trigger_execution::TriggerContext>,
-) -> Result<usize, ExecutorError> {
+) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
     // Check if target is sqlite_master/sqlite_schema (read-only system table)
     if is_sqlite_schema_table(&stmt.table_name) {
         return Err(ExecutorError::SqliteSystemTableReadOnly {
@@ -107,13 +110,15 @@ pub(super) fn execute_internal(
         && trigger_context.is_none()
         && !has_assertions
         && !has_expression_indexes
+        // RETURNING needs the two-phase path so NEW rows can be captured
+        && stmt.returning.is_none()
     {
         if let Some(result) = fast_path::try_fast_path_update(stmt, database, schema)? {
             // Invalidate columnar cache after fast path update
             if result > 0 {
                 database.invalidate_columnar_cache(table_name);
             }
-            return Ok(result);
+            return Ok((result, None));
         }
     }
 
@@ -661,7 +666,21 @@ pub(super) fn execute_internal(
         return Err(assertion_error);
     }
 
-    Ok(update_count)
+    // Project RETURNING items against the NEW rows (SQLite 3.35.0+).
+    let returning = if let Some(items) = &stmt.returning {
+        let new_rows: Vec<&Row> = updates.iter().map(|u| &u.new_row).collect();
+        Some(super::returning::project_returning(
+            items,
+            schema,
+            database,
+            stmt.alias.as_deref(),
+            &new_rows,
+        )?)
+    } else {
+        None
+    };
+
+    Ok((update_count, returning))
 }
 
 /// Validate only NOT NULL and CHECK constraints (for REPLACE conflict resolution)
@@ -1167,7 +1186,7 @@ fn execute_update_from(
     has_triggers: bool,
     pk_indices: &Option<Vec<usize>>,
     trigger_context: Option<&crate::trigger_execution::TriggerContext<'_>>,
-) -> Result<usize, ExecutorError> {
+) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
     // Execute the join and get matched rows with computed SET values
     // Issue #5082: pass trigger_context so the synthetic SELECT can resolve
     // OLD/NEW pseudo-variables when this UPDATE runs inside a trigger body.
@@ -1203,7 +1222,7 @@ fn execute_update_from(
                 vibesql_ast::TriggerEvent::Update(None),
             )?;
         }
-        return Ok(0);
+        return Ok((0, empty_returning(stmt, schema, database)?));
     }
 
     // Validate constraints for each update.
@@ -1439,7 +1458,7 @@ fn execute_update_from(
                 vibesql_ast::TriggerEvent::Update(None),
             )?;
         }
-        return Ok(0);
+        return Ok((0, empty_returning(stmt, schema, database)?));
     }
 
     // Cross-update uniqueness validation: catches multiple updates landing on the
@@ -1581,5 +1600,35 @@ fn execute_update_from(
     // Mark pk_indices as used (it's available for future enhancements)
     let _ = pk_indices;
 
-    Ok(update_count)
+    // Project RETURNING items against the NEW rows (SQLite 3.35.0+).
+    let returning = if let Some(items) = &stmt.returning {
+        let new_rows: Vec<&Row> = updates.iter().map(|u| &u.new_row).collect();
+        Some(super::returning::project_returning(
+            items,
+            schema,
+            database,
+            stmt.alias.as_deref(),
+            &new_rows,
+        )?)
+    } else {
+        None
+    };
+
+    Ok((update_count, returning))
+}
+
+/// Build an empty RETURNING result (column names only) for statements whose
+/// RETURNING clause matched zero rows. Returns `None` when the statement has
+/// no RETURNING clause.
+fn empty_returning(
+    stmt: &UpdateStmt,
+    schema: &vibesql_catalog::TableSchema,
+    database: &Database,
+) -> Result<Option<crate::select::SelectResult>, ExecutorError> {
+    stmt.returning
+        .as_ref()
+        .map(|items| {
+            super::returning::project_returning(items, schema, database, stmt.alias.as_deref(), &[])
+        })
+        .transpose()
 }

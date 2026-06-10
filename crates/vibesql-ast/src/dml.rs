@@ -2,7 +2,7 @@
 //!
 //! This module contains INSERT, UPDATE, and DELETE statement types.
 
-use crate::{CommonTableExpr, Expression, FromClause, OrderByItem, SelectStmt};
+use crate::{CommonTableExpr, Expression, FromClause, OrderByItem, SelectItem, SelectStmt};
 
 // ============================================================================
 // INSERT Statement
@@ -159,6 +159,10 @@ pub struct UpdateStmt {
     /// Optional conflict resolution clause (SQLite extension)
     /// Syntax: UPDATE OR REPLACE|IGNORE|ABORT|ROLLBACK|FAIL table SET ...
     pub conflict_clause: Option<ConflictClause>,
+    /// Optional RETURNING clause (SQLite 3.35.0+)
+    /// Syntax: UPDATE table SET ... [WHERE ...] RETURNING expr [, expr ...]
+    /// Returns the NEW row values (after assignments) for each updated row.
+    pub returning: Option<Vec<SelectItem>>,
 }
 
 /// Column assignment (column = value)

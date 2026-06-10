@@ -23,6 +23,7 @@ fn test_update_all_rows() {
         }],
         where_clause: None,
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -61,6 +62,7 @@ fn test_update_with_where_clause() {
             )))),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -107,6 +109,7 @@ fn test_update_multiple_columns() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -147,6 +150,7 @@ fn test_update_with_expression() {
         }],
         where_clause: None,
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -174,6 +178,7 @@ fn test_update_table_not_found() {
         assignments: vec![],
         where_clause: None,
         conflict_clause: None,
+        returning: None,
     };
 
     let result = UpdateExecutor::execute(&stmt, &mut db);
@@ -198,6 +203,7 @@ fn test_update_column_not_found() {
         }],
         where_clause: None,
         conflict_clause: None,
+        returning: None,
     };
 
     let result = UpdateExecutor::execute(&stmt, &mut db);
@@ -228,6 +234,7 @@ fn test_update_no_matching_rows() {
             right: Box::new(Expression::Literal(SqlValue::Integer(999))),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();

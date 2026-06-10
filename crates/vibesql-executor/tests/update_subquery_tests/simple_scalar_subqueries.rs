@@ -137,6 +137,7 @@ fn create_update_stmt(
         from_clause: None,
         where_clause,
         conflict_clause: None,
+        returning: None,
     }
 }
 
@@ -156,6 +157,7 @@ fn create_multi_column_update_stmt(
         from_clause: None,
         where_clause: None,
         conflict_clause: None,
+        returning: None,
     }
 }
 

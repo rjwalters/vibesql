@@ -1032,31 +1032,8 @@ fn build_view_schema(
 
 /// Check if a SqlValue is truthy using SQLite truthiness rules.
 ///
-/// SQLite rules:
-/// - `Boolean(true)` → true
-/// - `Boolean(false)` → false
-/// - `Null` → false (NULL is not truthy for WHERE clause purposes)
-/// - `0` and `0.0` → false
-/// - Any other numeric value → true
-/// - Strings → parse leading numeric, non-zero is true, 0 or non-numeric is false
+/// Delegates to the shared helper in `crate::evaluator::operators` so DELETE
+/// and UPDATE-on-view row selection use identical truthiness semantics.
 fn is_truthy(value: &SqlValue) -> bool {
-    use SqlValue::*;
-    match value {
-        Boolean(b) => *b,
-        Null => false, // NULL is not truthy for row selection
-        // Integer types: 0 is false, non-zero is true
-        Integer(n) => *n != 0,
-        Smallint(n) => *n != 0,
-        Bigint(n) => *n != 0,
-        Unsigned(n) => *n != 0,
-        // Floating point types: 0.0 is false, non-zero is true
-        Float(f) => *f != 0.0,
-        Real(f) => *f != 0.0,
-        Double(f) => *f != 0.0,
-        Numeric(f) => *f != 0.0,
-        // String types: SQLite parses leading numeric portion
-        Varchar(s) | Character(s) => crate::evaluator::operators::is_truthy_string(s),
-        // Other types are not truthy (conservative default)
-        _ => false,
-    }
+    crate::evaluator::operators::is_truthy(value)
 }

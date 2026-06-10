@@ -29,6 +29,7 @@ mod fast_path;
 mod foreign_keys;
 mod from_clause;
 mod index_sync;
+mod returning;
 mod row_selector;
 mod triggers;
 mod value_updater;
@@ -129,12 +130,27 @@ impl UpdateExecutor {
     ///     from_clause: None,
     ///     where_clause: None,
     ///     conflict_clause: None,
+    ///     returning: None,
     /// };
     ///
     /// let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
     /// assert_eq!(count, 1);
     /// ```
     pub fn execute(stmt: &UpdateStmt, database: &mut Database) -> Result<usize, ExecutorError> {
+        executor::execute_internal(stmt, database, None, None, None).map(|(count, _)| count)
+    }
+
+    /// Execute an UPDATE statement, capturing RETURNING rows (SQLite 3.35.0+)
+    ///
+    /// Returns the number of updated rows plus, when the statement carries a
+    /// RETURNING clause, the projected NEW rows (after SET assignments) — one
+    /// per updated row, or one per INSTEAD OF trigger fire for views.
+    ///
+    /// When the statement has no RETURNING clause the second element is `None`.
+    pub fn execute_returning(
+        stmt: &UpdateStmt,
+        database: &mut Database,
+    ) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
         executor::execute_internal(stmt, database, None, None, None)
     }
 
@@ -146,6 +162,7 @@ impl UpdateExecutor {
         procedural_context: &crate::procedural::ExecutionContext,
     ) -> Result<usize, ExecutorError> {
         executor::execute_internal(stmt, database, None, Some(procedural_context), None)
+            .map(|(count, _)| count)
     }
 
     /// Execute an UPDATE statement with trigger context
@@ -156,6 +173,7 @@ impl UpdateExecutor {
         trigger_context: &crate::trigger_execution::TriggerContext,
     ) -> Result<usize, ExecutorError> {
         executor::execute_internal(stmt, database, None, None, Some(trigger_context))
+            .map(|(count, _)| count)
     }
 
     /// Execute an UPDATE statement with optional pre-fetched schema
@@ -177,6 +195,6 @@ impl UpdateExecutor {
         database: &mut Database,
         schema: Option<&vibesql_catalog::TableSchema>,
     ) -> Result<usize, ExecutorError> {
-        executor::execute_internal(stmt, database, schema, None, None)
+        executor::execute_internal(stmt, database, schema, None, None).map(|(count, _)| count)
     }
 }

@@ -183,6 +183,7 @@ fn test_update_unique_constraint_composite() {
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let result = UpdateExecutor::execute(&stmt, &mut db);

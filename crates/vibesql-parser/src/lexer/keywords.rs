@@ -114,6 +114,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "COMMIT" => Keyword::Commit,
     "CONSTRAINT" => Keyword::Constraint,
     "RENAME" => Keyword::Rename,
+    "RETURNING" => Keyword::Returning,
     "MODIFY" => Keyword::Modify,
     "CHANGE" => Keyword::Change,
     "ROLLBACK" => Keyword::Rollback,

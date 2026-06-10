@@ -69,6 +69,7 @@ fn test_update_with_pk_index_performance() {
             })),
             quoted: false,
             conflict_clause: None,
+            returning: None,
         };
 
         UpdateExecutor::execute(&stmt, &mut db).unwrap();
