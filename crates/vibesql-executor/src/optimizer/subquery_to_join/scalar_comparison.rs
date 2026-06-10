@@ -45,10 +45,18 @@
 //!
 //! The one exception is a bare `COUNT(...)` (or SQLite's `TOTAL`), which
 //! evaluates to 0 (not NULL) over an empty group. For those we keep
-//! `COALESCE(__scalar_agg, 0)`. If COUNT/TOTAL appears nested inside a larger
-//! expression (e.g. `COUNT(*) + 5`), neither NULL nor 0 is the correct
-//! empty-group value, so we skip the transformation entirely and fall back to
-//! per-row correlated execution.
+//! `COALESCE(__scalar_agg, 0)`.
+//!
+//! Comparing directly against the joined column is only sound when NULL is
+//! guaranteed to propagate from the aggregate to the expression root. That is
+//! decided by a **whitelist**: the SELECT expression must be built exclusively
+//! from a NULL-on-empty aggregate (SUM/AVG/MIN/MAX/GROUP_CONCAT), arithmetic
+//! binary operators, unary +/-, CAST, and literals — all strictly
+//! NULL-propagating. Anything else (NULL-absorbing constructs like
+//! `COALESCE(SUM(x), 0)`, `IFNULL`, `CASE`, arbitrary function calls, or
+//! COUNT/TOTAL nested inside a larger expression such as `COUNT(*) + 5`) has
+//! an empty-group value the LEFT JOIN cannot represent, so we skip the
+//! transformation entirely and fall back to per-row correlated execution.
 //!
 //! ## Why This Is Faster
 //!
@@ -64,7 +72,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use vibesql_ast::{
     BinaryOperator, ColumnIdentifier, Expression, FromClause, FunctionIdentifier, GroupByClause,
-    JoinType, SelectItem, SelectStmt,
+    JoinType, SelectItem, SelectStmt, UnaryOperator,
 };
 use vibesql_types::SqlValue;
 
@@ -163,8 +171,9 @@ pub(super) fn try_convert_scalar_comparison_to_join(
     if matches!(empty_group_behavior, EmptyGroupBehavior::Unsupported) {
         if verbose {
             eprintln!(
-                "[SCALAR_COMPARISON] COUNT/TOTAL nested in expression - cannot represent \
-                 empty-group value after LEFT JOIN, skipping"
+                "[SCALAR_COMPARISON] Aggregate expression is not strictly NULL-propagating \
+                 (e.g. COALESCE/IFNULL/CASE around the aggregate, or nested COUNT/TOTAL) - \
+                 cannot represent empty-group value after LEFT JOIN, skipping"
             );
         }
         return None;
@@ -416,20 +425,35 @@ enum EmptyGroupBehavior {
     /// Bare COUNT/TOTAL yields 0 (not NULL) over an empty group, so the
     /// missing LEFT JOIN match must be defaulted with COALESCE(.., 0).
     DefaultZero,
-    /// COUNT/TOTAL nested inside a larger expression (e.g. `COUNT(*) + 5`):
-    /// neither NULL nor 0 is the correct empty-group value, so the
-    /// transformation must be skipped.
+    /// The expression's empty-group value cannot be represented after the
+    /// LEFT JOIN, so the transformation must be skipped. This covers:
+    /// - COUNT/TOTAL nested inside a larger expression (e.g. `COUNT(*) + 5`,
+    ///   whose empty-group value is 5 — neither NULL nor 0)
+    /// - NULL-absorbing constructs around the aggregate (e.g.
+    ///   `COALESCE(SUM(x), 0)`, `IFNULL(SUM(x), 0)`,
+    ///   `CASE WHEN SUM(x) IS NULL THEN 0 ELSE SUM(x) END`), whose
+    ///   empty-group value is non-NULL even though the aggregate is NULL
+    /// - Any construct not proven strictly NULL-propagating
     Unsupported,
 }
 
-/// Classify how an aggregate SELECT expression behaves over an empty group
+/// Classify how an aggregate SELECT expression behaves over an empty group.
+///
+/// `PropagateNull` is assigned via a WHITELIST: only expressions built
+/// exclusively from strictly NULL-propagating constructs around a
+/// NULL-on-empty aggregate qualify. Anything else falls back to
+/// `Unsupported` (per-row correlated execution), which is always correct.
 fn classify_empty_group_behavior(expr: &Expression) -> EmptyGroupBehavior {
     if is_bare_zero_on_empty_aggregate(expr) {
         EmptyGroupBehavior::DefaultZero
-    } else if contains_zero_on_empty_aggregate(expr) {
-        EmptyGroupBehavior::Unsupported
     } else {
-        EmptyGroupBehavior::PropagateNull
+        match strict_null_propagation(expr) {
+            Some(true) => EmptyGroupBehavior::PropagateNull,
+            // Some(false): whitelisted shape but no aggregate (shouldn't
+            // reach here — contains_aggregate is checked first); None: a
+            // construct outside the whitelist. Either way, don't transform.
+            _ => EmptyGroupBehavior::Unsupported,
+        }
     }
 }
 
@@ -437,6 +461,16 @@ fn classify_empty_group_behavior(expr: &Expression) -> EmptyGroupBehavior {
 /// empty group: COUNT and SQLite's TOTAL
 fn is_zero_on_empty_name(name: &FunctionIdentifier) -> bool {
     matches!(name.canonical().to_uppercase().as_str(), "COUNT" | "TOTAL")
+}
+
+/// Check if a function name is an aggregate that returns NULL over an empty
+/// group (SUM/AVG/MIN/MAX/GROUP_CONCAT, including DISTINCT/FILTER forms —
+/// those modifiers don't change the empty-group result)
+fn is_null_on_empty_name(name: &FunctionIdentifier) -> bool {
+    matches!(
+        name.canonical().to_uppercase().as_str(),
+        "SUM" | "AVG" | "MIN" | "MAX" | "GROUP_CONCAT"
+    )
 }
 
 /// Check if the expression IS (at the top level) a bare COUNT/TOTAL call
@@ -448,30 +482,55 @@ fn is_bare_zero_on_empty_aggregate(expr: &Expression) -> bool {
     }
 }
 
-/// Check if the expression CONTAINS a COUNT/TOTAL call anywhere
-fn contains_zero_on_empty_aggregate(expr: &Expression) -> bool {
+/// Whitelist check for strict NULL propagation from a NULL-on-empty aggregate
+/// to the expression root.
+///
+/// Returns:
+/// - `Some(true)` — every construct in the expression is strictly
+///   NULL-propagating AND it contains at least one NULL-on-empty aggregate,
+///   so the whole expression is NULL whenever the group is empty
+/// - `Some(false)` — whitelisted constructs only, but no aggregate (e.g. a
+///   literal operand)
+/// - `None` — contains a construct outside the whitelist (COALESCE/IFNULL,
+///   CASE, COUNT/TOTAL, logical/comparison operators, arbitrary functions,
+///   column refs, or any unrecognized variant). NULL propagation cannot be
+///   proven, so the caller must not classify as `PropagateNull`.
+fn strict_null_propagation(expr: &Expression) -> Option<bool> {
     match expr {
-        Expression::AggregateFunction { name, .. } => is_zero_on_empty_name(name),
-        Expression::Function { name, args, .. } => {
-            is_zero_on_empty_name(name) || args.iter().any(contains_zero_on_empty_aggregate)
+        // NULL-on-empty aggregates are NULL over an empty group regardless of
+        // their arguments (which are only evaluated per-row within the group)
+        Expression::AggregateFunction { name, .. } if is_null_on_empty_name(name) => Some(true),
+        Expression::Function { name, .. } if is_null_on_empty_name(name) => Some(true),
+        // Arithmetic strictly propagates NULL: if either operand is NULL,
+        // the result is NULL. Other binary operators (logical AND/OR absorb
+        // NULL, comparison, concat, bitwise, ...) fall to the catch-all.
+        Expression::BinaryOp {
+            op:
+                BinaryOperator::Plus
+                | BinaryOperator::Minus
+                | BinaryOperator::Multiply
+                | BinaryOperator::Divide
+                | BinaryOperator::IntegerDivide
+                | BinaryOperator::Modulo,
+            left,
+            right,
+        } => {
+            let l = strict_null_propagation(left)?;
+            let r = strict_null_propagation(right)?;
+            Some(l || r)
         }
-        Expression::BinaryOp { left, right, .. } => {
-            contains_zero_on_empty_aggregate(left) || contains_zero_on_empty_aggregate(right)
+        // Unary +/- strictly propagate NULL (NOT/IS NULL/etc. do not)
+        Expression::UnaryOp { op: UnaryOperator::Minus | UnaryOperator::Plus, expr } => {
+            strict_null_propagation(expr)
         }
-        Expression::UnaryOp { expr, .. } => contains_zero_on_empty_aggregate(expr),
-        Expression::Cast { expr, .. } => contains_zero_on_empty_aggregate(expr),
-        Expression::Case { operand, when_clauses, else_result } => {
-            operand.as_ref().map(|o| contains_zero_on_empty_aggregate(o)).unwrap_or(false)
-                || when_clauses.iter().any(|w| {
-                    w.conditions.iter().any(contains_zero_on_empty_aggregate)
-                        || contains_zero_on_empty_aggregate(&w.result)
-                })
-                || else_result
-                    .as_ref()
-                    .map(|e| contains_zero_on_empty_aggregate(e))
-                    .unwrap_or(false)
-        }
-        _ => false,
+        // CAST(NULL AS T) is NULL
+        Expression::Cast { expr, .. } => strict_null_propagation(expr),
+        // Constant leaf: never introduces or absorbs the aggregate's NULL
+        Expression::Literal(_) => Some(false),
+        // Everything else (COALESCE/IFNULL/CASE/functions/column refs/
+        // non-arithmetic operators/...) may absorb NULL — refuse to prove
+        // propagation
+        _ => None,
     }
 }
 
@@ -870,6 +929,98 @@ mod tests {
             transform_with_select_expr(count_plus_five).is_none(),
             "COUNT nested in expression must skip the transformation"
         );
+    }
+
+    fn coalesce_sum_zero() -> Expression {
+        Expression::Function {
+            name: FunctionIdentifier::new("COALESCE"),
+            args: vec![sum_quantity(), Expression::Literal(SqlValue::Integer(0))],
+            character_unit: None,
+        }
+    }
+
+    #[test]
+    fn test_coalesce_sum_skips_transformation() {
+        // x > (SELECT COALESCE(SUM(...), 0) correlated): the empty-group
+        // value is 0, not NULL — COALESCE absorbs the NULL. Comparing against
+        // the raw joined column would yield NULL and wrongly exclude the row,
+        // so the transformation must be skipped (per-row correlated fallback).
+        assert!(
+            transform_with_select_expr(coalesce_sum_zero()).is_none(),
+            "COALESCE(SUM(..), 0) must skip the scalar-comparison transformation"
+        );
+    }
+
+    #[test]
+    fn test_classify_null_absorbing_expressions_unsupported() {
+        // COALESCE(SUM(x), 0) → 0 over an empty group, not NULL
+        assert_eq!(
+            classify_empty_group_behavior(&coalesce_sum_zero()),
+            EmptyGroupBehavior::Unsupported
+        );
+
+        // IFNULL(SUM(x), 0) → 0 over an empty group, not NULL
+        let ifnull_sum = Expression::Function {
+            name: FunctionIdentifier::new("IFNULL"),
+            args: vec![sum_quantity(), Expression::Literal(SqlValue::Integer(0))],
+            character_unit: None,
+        };
+        assert_eq!(classify_empty_group_behavior(&ifnull_sum), EmptyGroupBehavior::Unsupported);
+
+        // CASE WHEN SUM(x) IS NULL THEN 0 ELSE SUM(x) END → 0 over an empty
+        // group, not NULL
+        let case_sum = Expression::Case {
+            operand: None,
+            when_clauses: vec![vibesql_ast::CaseWhen {
+                conditions: vec![Expression::UnaryOp {
+                    op: UnaryOperator::IsNull,
+                    expr: Box::new(sum_quantity()),
+                }],
+                result: Expression::Literal(SqlValue::Integer(0)),
+            }],
+            else_result: Some(Box::new(sum_quantity())),
+        };
+        assert_eq!(classify_empty_group_behavior(&case_sum), EmptyGroupBehavior::Unsupported);
+
+        // COALESCE nested inside arithmetic is just as absorbing:
+        // 0.5 * COALESCE(SUM(x), 0) → 0 over an empty group
+        let half_coalesce = Expression::BinaryOp {
+            op: BinaryOperator::Multiply,
+            left: Box::new(Expression::Literal(SqlValue::Float(0.5))),
+            right: Box::new(coalesce_sum_zero()),
+        };
+        assert_eq!(classify_empty_group_behavior(&half_coalesce), EmptyGroupBehavior::Unsupported);
+
+        // Non-whitelisted function around the aggregate (ABS is actually
+        // strict, but it is not on the whitelist — must stay conservative)
+        let abs_sum = Expression::Function {
+            name: FunctionIdentifier::new("ABS"),
+            args: vec![sum_quantity()],
+            character_unit: None,
+        };
+        assert_eq!(classify_empty_group_behavior(&abs_sum), EmptyGroupBehavior::Unsupported);
+    }
+
+    #[test]
+    fn test_classify_whitelisted_strict_compositions_propagate_null() {
+        // -SUM(x) and CAST(SUM(x) AS ..) are strictly NULL-propagating
+        let neg_sum =
+            Expression::UnaryOp { op: UnaryOperator::Minus, expr: Box::new(sum_quantity()) };
+        assert_eq!(classify_empty_group_behavior(&neg_sum), EmptyGroupBehavior::PropagateNull);
+
+        let cast_sum = Expression::Cast {
+            expr: Box::new(sum_quantity()),
+            data_type: vibesql_types::DataType::Real,
+        };
+        assert_eq!(classify_empty_group_behavior(&cast_sum), EmptyGroupBehavior::PropagateNull);
+
+        // SUM(x) + SUM(x) (arithmetic over two aggregates) is strict
+        let sum_plus_sum = Expression::BinaryOp {
+            op: BinaryOperator::Plus,
+            left: Box::new(sum_quantity()),
+            right: Box::new(sum_quantity()),
+        };
+        assert_eq!(classify_empty_group_behavior(&sum_plus_sum), EmptyGroupBehavior::PropagateNull);
     }
 
     #[test]
