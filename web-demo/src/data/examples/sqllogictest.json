@@ -5,172 +5,167 @@
     "description": "VibeSQL test conformance analytics"
   },
   "examples": {
-    "id": "sqllogictest",
-    "title": "SQLLogicTest Results",
-    "description": "Real-world dogfooding - query VibeSQL's own conformance test results",
-    "queries": [
-      {
-        "id": "slt-1",
-        "title": "Conformance Summary",
-        "database": "sqllogictest",
-        "description": "Current conformance pass rate by test category",
-        "sqlFeatures": [
-          "SELECT",
-          "GROUP BY",
-          "COUNT",
-          "SUM",
-          "CASE",
-          "ROUND",
-          "Aggregates"
-        ],
-        "difficulty": "intermediate",
-        "useCase": "analytics",
-        "tags": [
-          "conformance",
-          "testing",
-          "dogfooding",
-          "real-data"
-        ]
-      },
-      {
-        "id": "slt-2",
-        "title": "Recent Test Runs",
-        "database": "sqllogictest",
-        "description": "Show the last 10 test runs with pass rates",
-        "sqlFeatures": [
-          "SELECT",
-          "ORDER BY",
-          "LIMIT",
-          "ROUND"
-        ],
-        "difficulty": "beginner",
-        "useCase": "reports",
-        "tags": [
-          "conformance",
-          "history",
-          "ci-cd"
-        ]
-      },
-      {
-        "id": "slt-3",
-        "title": "Failing Index Tests",
-        "database": "sqllogictest",
-        "description": "Lists index-related tests that are currently failing",
-        "sqlFeatures": [
-          "SELECT",
-          "WHERE",
-          "ORDER BY",
-          "LIMIT"
-        ],
-        "difficulty": "beginner",
-        "useCase": "development",
-        "tags": [
-          "conformance",
-          "failures",
-          "debugging"
-        ]
-      },
-      {
-        "id": "slt-4",
-        "title": "Test Progress (JOIN Example)",
-        "database": "sqllogictest",
-        "description": "Shows current status vs last run status for evidence tests",
-        "sqlFeatures": [
-          "LEFT JOIN",
-          "SELECT",
-          "WHERE",
-          "ORDER BY",
-          "Multi-table queries"
-        ],
-        "difficulty": "intermediate",
-        "useCase": "analytics",
-        "tags": [
-          "conformance",
-          "joins",
-          "progress-tracking"
-        ]
-      },
-      {
-        "id": "slt-5",
-        "title": "Total Conformance",
-        "database": "sqllogictest",
-        "description": "Overall pass rate across all tests",
-        "sqlFeatures": [
-          "SELECT",
-          "COUNT",
-          "SUM",
-          "CASE",
-          "ROUND",
-          "Aggregates"
-        ],
-        "difficulty": "beginner",
-        "useCase": "analytics",
-        "tags": [
-          "conformance",
-          "metrics",
-          "kpi"
-        ]
-      },
-      {
-        "id": "slt-6",
-        "title": "Slowest Tests",
-        "database": "sqllogictest",
-        "description": "Tests with longest execution times",
-        "sqlFeatures": [
-          "SELECT",
-          "WHERE",
-          "Subquery",
-          "ORDER BY",
-          "LIMIT"
-        ],
-        "difficulty": "intermediate",
-        "useCase": "development",
-        "tags": [
-          "performance",
-          "optimization",
-          "slow-queries"
-        ]
-      },
-      {
-        "id": "slt-7",
-        "title": "Error Analysis",
-        "database": "sqllogictest",
-        "description": "Group failures by error type",
-        "sqlFeatures": [
-          "SELECT",
-          "WHERE",
-          "GROUP BY",
-          "COUNT",
-          "ORDER BY",
-          "LIMIT"
-        ],
-        "difficulty": "intermediate",
-        "useCase": "development",
-        "tags": [
-          "errors",
-          "debugging",
-          "root-cause-analysis"
-        ]
-      },
-      {
-        "id": "slt-8",
-        "title": "Never Passed Tests",
-        "database": "sqllogictest",
-        "description": "Find problem areas that need work",
-        "sqlFeatures": [
-          "SELECT",
-          "WHERE",
-          "ORDER BY",
-          "NULL filtering"
-        ],
-        "difficulty": "beginner",
-        "useCase": "development",
-        "tags": [
-          "conformance",
-          "failures",
-          "priorities"
-        ]
-      }
-    ]
+    "slt-1": {
+      "title": "Conformance Summary",
+      "database": "sqllogictest",
+      "sql": "-- Current conformance by category\n-- Shows pass rate for each test category\n\nSELECT \n    category,\n    COUNT(*) as total,\n    SUM(CASE WHEN status='PASS' THEN 1 ELSE 0 END) as passed,\n    ROUND(100.0 * SUM(CASE WHEN status='PASS' THEN 1 ELSE 0 END) / COUNT(*), 1) as pass_rate\nFROM test_files\nGROUP BY category\nORDER BY category;",
+      "description": "Current conformance pass rate by test category",
+      "sqlFeatures": [
+        "SELECT",
+        "GROUP BY",
+        "COUNT",
+        "SUM",
+        "CASE",
+        "ROUND",
+        "Aggregates"
+      ],
+      "difficulty": "intermediate",
+      "useCase": "analytics",
+      "tags": [
+        "conformance",
+        "testing",
+        "dogfooding",
+        "real-data"
+      ]
+    },
+    "slt-2": {
+      "title": "Recent Test Runs",
+      "database": "sqllogictest",
+      "sql": "-- Recent test runs\n-- Shows the last 10 test runs with pass rates\n\nSELECT \n    run_id,\n    started_at,\n    passed,\n    failed,\n    ROUND(100.0 * passed / total_files, 1) as pass_rate\nFROM test_runs\nORDER BY started_at DESC\nLIMIT 10;",
+      "description": "Show the last 10 test runs with pass rates",
+      "sqlFeatures": [
+        "SELECT",
+        "ORDER BY",
+        "LIMIT",
+        "ROUND"
+      ],
+      "difficulty": "beginner",
+      "useCase": "reports",
+      "tags": [
+        "conformance",
+        "history",
+        "ci-cd"
+      ]
+    },
+    "slt-3": {
+      "title": "Failing Index Tests",
+      "database": "sqllogictest",
+      "sql": "-- Find failing index tests\n-- Lists index-related tests that are currently failing\n\nSELECT file_path, subcategory\nFROM test_files\nWHERE category='index' AND status='FAIL'\nORDER BY subcategory, file_path\nLIMIT 20;",
+      "description": "Lists index-related tests that are currently failing",
+      "sqlFeatures": [
+        "SELECT",
+        "WHERE",
+        "ORDER BY",
+        "LIMIT"
+      ],
+      "difficulty": "beginner",
+      "useCase": "development",
+      "tags": [
+        "conformance",
+        "failures",
+        "debugging"
+      ]
+    },
+    "slt-4": {
+      "title": "Test Progress (JOIN Example)",
+      "database": "sqllogictest",
+      "sql": "-- Test file progress (JOIN example)\n-- Shows current status vs last run status for evidence tests\n\nSELECT \n    tf.file_path,\n    tf.status as current_status,\n    tr.status as last_run_status,\n    tr.tested_at as last_tested\nFROM test_files tf\nLEFT JOIN test_results tr ON tf.file_path = tr.file_path\nWHERE tf.category = 'evidence'\nORDER BY tf.file_path;",
+      "description": "Shows current status vs last run status for evidence tests",
+      "sqlFeatures": [
+        "LEFT JOIN",
+        "SELECT",
+        "WHERE",
+        "ORDER BY",
+        "Multi-table queries"
+      ],
+      "difficulty": "intermediate",
+      "useCase": "analytics",
+      "tags": [
+        "conformance",
+        "joins",
+        "progress-tracking"
+      ]
+    },
+    "slt-5": {
+      "title": "Total Conformance",
+      "database": "sqllogictest",
+      "sql": "-- Total conformance percentage\n-- Overall pass rate across all tests\n\nSELECT \n    COUNT(*) as total_tests,\n    SUM(CASE WHEN status='PASS' THEN 1 ELSE 0 END) as passed_tests,\n    SUM(CASE WHEN status='FAIL' THEN 1 ELSE 0 END) as failed_tests,\n    ROUND(100.0 * SUM(CASE WHEN status='PASS' THEN 1 ELSE 0 END) / COUNT(*), 1) as pass_rate\nFROM test_files;",
+      "description": "Overall pass rate across all tests",
+      "sqlFeatures": [
+        "SELECT",
+        "COUNT",
+        "SUM",
+        "CASE",
+        "ROUND",
+        "Aggregates"
+      ],
+      "difficulty": "beginner",
+      "useCase": "analytics",
+      "tags": [
+        "conformance",
+        "metrics",
+        "kpi"
+      ]
+    },
+    "slt-6": {
+      "title": "Slowest Tests",
+      "database": "sqllogictest",
+      "sql": "-- Find slowest tests\n-- Tests with longest execution times\n\nSELECT \n    file_path,\n    duration_ms,\n    status\nFROM test_results\nWHERE run_id = (SELECT MAX(run_id) FROM test_runs)\nORDER BY duration_ms DESC\nLIMIT 10;",
+      "description": "Tests with longest execution times",
+      "sqlFeatures": [
+        "SELECT",
+        "WHERE",
+        "Subquery",
+        "ORDER BY",
+        "LIMIT"
+      ],
+      "difficulty": "intermediate",
+      "useCase": "development",
+      "tags": [
+        "performance",
+        "optimization",
+        "slow-queries"
+      ]
+    },
+    "slt-7": {
+      "title": "Error Analysis",
+      "database": "sqllogictest",
+      "sql": "-- Error message analysis\n-- Group failures by error type\n\nSELECT \n    error_message,\n    COUNT(*) as occurrence_count\nFROM test_results\nWHERE status='FAIL' AND error_message IS NOT NULL\nGROUP BY error_message\nORDER BY COUNT(*) DESC\nLIMIT 10;",
+      "description": "Group failures by error type",
+      "sqlFeatures": [
+        "SELECT",
+        "WHERE",
+        "GROUP BY",
+        "COUNT",
+        "ORDER BY",
+        "LIMIT"
+      ],
+      "difficulty": "intermediate",
+      "useCase": "development",
+      "tags": [
+        "errors",
+        "debugging",
+        "root-cause-analysis"
+      ]
+    },
+    "slt-8": {
+      "title": "Never Passed Tests",
+      "database": "sqllogictest",
+      "sql": "-- Tests that have never passed\n-- Find problem areas that need work\n\nSELECT \n    file_path,\n    category,\n    subcategory\nFROM test_files\nWHERE status='FAIL' AND last_passed IS NULL\nORDER BY category, file_path;",
+      "description": "Find problem areas that need work",
+      "sqlFeatures": [
+        "SELECT",
+        "WHERE",
+        "ORDER BY",
+        "NULL filtering"
+      ],
+      "difficulty": "beginner",
+      "useCase": "development",
+      "tags": [
+        "conformance",
+        "failures",
+        "priorities"
+      ]
+    }
   }
 }

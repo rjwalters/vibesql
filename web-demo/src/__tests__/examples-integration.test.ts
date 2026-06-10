@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { exampleCategories, getAllExamples, findExample, getExamplesForDatabase } from '../data/examples'
+import {
+  exampleCategories,
+  getAllExamples,
+  findExample,
+  getExamplesForDatabase,
+} from '../data/examples'
 
 describe('Examples Integration', () => {
   it('should load all 24 categories', () => {

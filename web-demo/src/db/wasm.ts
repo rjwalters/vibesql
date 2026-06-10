@@ -14,7 +14,7 @@ async function loadWasmModule(): Promise<WasmModule> {
     const module = (await import('../../public/pkg/vibesql_wasm.js')) as unknown as WasmModule
     wasmModule = module
     return module
-  } catch (error) {
+  } catch {
     console.warn(
       'WASM bindings not found; falling back to stub module. Run `./scripts/build-wasm.sh` to enable database features.'
     )
@@ -48,7 +48,9 @@ export async function initDatabase(useOpfs: boolean = true): Promise<Database> {
       db = new module.Database()
       usingOpfs = false
       if (useOpfs && !isOpfsSupported()) {
-        console.warn('OPFS requested but not supported in this browser, falling back to in-memory storage')
+        console.warn(
+          'OPFS requested but not supported in this browser, falling back to in-memory storage'
+        )
       } else {
         console.log('Database initialized with in-memory storage')
       }
@@ -57,7 +59,7 @@ export async function initDatabase(useOpfs: boolean = true): Promise<Database> {
     return db
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    throw new Error(`Failed to load database: ${message}`)
+    throw new Error(`Failed to load database: ${message}`, { cause: error })
   }
 }
 

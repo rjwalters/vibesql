@@ -23,13 +23,10 @@ function configureMonacoEnvironment(): void {
     getWorker() {
       // For now, use only the editor worker (most important for SQL editing performance)
       // This uses a local worker entry file that Vite can properly bundle
-      return new Worker(
-        new URL('../workers/editor.worker.ts', import.meta.url),
-        {
-          type: 'module'
-        }
-      )
-    }
+      return new Worker(new URL('../workers/editor.worker.ts', import.meta.url), {
+        type: 'module',
+      })
+    },
   }
 }
 

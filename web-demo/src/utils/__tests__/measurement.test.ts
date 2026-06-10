@@ -12,7 +12,7 @@ describe('formatMeasurement', () => {
 
   it('should format milliseconds correctly', () => {
     // 9.03ms with 0.094ms stddev
-    const result = formatMeasurement(0.00903277215333333, 9.444017288855609e-05)
+    const result = formatMeasurement(0.00903277215333333, 9.444017288855609e-5)
     expect(result).not.toBeNull()
     expect(result!.unit).toBe('ms')
     // Should use precision based on stddev (2 sig figs of stddev)
@@ -21,7 +21,7 @@ describe('formatMeasurement', () => {
 
   it('should format microseconds correctly', () => {
     // 888µs with 11.8µs stddev
-    const result = formatMeasurement(0.0008882716580273318, 1.1825102506590448e-05)
+    const result = formatMeasurement(0.0008882716580273318, 1.1825102506590448e-5)
     expect(result).not.toBeNull()
     expect(result!.unit).toBe('µs')
   })
@@ -41,7 +41,7 @@ describe('formatMeasurement', () => {
   it('should use parenthetical format when specified', () => {
     const result = formatMeasurement(0.01234, 0.00056, {
       showUncertainty: true,
-      format: 'paren'
+      format: 'paren',
     })
     expect(result).not.toBeNull()
     expect(result!.combined).toMatch(/\(\d+\)/)
@@ -131,26 +131,26 @@ describe('real benchmark data formatting', () => {
     {
       name: 'Q1 VibeSQL',
       mean: 0.00903277215333333,
-      stddev: 9.444017288855609e-05,
-      expectedUnit: 'ms'
+      stddev: 9.444017288855609e-5,
+      expectedUnit: 'ms',
     },
     {
       name: 'Q1 SQLite',
       mean: 0.032574188865,
       stddev: 0.0006630421339375958,
-      expectedUnit: 'ms'
+      expectedUnit: 'ms',
     },
     {
       name: 'Q2 SQLite',
       mean: 0.0008882716580273318,
-      stddev: 1.1825102506590448e-05,
-      expectedUnit: 'µs'
+      stddev: 1.1825102506590448e-5,
+      expectedUnit: 'µs',
     },
     {
       name: 'Q5 VibeSQL',
       mean: 0.052424130369999995,
       stddev: 0.0022248999399577165,
-      expectedUnit: 'ms'
+      expectedUnit: 'ms',
     },
   ]
 
@@ -166,9 +166,7 @@ describe('real benchmark data formatting', () => {
       expect(result).not.toBeNull()
       // The value should have limited precision based on stddev
       const numericStr = result!.value.replace(/ \w+$/, '')
-      const decimalPlaces = numericStr.includes('.')
-        ? numericStr.split('.')[1].length
-        : 0
+      const decimalPlaces = numericStr.includes('.') ? numericStr.split('.')[1].length : 0
       // With 2 sig figs in stddev, we should have reasonable precision
       expect(decimalPlaces).toBeLessThanOrEqual(4)
     })

@@ -87,10 +87,7 @@ export class EditorManager {
   /**
    * Upgrade both editors to Monaco (lazy loaded on first interaction)
    */
-  async upgradeToMonaco(
-    getTableNames: () => string[],
-    executeHandler: () => void
-  ): Promise<void> {
+  async upgradeToMonaco(getTableNames: () => string[], executeHandler: () => void): Promise<void> {
     // Return existing promise if upgrade already in progress
     if (this.upgradePromise) return this.upgradePromise
 

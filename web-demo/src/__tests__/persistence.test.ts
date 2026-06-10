@@ -103,7 +103,7 @@ describe('OPFS Persistence', () => {
     db.execute("UPDATE users_persistent SET username = 'updated_user' WHERE id = 2")
 
     // Verify update
-    result = db.query("SELECT username FROM users_persistent WHERE id = 2")
+    result = db.query('SELECT username FROM users_persistent WHERE id = 2')
     const username = JSON.parse(result.rows[0])[0]
     expect(username).toBe('updated_user')
 
