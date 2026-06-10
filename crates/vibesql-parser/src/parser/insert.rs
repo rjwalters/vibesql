@@ -114,6 +114,15 @@ impl Parser {
         // Parse optional ON CONFLICT or ON DUPLICATE KEY UPDATE clause
         let (on_conflict, on_duplicate_key_update) = self.parse_on_clause_for_insert()?;
 
+        // Parse optional RETURNING clause (SQLite 3.35.0+)
+        // Syntax: INSERT INTO ... [ON CONFLICT ...] RETURNING expr [, expr ...]
+        let returning = if self.peek_keyword(Keyword::Returning) {
+            self.consume_keyword(Keyword::Returning)?;
+            Some(self.parse_select_list()?)
+        } else {
+            None
+        };
+
         // Expect semicolon or EOF
         if matches!(self.peek(), Token::Semicolon) {
             self.advance();
@@ -130,6 +139,7 @@ impl Parser {
             conflict_clause,
             on_conflict,
             on_duplicate_key_update,
+            returning,
         })
     }
 
@@ -244,6 +254,15 @@ impl Parser {
         // Parse optional ON CONFLICT or ON DUPLICATE KEY UPDATE clause
         let (on_conflict, on_duplicate_key_update) = self.parse_on_clause_for_insert()?;
 
+        // Parse optional RETURNING clause (SQLite 3.35.0+)
+        // Syntax: INSERT INTO ... [ON CONFLICT ...] RETURNING expr [, expr ...]
+        let returning = if self.peek_keyword(Keyword::Returning) {
+            self.consume_keyword(Keyword::Returning)?;
+            Some(self.parse_select_list()?)
+        } else {
+            None
+        };
+
         // Expect semicolon or EOF
         if matches!(self.peek(), Token::Semicolon) {
             self.advance();
@@ -260,6 +279,7 @@ impl Parser {
             conflict_clause,
             on_conflict,
             on_duplicate_key_update,
+            returning,
         })
     }
 
@@ -343,6 +363,15 @@ impl Parser {
         // Parse optional ON CONFLICT or ON DUPLICATE KEY UPDATE clause
         let (on_conflict, on_duplicate_key_update) = self.parse_on_clause_for_insert()?;
 
+        // Parse optional RETURNING clause (SQLite 3.35.0+)
+        // Syntax: INSERT INTO ... [ON CONFLICT ...] RETURNING expr [, expr ...]
+        let returning = if self.peek_keyword(Keyword::Returning) {
+            self.consume_keyword(Keyword::Returning)?;
+            Some(self.parse_select_list()?)
+        } else {
+            None
+        };
+
         // Expect semicolon or EOF
         if matches!(self.peek(), Token::Semicolon) {
             self.advance();
@@ -359,6 +388,7 @@ impl Parser {
             conflict_clause: Some(vibesql_ast::ConflictClause::Replace),
             on_conflict,
             on_duplicate_key_update,
+            returning,
         })
     }
 

@@ -42,6 +42,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();
 }
@@ -191,6 +192,7 @@ fn test_multi_row_insert_invalidates_cache() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &stmt).unwrap();
 
@@ -256,6 +258,7 @@ fn test_insert_select_invalidates_cache() {
             conflict_clause: None,
             on_conflict: None,
             on_duplicate_key_update: None,
+            returning: None,
         };
         InsertExecutor::execute(db, &stmt).unwrap();
     };
@@ -303,6 +306,7 @@ fn test_insert_select_invalidates_cache() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
 

@@ -136,6 +136,7 @@ fn insert_row(db: &mut Database, table_name: &str, values: Vec<SqlValue>) {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();
 }

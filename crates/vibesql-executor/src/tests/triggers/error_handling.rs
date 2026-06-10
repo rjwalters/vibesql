@@ -45,6 +45,7 @@ fn test_trigger_failure_causes_rollback() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     let result = InsertExecutor::execute(&mut db, &insert);
 
@@ -119,6 +120,7 @@ fn test_recursion_prevention() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     let result = InsertExecutor::execute(&mut db, &insert);
 

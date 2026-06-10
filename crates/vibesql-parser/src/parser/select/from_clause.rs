@@ -518,6 +518,10 @@ impl Parser {
                 | Token::Keyword { keyword: Keyword::Except, .. }
                 | Token::Keyword { keyword: Keyword::Using, .. }
                 | Token::Keyword { keyword: Keyword::For, .. }
+                // RETURNING terminates the SELECT embedded in INSERT ... SELECT
+                // ... RETURNING; SQLite likewise refuses RETURNING as an
+                // implicit (AS-less) table alias.
+                | Token::Keyword { keyword: Keyword::Returning, .. }
         )
     }
 

@@ -61,6 +61,7 @@ fn test_multiple_triggers_fire_in_order() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert).expect("Failed to insert");
 
@@ -107,6 +108,7 @@ fn test_trigger_with_multiple_statements() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert).expect("Failed to insert");
 
@@ -156,6 +158,7 @@ fn test_before_trigger_executes_first() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &init_insert).expect("Failed to initialize counter");
 
@@ -189,6 +192,7 @@ fn test_before_trigger_executes_first() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert).expect("Failed to insert");
 

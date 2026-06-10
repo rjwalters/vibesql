@@ -48,6 +48,7 @@ fn insert_user(db: &mut Database, id: i64, email: &str, name: &str) {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();
 }
@@ -80,6 +81,7 @@ fn test_insert_or_ignore_primary_key_conflict() {
         conflict_clause: Some(ConflictClause::Ignore),
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows_inserted = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -117,6 +119,7 @@ fn test_insert_or_ignore_unique_constraint_conflict() {
         conflict_clause: Some(ConflictClause::Ignore),
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows_inserted = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -168,6 +171,7 @@ fn test_insert_or_ignore_multi_row() {
         conflict_clause: Some(ConflictClause::Ignore),
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows_inserted = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -199,6 +203,7 @@ fn test_insert_or_ignore_no_conflict() {
         conflict_clause: Some(ConflictClause::Ignore),
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows_inserted = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -497,6 +502,7 @@ fn test_insert_or_ignore_not_null_violation() {
         conflict_clause: Some(ConflictClause::Ignore),
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows_inserted = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -577,6 +583,7 @@ fn test_insert_on_conflict_do_nothing_primary_key() {
             action: OnConflictAction::DoNothing,
         }),
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows_inserted = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -619,6 +626,7 @@ fn test_insert_on_conflict_do_nothing_without_target() {
             action: OnConflictAction::DoNothing,
         }),
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows_inserted = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -655,6 +663,7 @@ fn test_insert_on_conflict_do_nothing_no_conflict() {
             action: OnConflictAction::DoNothing,
         }),
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows_inserted = InsertExecutor::execute(&mut db, &stmt).unwrap();

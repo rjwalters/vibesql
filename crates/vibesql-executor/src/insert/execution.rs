@@ -13,6 +13,23 @@ pub fn execute_insert(
     db: &mut vibesql_storage::Database,
     stmt: &vibesql_ast::InsertStmt,
 ) -> Result<usize, ExecutorError> {
+    execute_insert_internal(db, stmt, None, None).map(|(count, _)| count)
+}
+
+/// Execute an INSERT statement, capturing RETURNING rows (SQLite 3.35.0+)
+///
+/// Returns the number of inserted rows plus, when the statement carries a
+/// RETURNING clause, the projected NEW rows (values as actually inserted,
+/// including defaults, generated columns, and auto INTEGER PRIMARY KEY) —
+/// one per inserted row, in insertion order. Rows skipped by `OR IGNORE` /
+/// `ON CONFLICT DO NOTHING` do not appear. For `ON DUPLICATE KEY UPDATE`,
+/// the post-UPDATE row is returned.
+///
+/// When the statement has no RETURNING clause the second element is `None`.
+pub fn execute_insert_returning(
+    db: &mut vibesql_storage::Database,
+    stmt: &vibesql_ast::InsertStmt,
+) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
     execute_insert_internal(db, stmt, None, None)
 }
 
@@ -23,7 +40,7 @@ pub fn execute_insert_with_procedural_context(
     stmt: &vibesql_ast::InsertStmt,
     procedural_context: &crate::procedural::ExecutionContext,
 ) -> Result<usize, ExecutorError> {
-    execute_insert_internal(db, stmt, Some(procedural_context), None)
+    execute_insert_internal(db, stmt, Some(procedural_context), None).map(|(count, _)| count)
 }
 
 /// Execute an INSERT statement with trigger context
@@ -34,7 +51,7 @@ pub fn execute_insert_with_trigger_context(
     stmt: &vibesql_ast::InsertStmt,
     trigger_context: &crate::trigger_execution::TriggerContext,
 ) -> Result<usize, ExecutorError> {
-    execute_insert_internal(db, stmt, None, Some(trigger_context))
+    execute_insert_internal(db, stmt, None, Some(trigger_context)).map(|(count, _)| count)
 }
 
 /// Internal implementation of INSERT execution
@@ -43,7 +60,7 @@ fn execute_insert_internal(
     stmt: &vibesql_ast::InsertStmt,
     procedural_context: Option<&crate::procedural::ExecutionContext>,
     trigger_context: Option<&crate::trigger_execution::TriggerContext>,
-) -> Result<usize, ExecutorError> {
+) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
     // Build full table name for error messages and privilege checks
     let full_table_name = match &stmt.schema_name {
         Some(schema) => format!("{}.{}", schema, stmt.table_name),
@@ -59,8 +76,9 @@ fn execute_insert_internal(
     }
 
     // Check if target is sqlite_stat1 (special writable statistics table)
+    // RETURNING is not supported on this virtual statistics table.
     if is_sqlite_stat1_table(&stmt.table_name) {
-        return execute_insert_sqlite_stat1(db, stmt);
+        return execute_insert_sqlite_stat1(db, stmt).map(|count| (count, None));
     }
 
     // Check INSERT privilege on the table
@@ -123,14 +141,16 @@ fn execute_insert_internal(
         vibesql_ast::InsertSource::Select(select_stmt) => {
             // Try bulk transfer optimization first (Phase 1-3)
             // This provides 10-50x performance improvement for compatible schemas
-            // Note: bulk transfer doesn't support CTEs, so skip if with_clause is present
-            if stmt.columns.is_empty() && stmt.with_clause.is_none() {
+            // Note: bulk transfer doesn't support CTEs, so skip if with_clause is present.
+            // RETURNING also gates this fast path: it returns early with only a
+            // count, but RETURNING must project the actually-inserted NEW rows.
+            if stmt.columns.is_empty() && stmt.with_clause.is_none() && stmt.returning.is_none() {
                 // Only attempt bulk transfer for INSERT INTO table SELECT (no column list)
                 if let Some(count) =
                     super::bulk_transfer::try_bulk_transfer(db, table_name, select_stmt)?
                 {
                     // Fast path succeeded, return early
-                    return Ok(count);
+                    return Ok((count, None));
                 }
             }
 
@@ -664,6 +684,13 @@ fn execute_insert_internal(
 
     let mut rows_inserted = 0;
 
+    // RETURNING (SQLite 3.35.0+): collect the rows as ACTUALLY inserted (or
+    // updated by ON DUPLICATE KEY UPDATE). The slow path can rewrite the
+    // IPK/rowid after validation (REPLACE reserved-rowid interplay), so rows
+    // are captured at the insert_row call sites, not from validated_rows.
+    let mut returned_rows: Vec<vibesql_storage::Row> = Vec::new();
+    let capture_returning = stmt.returning.is_some();
+
     // Check if any assertions exist - needed for rollback support
     let has_assertions = db.catalog.get_all_assertions().next().is_some();
 
@@ -728,6 +755,10 @@ fn execute_insert_internal(
                         ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
                     })?;
 
+                if capture_returning {
+                    returned_rows.extend(rows.iter().cloned());
+                }
+
                 // Maintain expression indexes for each inserted row
                 for (i, row) in rows.iter().enumerate() {
                     expression_index_maintenance::maintain_expression_indexes_for_insert(
@@ -766,6 +797,10 @@ fn execute_insert_internal(
                     ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
                 })?;
 
+            if capture_returning {
+                returned_rows.extend(rows.iter().cloned());
+            }
+
             // Maintain expression indexes for each inserted row
             for (i, row) in rows.iter().enumerate() {
                 expression_index_maintenance::maintain_expression_indexes_for_insert(
@@ -796,9 +831,20 @@ fn execute_insert_internal(
                     assignments,
                 )?;
 
-                if update_result.is_some() {
+                if let Some(updated_row_id) = update_result {
                     // Row was updated, count it
                     rows_inserted += 1;
+
+                    // RETURNING: SQLite/MySQL return the post-UPDATE row for
+                    // upserts that take the update arm.
+                    if capture_returning {
+                        if let Some(updated_row) = db
+                            .get_table(table_name)
+                            .and_then(|table| table.scan().get(updated_row_id))
+                        {
+                            returned_rows.push(updated_row.clone());
+                        }
+                    }
                     continue;
                 }
                 // No conflict, fall through to insert
@@ -967,6 +1013,12 @@ fn execute_insert_internal(
                 ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
             })?;
 
+            // RETURNING: capture the row exactly as inserted (after any
+            // REPLACE reserved-rowid / IPK rewrites above).
+            if capture_returning {
+                returned_rows.push(row.clone());
+            }
+
             // Maintain expression indexes for this insert
             expression_index_maintenance::maintain_expression_indexes_for_insert(
                 db,
@@ -1080,7 +1132,17 @@ fn execute_insert_internal(
         return Err(assertion_error);
     }
 
-    Ok(rows_inserted)
+    // Project the RETURNING clause against the rows actually inserted/updated
+    // (one result row per affected row, in insertion order). Zero affected
+    // rows still yield an empty result with the derived column headers.
+    let returning_result = if let Some(items) = &stmt.returning {
+        let row_refs: Vec<&vibesql_storage::Row> = returned_rows.iter().collect();
+        Some(crate::dml_returning::project_returning(items, &schema, db, None, &row_refs)?)
+    } else {
+        None
+    };
+
+    Ok((rows_inserted, returning_result))
 }
 
 /// Check if inserting a row would violate any constraints (for IGNORE conflict resolution)
@@ -1239,7 +1301,7 @@ fn execute_insert_on_view(
     view_def: &vibesql_catalog::ViewDefinition,
     procedural_context: Option<&crate::procedural::ExecutionContext>,
     trigger_context: Option<&crate::trigger_execution::TriggerContext>,
-) -> Result<usize, ExecutorError> {
+) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
     use vibesql_ast::TriggerTiming;
 
     // Find INSTEAD OF INSERT triggers for this view
@@ -1351,6 +1413,16 @@ fn execute_insert_on_view(
         collected_rows
     }; // evaluator dropped here
 
+    // RETURNING: project the NEW view rows (one per INSTEAD OF trigger fire),
+    // mirroring the UPDATE/DELETE view semantics. Projected before the
+    // triggers run since the database must be borrowed mutably below.
+    let returning_result = if let Some(items) = &stmt.returning {
+        let row_refs: Vec<&vibesql_storage::Row> = new_rows.iter().collect();
+        Some(crate::dml_returning::project_returning(items, &view_schema, db, None, &row_refs)?)
+    } else {
+        None
+    };
+
     // Now fire triggers (database can be mutably borrowed)
     let rows_processed = new_rows.len();
     for row in new_rows {
@@ -1359,7 +1431,7 @@ fn execute_insert_on_view(
         }
     }
 
-    Ok(rows_processed)
+    Ok((rows_processed, returning_result))
 }
 
 /// Build a pseudo TableSchema from a view definition

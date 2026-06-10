@@ -137,6 +137,14 @@ impl<'arena> ArenaParser<'arena> {
         // Parse optional ON CONFLICT or ON DUPLICATE KEY UPDATE clause
         let (on_conflict, on_duplicate_key_update) = self.parse_on_clause_for_insert()?;
 
+        // Parse optional RETURNING clause (SQLite 3.35.0+)
+        // Syntax: INSERT INTO ... [ON CONFLICT ...] RETURNING expr [, expr ...]
+        let returning = if self.try_consume_keyword(Keyword::Returning) {
+            Some(self.parse_select_list()?)
+        } else {
+            None
+        };
+
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
 
@@ -151,6 +159,7 @@ impl<'arena> ArenaParser<'arena> {
             conflict_clause,
             on_conflict,
             on_duplicate_key_update,
+            returning,
         };
 
         Ok(self.arena.alloc(stmt))
@@ -195,6 +204,14 @@ impl<'arena> ArenaParser<'arena> {
         // Parse optional ON CONFLICT or ON DUPLICATE KEY UPDATE clause
         let (on_conflict, on_duplicate_key_update) = self.parse_on_clause_for_insert()?;
 
+        // Parse optional RETURNING clause (SQLite 3.35.0+)
+        // Syntax: INSERT INTO ... [ON CONFLICT ...] RETURNING expr [, expr ...]
+        let returning = if self.try_consume_keyword(Keyword::Returning) {
+            Some(self.parse_select_list()?)
+        } else {
+            None
+        };
+
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
 
@@ -209,6 +226,7 @@ impl<'arena> ArenaParser<'arena> {
             conflict_clause: Some(ConflictClause::Replace),
             on_conflict,
             on_duplicate_key_update,
+            returning,
         };
 
         Ok(self.arena.alloc(stmt))

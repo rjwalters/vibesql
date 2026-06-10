@@ -311,6 +311,7 @@ pub fn build_insert_values(
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     }
 }
 
@@ -335,6 +336,7 @@ pub fn build_insert_columns(
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     }
 }
 

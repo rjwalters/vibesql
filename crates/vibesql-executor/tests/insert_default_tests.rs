@@ -41,6 +41,7 @@ fn test_character_varying_column_with_length() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -90,6 +91,7 @@ fn test_character_varying_column_without_length() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -143,6 +145,7 @@ fn test_insert_with_default_value() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -194,6 +197,7 @@ fn test_insert_default_no_default_value_defined() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -258,6 +262,7 @@ fn test_insert_default_values_syntax() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -316,6 +321,7 @@ fn test_insert_default_values_with_integer_primary_key() {
             conflict_clause: None,
             on_conflict: None,
             on_duplicate_key_update: None,
+            returning: None,
         };
         InsertExecutor::execute(&mut db, &stmt).unwrap();
     }
@@ -376,6 +382,7 @@ fn test_integer_primary_key_null_autogen_empty_table() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -429,6 +436,7 @@ fn test_integer_primary_key_null_autogen_sequential() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &stmt1).unwrap();
 
@@ -449,6 +457,7 @@ fn test_integer_primary_key_null_autogen_sequential() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &stmt2).unwrap();
 
@@ -500,6 +509,7 @@ fn test_integer_primary_key_null_autogen_after_explicit() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &stmt1).unwrap();
 
@@ -520,6 +530,7 @@ fn test_integer_primary_key_null_autogen_after_explicit() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &stmt2).unwrap();
 
@@ -576,6 +587,7 @@ fn test_bigint_primary_key_no_autogen() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &stmt).unwrap();
 
@@ -640,6 +652,7 @@ fn test_integer_primary_key_null_autogen_multirow() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -706,6 +719,7 @@ fn test_composite_primary_key_no_autogen() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &stmt).unwrap();
 

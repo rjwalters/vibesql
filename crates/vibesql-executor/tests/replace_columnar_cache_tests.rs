@@ -42,6 +42,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();
 }
@@ -63,6 +64,7 @@ fn replace_product(db: &mut Database, id: i64, name: &str, price: i64) {
         conflict_clause: Some(vibesql_ast::ConflictClause::Replace),
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();
 }
@@ -216,6 +218,7 @@ fn test_replace_unique_constraint_invalidates_cache() {
             conflict_clause: None,
             on_conflict: None,
             on_duplicate_key_update: None,
+            returning: None,
         };
         InsertExecutor::execute(db, &stmt).unwrap();
     };
@@ -242,6 +245,7 @@ fn test_replace_unique_constraint_invalidates_cache() {
         conflict_clause: Some(vibesql_ast::ConflictClause::Replace),
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &replace_stmt).unwrap();
 

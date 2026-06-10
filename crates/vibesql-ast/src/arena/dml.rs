@@ -118,6 +118,10 @@ pub struct InsertStmt<'arena> {
     pub on_conflict: Option<OnConflictClause<'arena>>,
     /// ON DUPLICATE KEY UPDATE clause (MySQL-style upsert)
     pub on_duplicate_key_update: Option<BumpVec<'arena, Assignment<'arena>>>,
+    /// Optional RETURNING clause (SQLite 3.35.0+)
+    /// Syntax: INSERT INTO table ... [ON CONFLICT ...] RETURNING expr [, expr ...]
+    /// Returns the NEW row values (as actually inserted) for each inserted row.
+    pub returning: Option<BumpVec<'arena, SelectItem<'arena>>>,
 }
 
 // ============================================================================

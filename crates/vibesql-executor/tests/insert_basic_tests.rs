@@ -25,6 +25,7 @@ fn test_basic_insert() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -65,6 +66,7 @@ fn test_multi_row_insert() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -96,6 +98,7 @@ fn test_insert_with_column_list() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -143,6 +146,7 @@ fn test_insert_null_value() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -178,6 +182,7 @@ fn test_insert_sqlite_type_affinity() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     // SQLite affinity: this should succeed
@@ -205,6 +210,7 @@ fn test_insert_column_count_mismatch() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let result = InsertExecutor::execute(&mut db, &stmt);
@@ -232,6 +238,7 @@ fn test_insert_table_not_found() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let result = InsertExecutor::execute(&mut db, &stmt);
@@ -261,6 +268,7 @@ fn test_insert_column_not_found() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let result = InsertExecutor::execute(&mut db, &stmt);
@@ -292,6 +300,7 @@ fn test_insert_not_null_constraint_violation() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let result = InsertExecutor::execute(&mut db, &stmt);

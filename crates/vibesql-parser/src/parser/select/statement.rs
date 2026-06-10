@@ -378,8 +378,17 @@ impl Parser {
         // - Parenthesized subexpressions
         if validate_end_tokens {
             if allow_order_limit {
-                // Top-level: only allow semicolon, EOF, or ) (for subqueries/CTEs)
-                if !matches!(self.peek(), Token::Semicolon | Token::Eof | Token::RParen) {
+                // Top-level: only allow semicolon, EOF, or ) (for subqueries/CTEs).
+                // RETURNING is allowed because the SELECT may be the source of
+                // INSERT INTO t SELECT ... RETURNING ... (the clause belongs to
+                // the outer INSERT, issue #5263).
+                if !matches!(
+                    self.peek(),
+                    Token::Semicolon
+                        | Token::Eof
+                        | Token::RParen
+                        | Token::Keyword { keyword: Keyword::Returning, .. }
+                ) {
                     return Err(ParseError { message: self.peek().syntax_error() });
                 }
             } else {
@@ -720,6 +729,9 @@ impl Parser {
             //       ORDER/LIMIT/OFFSET may follow and belong to the outer statement
             let valid_end_token = match self.peek() {
                 Token::Semicolon | Token::Eof | Token::RParen => true,
+                // RETURNING belongs to an outer INSERT (INSERT INTO t VALUES
+                // ... RETURNING ..., issue #5263).
+                Token::Keyword { keyword: Keyword::Returning, .. } => true,
                 // When nested, allow ORDER BY/LIMIT/OFFSET for outer statement
                 Token::Keyword { keyword: Keyword::Order, .. }
                 | Token::Keyword { keyword: Keyword::Limit, .. }
