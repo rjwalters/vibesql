@@ -4,6 +4,7 @@ pub mod defaults;
 mod duplicate_key_update;
 mod execution;
 mod foreign_keys;
+mod on_conflict_update;
 mod replace;
 mod row_validator;
 pub mod validation;

@@ -94,6 +94,16 @@ pub struct OnConflictClause {
     /// Optional list of indexed columns to match for conflict detection.
     /// When None, matches any unique constraint violation.
     pub conflict_target: Option<Vec<String>>,
+    /// True when the conflict target contains components that a plain
+    /// column-name list cannot represent exactly: expression components
+    /// (`ON CONFLICT(a+b)`), an explicit non-BINARY COLLATE
+    /// (`ON CONFLICT(b COLLATE nocase)`), or a target-level WHERE predicate
+    /// (`ON CONFLICT(b) WHERE b>10`, partial-index upsert).
+    ///
+    /// The executor conservatively reports inexact targets with SQLite's
+    /// canonical "ON CONFLICT clause does not match any PRIMARY KEY or
+    /// UNIQUE constraint" error (v1 limitation, issue #5269).
+    pub target_inexact: bool,
     /// The action to take when a conflict occurs.
     pub action: OnConflictAction,
 }

@@ -409,36 +409,31 @@ impl Parser {
             // SQLite/PostgreSQL: ON CONFLICT [(cols)] DO {NOTHING | UPDATE SET ...}
             self.advance(); // consume CONFLICT
 
-            // Parse optional conflict target (column list)
+            // Parse optional conflict target (indexed column list)
             //
             // SQLite's grammar for an upsert conflict target allows each
-            // column to be followed by an optional `COLLATE name` and an
-            // optional `ASC | DESC`. It also accepts `NULLS FIRST | LAST`
-            // syntactically and then rejects it with the canonical
-            // "unsupported use of NULLS FIRST/LAST" error. We mirror that
-            // behavior so nulls1.test 3.1.11 / 3.1.12 see the expected
-            // error message.
+            // entry to be an arbitrary indexed expression with an optional
+            // `COLLATE name` and an optional `ASC | DESC`, plus an optional
+            // target-level `WHERE` predicate (partial-index upsert). It also
+            // accepts `NULLS FIRST | LAST` syntactically and then rejects it
+            // with the canonical "unsupported use of NULLS FIRST/LAST" error.
+            // We mirror that behavior so nulls1.test 3.1.11 / 3.1.12 see the
+            // expected error message.
+            //
+            // v1 (issue #5269) matches plain column names with the default
+            // BINARY collation only. Expression components, non-BINARY
+            // COLLATE, and target WHERE predicates parse successfully but
+            // mark the target "inexact" so the executor reports SQLite's
+            // canonical "ON CONFLICT clause does not match any PRIMARY KEY
+            // or UNIQUE constraint" error (upsert1-130/210/310/1210).
+            let mut target_inexact = false;
             let conflict_target = if matches!(self.peek(), Token::LParen) {
                 self.advance(); // consume (
-                let cols = self.parse_comma_separated_list(|p| {
-                    let name = match p.peek() {
-                        Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
-                            let name = col.clone();
-                            p.advance();
-                            name
-                        }
-                        _ => {
-                            return Err(ParseError {
-                                message: "Expected column name in ON CONFLICT".to_string(),
-                            });
-                        }
-                    };
-
-                    // Optional COLLATE collation_name
-                    if p.peek_keyword(Keyword::Collate) {
-                        p.advance(); // consume COLLATE
-                        let _collation = p.parse_identifier()?;
-                    }
+                let entries = self.parse_comma_separated_list(|p| {
+                    // Parse the entry as a general expression; the expression
+                    // parser consumes a trailing COLLATE into
+                    // Expression::Collate.
+                    let expr = p.parse_expression()?;
 
                     // Optional ASC | DESC
                     if p.peek_keyword(Keyword::Asc) || p.peek_keyword(Keyword::Desc) {
@@ -449,13 +444,47 @@ impl Parser {
                     // error message.
                     p.reject_nulls_in_index_position()?;
 
-                    Ok(name)
+                    // Peel an optional COLLATE wrapper.
+                    let (base, collation) = match &expr {
+                        vibesql_ast::Expression::Collate { expr: inner, collation } => {
+                            (inner.as_ref(), Some(collation.as_str()))
+                        }
+                        other => (other, None),
+                    };
+
+                    match base {
+                        vibesql_ast::Expression::ColumnRef(id)
+                            if id.table_canonical().is_none() =>
+                        {
+                            // Plain column: exact unless a non-default
+                            // (non-BINARY) collation was requested.
+                            let inexact = collation
+                                .map(|c| !c.eq_ignore_ascii_case("binary"))
+                                .unwrap_or(false);
+                            Ok((id.column_display().to_string(), inexact))
+                        }
+                        _ => {
+                            // Expression component: cannot match a plain
+                            // column-list constraint in v1.
+                            Ok((String::new(), true))
+                        }
+                    }
                 })?;
                 self.expect_token(Token::RParen)?;
-                Some(cols)
+                target_inexact = entries.iter().any(|(_, inexact)| *inexact);
+                Some(entries.into_iter().map(|(name, _)| name).collect())
             } else {
                 None
             };
+
+            // Optional target-level WHERE predicate (partial-index upsert).
+            // Parsed but not matched in v1: marks the target inexact
+            // (upsert1-310).
+            if conflict_target.is_some() && self.peek_keyword(Keyword::Where) {
+                self.advance(); // consume WHERE
+                let _predicate = self.parse_expression()?;
+                target_inexact = true;
+            }
 
             self.expect_keyword(Keyword::Do)?;
 
@@ -484,7 +513,10 @@ impl Parser {
                 });
             };
 
-            Ok((Some(vibesql_ast::OnConflictClause { conflict_target, action }), None))
+            Ok((
+                Some(vibesql_ast::OnConflictClause { conflict_target, target_inexact, action }),
+                None,
+            ))
         } else if self.peek_keyword(Keyword::Duplicate) {
             // MySQL: ON DUPLICATE KEY UPDATE ...
             self.advance(); // consume DUPLICATE

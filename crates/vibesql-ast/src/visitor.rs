@@ -1345,6 +1345,7 @@ pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertSt
         conflict_clause: stmt.conflict_clause,
         on_conflict: stmt.on_conflict.map(|clause| crate::OnConflictClause {
             conflict_target: clause.conflict_target,
+            target_inexact: clause.target_inexact,
             action: match clause.action {
                 crate::OnConflictAction::DoNothing => crate::OnConflictAction::DoNothing,
                 crate::OnConflictAction::DoUpdate { assignments, where_clause } => {

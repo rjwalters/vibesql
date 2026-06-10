@@ -580,6 +580,7 @@ fn test_insert_on_conflict_do_nothing_primary_key() {
         conflict_clause: None,
         on_conflict: Some(OnConflictClause {
             conflict_target: Some(vec!["id".to_string()]),
+            target_inexact: false,
             action: OnConflictAction::DoNothing,
         }),
         on_duplicate_key_update: None,
@@ -623,6 +624,7 @@ fn test_insert_on_conflict_do_nothing_without_target() {
         conflict_clause: None,
         on_conflict: Some(OnConflictClause {
             conflict_target: None, // No specific conflict target
+            target_inexact: false,
             action: OnConflictAction::DoNothing,
         }),
         on_duplicate_key_update: None,
@@ -660,6 +662,7 @@ fn test_insert_on_conflict_do_nothing_no_conflict() {
         conflict_clause: None,
         on_conflict: Some(OnConflictClause {
             conflict_target: Some(vec!["id".to_string()]),
+            target_inexact: false,
             action: OnConflictAction::DoNothing,
         }),
         on_duplicate_key_update: None,

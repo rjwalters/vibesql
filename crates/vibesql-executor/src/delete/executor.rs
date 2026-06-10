@@ -927,6 +927,13 @@ fn execute_truncate(database: &mut Database, table_name: &str) -> Result<usize, 
     // Note: table.clear() invalidates the table-level columnar cache internally
     table.clear();
 
+    // Rebuild user-defined indexes (clears them, since the table is now empty).
+    // Without this, database-level index data retains the deleted rows' keys
+    // and subsequent INSERTs fail with spurious UNIQUE constraint errors
+    // (upsert1-710/740/770). The TRUNCATE TABLE executor does the same
+    // (see truncate/core.rs::execute_truncate).
+    database.rebuild_indexes(table_name);
+
     // Invalidate the database-level columnar cache since table data changed.
     // Both the table-level (via clear()) and database-level invalidations are
     // necessary because they manage separate caches at different levels.

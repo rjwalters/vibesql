@@ -250,6 +250,15 @@ pub fn enforce_unique_indexes(
                 continue;
             }
 
+            // Skip expression indexes: this check builds keys from plain
+            // column values and expect_column_name() panics on expression
+            // components (observed via upsert1-800 with a UNIQUE expression
+            // index). Expression indexes are maintained separately by
+            // expression_index_maintenance.
+            if index_metadata.columns.iter().any(|col| col.is_expression()) {
+                continue;
+            }
+
             // Build the key values from the row for this index
             let mut key_values = Vec::new();
             for index_col in &index_metadata.columns {

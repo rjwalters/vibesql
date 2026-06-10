@@ -196,6 +196,14 @@ impl IndexManager {
     ) -> Result<(), StorageError> {
         for (index_name, metadata) in &self.indexes {
             if metadata.table_name == table_name && metadata.unique && !metadata.is_partial() {
+                // Skip expression indexes: storage cannot evaluate expressions
+                // to build the key (expect_column_name would panic). The
+                // executor crate maintains expression indexes separately (see
+                // expression_index_maintenance). Observed via upsert1-800
+                // where a UNIQUE expression index caused a panic on INSERT.
+                if metadata.columns.iter().any(|col| col.is_expression()) {
+                    continue;
+                }
                 if let Some(index_data) = self.index_data.get(index_name) {
                     // Build composite key from the indexed columns
                     // Apply prefix truncation and normalize numeric types to ensure consistent
