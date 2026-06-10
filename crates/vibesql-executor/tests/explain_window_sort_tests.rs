@@ -197,3 +197,149 @@ fn test_direction_distinguishes_keys() {
     );
     assert_eq!(count, 2);
 }
+
+// ---------------------------------------------------------------------------
+// Statement-level ORDER BY suppression (issue #5246)
+//
+// SQLite suppresses the statement-level USE TEMP B-TREE FOR ORDER BY entry
+// when the statement ORDER BY is a structural prefix of (or equal to) the
+// combined sort key of the FIRST window in the SELECT list: the co-routine
+// rewrite places the first window's sorting pass outermost, so its key is
+// the final output order. Expected counts below verified against
+// sqlite3 3.51.0 with the same schema.
+// ---------------------------------------------------------------------------
+
+// Case 1: statement ORDER BY identical to the window sort key — suppressed.
+#[test]
+fn test_statement_order_by_identical_to_window_key_suppressed() {
+    let db = setup_db();
+    let count = order_count(&db, "SELECT sum(c) OVER (ORDER BY c) FROM t5 ORDER BY c");
+    assert_eq!(count, 1);
+}
+
+// Case 2: statement ORDER BY extends the window key — NOT suppressed.
+#[test]
+fn test_statement_order_by_extending_window_key_not_suppressed() {
+    let db = setup_db();
+    let count = order_count(&db, "SELECT sum(c) OVER (ORDER BY c) FROM t5 ORDER BY c, b");
+    assert_eq!(count, 2);
+}
+
+// Case 3: statement ORDER BY is a prefix of the window key — suppressed.
+#[test]
+fn test_statement_order_by_prefix_of_window_key_suppressed() {
+    let db = setup_db();
+    let count = order_count(&db, "SELECT sum(c) OVER (ORDER BY c, b) FROM t5 ORDER BY c");
+    assert_eq!(count, 1);
+}
+
+// Case 4: direction mismatch (window ASC, statement DESC) — NOT suppressed.
+#[test]
+fn test_statement_order_by_direction_mismatch_not_suppressed() {
+    let db = setup_db();
+    let count = order_count(&db, "SELECT sum(c) OVER (ORDER BY c) FROM t5 ORDER BY c DESC");
+    assert_eq!(count, 2);
+}
+
+// Case 5: DESC exact match — suppressed.
+#[test]
+fn test_statement_order_by_desc_exact_match_suppressed() {
+    let db = setup_db();
+    let count = order_count(&db, "SELECT sum(c) OVER (ORDER BY c DESC) FROM t5 ORDER BY c DESC");
+    assert_eq!(count, 1);
+}
+
+// Case 6: DESC prefix match — suppressed.
+#[test]
+fn test_statement_order_by_desc_prefix_suppressed() {
+    let db = setup_db();
+    let count = order_count(&db, "SELECT sum(c) OVER (ORDER BY c DESC, b) FROM t5 ORDER BY c DESC");
+    assert_eq!(count, 1);
+}
+
+// Case 7: statement ORDER BY matches the window PARTITION BY key — suppressed.
+#[test]
+fn test_statement_order_by_matching_partition_key_suppressed() {
+    let db = setup_db();
+    let count = order_count(&db, "SELECT sum(c) OVER (PARTITION BY c) FROM t5 ORDER BY c");
+    assert_eq!(count, 1);
+}
+
+// Case 8: statement ORDER BY is a prefix via the PARTITION BY portion of the
+// combined key (PARTITION BY c ORDER BY b => key (c, b)) — suppressed.
+#[test]
+fn test_statement_order_by_partition_prefix_suppressed() {
+    let db = setup_db();
+    let count =
+        order_count(&db, "SELECT sum(c) OVER (PARTITION BY c ORDER BY b) FROM t5 ORDER BY c");
+    assert_eq!(count, 1);
+}
+
+// Case 9: COLLATE mismatch — NOT suppressed.
+#[test]
+fn test_statement_order_by_collate_mismatch_not_suppressed() {
+    let db = setup_db();
+    let count =
+        order_count(&db, "SELECT sum(c) OVER (ORDER BY c) FROM t5 ORDER BY c COLLATE NOCASE");
+    assert_eq!(count, 2);
+}
+
+// Case 10: multiple windows — statement ORDER BY matching the FIRST window's
+// key is suppressed.
+#[test]
+fn test_statement_order_by_matching_first_window_suppressed() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(c) OVER (ORDER BY c),
+            sum(c) OVER (ORDER BY b)
+         FROM t5 ORDER BY c",
+    );
+    assert_eq!(count, 2);
+}
+
+// Case 11: multiple windows — statement ORDER BY matching only the SECOND
+// window's key is NOT suppressed (only the first window's key governs).
+#[test]
+fn test_statement_order_by_matching_second_window_not_suppressed() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(c) OVER (ORDER BY c),
+            sum(c) OVER (ORDER BY b)
+         FROM t5 ORDER BY b",
+    );
+    assert_eq!(count, 3);
+}
+
+// Case 12: first window has an empty key (OVER ()) — never suppresses, even
+// if a later window's key matches the statement ORDER BY.
+#[test]
+fn test_empty_first_window_key_never_suppresses() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(c) OVER (),
+            sum(c) OVER (ORDER BY c)
+         FROM t5 ORDER BY c",
+    );
+    assert_eq!(count, 2);
+}
+
+// Reversed-window-order control for cases 10/11: with the windows swapped,
+// suppression follows the new first window's key.
+#[test]
+fn test_suppression_follows_window_order_in_select_list() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(c) OVER (ORDER BY b),
+            sum(c) OVER (ORDER BY c)
+         FROM t5 ORDER BY b",
+    );
+    assert_eq!(count, 2);
+}
