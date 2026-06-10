@@ -23,7 +23,18 @@
       "sqlFeatures": [
         "SUBSTRING",
         "LENGTH"
-      ]
+      ],
+      "expectedRows": [
+        ["Sarah", "Chen", "S", "4"],
+        ["Michael", "Rodriguez", "M", "9"],
+        ["Emily", "Johnson", "E", "7"],
+        ["David", "Kim", "D", "3"],
+        ["Jennifer", "Martinez", "J", "8"],
+        ["Robert", "Taylor", "R", "6"],
+        ["Lisa", "Anderson", "L", "8"],
+        ["James", "Wilson", "J", "6"]
+      ],
+      "expectedCount": 8
     },
     "string-3": {
       "title": "Text Trimming",

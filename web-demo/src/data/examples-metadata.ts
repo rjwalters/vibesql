@@ -22,6 +22,9 @@ export interface QueryExample {
   executionTimeMs?: number
   relatedExamples?: string[] // IDs of related examples
   tags?: string[] // Searchable tags
+  // Expected results (regenerated from the engine; see ExamplePayload in examples/types.ts)
+  expectedRows?: string[][] // Expected result rows (excluding header)
+  expectedCount?: number // Expected number of rows
 }
 
 export interface ExampleCategory {

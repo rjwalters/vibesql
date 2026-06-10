@@ -51,6 +51,8 @@ interface CategoryJSON {
       executionTimeMs?: number
       relatedExamples?: string[]
       tags?: string[]
+      expectedRows?: string[][]
+      expectedCount?: number
     }
   }
 }
@@ -101,6 +103,8 @@ export function loadAllCategories(): ExampleCategory[] {
       executionTimeMs: example.executionTimeMs,
       relatedExamples: example.relatedExamples,
       tags: example.tags,
+      expectedRows: example.expectedRows,
+      expectedCount: example.expectedCount,
     }))
 
     return {
