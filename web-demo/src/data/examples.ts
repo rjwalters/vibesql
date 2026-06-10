@@ -9,18 +9,13 @@ import type {
   QueryExample,
   ExampleCategory,
   ExampleMetadata,
-  CategoryMetadata
+  CategoryMetadata,
 } from './examples-metadata'
 
 import { loadAllCategories } from './examples/loader'
 
 // Re-export types and interfaces
-export type {
-  QueryExample,
-  ExampleCategory,
-  ExampleMetadata,
-  CategoryMetadata
-}
+export type { QueryExample, ExampleCategory, ExampleMetadata, CategoryMetadata }
 
 // Re-export for backward compatibility
 export { exampleCategoriesMetadata } from './examples-metadata'
@@ -29,7 +24,7 @@ export { exampleCategoriesMetadata } from './examples-metadata'
 export {
   getAllExampleMetadata,
   findExampleMetadata,
-  getExampleMetadataForDatabase
+  getExampleMetadataForDatabase,
 } from './examples-metadata'
 
 /**

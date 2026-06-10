@@ -85,9 +85,7 @@ export function setupThemeSync(
 /**
  * Initialize application components
  */
-export async function initializeApp(
-  progress: LoadingProgressComponent
-): Promise<AppComponents> {
+export async function initializeApp(progress: LoadingProgressComponent): Promise<AppComponents> {
   // Step 1: Initialize theme
   progress.updateStep('theme', 50, 'loading')
   const theme = initTheme()

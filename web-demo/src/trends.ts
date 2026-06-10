@@ -5,55 +5,70 @@
  * Shows trends over time for TPC-H, TPC-DS, TPC-C, and Sysbench benchmarks.
  */
 
-import './styles/main.css';
-import { initTheme } from './theme';
-import { initLocale } from './locale';
-import { NavigationComponent } from './components/Navigation';
-import { FooterComponent } from './components/Footer';
-import { initI18n, updateDOM } from './i18n';
-import { setCommitLink } from './components/CommitLink';
+import './styles/main.css'
+import { initTheme } from './theme'
+import { initLocale } from './locale'
+import { NavigationComponent } from './components/Navigation'
+import { FooterComponent } from './components/Footer'
+import { initI18n, updateDOM } from './i18n'
+import { setCommitLink } from './components/CommitLink'
 
 // Chart.js is loaded via CDN in trends.html
-declare const Chart: any;
+// Minimal structural typing for the parts of the Chart.js API we use.
+interface ChartInstance {
+  destroy(): void
+}
+
+interface ChartTooltipItem {
+  dataIndex: number
+  raw?: { x?: unknown }
+  parsed: { y: number | null }
+  dataset: { label?: string }
+}
+
+declare const Chart: new (
+  ctx: CanvasRenderingContext2D | HTMLCanvasElement,
+  config: unknown
+) => ChartInstance
 
 // ============================================================================
 // Types
 // ============================================================================
 
 interface TrendDataPoint {
-  date: string;
-  timestamp?: string;
-  commit: string;
-  avg_ms?: number;
-  min_ms?: number;
-  max_ms?: number;
-  geomean_ms?: number;
-  queries_passed?: number;
-  total_queries?: number;
-  tps?: number;
-  latency_us?: number;
-  workloads?: Record<string, number>;
+  date: string
+  timestamp?: string
+  commit: string
+  avg_ms?: number
+  min_ms?: number
+  max_ms?: number
+  geomean_ms?: number
+  queries_passed?: number
+  total_queries?: number
+  tps?: number
+  latency_us?: number
+  workloads?: Record<string, number>
 }
 
 interface BenchmarkTrend {
-  suite: string;
-  display_name: string;
-  description: string;
-  metric?: string;
-  metric_label?: string;
-  data: TrendDataPoint[];
+  suite: string
+  display_name: string
+  description: string
+  metric?: string
+  metric_label?: string
+  data: TrendDataPoint[]
 }
 
 interface TrendData {
-  generated_at: string;
-  git_commit: string;
-  description: string;
+  generated_at: string
+  git_commit: string
+  description: string
   benchmarks: {
-    tpch?: BenchmarkTrend;
-    tpcds?: BenchmarkTrend;
-    tpcc?: BenchmarkTrend;
-    sysbench?: BenchmarkTrend;
-  };
+    tpch?: BenchmarkTrend
+    tpcds?: BenchmarkTrend
+    tpcc?: BenchmarkTrend
+    sysbench?: BenchmarkTrend
+  }
 }
 
 // ============================================================================
@@ -62,71 +77,73 @@ interface TrendData {
 
 const COLORS = {
   avg: {
-    bg: 'rgba(59, 130, 246, 0.2)',      // Blue
+    bg: 'rgba(59, 130, 246, 0.2)', // Blue
     border: 'rgba(59, 130, 246, 1)',
   },
   min: {
-    bg: 'rgba(34, 197, 94, 0.2)',       // Green (best)
+    bg: 'rgba(34, 197, 94, 0.2)', // Green (best)
     border: 'rgba(34, 197, 94, 1)',
   },
   max: {
-    bg: 'rgba(239, 68, 68, 0.2)',       // Red (worst)
+    bg: 'rgba(239, 68, 68, 0.2)', // Red (worst)
     border: 'rgba(239, 68, 68, 1)',
   },
   tps: {
-    bg: 'rgba(34, 197, 94, 0.2)',       // Green
+    bg: 'rgba(34, 197, 94, 0.2)', // Green
     border: 'rgba(34, 197, 94, 1)',
   },
-};
+}
 
 // ============================================================================
 // Chart Creation
 // ============================================================================
 
-let charts: Map<string, any> = new Map();
+const charts: Map<string, ChartInstance> = new Map()
 
 function createTimeSeriesChart(
   canvasId: string,
   data: TrendDataPoint[],
   config: {
-    yAxisLabel: string;
+    yAxisLabel: string
     datasets: {
-      key: keyof TrendDataPoint;
-      label: string;
-      color: { bg: string; border: string };
-    }[];
-    higherIsBetter?: boolean;
+      key: keyof TrendDataPoint
+      label: string
+      color: { bg: string; border: string }
+    }[]
+    higherIsBetter?: boolean
   }
 ): void {
-  const canvas = document.getElementById(canvasId) as HTMLCanvasElement;
-  if (!canvas) return;
+  const canvas = document.getElementById(canvasId) as HTMLCanvasElement
+  if (!canvas) return
 
   // Destroy existing chart
   if (charts.has(canvasId)) {
-    charts.get(canvasId).destroy();
+    charts.get(canvasId)?.destroy()
   }
 
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
 
   // Sort data by timestamp to ensure chronological order
   const sortedData = [...data].sort((a, b) => {
-    const timeA = a.timestamp || a.date;
-    const timeB = b.timestamp || b.date;
-    return timeA.localeCompare(timeB);
-  });
+    const timeA = a.timestamp || a.date
+    const timeB = b.timestamp || b.date
+    return timeA.localeCompare(timeB)
+  })
 
   // Create time-based data points (x = timestamp, y = value)
   const datasets = config.datasets.map(ds => ({
     label: ds.label,
-    data: sortedData.map(point => {
-      const value = point[ds.key] as number;
-      if (value === undefined || value === null) return null;
-      // Parse timestamp or date into a Date object for time scale
-      const timeStr = point.timestamp || point.date;
-      const time = new Date(timeStr);
-      return { x: time, y: value };
-    }).filter(d => d !== null),
+    data: sortedData
+      .map(point => {
+        const value = point[ds.key] as number
+        if (value === undefined || value === null) return null
+        // Parse timestamp or date into a Date object for time scale
+        const timeStr = point.timestamp || point.date
+        const time = new Date(timeStr)
+        return { x: time, y: value }
+      })
+      .filter(d => d !== null),
     backgroundColor: ds.color.bg,
     borderColor: ds.color.border,
     borderWidth: 2,
@@ -135,12 +152,12 @@ function createTimeSeriesChart(
     pointRadius: 4,
     pointHoverRadius: 6,
     spanGaps: false,
-  }));
+  }))
 
   // Get theme colors
-  const isDark = document.documentElement.classList.contains('dark');
-  const gridColor = isDark ? 'rgba(75, 85, 99, 0.5)' : 'rgba(209, 213, 219, 0.5)';
-  const textColor = isDark ? '#9CA3AF' : '#6B7280';
+  const isDark = document.documentElement.classList.contains('dark')
+  const gridColor = isDark ? 'rgba(75, 85, 99, 0.5)' : 'rgba(209, 213, 219, 0.5)'
+  const textColor = isDark ? '#9CA3AF' : '#6B7280'
 
   const chart = new Chart(ctx, {
     type: 'line',
@@ -204,32 +221,35 @@ function createTimeSeriesChart(
         },
         tooltip: {
           callbacks: {
-            title: (items: any[]) => {
-              if (items.length === 0) return '';
-              const idx = items[0].dataIndex;
-              const point = sortedData[idx];
+            title: (items: ChartTooltipItem[]) => {
+              if (items.length === 0) return ''
+              const idx = items[0].dataIndex
+              const point = sortedData[idx]
               // Use the raw data's x value (Date object) for display
-              const rawData = items[0].raw;
-              const time = rawData?.x instanceof Date
-                ? rawData.x.toLocaleString()
-                : (point.timestamp ? new Date(point.timestamp).toLocaleString() : point.date);
-              return `${time} (${point.commit || 'unknown'})`;
+              const rawData = items[0].raw
+              const time =
+                rawData?.x instanceof Date
+                  ? rawData.x.toLocaleString()
+                  : point.timestamp
+                    ? new Date(point.timestamp).toLocaleString()
+                    : point.date
+              return `${time} (${point.commit || 'unknown'})`
             },
-            label: (context: any) => {
-              const value = context.parsed.y;
-              if (value === null) return `${context.dataset.label}: N/A`;
+            label: (context: ChartTooltipItem) => {
+              const value = context.parsed.y
+              if (value === null) return `${context.dataset.label}: N/A`
               if (config.higherIsBetter) {
-                return `${context.dataset.label}: ${value.toFixed(2)} TPS`;
+                return `${context.dataset.label}: ${value.toFixed(2)} TPS`
               }
-              return `${context.dataset.label}: ${value.toFixed(2)} ms`;
+              return `${context.dataset.label}: ${value.toFixed(2)} ms`
             },
           },
         },
       },
     },
-  });
+  })
 
-  charts.set(canvasId, chart);
+  charts.set(canvasId, chart)
 }
 
 function renderTPCHChart(trend: BenchmarkTrend): void {
@@ -240,7 +260,7 @@ function renderTPCHChart(trend: BenchmarkTrend): void {
       { key: 'min_ms', label: 'Best (Min)', color: COLORS.min },
       { key: 'max_ms', label: 'Worst (Max)', color: COLORS.max },
     ],
-  });
+  })
 }
 
 function renderTPCDSChart(trend: BenchmarkTrend): void {
@@ -251,17 +271,15 @@ function renderTPCDSChart(trend: BenchmarkTrend): void {
       { key: 'min_ms', label: 'Best (Min)', color: COLORS.min },
       { key: 'max_ms', label: 'Worst (Max)', color: COLORS.max },
     ],
-  });
+  })
 }
 
 function renderTPCCChart(trend: BenchmarkTrend): void {
   createTimeSeriesChart('tpcc-chart', trend.data, {
     yAxisLabel: 'Transactions per Second (TPS)',
-    datasets: [
-      { key: 'tps', label: 'TPS', color: COLORS.tps },
-    ],
+    datasets: [{ key: 'tps', label: 'TPS', color: COLORS.tps }],
     higherIsBetter: true,
-  });
+  })
 }
 
 function renderSysbenchChart(trend: BenchmarkTrend): void {
@@ -272,7 +290,7 @@ function renderSysbenchChart(trend: BenchmarkTrend): void {
       { key: 'min_ms', label: 'Best (Min)', color: COLORS.min },
       { key: 'max_ms', label: 'Worst (Max)', color: COLORS.max },
     ],
-  });
+  })
 }
 
 // ============================================================================
@@ -281,51 +299,51 @@ function renderSysbenchChart(trend: BenchmarkTrend): void {
 
 function updateSummaryCards(data: TrendData): void {
   // Total runs
-  let totalRuns = 0;
-  const dates: string[] = [];
-  let latestCommit = '';
+  let totalRuns = 0
+  const dates: string[] = []
+  let latestCommit = ''
 
   for (const [, trend] of Object.entries(data.benchmarks)) {
     if (trend && trend.data) {
-      totalRuns += trend.data.length;
+      totalRuns += trend.data.length
       for (const point of trend.data) {
-        if (point.date) dates.push(point.date);
-        if (point.commit) latestCommit = point.commit;
+        if (point.date) dates.push(point.date)
+        if (point.commit) latestCommit = point.commit
       }
     }
   }
 
-  const totalRunsEl = document.getElementById('total-runs');
+  const totalRunsEl = document.getElementById('total-runs')
   if (totalRunsEl) {
-    totalRunsEl.textContent = totalRuns.toString();
+    totalRunsEl.textContent = totalRuns.toString()
   }
 
   // Date range
   if (dates.length > 0) {
-    dates.sort();
-    const firstDate = dates[0];
-    const lastDate = dates[dates.length - 1];
-    const dateRangeEl = document.getElementById('date-range');
+    dates.sort()
+    const firstDate = dates[0]
+    const lastDate = dates[dates.length - 1]
+    const dateRangeEl = document.getElementById('date-range')
     if (dateRangeEl) {
       if (firstDate === lastDate) {
-        dateRangeEl.textContent = firstDate;
+        dateRangeEl.textContent = firstDate
       } else {
-        dateRangeEl.textContent = `${firstDate} - ${lastDate}`;
+        dateRangeEl.textContent = `${firstDate} - ${lastDate}`
       }
     }
   }
 
   // Latest commit - render as clickable GitHub link
-  const latestCommitEl = document.getElementById('latest-commit');
+  const latestCommitEl = document.getElementById('latest-commit')
   if (latestCommitEl && latestCommit) {
-    setCommitLink(latestCommitEl, latestCommit);
+    setCommitLink(latestCommitEl, latestCommit)
   }
 
   // Generated at
-  const generatedAtEl = document.getElementById('generated-at');
+  const generatedAtEl = document.getElementById('generated-at')
   if (generatedAtEl && data.generated_at) {
-    const date = new Date(data.generated_at);
-    generatedAtEl.textContent = date.toLocaleDateString();
+    const date = new Date(data.generated_at)
+    generatedAtEl.textContent = date.toLocaleDateString()
   }
 }
 
@@ -335,30 +353,30 @@ function updateSummaryCards(data: TrendData): void {
 
 async function loadTrendData(): Promise<TrendData | null> {
   try {
-    const response = await fetch('./benchmarks/trends_results.json');
+    const response = await fetch('./benchmarks/trends_results.json')
     if (!response.ok) {
-      console.error('Failed to load trend data:', response.statusText);
-      return null;
+      console.error('Failed to load trend data:', response.statusText)
+      return null
     }
-    return await response.json();
+    return await response.json()
   } catch (error) {
-    console.error('Error loading trend data:', error);
-    return null;
+    console.error('Error loading trend data:', error)
+    return null
   }
 }
 
 function showNoDataMessage(chartId: string, message: string): void {
-  const canvas = document.getElementById(chartId) as HTMLCanvasElement;
-  if (!canvas) return;
+  const canvas = document.getElementById(chartId) as HTMLCanvasElement
+  if (!canvas) return
 
-  const parent = canvas.parentElement;
-  if (!parent) return;
+  const parent = canvas.parentElement
+  if (!parent) return
 
   parent.innerHTML = `
     <div class="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
       <p>${message}</p>
     </div>
-  `;
+  `
 }
 
 // ============================================================================
@@ -367,81 +385,84 @@ function showNoDataMessage(chartId: string, message: string): void {
 
 async function init(): Promise<void> {
   // Initialize theme and locale
-  const theme = initTheme();
-  const locale = initLocale();
+  const theme = initTheme()
+  const locale = initLocale()
 
   // Initialize i18n
-  initI18n(locale.current);
-  updateDOM();
+  initI18n(locale.current)
+  updateDOM()
 
   // Initialize navigation
-  new NavigationComponent('trends', theme, locale);
+  new NavigationComponent('trends', theme, locale)
 
   // Initialize footer with build timestamp
-  new FooterComponent(true);
+  new FooterComponent(true)
 
   // Load and render trend data
-  const data = await loadTrendData();
+  const data = await loadTrendData()
 
   if (!data) {
-    showNoDataMessage('tpch-chart', 'No trend data available. Run scripts/export_trend_json.py to generate data.');
-    showNoDataMessage('tpcds-chart', 'No trend data available.');
-    showNoDataMessage('tpcc-chart', 'No trend data available.');
-    showNoDataMessage('sysbench-chart', 'No trend data available.');
-    return;
+    showNoDataMessage(
+      'tpch-chart',
+      'No trend data available. Run scripts/export_trend_json.py to generate data.'
+    )
+    showNoDataMessage('tpcds-chart', 'No trend data available.')
+    showNoDataMessage('tpcc-chart', 'No trend data available.')
+    showNoDataMessage('sysbench-chart', 'No trend data available.')
+    return
   }
 
   // Update summary cards
-  updateSummaryCards(data);
+  updateSummaryCards(data)
 
   // Render charts
   if (data.benchmarks.tpch && data.benchmarks.tpch.data.length > 0) {
-    renderTPCHChart(data.benchmarks.tpch);
+    renderTPCHChart(data.benchmarks.tpch)
   } else {
-    showNoDataMessage('tpch-chart', 'No TPC-H trend data available.');
+    showNoDataMessage('tpch-chart', 'No TPC-H trend data available.')
   }
 
   if (data.benchmarks.tpcds && data.benchmarks.tpcds.data.length > 0) {
-    renderTPCDSChart(data.benchmarks.tpcds);
+    renderTPCDSChart(data.benchmarks.tpcds)
   } else {
-    showNoDataMessage('tpcds-chart', 'No TPC-DS trend data available.');
+    showNoDataMessage('tpcds-chart', 'No TPC-DS trend data available.')
   }
 
   if (data.benchmarks.tpcc && data.benchmarks.tpcc.data.length > 0) {
-    renderTPCCChart(data.benchmarks.tpcc);
+    renderTPCCChart(data.benchmarks.tpcc)
   } else {
-    showNoDataMessage('tpcc-chart', 'No TPC-C trend data available.');
+    showNoDataMessage('tpcc-chart', 'No TPC-C trend data available.')
   }
 
   if (data.benchmarks.sysbench && data.benchmarks.sysbench.data.length > 0) {
-    renderSysbenchChart(data.benchmarks.sysbench);
+    renderSysbenchChart(data.benchmarks.sysbench)
   } else {
-    showNoDataMessage('sysbench-chart', 'No Sysbench trend data available.');
+    showNoDataMessage('sysbench-chart', 'No Sysbench trend data available.')
   }
 
   // Re-render charts on theme change (watch for dark class toggle)
-  const observer = new MutationObserver((mutations) => {
+  const observer = new MutationObserver(mutations => {
     for (const mutation of mutations) {
       if (mutation.attributeName === 'class') {
         // Theme changed, re-render charts with new colors
         if (data.benchmarks.tpch && data.benchmarks.tpch.data.length > 0) {
-          renderTPCHChart(data.benchmarks.tpch);
+          renderTPCHChart(data.benchmarks.tpch)
         }
         if (data.benchmarks.tpcds && data.benchmarks.tpcds.data.length > 0) {
-          renderTPCDSChart(data.benchmarks.tpcds);
+          renderTPCDSChart(data.benchmarks.tpcds)
         }
         if (data.benchmarks.tpcc && data.benchmarks.tpcc.data.length > 0) {
-          renderTPCCChart(data.benchmarks.tpcc);
+          renderTPCCChart(data.benchmarks.tpcc)
         }
         if (data.benchmarks.sysbench && data.benchmarks.sysbench.data.length > 0) {
-          renderSysbenchChart(data.benchmarks.sysbench);
+          renderSysbenchChart(data.benchmarks.sysbench)
         }
-        break;
+        break
       }
     }
-  });
-  observer.observe(document.documentElement, { attributes: true });
+  })
+  observer.observe(document.documentElement, { attributes: true })
 }
 
 // Start on DOM ready
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', init)

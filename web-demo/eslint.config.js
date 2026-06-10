@@ -27,6 +27,9 @@ export default [
     },
   },
   {
-    ignores: ['dist/', 'node_modules/', '*.config.*', 'examples/', 'public/pkg/'],
+    // Root-level *.js / *.mjs files are ad-hoc manual debugging scripts
+    // (Playwright/site checks run directly via `node`); they are not part of
+    // the build or test suite, so they are excluded from linting.
+    ignores: ['dist/', 'node_modules/', '*.config.*', 'examples/', 'public/pkg/', '*.js', '*.mjs'],
   },
 ]

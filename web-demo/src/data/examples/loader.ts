@@ -1,4 +1,9 @@
-import type { ExampleCategory, CategoryMetadata, QueryExample, ExampleMetadata } from '../examples-metadata'
+import type {
+  ExampleCategory,
+  CategoryMetadata,
+  QueryExample,
+  ExampleMetadata,
+} from '../examples-metadata'
 
 // Import all JSON category files (these will be bundled by Vite)
 import advancedMultiFeature from './advanced-multi-feature.json'
@@ -75,7 +80,7 @@ const categoryJSONFiles: CategoryJSON[] = [
   string,
   subqueries,
   university,
-  window
+  window,
 ] as CategoryJSON[]
 
 /**
@@ -86,7 +91,7 @@ export function loadAllCategories(): ExampleCategory[] {
     const queries: QueryExample[] = Object.entries(categoryJSON.examples).map(([id, example]) => ({
       id,
       title: example.title,
-      database: example.database as any,
+      database: example.database as QueryExample['database'],
       sql: example.sql,
       description: example.description,
       sqlFeatures: example.sqlFeatures,
@@ -95,14 +100,14 @@ export function loadAllCategories(): ExampleCategory[] {
       performanceNotes: example.performanceNotes,
       executionTimeMs: example.executionTimeMs,
       relatedExamples: example.relatedExamples,
-      tags: example.tags
+      tags: example.tags,
     }))
 
     return {
       id: categoryJSON._category.id,
       title: categoryJSON._category.title,
       description: categoryJSON._category.description,
-      queries
+      queries,
     }
   })
 }
@@ -112,25 +117,27 @@ export function loadAllCategories(): ExampleCategory[] {
  */
 export function loadAllCategoryMetadata(): CategoryMetadata[] {
   return categoryJSONFiles.map(categoryJSON => {
-    const queries: ExampleMetadata[] = Object.entries(categoryJSON.examples).map(([id, example]) => ({
-      id,
-      title: example.title,
-      database: example.database as any,
-      description: example.description,
-      sqlFeatures: example.sqlFeatures,
-      difficulty: example.difficulty,
-      useCase: example.useCase,
-      performanceNotes: example.performanceNotes,
-      executionTimeMs: example.executionTimeMs,
-      relatedExamples: example.relatedExamples,
-      tags: example.tags
-    }))
+    const queries: ExampleMetadata[] = Object.entries(categoryJSON.examples).map(
+      ([id, example]) => ({
+        id,
+        title: example.title,
+        database: example.database as ExampleMetadata['database'],
+        description: example.description,
+        sqlFeatures: example.sqlFeatures,
+        difficulty: example.difficulty,
+        useCase: example.useCase,
+        performanceNotes: example.performanceNotes,
+        executionTimeMs: example.executionTimeMs,
+        relatedExamples: example.relatedExamples,
+        tags: example.tags,
+      })
+    )
 
     return {
       id: categoryJSON._category.id,
       title: categoryJSON._category.title,
       description: categoryJSON._category.description,
-      queries
+      queries,
     }
   })
 }
