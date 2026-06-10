@@ -15,12 +15,15 @@ use vibesql_executor::ExplainExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 
-/// Create the window1.test section-23 schema:
-/// CREATE TABLE t5(a, b, c); CREATE INDEX t5ab ON t5(a, b);
+/// Create the window1.test section-23 schema (extended with a `d` column
+/// for the multi-window index-position tests; sqlite3 verification used
+/// t5(a,b,c,d) and the EQP output for the original cases is unchanged):
+/// CREATE TABLE t5(a, b, c, d); CREATE INDEX t5ab ON t5(a, b);
 fn setup_db() -> Database {
     let mut db = Database::new();
 
-    let create = Parser::parse_sql("CREATE TABLE t5 (a INTEGER, b INTEGER, c INTEGER)").unwrap();
+    let create =
+        Parser::parse_sql("CREATE TABLE t5 (a INTEGER, b INTEGER, c INTEGER, d INTEGER)").unwrap();
     if let Statement::CreateTable(stmt) = create {
         vibesql_executor::CreateTableExecutor::execute(&stmt, &mut db).unwrap();
     } else {
@@ -342,4 +345,125 @@ fn test_suppression_follows_window_order_in_select_list() {
          FROM t5 ORDER BY b",
     );
     assert_eq!(count, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Multi-window index suppression (issue #5248)
+//
+// SQLite's nested co-routine rewrite emits window sorting passes in reverse
+// SELECT-list order: the LAST distinct window key (by first occurrence) is
+// the INNERMOST pass — the only one that scans the base table and can use an
+// index. All outer passes read co-routine output and always need a temp
+// B-tree, even when their key matches an index. Expected counts below
+// verified against sqlite3 3.51.0 with schema t5(a,b,c,d), index t5ab(a,b).
+// ---------------------------------------------------------------------------
+
+// Two windows, index-matching key (a, b) FIRST: its pass is outermost and
+// reads a co-routine, so the index is NOT usable — both keys count.
+#[test]
+fn test_index_key_first_of_two_windows_not_suppressed() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(c) OVER (ORDER BY a, b),
+            sum(a) OVER (ORDER BY c)
+         FROM t5",
+    );
+    assert_eq!(count, 2);
+}
+
+// Two windows, index-matching key (a, b) LAST: its pass is innermost, scans
+// t5 via index t5ab, and is suppressed — only key (c) counts.
+#[test]
+fn test_index_key_last_of_two_windows_suppressed() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(a) OVER (ORDER BY c),
+            sum(c) OVER (ORDER BY a, b)
+         FROM t5",
+    );
+    assert_eq!(count, 1);
+}
+
+// Three windows, index-matching key (a, b) FIRST: outermost pass — all
+// three keys count.
+#[test]
+fn test_index_key_first_of_three_windows_not_suppressed() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(d) OVER (ORDER BY a, b),
+            sum(d) OVER (ORDER BY c),
+            sum(d) OVER (ORDER BY d)
+         FROM t5",
+    );
+    assert_eq!(count, 3);
+}
+
+// Three windows, index-matching key (a, b) in the MIDDLE: still an outer
+// pass — all three keys count.
+#[test]
+fn test_index_key_middle_of_three_windows_not_suppressed() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(d) OVER (ORDER BY c),
+            sum(d) OVER (ORDER BY a, b),
+            sum(d) OVER (ORDER BY d)
+         FROM t5",
+    );
+    assert_eq!(count, 3);
+}
+
+// Three windows, index-matching key (a, b) LAST: innermost pass uses the
+// index — only the two outer keys count.
+#[test]
+fn test_index_key_last_of_three_windows_suppressed() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(d) OVER (ORDER BY c),
+            sum(d) OVER (ORDER BY d),
+            sum(d) OVER (ORDER BY a, b)
+         FROM t5",
+    );
+    assert_eq!(count, 2);
+}
+
+// Dedup keeps FIRST-occurrence position: (a,b), (c), (a,b) dedups to
+// [(a,b), (c)] — innermost key is (c), index NOT used, both keys count.
+#[test]
+fn test_repeated_index_key_keeps_first_position_not_suppressed() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(c) OVER (ORDER BY a, b),
+            sum(a) OVER (ORDER BY c),
+            sum(b) OVER (ORDER BY a, b)
+         FROM t5",
+    );
+    assert_eq!(count, 2);
+}
+
+// Dedup control: (c), (a,b), (c) dedups to [(c), (a,b)] — innermost key is
+// (a,b), index used — only key (c) counts.
+#[test]
+fn test_repeated_outer_key_leaves_index_key_innermost_suppressed() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(a) OVER (ORDER BY c),
+            sum(c) OVER (ORDER BY a, b),
+            sum(b) OVER (ORDER BY c)
+         FROM t5",
+    );
+    assert_eq!(count, 1);
 }
