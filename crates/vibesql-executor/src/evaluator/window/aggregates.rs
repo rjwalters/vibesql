@@ -11,6 +11,27 @@ use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::{partitioning::Partition, sorting::compare_values};
+use crate::evaluator::casting::string_to_number;
+
+/// SQLite numeric coercion for text arguments of sum/total/avg.
+///
+/// SQLite forces text aggregate inputs to a number instead of skipping them:
+/// - text that is entirely a valid integer → INTEGER (`sum('5') OVER()` → 5)
+/// - anything else → REAL from the parsed numeric prefix
+///   (`sum('seventeen') OVER()` → 0.0, `sum('5xyz') OVER()` → 5.0)
+///
+/// Returns `(value, is_real)` where `is_real` indicates the REAL storage
+/// class was used (so sum() yields a real result).
+fn coerce_text_to_number(s: &str) -> (f64, bool) {
+    let trimmed = s.trim();
+    if !trimmed.is_empty() {
+        if let Ok(n) = trimmed.parse::<i64>() {
+            return (n as f64, false);
+        }
+    }
+    let (_, float_val, _) = string_to_number(s);
+    (float_val, true)
+}
 
 /// Helper function to check if a row passes the FILTER condition
 /// Returns true if there's no filter, or if the filter evaluates to TRUE
@@ -178,6 +199,26 @@ where
                     has_value = true;
                     saw_real = true;
                 }
+                // SQLite coerces text/blob inputs to a number instead of
+                // skipping them: sum('5') OVER() → 5, sum('seventeen')
+                // OVER() → 0.0 (window1.test 61.1 chain).
+                SqlValue::Varchar(ref s) | SqlValue::Character(ref s) => {
+                    let (v, is_real) = coerce_text_to_number(s);
+                    sum += v;
+                    has_value = true;
+                    if is_real {
+                        saw_real = true;
+                    }
+                }
+                // SQLite: blob operands always coerce to REAL
+                // (sum(x'35') OVER() → 5.0, typeof real).
+                SqlValue::Blob(ref bytes) => {
+                    let text = std::str::from_utf8(bytes).unwrap_or("");
+                    let (v, _) = coerce_text_to_number(text);
+                    sum += v;
+                    has_value = true;
+                    saw_real = true;
+                }
                 SqlValue::Null => {} // Ignore NULL
                 _ => {}              // Ignore non-numeric values
             }
@@ -250,6 +291,15 @@ where
                 }
                 SqlValue::Double(n) => {
                     sum += n;
+                }
+                // SQLite coerces text/blob inputs to a number instead of
+                // skipping them (total('seventeen') OVER() → 0.0).
+                SqlValue::Varchar(ref s) | SqlValue::Character(ref s) => {
+                    sum += coerce_text_to_number(s).0;
+                }
+                SqlValue::Blob(ref bytes) => {
+                    let text = std::str::from_utf8(bytes).unwrap_or("");
+                    sum += coerce_text_to_number(text).0;
                 }
                 SqlValue::Null => {} // Ignore NULL
                 _ => {}              // Ignore non-numeric values
@@ -324,6 +374,17 @@ where
                 }
                 SqlValue::Double(n) => {
                     sum += n;
+                    count += 1;
+                }
+                // SQLite coerces text/blob inputs to a number instead of
+                // skipping them (avg('seventeen') OVER() → 0.0).
+                SqlValue::Varchar(ref s) | SqlValue::Character(ref s) => {
+                    sum += coerce_text_to_number(s).0;
+                    count += 1;
+                }
+                SqlValue::Blob(ref bytes) => {
+                    let text = std::str::from_utf8(bytes).unwrap_or("");
+                    sum += coerce_text_to_number(text).0;
                     count += 1;
                 }
                 SqlValue::Null => {} // Ignore NULL

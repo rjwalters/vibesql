@@ -135,3 +135,4 @@ mod update_returning;
 mod vector_distance_operators;
 mod view_tests;
 mod window1_quick_wins;
+mod window1_residuals;

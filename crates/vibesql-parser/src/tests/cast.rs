@@ -281,8 +281,10 @@ fn test_parse_cast_signed_cross_join_subquery() {
 
 #[test]
 fn test_parse_cast_empty_typename() {
-    // SQLite tolerates a missing type name: CAST(x AS ) parses with no
-    // affinity (treated like CAST(x AS ANY)). From window1.test 61.1.
+    // SQLite tolerates a missing type name: CAST(x AS ) gets NUMERIC
+    // affinity, same as an unrecognized type name (sqlite3AffinityType("")
+    // falls through to NUMERIC). From window1.test 61.1; verified against
+    // SQLite 3.51: CAST('seventeen' AS ) → 0 (typeof integer).
     let result = Parser::parse_sql("SELECT CAST(a AS ) FROM t1;");
     assert!(result.is_ok(), "CAST with empty type name should parse: {:?}", result);
 
@@ -293,8 +295,8 @@ fn test_parse_cast_empty_typename() {
                 vibesql_ast::Expression::Cast { data_type, .. } => {
                     assert_eq!(
                         data_type,
-                        &vibesql_types::DataType::BinaryLargeObject,
-                        "empty type name should map to no-affinity (BLOB) cast"
+                        &vibesql_types::DataType::Numeric { precision: 38, scale: 0 },
+                        "empty type name should map to NUMERIC affinity"
                     );
                 }
                 _ => panic!("Expected CAST expression, got {:?}", expr),
