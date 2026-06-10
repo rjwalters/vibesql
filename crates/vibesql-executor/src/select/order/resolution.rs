@@ -1396,7 +1396,18 @@ fn collect_window_over_aggregates_from_expr(
     use vibesql_ast::Expression;
 
     match expr {
-        Expression::WindowFunction { over, .. } => {
+        Expression::WindowFunction { function, over } => {
+            // Window function arguments (e.g., `lead(sum(c)) OVER (...)`):
+            // aggregates appearing as args need hidden per-group columns so the
+            // post-aggregation window pass can resolve them (#5267).
+            let args = match function {
+                vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
+            };
+            for arg in args {
+                collect_aggregates_from_expr(arg, aggregates);
+            }
             // PARTITION BY expressions
             if let Some(partition_by) = &over.partition_by {
                 for p_expr in partition_by {
