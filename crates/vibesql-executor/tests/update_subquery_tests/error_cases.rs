@@ -77,6 +77,7 @@ fn test_update_with_subquery_multiple_rows_uses_first() {
         }],
         where_clause: None,
         conflict_clause: None,
+        returning: None,
     };
 
     let result = UpdateExecutor::execute(&stmt, &mut db);
@@ -173,6 +174,7 @@ fn test_update_with_subquery_multiple_columns_error() {
         }],
         where_clause: None,
         conflict_clause: None,
+        returning: None,
     };
 
     let result = UpdateExecutor::execute(&stmt, &mut db);

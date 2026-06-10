@@ -69,6 +69,7 @@ fn test_update_invalidates_columnar_cache() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: None,
+        returning: None,
     };
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
     assert_eq!(count, 1, "Should update 1 row");
@@ -140,6 +141,7 @@ fn test_update_invalidates_prewarmed_cache() {
             right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Bob")))),
         })),
         conflict_clause: None,
+        returning: None,
     };
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
     assert_eq!(count, 1, "Should update 1 row");
@@ -179,6 +181,7 @@ fn test_update_all_rows_invalidates_cache() {
         }],
         where_clause: None,
         conflict_clause: None,
+        returning: None,
     };
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
     assert_eq!(count, 3, "Should update 3 rows");
@@ -222,6 +225,7 @@ fn test_update_no_match_does_not_invalidate_cache() {
             right: Box::new(Expression::Literal(SqlValue::Integer(999))), // No such id
         })),
         conflict_clause: None,
+        returning: None,
     };
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
     assert_eq!(count, 0, "Should update 0 rows");
@@ -266,6 +270,7 @@ fn test_multiple_updates_invalidate_cache() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: None,
+        returning: None,
     };
     UpdateExecutor::execute(&stmt1, &mut db).unwrap();
 
@@ -296,6 +301,7 @@ fn test_multiple_updates_invalidate_cache() {
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         })),
         conflict_clause: None,
+        returning: None,
     };
     UpdateExecutor::execute(&stmt2, &mut db).unwrap();
 
@@ -348,6 +354,7 @@ fn test_update_multiple_columns_invalidates_cache() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: None,
+        returning: None,
     };
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
     assert_eq!(count, 1, "Should update 1 row");

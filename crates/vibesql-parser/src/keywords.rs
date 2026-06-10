@@ -129,6 +129,8 @@ pub enum Keyword {
     Rename,
     Modify,
     Change,
+    /// RETURNING clause on DML statements (SQLite 3.35.0+)
+    Returning,
     // SAVEPOINT keywords
     Savepoint,
     Release,
@@ -405,7 +407,11 @@ impl Keyword {
             Keyword::Current | Keyword::Exclude | Keyword::Filter | Keyword::Following |
             Keyword::Groups | Keyword::No | Keyword::Others | Keyword::Over |
             Keyword::Partition | Keyword::Preceding | Keyword::Range | Keyword::Ties |
-            Keyword::Unbounded | Keyword::Window | Keyword::First | Keyword::Last
+            Keyword::Unbounded | Keyword::Window | Keyword::First | Keyword::Last |
+            // RETURNING is a "fallback" keyword in SQLite (3.35.0+): it is only
+            // meaningful at the end of a DML statement and remains usable as an
+            // ordinary identifier elsewhere.
+            Keyword::Returning
         )
     }
 }
@@ -526,6 +532,7 @@ impl fmt::Display for Keyword {
             Keyword::Constraint => "CONSTRAINT",
             Keyword::Default => "DEFAULT",
             Keyword::Rename => "RENAME",
+            Keyword::Returning => "RETURNING",
             Keyword::Modify => "MODIFY",
             Keyword::Change => "CHANGE",
             Keyword::Savepoint => "SAVEPOINT",

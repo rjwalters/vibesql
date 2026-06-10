@@ -79,6 +79,7 @@ fn test_update_where_scalar_subquery_equal() {
             right: Box::new(Expression::ScalarSubquery(subquery)),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -170,6 +171,7 @@ fn test_update_where_scalar_subquery_less_than() {
             right: Box::new(Expression::ScalarSubquery(subquery)),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -253,6 +255,7 @@ fn test_update_where_subquery_returns_null() {
             right: Box::new(Expression::ScalarSubquery(subquery)),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -348,6 +351,7 @@ fn test_update_where_subquery_with_aggregate() {
             right: Box::new(Expression::ScalarSubquery(subquery)),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -480,6 +484,7 @@ fn test_update_where_and_set_both_use_subqueries() {
             negated: false,
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();

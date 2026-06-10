@@ -94,6 +94,7 @@ fn test_update_where_in_subquery() {
             negated: false,
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -189,6 +190,7 @@ fn test_update_where_not_in_subquery() {
             negated: true,
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -277,6 +279,7 @@ fn test_update_where_subquery_empty_result() {
             negated: false,
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -382,6 +385,7 @@ fn test_update_where_complex_subquery_condition() {
             negated: false,
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -481,6 +485,7 @@ fn test_update_where_multiple_rows_in_subquery() {
             negated: false,
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();

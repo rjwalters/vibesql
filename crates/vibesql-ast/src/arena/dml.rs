@@ -7,7 +7,7 @@ use bumpalo::collections::Vec as BumpVec;
 use super::{
     expression::{Expression, OrderByItem},
     interner::Symbol,
-    select::{CommonTableExpr, FromClause, SelectStmt},
+    select::{CommonTableExpr, FromClause, SelectItem, SelectStmt},
 };
 
 // ============================================================================
@@ -154,6 +154,10 @@ pub struct UpdateStmt<'arena> {
     /// Optional conflict resolution clause (SQLite extension)
     /// Syntax: UPDATE OR REPLACE|IGNORE|ABORT|ROLLBACK|FAIL table SET ...
     pub conflict_clause: Option<ConflictClause>,
+    /// Optional RETURNING clause (SQLite 3.35.0+)
+    /// Syntax: UPDATE table SET ... [WHERE ...] RETURNING expr [, expr ...]
+    /// Returns the NEW row values (after assignments) for each updated row.
+    pub returning: Option<BumpVec<'arena, SelectItem<'arena>>>,
 }
 
 /// Column assignment (column = value)

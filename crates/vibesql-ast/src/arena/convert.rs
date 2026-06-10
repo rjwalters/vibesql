@@ -691,6 +691,10 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 .map(|froms| froms.iter().map(|f| self.convert_from_clause(f)).collect()),
             where_clause: stmt.where_clause.as_ref().map(|wc| self.convert_where_clause(wc)),
             conflict_clause: stmt.conflict_clause.map(ConflictClause::from),
+            returning: stmt
+                .returning
+                .as_ref()
+                .map(|items| items.iter().map(|item| self.convert_select_item(item)).collect()),
         }
     }
 

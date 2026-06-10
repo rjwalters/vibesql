@@ -240,6 +240,7 @@ fn test_update_or_ignore_primary_key_conflict() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: Some(ConflictClause::Ignore),
+        returning: None,
     };
 
     let rows_updated = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -287,6 +288,7 @@ fn test_update_or_ignore_unique_constraint_conflict() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: Some(ConflictClause::Ignore),
+        returning: None,
     };
 
     let rows_updated = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -324,6 +326,7 @@ fn test_update_or_ignore_no_conflict() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: Some(ConflictClause::Ignore),
+        returning: None,
     };
 
     let rows_updated = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -369,6 +372,7 @@ fn test_update_or_replace_primary_key_conflict() {
             )))),
         })),
         conflict_clause: Some(ConflictClause::Replace),
+        returning: None,
     };
 
     let rows_updated = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -411,6 +415,7 @@ fn test_update_or_replace_unique_constraint_conflict() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: Some(ConflictClause::Replace),
+        returning: None,
     };
 
     let rows_updated = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -456,6 +461,7 @@ fn test_update_or_replace_no_conflict() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: Some(ConflictClause::Replace),
+        returning: None,
     };
 
     let rows_updated = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -526,6 +532,7 @@ fn test_update_or_ignore_not_null_violation() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: Some(ConflictClause::Ignore),
+        returning: None,
     };
 
     let rows_updated = UpdateExecutor::execute(&stmt, &mut db).unwrap();

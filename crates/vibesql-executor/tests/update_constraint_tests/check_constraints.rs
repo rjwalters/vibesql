@@ -29,6 +29,7 @@ fn test_update_check_constraint_passes() {
         }],
         where_clause: None,
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -56,6 +57,7 @@ fn test_update_check_constraint_violation() {
         }],
         where_clause: None,
         conflict_clause: None,
+        returning: None,
     };
 
     let result = UpdateExecutor::execute(&stmt, &mut db);
@@ -91,6 +93,7 @@ fn test_update_check_constraint_with_null() {
         }],
         where_clause: None,
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -122,6 +125,7 @@ fn test_update_check_constraint_with_expression() {
         }],
         where_clause: None,
         conflict_clause: None,
+        returning: None,
     };
     let count = UpdateExecutor::execute(&stmt1, &mut db).unwrap();
     assert_eq!(count, 1);
@@ -139,6 +143,7 @@ fn test_update_check_constraint_with_expression() {
         }],
         where_clause: None,
         conflict_clause: None,
+        returning: None,
     };
 
     let result = UpdateExecutor::execute(&stmt2, &mut db);

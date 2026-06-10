@@ -31,13 +31,17 @@ pub fn execute_update_with_trigger_context(
 /// When updating a view, we need to fire INSTEAD OF UPDATE triggers
 /// instead of actually updating data. The triggers typically update
 /// the underlying tables.
+///
+/// When the statement has a RETURNING clause, the projected NEW view rows
+/// (old row with SET assignments applied) are returned — one per trigger
+/// fire, regardless of what the trigger body does (SQLite semantics).
 pub(super) fn execute_update_on_view(
     database: &mut Database,
     stmt: &UpdateStmt,
     view_def: &ViewDefinition,
     procedural_context: Option<&crate::procedural::ExecutionContext>,
     trigger_context: Option<&crate::trigger_execution::TriggerContext>,
-) -> Result<usize, ExecutorError> {
+) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
     // Find INSTEAD OF UPDATE triggers for this view
     let triggers = crate::TriggerFirer::find_triggers(
         database,
@@ -89,18 +93,28 @@ pub(super) fn execute_update_on_view(
 
     // Now fire triggers (database can be mutably borrowed)
     let rows_processed = updates.len();
-    for (old_row, new_row) in updates {
+    for (old_row, new_row) in &updates {
         for trigger in &triggers {
-            crate::TriggerFirer::execute_trigger(
-                database,
-                trigger,
-                Some(&old_row),
-                Some(&new_row),
-            )?;
+            crate::TriggerFirer::execute_trigger(database, trigger, Some(old_row), Some(new_row))?;
         }
     }
 
-    Ok(rows_processed)
+    // Project RETURNING items against the NEW view rows (SQLite returns the
+    // updated view row per trigger fire, not whatever the trigger body did).
+    let returning = if let Some(items) = &stmt.returning {
+        let new_rows: Vec<&Row> = updates.iter().map(|(_, new_row)| new_row).collect();
+        Some(super::returning::project_returning(
+            items,
+            &view_schema,
+            database,
+            stmt.alias.as_deref(),
+            &new_rows,
+        )?)
+    } else {
+        None
+    };
+
+    Ok((rows_processed, returning))
 }
 
 /// Build (old_row, new_row) update pairs for an UPDATE on a view WITHOUT a FROM
@@ -130,12 +144,20 @@ fn collect_view_updates_no_from(
     // Select rows matching WHERE clause and build updates
     let mut collected_updates = Vec::new();
     for row in &all_rows.rows {
+        // Clear the CSE cache before evaluating this row: cached expression
+        // results (e.g. the WHERE comparison itself) from a previous row
+        // would otherwise be replayed for every subsequent row, making the
+        // first row's WHERE verdict apply to the whole view (issue #5233 —
+        // `UPDATE v SET ... WHERE b=4` fired the trigger 0 times).
+        evaluator.clear_cse_cache();
+
         let matches = match &stmt.where_clause {
-            Some(WhereClause::Condition(expr)) => match evaluator.eval(expr, row)? {
-                SqlValue::Boolean(b) => b,
-                SqlValue::Null => false,
-                _ => false,
-            },
+            // Use SQLite truthiness rather than a Boolean-only match so
+            // SQLite-style Integer(1)/Integer(0) comparison results count
+            // as matches too (issue #5233).
+            Some(WhereClause::Condition(expr)) => {
+                crate::evaluator::operators::is_truthy(&evaluator.eval(expr, row)?)
+            }
             None => true, // No WHERE clause - update all rows
             Some(WhereClause::CurrentOf(_)) => {
                 return Err(ExecutorError::UnsupportedExpression(
@@ -301,12 +323,11 @@ fn collect_view_updates_with_from(
     // Reconstruct (old_row, new_row) pairs from the joined output.
     //
     // The synthetic SELECT's WHERE has already filtered the rows, so every
-    // result row corresponds to one matched view row. If a single view row
-    // matches multiple FROM-side rows, SQLite picks one arbitrary join row
-    // for the trigger fire (the first match in physical order). We mirror
-    // that by deduplicating on the projected view columns — the first
-    // occurrence wins.
-    let mut seen_old: Vec<Row> = Vec::new();
+    // result row corresponds to one join match. SQLite fires the INSTEAD OF
+    // trigger once per join match — if a single view row matches multiple
+    // FROM-side rows, the trigger fires once per match (verified against
+    // sqlite3 3.51.0 for window1.test 73.4, which expects 9 fires for
+    // 3 view rows x 3 subquery rows). No deduplication is performed.
     let mut collected_updates: Vec<(Row, Row)> = Vec::new();
 
     for row in rows {
@@ -323,12 +344,6 @@ fn collect_view_updates_with_from(
         // First view_col_count values are the old row's column values.
         let old_values: Vec<SqlValue> = row.values[..view_col_count].to_vec();
         let old_row = Row::new(old_values);
-
-        // SQLite semantics: at most one trigger fire per matched view row.
-        // Dedup on the old row's contents (we don't have a rowid for views).
-        if seen_old.iter().any(|existing| existing.values == old_row.values) {
-            continue;
-        }
 
         // Build NEW row: copy old, then overwrite assigned columns with
         // the corresponding __set_<i>__ values.
@@ -348,7 +363,6 @@ fn collect_view_updates_with_from(
         }
         let new_row = Row::new(new_row_values);
 
-        seen_old.push(old_row.clone());
         collected_updates.push((old_row, new_row));
     }
 
@@ -401,10 +415,16 @@ pub(super) fn build_view_schema(
     let column_names: Vec<String> =
         if let Some(ref cols) = view_def.columns { cols.clone() } else { result.columns.clone() };
 
-    // Build columns with a generic data type (we just need names for trigger binding)
+    // Build columns with NONE affinity (DataType::Null). The pseudo-schema
+    // mainly provides column names for trigger binding, but its data types
+    // feed SQLite affinity rules during WHERE evaluation: declaring the
+    // columns as Varchar gave them TEXT affinity, which converted numeric
+    // literals to text and made comparisons like `WHERE b=4` never match
+    // (issue #5233). NONE affinity compares values by their actual types,
+    // matching bare (undeclared) columns in SQLite.
     let columns: Vec<ColumnSchema> = column_names
         .into_iter()
-        .map(|name| ColumnSchema::new(name, DataType::Varchar { max_length: None }, true))
+        .map(|name| ColumnSchema::new(name, DataType::Null, true))
         .collect();
 
     Ok(TableSchema::new(view_def.name.clone(), columns))

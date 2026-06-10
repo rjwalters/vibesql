@@ -192,5 +192,6 @@ pub fn create_update_with_id_clause(
             right: Box::new(Expression::Literal(SqlValue::Integer(id))),
         })),
         conflict_clause: None,
+        returning: None,
     }
 }

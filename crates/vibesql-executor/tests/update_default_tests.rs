@@ -43,6 +43,7 @@ fn test_update_with_default_value() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -95,6 +96,7 @@ fn test_update_default_no_default_value_defined() {
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
         conflict_clause: None,
+        returning: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
