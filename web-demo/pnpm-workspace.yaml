@@ -1,0 +1,8 @@
+# web-demo is a standalone pnpm project, deliberately NOT part of the
+# repo-root workspace (../pnpm-workspace.yaml only matches packages/*).
+# Without this file, pnpm resolves the workspace root upward to the repo
+# root, which breaks lockfile updates here (manifest-only Dependabot PRs,
+# see issue #5251). pnpm stops at the nearest pnpm-workspace.yaml, so this
+# file pins web-demo as its own single-project workspace root.
+packages:
+  - .
