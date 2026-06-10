@@ -1370,24 +1370,43 @@ pub(crate) fn extract_order_by_aggregates(
 pub(crate) fn extract_window_aggregates(
     select_list: &[vibesql_ast::SelectItem],
 ) -> Vec<vibesql_ast::Expression> {
-    use vibesql_ast::{Expression, SelectItem};
+    use vibesql_ast::SelectItem;
 
     let mut aggregates = Vec::new();
 
     for item in select_list {
-        if let SelectItem::Expression { expr: Expression::WindowFunction { over, .. }, .. } =
-            item
-        {
+        if let SelectItem::Expression { expr, .. } = item {
+            // Window functions can be top-level SELECT items or embedded inside
+            // larger expressions (e.g. `count(a) OVER (ORDER BY sum(a)) + total(a)
+            // OVER()`, #5232) — walk the expression to find all of them.
+            collect_window_over_aggregates_from_expr(expr, &mut aggregates);
+        }
+    }
+
+    aggregates
+}
+
+/// Walk an expression tree (without descending into subqueries) and, for every
+/// window function found, collect the aggregate expressions appearing in its
+/// OVER clause (PARTITION BY, ORDER BY, frame offsets).
+fn collect_window_over_aggregates_from_expr(
+    expr: &vibesql_ast::Expression,
+    aggregates: &mut Vec<vibesql_ast::Expression>,
+) {
+    use vibesql_ast::Expression;
+
+    match expr {
+        Expression::WindowFunction { over, .. } => {
             // PARTITION BY expressions
             if let Some(partition_by) = &over.partition_by {
                 for p_expr in partition_by {
-                    collect_aggregates_from_expr(p_expr, &mut aggregates);
+                    collect_aggregates_from_expr(p_expr, aggregates);
                 }
             }
             // ORDER BY expressions
             if let Some(order_by) = &over.order_by {
                 for ob_item in order_by {
-                    collect_aggregates_from_expr(&ob_item.expr, &mut aggregates);
+                    collect_aggregates_from_expr(&ob_item.expr, aggregates);
                 }
             }
             // Frame offset expressions (e.g., `ROWS BETWEEN sum(x) PRECEDING ...`)
@@ -1395,20 +1414,81 @@ pub(crate) fn extract_window_aggregates(
                 if let vibesql_ast::FrameBound::Preceding(e)
                 | vibesql_ast::FrameBound::Following(e) = &frame.start
                 {
-                    collect_aggregates_from_expr(e, &mut aggregates);
+                    collect_aggregates_from_expr(e, aggregates);
                 }
                 if let Some(end) = &frame.end {
                     if let vibesql_ast::FrameBound::Preceding(e)
                     | vibesql_ast::FrameBound::Following(e) = end
                     {
-                        collect_aggregates_from_expr(e, &mut aggregates);
+                        collect_aggregates_from_expr(e, aggregates);
                     }
                 }
             }
         }
+        // Recurse into compound expressions to find embedded window functions.
+        Expression::BinaryOp { left, right, .. } => {
+            collect_window_over_aggregates_from_expr(left, aggregates);
+            collect_window_over_aggregates_from_expr(right, aggregates);
+        }
+        Expression::UnaryOp { expr: inner, .. }
+        | Expression::Cast { expr: inner, .. }
+        | Expression::IsNull { expr: inner, .. }
+        | Expression::IsTruthValue { expr: inner, .. }
+        | Expression::Collate { expr: inner, .. } => {
+            collect_window_over_aggregates_from_expr(inner, aggregates);
+        }
+        Expression::IsDistinctFrom { left, right, .. } => {
+            collect_window_over_aggregates_from_expr(left, aggregates);
+            collect_window_over_aggregates_from_expr(right, aggregates);
+        }
+        Expression::Function { args, .. } => {
+            for arg in args {
+                collect_window_over_aggregates_from_expr(arg, aggregates);
+            }
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                collect_window_over_aggregates_from_expr(op, aggregates);
+            }
+            for when_clause in when_clauses {
+                for cond in &when_clause.conditions {
+                    collect_window_over_aggregates_from_expr(cond, aggregates);
+                }
+                collect_window_over_aggregates_from_expr(&when_clause.result, aggregates);
+            }
+            if let Some(else_expr) = else_result {
+                collect_window_over_aggregates_from_expr(else_expr, aggregates);
+            }
+        }
+        Expression::Between { expr, low, high, .. } => {
+            collect_window_over_aggregates_from_expr(expr, aggregates);
+            collect_window_over_aggregates_from_expr(low, aggregates);
+            collect_window_over_aggregates_from_expr(high, aggregates);
+        }
+        Expression::InList { expr, values, .. } => {
+            collect_window_over_aggregates_from_expr(expr, aggregates);
+            for item in values {
+                collect_window_over_aggregates_from_expr(item, aggregates);
+            }
+        }
+        Expression::Like { expr, pattern, .. } | Expression::Glob { expr, pattern, .. } => {
+            collect_window_over_aggregates_from_expr(expr, aggregates);
+            collect_window_over_aggregates_from_expr(pattern, aggregates);
+        }
+        Expression::Conjunction(exprs)
+        | Expression::Disjunction(exprs)
+        | Expression::RowValueConstructor(exprs) => {
+            for e in exprs {
+                collect_window_over_aggregates_from_expr(e, aggregates);
+            }
+        }
+        // IN / quantified comparison: only the LHS shares this scope.
+        Expression::In { expr, .. } | Expression::QuantifiedComparison { expr, .. } => {
+            collect_window_over_aggregates_from_expr(expr, aggregates);
+        }
+        // Subqueries have their own scope; other leaves can't contain windows.
+        _ => {}
     }
-
-    aggregates
 }
 
 /// Recursively collect aggregate function expressions from an expression tree.

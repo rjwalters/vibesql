@@ -382,6 +382,28 @@ impl SelectExecutor<'_> {
         let expanded_select_list =
             self.expand_wildcards_for_aggregation(&stmt.select_list, &schema)?;
 
+        // Get GROUP BY base expressions (appended as hidden columns after the
+        // SELECT items; also used later for ORDER BY resolution).
+        let group_by_exprs: Vec<vibesql_ast::Expression> = if let Some(group_by) = &stmt.group_by {
+            get_base_expressions(group_by)
+        } else {
+            Vec::new()
+        };
+
+        // Plan decomposition of SELECT items that embed window functions inside
+        // larger expressions (e.g. `lead(2) OVER() + sum(c)`). Each embedded
+        // window and each maximal window-free subexpression becomes a hidden
+        // component column; the post-aggregation window pass computes the
+        // window values and re-evaluates the residual expression. See #5232.
+        let embedded_window_hidden_base = expanded_select_list.len()
+            + group_by_exprs.len()
+            + order_by_aggregates.len()
+            + window_aggregates.len();
+        let embedded_window_plan = window::plan_embedded_window_rewrites(
+            &expanded_select_list,
+            embedded_window_hidden_base,
+        );
+
         // Detect and set up pivot aggregate optimization (#3136)
         // This detects patterns like: SUM(CASE WHEN col='A' THEN val END), SUM(CASE WHEN col='B'
         // THEN val END)... and batches them into a single pass over the data
@@ -572,6 +594,21 @@ impl SelectExecutor<'_> {
                             row_values.push(agg_value);
                         }
 
+                        // Compute embedded-window components and append them to
+                        // row values. Window components evaluate to their
+                        // placeholder (overwritten by the window pass); window-free
+                        // components evaluate to their per-group value. See #5232.
+                        for component in &embedded_window_plan.components {
+                            let value = self.evaluate_with_aggregates_and_grouping(
+                                &component.expr,
+                                &group_rows,
+                                &group_key,
+                                &evaluator,
+                                &grouping_context,
+                            )?;
+                            row_values.push(value);
+                        }
+
                         let row = vibesql_storage::Row::new(row_values);
 
                         // Track memory for aggregation result row
@@ -670,10 +707,23 @@ impl SelectExecutor<'_> {
                 };
 
                 if include_group {
-                    // No GROUP BY columns and no ORDER BY aggregates in this path,
-                    // but we still need to append window-function aggregates so the
-                    // window evaluator can reference them. See issue #5106.
+                    // No GROUP BY columns in this path, but we still need to append
+                    // ORDER BY aggregates and window-function aggregates so the row
+                    // layout matches the schema the window pass builds (SELECT items,
+                    // GROUP BY columns, ORDER BY aggregates, window aggregates,
+                    // embedded window components). See issues #5106 and #5232.
                     let mut row_values = aggregate_results;
+
+                    for order_agg_expr in &order_by_aggregates {
+                        let agg_value = self.evaluate_with_aggregates_and_grouping(
+                            order_agg_expr,
+                            &group_rows,
+                            &group_key,
+                            &evaluator,
+                            &grouping_context,
+                        )?;
+                        row_values.push(agg_value);
+                    }
 
                     for win_agg_expr in &window_aggregates {
                         let agg_value = self.evaluate_with_aggregates_and_grouping(
@@ -684,6 +734,19 @@ impl SelectExecutor<'_> {
                             &grouping_context,
                         )?;
                         row_values.push(agg_value);
+                    }
+
+                    // Embedded-window components: placeholders for window nodes,
+                    // per-group values for window-free subexpressions. See #5232.
+                    for component in &embedded_window_plan.components {
+                        let value = self.evaluate_with_aggregates_and_grouping(
+                            &component.expr,
+                            &group_rows,
+                            &group_key,
+                            &evaluator,
+                            &grouping_context,
+                        )?;
+                        row_values.push(value);
                     }
 
                     let row = vibesql_storage::Row::new(row_values);
@@ -698,19 +761,16 @@ impl SelectExecutor<'_> {
             }
         }
 
-        // Get GROUP BY expressions for ORDER BY resolution
-        let group_by_exprs: Vec<vibesql_ast::Expression> = if let Some(group_by) = &stmt.group_by {
-            get_base_expressions(group_by)
-        } else {
-            Vec::new()
-        };
-
         // Apply window functions that wrap aggregates (e.g., AVG(SUM(x)) OVER (...))
         // This must happen after GROUP BY but before ORDER BY
         // Pass GROUP BY expressions so window ORDER BY/PARTITION BY can reference them.
         // Pass window_aggregates and order_by_aggregates count so window evaluator can
         // map references to the pre-computed hidden columns. See issue #5106.
-        let result_rows = if window::has_aggregate_window_functions(&expanded_select_list) {
+        // Embedded window functions inside larger SELECT expressions are handled
+        // via the decomposition plan. See #5232.
+        let result_rows = if window::has_aggregate_window_functions(&expanded_select_list)
+            || !embedded_window_plan.is_empty()
+        {
             window::apply_window_functions_to_aggregates(
                 result_rows,
                 &expanded_select_list,
@@ -719,14 +779,18 @@ impl SelectExecutor<'_> {
                 &group_by_exprs,
                 order_by_aggregates.len(),
                 &window_aggregates,
+                &embedded_window_plan,
             )?
         } else {
             result_rows
         };
 
-        // Calculate count of hidden columns (GROUP BY + ORDER BY aggregates + window aggregates)
-        let hidden_col_count =
-            group_by_exprs.len() + order_by_aggregates.len() + window_aggregates.len();
+        // Calculate count of hidden columns (GROUP BY + ORDER BY aggregates +
+        // window aggregates + embedded window components)
+        let hidden_col_count = group_by_exprs.len()
+            + order_by_aggregates.len()
+            + window_aggregates.len()
+            + embedded_window_plan.components.len();
 
         // Apply ORDER BY if present
         // Note: For scalar aggregates (no GROUP BY), ORDER BY is skipped because:
