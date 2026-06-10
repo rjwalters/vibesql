@@ -951,3 +951,153 @@ fn test_window_order_by_references_aggregate_5106() {
         panic!("Expected SELECT statement");
     }
 }
+
+/// Regression tests for #5267: a window function whose *argument* is an
+/// aggregate must work when the window is embedded inside a larger
+/// expression (e.g. `coalesce(lead(sum(c)) OVER(...), -1) + sum(c)`).
+///
+/// Before the fix, aggregates appearing in embedded window arguments were not
+/// collected into the hidden window-aggregate columns (#5106), so the
+/// post-aggregation window pass either errored (MisuseOfAggregateContext for
+/// LEAD/LAG) or silently returned NULL (FIRST_VALUE/LAST_VALUE/NTH_VALUE).
+///
+/// Table: g(k, c) = (1,10),(1,20),(2,5) => groups k=1 sum(c)=30, k=2 sum(c)=5.
+/// All expected values verified against SQLite.
+fn create_embedded_window_arg_db() -> Database {
+    let mut db = Database::new();
+
+    let schema = TableSchema::new(
+        "G".to_string(),
+        vec![
+            ColumnSchema::new("K".to_string(), DataType::Integer, false),
+            ColumnSchema::new("C".to_string(), DataType::Integer, false),
+        ],
+    );
+    db.create_table(schema).unwrap();
+
+    let table = db.get_table_mut("G").unwrap();
+    use vibesql_storage::Row;
+    table.insert(Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)])).unwrap();
+    table.insert(Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(20)])).unwrap();
+    table.insert(Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(5)])).unwrap();
+
+    db
+}
+
+/// Run a two-column query (k, expr) against the #5267 test db and assert the
+/// second column matches `expected` for rows ordered by k.
+fn assert_embedded_window_arg_results(query: &str, expected: &[SqlValue]) {
+    let db = create_embedded_window_arg_db();
+    let executor = SelectExecutor::new(&db);
+    let stmt = Parser::parse_sql(query).unwrap();
+
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let rows = executor.execute(&select_stmt).unwrap();
+        assert_eq!(rows.len(), expected.len(), "row count mismatch for: {}", query);
+        for (i, want) in expected.iter().enumerate() {
+            assert_eq!(
+                rows[i].values[1], *want,
+                "query `{}`: row {} expected {:?}, got {:?}",
+                query, i, want, rows[i].values[1]
+            );
+        }
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+#[test]
+fn test_embedded_lead_aggregate_arg_in_coalesce_plus_aggregate_5267() {
+    // Exemplar from #5267. SQLite: 1|35, 2|4
+    assert_embedded_window_arg_results(
+        "SELECT k, coalesce(lead(sum(c)) OVER(ORDER BY k), -1) + sum(c) FROM g GROUP BY k ORDER BY k",
+        &[SqlValue::Integer(35), SqlValue::Integer(4)],
+    );
+}
+
+#[test]
+fn test_embedded_lead_aggregate_arg_plus_aggregate_5267() {
+    // SQLite: 1|35, 2|NULL
+    assert_embedded_window_arg_results(
+        "SELECT k, lead(sum(c)) OVER(ORDER BY k) + sum(c) FROM g GROUP BY k ORDER BY k",
+        &[SqlValue::Integer(35), SqlValue::Null],
+    );
+}
+
+#[test]
+fn test_embedded_lag_aggregate_arg_in_coalesce_5267() {
+    // SQLite: 1|-1, 2|30
+    assert_embedded_window_arg_results(
+        "SELECT k, coalesce(lag(sum(c)) OVER(ORDER BY k), -1) FROM g GROUP BY k ORDER BY k",
+        &[SqlValue::Integer(-1), SqlValue::Integer(30)],
+    );
+}
+
+#[test]
+fn test_embedded_first_value_aggregate_arg_in_coalesce_5267() {
+    // Previously silently wrong (-1, -1) because the eval error was swallowed
+    // into NULL. SQLite: 30, 30
+    assert_embedded_window_arg_results(
+        "SELECT k, coalesce(first_value(sum(c)) OVER(ORDER BY k), -1) FROM g GROUP BY k ORDER BY k",
+        &[SqlValue::Integer(30), SqlValue::Integer(30)],
+    );
+}
+
+#[test]
+fn test_embedded_last_value_aggregate_arg_in_coalesce_5267() {
+    // Default frame is RANGE UNBOUNDED PRECEDING TO CURRENT ROW, so
+    // last_value is the current row's per-group sum. SQLite: 1|30, 2|5
+    assert_embedded_window_arg_results(
+        "SELECT k, coalesce(last_value(sum(c)) OVER(ORDER BY k), -1) FROM g GROUP BY k ORDER BY k",
+        &[SqlValue::Integer(30), SqlValue::Integer(5)],
+    );
+}
+
+#[test]
+fn test_embedded_nth_value_aggregate_arg_in_coalesce_5267() {
+    // SQLite: 30, 30
+    assert_embedded_window_arg_results(
+        "SELECT k, coalesce(nth_value(sum(c), 1) OVER(ORDER BY k), -1) FROM g GROUP BY k ORDER BY k",
+        &[SqlValue::Integer(30), SqlValue::Integer(30)],
+    );
+}
+
+#[test]
+fn test_embedded_lead_aggregate_arg_with_default_plus_literal_5267() {
+    // SQLite: 1|6, 2|1
+    assert_embedded_window_arg_results(
+        "SELECT k, lead(sum(c), 1, 0) OVER(ORDER BY k) + 1 FROM g GROUP BY k ORDER BY k",
+        &[SqlValue::Integer(6), SqlValue::Integer(1)],
+    );
+}
+
+#[test]
+fn test_embedded_aggregate_window_over_aggregate_still_works_5267() {
+    // Aggregate-window-over-aggregate path was already correct; must not
+    // regress. SQLite: 1|30, 2|35
+    assert_embedded_window_arg_results(
+        "SELECT k, coalesce(sum(sum(c)) OVER(ORDER BY k), -1) + 0 FROM g GROUP BY k ORDER BY k",
+        &[SqlValue::Integer(30), SqlValue::Integer(35)],
+    );
+}
+
+#[test]
+fn test_top_level_lead_aggregate_arg_still_works_5267() {
+    // Top-level (non-embedded) form already worked; must not regress.
+    // SQLite: 1|5, 2|NULL
+    assert_embedded_window_arg_results(
+        "SELECT k, lead(sum(c)) OVER(ORDER BY k) FROM g GROUP BY k ORDER BY k",
+        &[SqlValue::Integer(5), SqlValue::Null],
+    );
+}
+
+#[test]
+fn test_embedded_lead_aggregate_arg_also_in_over_clause_5267() {
+    // The aggregate also appears in the OVER clause; this already passed
+    // (exercises the #5106 hidden-column resolution) and must stay correct.
+    // SQLite: 1|-1, 2|30
+    assert_embedded_window_arg_results(
+        "SELECT k, coalesce(lead(sum(c)) OVER(ORDER BY sum(c)), -1) FROM g GROUP BY k ORDER BY k",
+        &[SqlValue::Integer(-1), SqlValue::Integer(30)],
+    );
+}
