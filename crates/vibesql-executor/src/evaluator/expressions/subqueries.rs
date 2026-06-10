@@ -453,13 +453,8 @@ impl ExpressionEvaluator<'_> {
 
         // Evaluate all elements of the left row value
         let mut expr_values = Vec::with_capacity(expected_columns);
-        let mut has_null_element = false;
-
         for elem_expr in expr_elements {
             let val = self.eval(elem_expr, row)?;
-            if matches!(val, SqlValue::Null) {
-                has_null_element = true;
-            }
             expr_values.push(val);
         }
 
@@ -528,11 +523,14 @@ impl ExpressionEvaluator<'_> {
             return Ok(SqlValue::Boolean(negated));
         }
 
-        // If the row value has a NULL element, handle specially
-        // NULL IN (empty set) → FALSE, but we already handled empty set above
-        // NULL IN (non-empty set) → depends on matches
-
-        let mut found_null_in_subquery = false;
+        // Whether any row compared as UNKNOWN (all non-NULL elements equal,
+        // but at least one element comparison involved NULL). Rows that are
+        // definitively FALSE (some element definitively unequal) do NOT make
+        // the overall result UNKNOWN — SQL three-valued AND semantics:
+        // (0,0) IN (SELECT NULL, 1) is FALSE (0=1 is false), while
+        // (0,0) IN (SELECT NULL, 0) is NULL (0=NULL is unknown). (#5268,
+        // mirrors the combined-evaluator fix from #5265)
+        let mut found_unknown_row = false;
 
         // Compare with each row from subquery
         for subquery_row in &rows {
@@ -545,12 +543,9 @@ impl ExpressionEvaluator<'_> {
                     .get(i)
                     .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: i })?;
 
-                // Check for NULL
+                // NULL on either side propagates as UNKNOWN for this element
                 if matches!(expr_val, SqlValue::Null) || matches!(subquery_val, SqlValue::Null) {
                     has_null_comparison = true;
-                    if matches!(subquery_val, SqlValue::Null) {
-                        found_null_in_subquery = true;
-                    }
                     // Can't determine equality with NULL - continue to check other elements
                     continue;
                 }
@@ -584,18 +579,21 @@ impl ExpressionEvaluator<'_> {
                 }
             }
 
-            if all_equal && !has_null_comparison {
-                // Found a match!
-                return Ok(SqlValue::Boolean(!negated));
+            if all_equal {
+                if !has_null_comparison {
+                    // Found an exact match
+                    return Ok(SqlValue::Boolean(!negated));
+                }
+                // No element definitively unequal, but some comparison was
+                // UNKNOWN — this row's match is UNKNOWN.
+                found_unknown_row = true;
             }
         }
 
         // No exact match found
-        if has_null_element || found_null_in_subquery {
-            // NULL in either side means result is NULL (unless we found an exact match above)
+        if found_unknown_row {
             Ok(SqlValue::Null)
         } else {
-            // No match found
             Ok(SqlValue::Boolean(negated))
         }
     }
