@@ -27,6 +27,26 @@ jobs:
         run: python3 scripts/verify_benchmark_queries.py
 
   # ============================================================================
+  # Guard against web-demo lockfile drift (manifest-only dependency bumps).
+  # pnpm defaults to --frozen-lockfile in CI; this fails fast with
+  # ERR_PNPM_OUTDATED_LOCKFILE if package.json and pnpm-lock.yaml disagree.
+  # See issue #5251.
+  # ============================================================================
+  web-demo-lockfile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web-demo/package.json
+
+      - name: Verify web-demo lockfile is in sync
+        run: pnpm install --frozen-lockfile
+        working-directory: web-demo
+
+  # ============================================================================
   # Fast CI for branches/PRs - optimized for speed
   # ============================================================================
   test:
