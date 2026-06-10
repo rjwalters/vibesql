@@ -296,3 +296,39 @@ fn test_insert_select_source_with_on_conflict() {
     .unwrap();
     assert_eq!(rows(&db, "t"), vec![vec![int(1), int(2)]]);
 }
+
+#[test]
+fn test_delete_all_then_reinsert_unique_index_value() {
+    // Regression (added during review of PR #5277): the DELETE truncate fast
+    // path cleared the table but left database-level index data stale, so
+    // re-inserting a previously-deleted unique value failed with a spurious
+    // UNIQUE constraint error (upsert1-710/740/770).
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t(a INT, b INT)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX ta ON t(a)").unwrap();
+    exec(&mut db, "INSERT INTO t VALUES (1, 2)").unwrap();
+
+    let delete_stmt = match vibesql_parser::Parser::parse_sql("DELETE FROM t").unwrap() {
+        vibesql_ast::Statement::Delete(d) => d,
+        other => panic!("expected DELETE, got {other:?}"),
+    };
+    vibesql_executor::DeleteExecutor::execute(&delete_stmt, &mut db).unwrap();
+
+    exec(&mut db, "INSERT INTO t VALUES (1, 3)")
+        .expect("reinsert after DELETE FROM must not raise a spurious UNIQUE error");
+    assert_eq!(rows(&db, "t"), vec![vec![int(1), int(3)]]);
+}
+
+#[test]
+fn test_insert_with_unique_expression_index_does_not_panic() {
+    // Regression (added during review of PR #5277): INSERT into a table with
+    // a UNIQUE expression index panicked via expect_column_name() in both the
+    // executor's enforce_unique_indexes and storage's
+    // check_unique_constraints_for_insert (upsert1-800).
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t(a INT, b INT)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX tab ON t(a+b)").unwrap();
+    exec(&mut db, "INSERT INTO t VALUES (1, 2)")
+        .expect("insert with unique expression index must not panic");
+    assert_eq!(rows(&db, "t"), vec![vec![int(1), int(2)]]);
+}
