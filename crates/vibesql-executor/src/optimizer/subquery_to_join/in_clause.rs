@@ -66,6 +66,18 @@ pub(super) fn try_convert_in_to_join(
         _ => return None,
     };
 
+    // Skip if the subquery's SELECT expression contains a window function (issue #5231).
+    // Window functions are computed over the subquery's entire result set, so hoisting
+    // them into a per-row join ON condition is semantically invalid:
+    //   x IN (SELECT row_number() OVER (ORDER BY ...) FROM t)
+    // cannot become `... SEMI JOIN t ON x = row_number() OVER (...)`.
+    // Falling back to row-by-row IN evaluation (eval_in_subquery) handles both
+    // correlated and uncorrelated forms correctly. This guard also covers the
+    // NOT IN → ANTI join path and the aggregate (GROUP BY/HAVING) path below.
+    if crate::select::window::expression_has_window_function(&subquery_column) {
+        return None;
+    }
+
     // Skip if subquery has LIMIT, OFFSET, or set operations (can't safely convert)
     if subquery.limit.is_some() || subquery.offset.is_some() || subquery.set_operation.is_some() {
         return None;

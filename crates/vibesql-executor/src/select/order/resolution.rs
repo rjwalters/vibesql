@@ -346,10 +346,22 @@ pub(crate) fn resolve_order_by_alias<'a>(
                 ResolvedPosition::Expression(expr) => {
                     return Ok(Cow::Borrowed(expr));
                 }
-                ResolvedPosition::ColumnName(col_name) => {
-                    return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef(
-                        vibesql_ast::ColumnIdentifier::simple(&col_name, false),
-                    )));
+                ResolvedPosition::ColumnName { table, column } => {
+                    // Build a table-qualified reference when the source table is
+                    // known so the ambiguity check is not tripped when multiple
+                    // tables expose the same column name (issue #5231).
+                    // quoted=true preserves the canonical table/column names
+                    // exactly as stored in the schema.
+                    let col_id = match table {
+                        Some(table_name) => vibesql_ast::ColumnIdentifier::qualified(
+                            &table_name,
+                            true,
+                            &column,
+                            true,
+                        ),
+                        None => vibesql_ast::ColumnIdentifier::simple(&column, false),
+                    };
+                    return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef(col_id)));
                 }
                 ResolvedPosition::NotFound => {
                     // Fallback: shouldn't reach here if validation passed
