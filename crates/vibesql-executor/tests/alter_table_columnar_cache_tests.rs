@@ -46,6 +46,7 @@ fn insert_row(db: &mut Database, id: i64, name: &str, value: i64) {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();
 }
@@ -363,6 +364,7 @@ fn test_alter_column_drop_not_null_invalidates_cache() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &stmt).unwrap();
 
@@ -456,6 +458,7 @@ fn test_alter_column_drop_default_invalidates_cache() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &stmt).unwrap();
 

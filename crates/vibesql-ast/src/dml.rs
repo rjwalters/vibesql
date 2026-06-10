@@ -123,6 +123,10 @@ pub struct InsertStmt {
     pub on_conflict: Option<OnConflictClause>,
     /// ON DUPLICATE KEY UPDATE clause (MySQL-style upsert)
     pub on_duplicate_key_update: Option<Vec<Assignment>>,
+    /// Optional RETURNING clause (SQLite 3.35.0+)
+    /// Syntax: INSERT INTO table ... [ON CONFLICT ...] RETURNING expr [, expr ...]
+    /// Returns the NEW row values (as actually inserted) for each inserted row.
+    pub returning: Option<Vec<SelectItem>>,
 }
 
 // ============================================================================

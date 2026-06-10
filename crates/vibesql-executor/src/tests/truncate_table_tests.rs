@@ -412,6 +412,7 @@ fn test_truncate_resets_auto_increment() {
             conflict_clause: None,
             on_conflict: None,
             on_duplicate_key_update: None,
+            returning: None,
         };
         InsertExecutor::execute(&mut db, &insert).unwrap();
     }
@@ -445,6 +446,7 @@ fn test_truncate_resets_auto_increment() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert).unwrap();
 
@@ -524,6 +526,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
             conflict_clause: None,
             on_conflict: None,
             on_duplicate_key_update: None,
+            returning: None,
         };
         InsertExecutor::execute(&mut db, &insert).unwrap();
     }
@@ -553,6 +556,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert).unwrap();
 

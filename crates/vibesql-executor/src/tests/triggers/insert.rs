@@ -46,6 +46,7 @@ fn test_after_insert_trigger_fires() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert).expect("Failed to insert");
 
@@ -105,6 +106,7 @@ fn test_after_insert_trigger_fires_for_each_row() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert).expect("Failed to insert");
 
@@ -150,6 +152,7 @@ fn test_before_insert_trigger_fires() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert).expect("Failed to insert");
 

@@ -132,6 +132,7 @@ fn test_transaction_insert_commit() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     let rows = InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
     assert_eq!(rows, 1);
@@ -172,6 +173,7 @@ fn test_transaction_insert_rollback() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     let rows = InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
     assert_eq!(rows, 1);
@@ -208,6 +210,7 @@ fn test_transaction_multiple_operations_commit() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt1).unwrap();
 
@@ -230,6 +233,7 @@ fn test_transaction_multiple_operations_commit() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt2).unwrap();
 
@@ -265,6 +269,7 @@ fn test_transaction_multiple_operations_rollback() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt1).unwrap();
 
@@ -287,6 +292,7 @@ fn test_transaction_multiple_operations_rollback() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt2).unwrap();
 
@@ -330,6 +336,7 @@ fn test_transaction_isolation() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db1, &insert_stmt).unwrap();
 
@@ -376,6 +383,7 @@ fn test_transaction_nested_operations() {
             conflict_clause: None,
             on_conflict: None,
             on_duplicate_key_update: None,
+            returning: None,
         };
         InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
     }
@@ -412,6 +420,7 @@ fn test_transaction_empty_rollback() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
 
@@ -449,6 +458,7 @@ fn test_multiple_transactions() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt1).unwrap();
     CommitExecutor::execute(&CommitStmt, &mut db).unwrap();
@@ -470,6 +480,7 @@ fn test_multiple_transactions() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt2).unwrap();
     RollbackExecutor::execute(&RollbackStmt, &mut db).unwrap();

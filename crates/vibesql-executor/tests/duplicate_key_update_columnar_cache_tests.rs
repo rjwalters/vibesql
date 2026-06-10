@@ -42,6 +42,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();
 }
@@ -72,6 +73,7 @@ fn upsert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
                 value: vibesql_ast::Expression::DuplicateKeyValue { column: "stock".to_string() },
             },
         ]),
+        returning: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();
 }
@@ -227,6 +229,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
             conflict_clause: None,
             on_conflict: None,
             on_duplicate_key_update: None,
+            returning: None,
         };
         InsertExecutor::execute(db, &stmt).unwrap();
     };
@@ -256,6 +259,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
             column: "score".to_string(),
             value: vibesql_ast::Expression::DuplicateKeyValue { column: "score".to_string() },
         }]),
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &upsert_stmt).unwrap();
 
@@ -350,6 +354,7 @@ fn test_on_duplicate_key_update_arithmetic_invalidates_cache() {
                 }),
             },
         }]),
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &upsert_stmt).unwrap();
 

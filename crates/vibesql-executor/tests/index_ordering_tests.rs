@@ -74,6 +74,7 @@ fn test_index_ordering() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     vibesql_executor::InsertExecutor::execute(&mut db, &insert_stmt).unwrap();

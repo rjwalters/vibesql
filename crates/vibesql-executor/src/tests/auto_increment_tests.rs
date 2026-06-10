@@ -69,6 +69,7 @@ fn test_auto_increment_basic_inserts() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     let result = InsertExecutor::execute(&mut db, &insert1);
     assert!(result.is_ok(), "Failed to insert alice: {:?}", result.err());
@@ -87,6 +88,7 @@ fn test_auto_increment_basic_inserts() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     let result = InsertExecutor::execute(&mut db, &insert2);
     assert!(result.is_ok(), "Failed to insert bob: {:?}", result.err());
@@ -216,6 +218,7 @@ fn test_last_insert_rowid_basic() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     let result = InsertExecutor::execute(&mut db, &insert1);
     assert!(result.is_ok(), "Failed to insert alice: {:?}", result.err());
@@ -237,6 +240,7 @@ fn test_last_insert_rowid_basic() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     let result = InsertExecutor::execute(&mut db, &insert2);
     assert!(result.is_ok(), "Failed to insert bob: {:?}", result.err());
@@ -314,6 +318,7 @@ fn test_last_insert_rowid_multi_row_insert() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     let result = InsertExecutor::execute(&mut db, &multi_insert);
     assert!(result.is_ok(), "Failed to multi-row insert: {:?}", result.err());
@@ -389,6 +394,7 @@ fn test_last_insert_rowid_no_auto_increment() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     let result = InsertExecutor::execute(&mut db, &insert1);
     assert!(result.is_ok(), "Failed to insert: {:?}", result.err());
@@ -462,6 +468,7 @@ fn test_last_insert_rowid_via_select() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     let result = InsertExecutor::execute(&mut db, &insert1);
     assert!(result.is_ok(), "Failed to insert: {:?}", result.err());

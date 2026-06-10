@@ -87,6 +87,7 @@ fn test_when_clause_filters_firing() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert1).expect("Failed to insert");
 
@@ -108,6 +109,7 @@ fn test_when_clause_filters_firing() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert2).expect("Failed to insert");
 

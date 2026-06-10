@@ -25,6 +25,7 @@ fn test_insert_from_select_basic() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
 
@@ -82,6 +83,7 @@ fn test_insert_from_select_basic() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &insert_select_stmt).unwrap();
@@ -121,6 +123,7 @@ fn test_insert_from_select_with_where() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
 
@@ -184,6 +187,7 @@ fn test_insert_from_select_with_where() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &insert_select_stmt).unwrap();
@@ -215,6 +219,7 @@ fn test_insert_from_select_column_mismatch() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
 
@@ -277,6 +282,7 @@ fn test_insert_from_select_column_mismatch() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let result = InsertExecutor::execute(&mut db, &insert_select_stmt);
@@ -327,6 +333,7 @@ fn test_insert_from_select_with_aggregates() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
 
@@ -405,6 +412,7 @@ fn test_insert_from_select_with_aggregates() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     let rows = InsertExecutor::execute(&mut db, &insert_select_stmt).unwrap();
     assert_eq!(rows, 1);

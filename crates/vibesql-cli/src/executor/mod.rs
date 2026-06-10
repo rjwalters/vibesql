@@ -218,12 +218,36 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::Insert(insert_stmt) => {
-                match vibesql_executor::InsertExecutor::execute(&mut self.db, &insert_stmt) {
-                    Ok(affected_rows) => {
+                match vibesql_executor::InsertExecutor::execute_returning(
+                    &mut self.db,
+                    &insert_stmt,
+                ) {
+                    Ok((affected_rows, returning)) => {
                         // Track changes count for changes() and total_changes() functions
                         self.db.set_last_changes_count(affected_rows);
                         self.db.increment_total_changes_count(affected_rows);
                         result.row_count = affected_rows;
+
+                        // RETURNING clause: render the projected NEW rows like
+                        // a SELECT result (SQLite 3.35.0+ semantics).
+                        if let Some(returning_result) = returning {
+                            result.row_count = returning_result.rows.len();
+                            result.columns = returning_result.columns;
+                            for row in returning_result.rows {
+                                let row_strs: Vec<Option<String>> =
+                                    row.values
+                                        .iter()
+                                        .map(|v| {
+                                            if v.is_null() {
+                                                None
+                                            } else {
+                                                Some(format_sql_value(v))
+                                            }
+                                        })
+                                        .collect();
+                                result.rows.push(row_strs);
+                            }
+                        }
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
@@ -245,17 +269,17 @@ impl SqlExecutor {
                             result.row_count = returning_result.rows.len();
                             result.columns = returning_result.columns;
                             for row in returning_result.rows {
-                                let row_strs: Vec<Option<String>> = row
-                                    .values
-                                    .iter()
-                                    .map(|v| {
-                                        if v.is_null() {
-                                            None
-                                        } else {
-                                            Some(format_sql_value(v))
-                                        }
-                                    })
-                                    .collect();
+                                let row_strs: Vec<Option<String>> =
+                                    row.values
+                                        .iter()
+                                        .map(|v| {
+                                            if v.is_null() {
+                                                None
+                                            } else {
+                                                Some(format_sql_value(v))
+                                            }
+                                        })
+                                        .collect();
                                 result.rows.push(row_strs);
                             }
                         }
@@ -280,17 +304,17 @@ impl SqlExecutor {
                             result.row_count = returning_result.rows.len();
                             result.columns = returning_result.columns;
                             for row in returning_result.rows {
-                                let row_strs: Vec<Option<String>> = row
-                                    .values
-                                    .iter()
-                                    .map(|v| {
-                                        if v.is_null() {
-                                            None
-                                        } else {
-                                            Some(format_sql_value(v))
-                                        }
-                                    })
-                                    .collect();
+                                let row_strs: Vec<Option<String>> =
+                                    row.values
+                                        .iter()
+                                        .map(|v| {
+                                            if v.is_null() {
+                                                None
+                                            } else {
+                                                Some(format_sql_value(v))
+                                            }
+                                        })
+                                        .collect();
                                 result.rows.push(row_strs);
                             }
                         }
@@ -1089,8 +1113,7 @@ impl SqlExecutor {
                     //
                     // See SQLite's DBSTATUS_DEFERRED_FKS:
                     //   https://www.sqlite.org/c3ref/c_dbstatus_options.html
-                    let count =
-                        vibesql_executor::live_deferred_fk_violation_count(&self.db) as i64;
+                    let count = vibesql_executor::live_deferred_fk_violation_count(&self.db) as i64;
                     Ok(QueryResult {
                         columns: vec!["deferred_fk_count".to_string()],
                         rows: vec![vec![Some(count.to_string())]],
@@ -1156,11 +1179,8 @@ impl SqlExecutor {
         let mut rows = Vec::new();
         if let Some(schema) = self.db.catalog.get_table(&table_name) {
             for (fk_id, fk) in schema.foreign_keys.iter().enumerate() {
-                for (seq, (col_name, parent_col_name)) in fk
-                    .column_names
-                    .iter()
-                    .zip(fk.parent_column_names.iter())
-                    .enumerate()
+                for (seq, (col_name, parent_col_name)) in
+                    fk.column_names.iter().zip(fk.parent_column_names.iter()).enumerate()
                 {
                     let on_update = match &fk.on_update {
                         vibesql_catalog::ReferentialAction::NoAction => "NO ACTION",
@@ -1214,8 +1234,8 @@ impl SqlExecutor {
         // "main" and the current schema both refer to the only available schema.
         let current_schema = self.db.catalog.get_current_schema().to_string();
         if let Some(ref schema) = stmt.database {
-            let is_current = schema.eq_ignore_ascii_case(&current_schema)
-                || schema.eq_ignore_ascii_case("main");
+            let is_current =
+                schema.eq_ignore_ascii_case(&current_schema) || schema.eq_ignore_ascii_case("main");
             if !is_current {
                 let table_part = match &stmt.value {
                     Some(vibesql_ast::PragmaValue::Identifier(name)) => Some(name.clone()),
@@ -1254,11 +1274,7 @@ impl SqlExecutor {
         for tbl_name in &tables_to_check {
             let (fk_constraints, rowid_alias_idx, without_rowid) =
                 if let Some(schema) = self.db.catalog.get_table(tbl_name) {
-                    (
-                        schema.foreign_keys.clone(),
-                        schema.rowid_alias_column,
-                        schema.without_rowid,
-                    )
+                    (schema.foreign_keys.clone(), schema.rowid_alias_column, schema.without_rowid)
                 } else {
                     continue;
                 };
@@ -1269,11 +1285,7 @@ impl SqlExecutor {
 
             // Get all rows from the child table
             // Note: tables are stored with qualified names (schema.table)
-            let qualified_name = format!(
-                "{}.{}",
-                self.db.catalog.get_current_schema(),
-                tbl_name
-            );
+            let qualified_name = format!("{}.{}", self.db.catalog.get_current_schema(), tbl_name);
             let child_rows: Vec<_> = if let Some(table) = self.db.tables.get(&qualified_name) {
                 table.scan_live().map(|(id, row)| (id, row.clone())).collect()
             } else if let Some(table) = self.db.tables.get(tbl_name.as_str()) {
@@ -1292,9 +1304,7 @@ impl SqlExecutor {
                     if without_rowid {
                         return (None, row);
                     }
-                    let rowid = match rowid_alias_idx
-                        .and_then(|idx| row.values.get(idx))
-                    {
+                    let rowid = match rowid_alias_idx.and_then(|idx| row.values.get(idx)) {
                         Some(vibesql_types::SqlValue::Integer(v)) => *v,
                         _ => (*phys_idx as i64) + 1,
                     };
@@ -1308,11 +1318,7 @@ impl SqlExecutor {
                 // covering the FK columns, raise the SQLite-compatible error.
                 // Matches `do_catchsql_test 11.1` in fkey5.test.
                 if let Some((child, parent)) =
-                    vibesql_executor::foreign_key_check::detect_fk_mismatch(
-                        &self.db,
-                        tbl_name,
-                        fk,
-                    )
+                    vibesql_executor::foreign_key_check::detect_fk_mismatch(&self.db, tbl_name, fk)
                 {
                     anyhow::bail!(
                         "foreign key mismatch - \"{}\" referencing \"{}\"",
@@ -1326,33 +1332,20 @@ impl SqlExecutor {
                 // Use the shared resolver so post-reload placeholder indices
                 // do not skew which parent columns we read from.
                 let parent_column_collations: Vec<Option<String>> =
-                    vibesql_executor::foreign_key_check::parent_collations_for_fk(
-                        &self.db, fk,
-                    );
+                    vibesql_executor::foreign_key_check::parent_collations_for_fk(&self.db, fk);
                 let resolved_parent_indices =
                     vibesql_executor::foreign_key_check::resolved_parent_indices_for_fk(
                         &self.db, fk,
                     );
 
                 // Get parent table data
-                let parent_qualified = format!(
-                    "{}.{}",
-                    self.db.catalog.get_current_schema(),
-                    &fk.parent_table
-                );
+                let parent_qualified =
+                    format!("{}.{}", self.db.catalog.get_current_schema(), &fk.parent_table);
                 let parent_rows: Vec<_> =
                     if let Some(parent_table) = self.db.tables.get(&parent_qualified) {
-                        parent_table
-                            .scan_live()
-                            .map(|(_, row)| row.clone())
-                            .collect()
-                    } else if let Some(parent_table) =
-                        self.db.tables.get(&fk.parent_table)
-                    {
-                        parent_table
-                            .scan_live()
-                            .map(|(_, row)| row.clone())
-                            .collect()
+                        parent_table.scan_live().map(|(_, row)| row.clone()).collect()
+                    } else if let Some(parent_table) = self.db.tables.get(&fk.parent_table) {
+                        parent_table.scan_live().map(|(_, row)| row.clone()).collect()
                     } else {
                         // Parent table doesn't exist - every row whose FK columns are all
                         // non-NULL is a violation. NULL FK values never violate (matches SQLite).
@@ -1366,12 +1359,7 @@ impl SqlExecutor {
                             if any_null {
                                 continue;
                             }
-                            rows.push((
-                                tbl_name.clone(),
-                                *rowid,
-                                fk.parent_table.clone(),
-                                fk_id,
-                            ));
+                            rows.push((tbl_name.clone(), *rowid, fk.parent_table.clone(), fk_id));
                         }
                         continue;
                     };
@@ -1391,62 +1379,41 @@ impl SqlExecutor {
                         .collect();
 
                     // Skip if any FK value is NULL (NULL doesn't violate FK)
-                    if child_values
-                        .iter()
-                        .any(|v| matches!(v, vibesql_types::SqlValue::Null))
-                    {
+                    if child_values.iter().any(|v| matches!(v, vibesql_types::SqlValue::Null)) {
                         continue;
                     }
 
                     // Check if matching parent row exists
                     let found = parent_rows.iter().any(|parent_row| {
-                        resolved_parent_indices
-                            .iter()
-                            .zip(child_values.iter())
-                            .enumerate()
-                            .all(|(i, (&parent_idx, child_val))| {
+                        resolved_parent_indices.iter().zip(child_values.iter()).enumerate().all(
+                            |(i, (&parent_idx, child_val))| {
                                 if parent_idx < parent_row.values.len() {
                                     vibesql_executor::foreign_key_check::fk_values_equal(
                                         child_val,
                                         &parent_row.values[parent_idx],
-                                        parent_column_collations
-                                            .get(i)
-                                            .and_then(|c| c.as_deref()),
+                                        parent_column_collations.get(i).and_then(|c| c.as_deref()),
                                     )
                                 } else {
                                     false
                                 }
-                            })
+                            },
+                        )
                     });
 
                     if !found {
-                        rows.push((
-                            tbl_name.clone(),
-                            *rowid,
-                            fk.parent_table.clone(),
-                            fk_id,
-                        ));
+                        rows.push((tbl_name.clone(), *rowid, fk.parent_table.clone(), fk_id));
                     }
                 }
             }
         }
 
         // Sort violations by (table, rowid, fk_id) so output matches SQLite's btree order.
-        rows.sort_by(|a, b| {
-            a.0.cmp(&b.0)
-                .then(a.1.cmp(&b.1))
-                .then(a.3.cmp(&b.3))
-        });
+        rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.3.cmp(&b.3)));
 
         let final_rows: Vec<Vec<Option<String>>> = rows
             .into_iter()
             .map(|(t, rid, p, fk)| {
-                vec![
-                    Some(t),
-                    rid.map(|v| v.to_string()),
-                    Some(p),
-                    Some(fk.to_string()),
-                ]
+                vec![Some(t), rid.map(|v| v.to_string()), Some(p), Some(fk.to_string())]
             })
             .collect();
 
@@ -1504,8 +1471,8 @@ impl SqlExecutor {
         // (SQLite returns no rows for a missing table in table_info, no error).
         let current_schema = self.db.catalog.get_current_schema().to_string();
         if let Some(ref schema) = stmt.database {
-            let is_current = schema.eq_ignore_ascii_case(&current_schema)
-                || schema.eq_ignore_ascii_case("main");
+            let is_current =
+                schema.eq_ignore_ascii_case(&current_schema) || schema.eq_ignore_ascii_case("main");
             if !is_current {
                 return Ok(QueryResult {
                     columns,
@@ -1536,11 +1503,9 @@ impl SqlExecutor {
         // the declared primary-key column list.
         let pk_positions: std::collections::HashMap<String, usize> =
             match schema.primary_key.as_ref() {
-                Some(pk_cols) => pk_cols
-                    .iter()
-                    .enumerate()
-                    .map(|(i, name)| (name.clone(), i + 1))
-                    .collect(),
+                Some(pk_cols) => {
+                    pk_cols.iter().enumerate().map(|(i, name)| (name.clone(), i + 1)).collect()
+                }
                 None => std::collections::HashMap::new(),
             };
 
@@ -1562,10 +1527,7 @@ impl SqlExecutor {
             });
 
             // pk: 1-based position within the primary key, or 0 if not PK.
-            let pk = pk_positions
-                .get(&column.name)
-                .copied()
-                .unwrap_or(0);
+            let pk = pk_positions.get(&column.name).copied().unwrap_or(0);
 
             rows.push(vec![
                 Some(cid.to_string()),

@@ -1053,6 +1053,18 @@ fn walk_insert<V: ExpressionVisitor>(visitor: &mut V, stmt: &InsertStmt) {
             }
         }
     }
+
+    // Walk RETURNING expressions
+    if let Some(items) = &stmt.returning {
+        for item in items {
+            if let SelectItem::Expression { expr, .. } = item {
+                let result = walk_expression(visitor, expr);
+                if result.should_stop() {
+                    return;
+                }
+            }
+        }
+    }
 }
 
 /// Walk an UPDATE statement
@@ -1355,6 +1367,19 @@ pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertSt
                 .map(|a| Assignment {
                     column: a.column,
                     value: transform_expression(visitor, a.value),
+                })
+                .collect()
+        }),
+        returning: stmt.returning.map(|items| {
+            items
+                .into_iter()
+                .map(|item| match item {
+                    SelectItem::Expression { expr, alias, source_text } => SelectItem::Expression {
+                        expr: transform_expression(visitor, expr),
+                        alias,
+                        source_text,
+                    },
+                    other => other,
                 })
                 .collect()
         }),

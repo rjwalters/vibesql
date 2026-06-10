@@ -215,3 +215,150 @@ fn test_parse_replace_with_rowid_column() {
         _ => panic!("Expected INSERT statement"),
     }
 }
+
+// ========================================================================
+// RETURNING Clause Tests (SQLite 3.35.0+, issue #5263)
+// ========================================================================
+
+#[test]
+fn test_parse_insert_returning_star() {
+    let result = Parser::parse_sql("INSERT INTO t1(b) VALUES ('x') RETURNING *;");
+    assert!(result.is_ok(), "RETURNING * should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => {
+            let returning = insert.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 1);
+            assert!(matches!(returning[0], vibesql_ast::SelectItem::Wildcard { .. }));
+        }
+        _ => panic!("Expected INSERT statement"),
+    }
+}
+
+#[test]
+fn test_parse_insert_returning_expression_list() {
+    let result = Parser::parse_sql("INSERT INTO t1 VALUES (1, 2) RETURNING a, b + 1;");
+    assert!(result.is_ok(), "RETURNING expr list should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => {
+            let returning = insert.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 2);
+            assert!(matches!(returning[0], vibesql_ast::SelectItem::Expression { .. }));
+            assert!(matches!(returning[1], vibesql_ast::SelectItem::Expression { .. }));
+        }
+        _ => panic!("Expected INSERT statement"),
+    }
+}
+
+#[test]
+fn test_parse_insert_returning_with_alias() {
+    let result =
+        Parser::parse_sql("INSERT INTO t1 VALUES (1) RETURNING a AS new_a, a + 1 incremented;");
+    assert!(result.is_ok(), "RETURNING aliases should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => {
+            let returning = insert.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 2);
+            match &returning[0] {
+                vibesql_ast::SelectItem::Expression { alias, .. } => {
+                    assert_eq!(alias.as_deref(), Some("new_a"));
+                }
+                other => panic!("Expected expression item, got {:?}", other),
+            }
+            match &returning[1] {
+                vibesql_ast::SelectItem::Expression { alias, .. } => {
+                    assert_eq!(alias.as_deref(), Some("incremented"));
+                }
+                other => panic!("Expected expression item, got {:?}", other),
+            }
+        }
+        _ => panic!("Expected INSERT statement"),
+    }
+}
+
+#[test]
+fn test_parse_insert_returning_after_on_conflict() {
+    let result = Parser::parse_sql(
+        "INSERT INTO t1(a, b) VALUES (1, 2) ON CONFLICT(a) DO UPDATE SET b = 3 RETURNING *;",
+    );
+    assert!(result.is_ok(), "RETURNING after ON CONFLICT should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => {
+            assert!(insert.on_conflict.is_some());
+            let returning = insert.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 1);
+        }
+        _ => panic!("Expected INSERT statement"),
+    }
+}
+
+#[test]
+fn test_parse_insert_returning_with_cte() {
+    let result = Parser::parse_sql(
+        "WITH src AS (SELECT 1 AS x) INSERT INTO t1 SELECT x FROM src RETURNING *;",
+    );
+    assert!(result.is_ok(), "RETURNING with CTE should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => {
+            assert!(insert.with_clause.is_some());
+            let returning = insert.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 1);
+        }
+        _ => panic!("Expected INSERT statement"),
+    }
+}
+
+#[test]
+fn test_parse_replace_into_returning() {
+    let result = Parser::parse_sql("REPLACE INTO t1(a, b) VALUES (1, 'x') RETURNING a, b;");
+    assert!(result.is_ok(), "REPLACE INTO RETURNING should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => {
+            assert_eq!(
+                insert.conflict_clause,
+                Some(vibesql_ast::ConflictClause::Replace),
+                "REPLACE INTO should set the Replace conflict clause"
+            );
+            let returning = insert.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 2);
+        }
+        _ => panic!("Expected INSERT statement"),
+    }
+}
+
+#[test]
+fn test_parse_insert_returning_arena_parser() {
+    // The CLI path goes through parse_with_arena_fallback; make sure the
+    // arena parser captures RETURNING too.
+    let result = crate::parse_with_arena_fallback("INSERT INTO t1(b) VALUES ('x') RETURNING a, b");
+    assert!(result.is_ok(), "arena parser should handle RETURNING: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => {
+            let returning = insert.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 2);
+        }
+        _ => panic!("Expected INSERT statement"),
+    }
+}
+
+#[test]
+fn test_parse_replace_returning_arena_parser() {
+    let result =
+        crate::parse_with_arena_fallback("REPLACE INTO t1(a, b) VALUES (1, 'x') RETURNING *");
+    assert!(result.is_ok(), "arena parser should handle REPLACE RETURNING: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => {
+            let returning = insert.returning.expect("returning clause should be captured");
+            assert_eq!(returning.len(), 1);
+        }
+        _ => panic!("Expected INSERT statement"),
+    }
+}
+
+#[test]
+fn test_parse_insert_without_returning_is_none() {
+    let result = Parser::parse_sql("INSERT INTO t1 VALUES (1);");
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => assert!(insert.returning.is_none()),
+        _ => panic!("Expected INSERT statement"),
+    }
+}

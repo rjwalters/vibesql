@@ -629,6 +629,10 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             on_duplicate_key_update: stmt.on_duplicate_key_update.as_ref().map(|assignments| {
                 assignments.iter().map(|a| self.convert_assignment(a)).collect()
             }),
+            returning: stmt
+                .returning
+                .as_ref()
+                .map(|items| items.iter().map(|item| self.convert_select_item(item)).collect()),
         }
     }
 

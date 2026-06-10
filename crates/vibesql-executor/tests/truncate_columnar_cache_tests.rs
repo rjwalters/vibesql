@@ -43,6 +43,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(db, &stmt).unwrap();
 }
@@ -271,6 +272,7 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &parent_stmt).unwrap();
 
@@ -290,6 +292,7 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &child_stmt1).unwrap();
 
@@ -308,6 +311,7 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
     InsertExecutor::execute(&mut db, &child_stmt2).unwrap();
 

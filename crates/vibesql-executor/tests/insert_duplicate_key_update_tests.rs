@@ -50,6 +50,7 @@ fn test_on_duplicate_key_update_basic() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &initial_stmt).unwrap();
@@ -77,6 +78,7 @@ fn test_on_duplicate_key_update_basic() {
             column: "stock".to_string(),
             value: vibesql_ast::Expression::DuplicateKeyValue { column: "stock".to_string() },
         }]),
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &upsert_stmt).unwrap();
@@ -116,6 +118,7 @@ fn test_on_duplicate_key_update_with_arithmetic() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     InsertExecutor::execute(&mut db, &initial_stmt).unwrap();
@@ -149,6 +152,7 @@ fn test_on_duplicate_key_update_with_arithmetic() {
                 }),
             },
         }]),
+        returning: None,
     };
 
     InsertExecutor::execute(&mut db, &upsert_stmt).unwrap();
@@ -188,6 +192,7 @@ fn test_on_duplicate_key_update_no_conflict() {
             column: "stock".to_string(),
             value: vibesql_ast::Expression::DuplicateKeyValue { column: "stock".to_string() },
         }]),
+        returning: None,
     };
 
     let rows = InsertExecutor::execute(&mut db, &upsert_stmt).unwrap();

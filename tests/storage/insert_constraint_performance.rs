@@ -55,6 +55,7 @@ fn test_insert_with_merged_constraint_validation() {
             conflict_clause: None,
             on_conflict: None,
             on_duplicate_key_update: None,
+            returning: None,
         };
 
         InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -122,6 +123,7 @@ fn test_insert_multi_row_with_constraints() {
         conflict_clause: None,
         on_conflict: None,
         on_duplicate_key_update: None,
+        returning: None,
     };
 
     InsertExecutor::execute(&mut db, &stmt).unwrap();
