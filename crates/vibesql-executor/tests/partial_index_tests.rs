@@ -517,8 +517,8 @@ fn partial_index_body_empty_after_compaction_removes_all_truthy_rows() {
 
 // ---------------------------------------------------------------------------
 // Planner selection of partial indexes via structural predicate implication
-// (issue #5325; v1 covers non-expression partial indexes only — expression
-// ones are excluded until the probe bug #5333 is fixed)
+// (issue #5325; expression partial indexes included since #5333 fixed the
+// temporal probe-bound bug)
 // ---------------------------------------------------------------------------
 
 /// Run EXPLAIN QUERY PLAN and return the text output.
@@ -551,18 +551,15 @@ fn select_first_column_ints(db: &Database, sql: &str) -> Vec<i64> {
     }
 }
 
-/// date2-330/331 shape: partial EXPRESSION indexes are excluded from planner
-/// selection (v1, issue #5333) even when the query WHERE contains the index
-/// predicate verbatim as a conjunct. The expression-index equality/BETWEEN
-/// probe machinery compares Timestamp keys against string bounds incorrectly
-/// and returns 0 rows — with `t3b1` selected this exact query returns `{}`
-/// instead of `{1, 2}` (silent row loss; the WHERE post-filter can only
-/// narrow an empty probe result, never widen it). So the plan must be a full
-/// scan AND the rows must be correct. When #5333 fixes the probes, flip the
-/// plan assertion back to expecting `USING INDEX t3b1` and keep the row
-/// assertion — the rows are the real guard.
+/// date2-330/331 shape: partial EXPRESSION indexes are selected when the
+/// query WHERE contains the index predicate verbatim as a conjunct. Before
+/// #5333 fixed the temporal probe bounds (Timestamp keys vs string bounds
+/// compared by type-tag order), selecting `t3b1` for this exact query
+/// returned `{}` instead of `{1, 2}` (silent row loss; the WHERE post-filter
+/// can only narrow an empty probe result, never widen it). The plan must use
+/// the index AND the rows must be correct — the rows are the real guard.
 #[test]
-fn planner_excludes_partial_expression_index_from_selection() {
+fn planner_selects_partial_expression_index_when_predicate_implied() {
     let mut db = Database::new();
     execute_sql(
         &mut db,
@@ -580,8 +577,8 @@ fn planner_excludes_partial_expression_index_from_selection() {
 
     let plan = explain_query_plan(&db, sql);
     assert!(
-        !plan.contains("t3b1"),
-        "partial expression index must be excluded from selection until #5333, got:\n{}",
+        plan.contains("t3b1"),
+        "partial expression index must be selected when the predicate is implied (#5333), got:\n{}",
         plan
     );
 
@@ -589,7 +586,7 @@ fn planner_excludes_partial_expression_index_from_selection() {
     // 2017-07-06 (in range); 2457950.5 = 2017-07-16 (out of range).
     let mut rows = select_first_column_ints(&db, sql);
     rows.sort_unstable();
-    assert_eq!(rows, vec![1, 2], "query must return correct rows via full scan");
+    assert_eq!(rows, vec![1, 2], "query must return correct rows via the index probe");
 }
 
 /// Without the typeof(b)='real' conjunct the implication fails and the

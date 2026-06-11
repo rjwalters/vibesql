@@ -24,6 +24,7 @@ mod composite;
 mod expression_index;
 mod in_list;
 pub(super) mod range;
+mod temporal_coercion;
 
 // Re-export types
 pub(crate) use composite::{CompositePredicateType, PrefixPredicateResult, PrefixWithRangeResult};
@@ -68,6 +69,11 @@ pub(crate) use expression_index::{
 
 // Re-export main extraction function
 pub(crate) use in_list::{extract_index_predicate, where_clause_fully_satisfied_by_index};
+
+// Re-export temporal probe-bound coercion (issue #5333)
+pub(crate) use temporal_coercion::{
+    coerce_equality_key, coerce_index_predicate_for_temporal_keys, EqualityKeyCoercion,
+};
 
 #[cfg(test)]
 #[path = "tests.rs"]

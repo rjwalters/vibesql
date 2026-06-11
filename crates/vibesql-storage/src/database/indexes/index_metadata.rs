@@ -173,6 +173,30 @@ impl IndexData {
         }
     }
 
+    /// Sample the stored key value at a given column position.
+    ///
+    /// Returns the first non-NULL `SqlValue` found at position `col_idx`
+    /// across the index's stored keys, or `None` if the index is empty, all
+    /// keys are NULL at that position, or the backend does not support cheap
+    /// key sampling (disk-backed / vector indexes).
+    ///
+    /// This is used by the executor to determine the stored key *type* so
+    /// that string probe bounds can be coerced to match temporal keys
+    /// (issue #5333). Only the type of the returned value is meaningful.
+    pub fn first_key_value_sample(&self, col_idx: usize) -> Option<SqlValue> {
+        match self {
+            IndexData::InMemory { data, .. } => data
+                .keys()
+                .filter_map(|key| key.get(col_idx))
+                .find(|v| !matches!(v, SqlValue::Null))
+                .cloned(),
+            // Disk-backed B+ trees don't expose cheap key iteration; vector
+            // indexes don't store comparable scalar keys. Callers treat None
+            // as "unknown key type" and skip coercion.
+            _ => None,
+        }
+    }
+
     /// Check if the pending deletions need compaction.
     #[inline]
     pub fn needs_compaction(&self) -> bool {

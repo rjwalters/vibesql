@@ -170,6 +170,14 @@ impl SelectExecutor<'_> {
                 None => continue,
             };
 
+            // Issue #5333: coerce string equality keys to the stored temporal
+            // key type; skip this index when no faithful coercion exists
+            // (slower paths evaluate with executor semantics).
+            let mut prefix_key = prefix_key;
+            if !coerce_temporal_lookup_keys(index_data, &mut prefix_key) {
+                continue;
+            }
+
             // Perform the optimized prefix scan
             let row_indices = if is_desc {
                 // Use reverse prefix scan for DESC ORDER BY
@@ -360,6 +368,15 @@ impl SelectExecutor<'_> {
                 None => continue,
             };
 
+            // Issue #5333: coerce string equality keys to the stored temporal
+            // key type (e.g. `ts_col = '2017-07-20 15:30:00'` against
+            // Timestamp keys); skip this index when no faithful coercion
+            // exists (slower paths evaluate with executor semantics).
+            let mut key_values = key_values;
+            if !coerce_temporal_lookup_keys(index_data, &mut key_values) {
+                continue;
+            }
+
             let row_indices = if key_values.len() == index_columns.len() {
                 // Full key match - use exact lookup
                 match index_data.get(&key_values) {
@@ -544,4 +561,42 @@ impl SelectExecutor<'_> {
         // No suitable covering index found
         Ok(None)
     }
+}
+
+/// Coerce string equality lookup keys to the stored temporal key type
+/// (issue #5333).
+///
+/// Index keys are compared with `SqlValue`'s total order, where cross-type
+/// pairs (e.g. `Varchar` vs `Timestamp`) are never equal. A point lookup
+/// built from a raw string literal therefore silently returns 0 rows against
+/// temporal keys. This mirrors the executor's comparison semantics:
+/// `Date` keys parse the string (parse-first); `Timestamp`/`Time` keys
+/// require an exact parse → Display round-trip (TEXT-rendering equality).
+///
+/// Returns `false` when the index cannot be probed faithfully with these
+/// keys — the caller should skip the index and let a slower path compute the
+/// result with executor semantics.
+fn coerce_temporal_lookup_keys(
+    index_data: &vibesql_storage::database::indexes::IndexData,
+    key_values: &mut [SqlValue],
+) -> bool {
+    use crate::select::scan::index_scan::predicate::{coerce_equality_key, EqualityKeyCoercion};
+
+    // Fast exit: nothing to do unless some key component is a string.
+    if !key_values.iter().any(|v| matches!(v, SqlValue::Varchar(_) | SqlValue::Character(_))) {
+        return true;
+    }
+
+    for (col_idx, value) in key_values.iter_mut().enumerate() {
+        let Some(sample) = index_data.first_key_value_sample(col_idx) else {
+            continue;
+        };
+        match coerce_equality_key(&sample, value) {
+            EqualityKeyCoercion::Unchanged => {}
+            EqualityKeyCoercion::Coerced(coerced) => *value = coerced,
+            EqualityKeyCoercion::Unusable => return false,
+        }
+    }
+
+    true
 }

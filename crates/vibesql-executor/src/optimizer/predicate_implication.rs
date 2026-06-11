@@ -20,11 +20,12 @@
 //! SELECT id FROM orders WHERE status = 1 AND sku = 300;
 //! ```
 //!
-//! v1 additionally restricts selection to NON-EXPRESSION partial indexes:
-//! partial indexes with expression columns (e.g. the date2-330/331 index
-//! `CREATE INDEX t3b1 ON t3(datetime(b)) WHERE typeof(b)='real'`) are excluded
-//! until the expression-index equality/BETWEEN probe bug (#5333) is fixed —
-//! see [`partial_index_usable`].
+//! Partial EXPRESSION indexes (e.g. the date2-330/331 index
+//! `CREATE INDEX t3b1 ON t3(datetime(b)) WHERE typeof(b)='real'`) are selected
+//! under the same implication rule. They were temporarily excluded while the
+//! temporal probe-bound bug existed; #5333 fixed the probes by coercing string
+//! bounds to the stored temporal key type (see
+//! `select::scan::index_scan::predicate::temporal_coercion`).
 //!
 //! Correctness:
 //! - **Extra rows are harmless** — the full WHERE clause is always re-applied
@@ -98,22 +99,16 @@ pub(crate) fn query_implies_index_predicate(
 /// clause, considering partial-index predicates.
 ///
 /// - Non-partial indexes are always usable (returns `true`).
-/// - Partial indexes containing **expression columns** are never usable (v1
-///   exclusion, see below).
-/// - Other partial indexes are usable only when `query_where` structurally
-///   implies the index predicate (see [`query_implies_index_predicate`]).
+/// - Partial indexes (expression or not) are usable only when `query_where`
+///   structurally implies the index predicate (see
+///   [`query_implies_index_predicate`]).
 /// - A partial index with no query WHERE clause is never usable.
 ///
-/// v1 exclusion of partial EXPRESSION indexes (issue #5333): the
-/// expression-index probe machinery compares `Timestamp` keys against string
-/// bounds incorrectly for equality and BETWEEN probes (both return 0 rows;
-/// one-sided ranges are fine). Selecting a partial expression index such as
-/// `CREATE INDEX t3b1 ON t3(datetime(b)) WHERE typeof(b)='real'` (date2-331)
-/// therefore silently loses rows — an empty probe result can only be narrowed
-/// by the WHERE post-filter, never widened. Until #5333 fixes the probes,
-/// partial expression indexes stay excluded from planner selection, matching
-/// the pre-#5331 behavior for them. (Non-partial expression indexes keep
-/// their existing selection behavior — also tracked by #5333.)
+/// Partial EXPRESSION indexes were excluded here (v1) while the temporal
+/// probe-bound bug existed: probes compared `Timestamp` keys against raw
+/// string bounds with type-tag ordering and silently lost rows. Issue #5333
+/// fixed the probes by coercing string bounds to the stored temporal key type
+/// at probe time, so the exclusion is no longer needed.
 ///
 /// The partial predicate lives on the catalog-side `IndexMetadata`
 /// (`where_clause`); the storage-side metadata does not yet carry it.
@@ -131,12 +126,6 @@ pub(crate) fn partial_index_usable(
         // Not a partial index: no predicate gate.
         return true;
     };
-
-    // v1: partial expression indexes are excluded until the expression-index
-    // equality/BETWEEN probe bug (#5333) is fixed.
-    if metadata.has_expression_columns() {
-        return false;
-    }
 
     match query_where {
         Some(query_where) => query_implies_index_predicate(query_where, index_where),
@@ -323,12 +312,10 @@ mod tests {
     }
 
     #[test]
-    fn partial_expression_index_excluded_even_when_implied() {
-        // v1 exclusion (#5333): the expression-index equality/BETWEEN probe
-        // machinery loses rows (Timestamp keys vs string bounds), so a
-        // partial EXPRESSION index must never be planner-usable — even when
-        // the query WHERE implies the index predicate verbatim (date2-331
-        // shape). Remove this exclusion when #5333 is fixed.
+    fn partial_expression_index_usable_when_implied() {
+        // #5333 fixed the temporal probe-bound bug, so partial EXPRESSION
+        // indexes follow the same implication rule as non-expression ones
+        // (date2-330/331 shape).
         use vibesql_storage::Database;
 
         let mut db = Database::new();
@@ -345,10 +332,14 @@ mod tests {
             crate::CreateIndexExecutor::execute(&stmt, &mut db).unwrap();
         }
 
-        // Even a verbatim-implying WHERE clause must not make it usable.
+        // Verbatim-implying WHERE clause makes it usable.
         let implying =
             parse_where("typeof(b)='real' AND datetime(b) BETWEEN '2017-07-04' AND '2017-07-08'");
-        assert!(!partial_index_usable(&db, "t3b1", Some(&implying)));
+        assert!(partial_index_usable(&db, "t3b1", Some(&implying)));
+
+        // Non-implying / absent WHERE clause: still unusable.
+        let non_implying = parse_where("datetime(b) > '2017-07-04'");
+        assert!(!partial_index_usable(&db, "t3b1", Some(&non_implying)));
         assert!(!partial_index_usable(&db, "t3b1", None));
     }
 
