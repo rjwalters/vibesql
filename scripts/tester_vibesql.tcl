@@ -4819,6 +4819,18 @@ proc sqlite3_key {args} {
     return
 }
 
+proc do_not_use_codec {} {
+    # SQLite codec (SEE encryption) testing - not applicable to VibeSQL.
+    # Matches SQLite tester.tcl semantics: mark run codec-incompatible, reset db.
+    set ::do_not_use_codec 1
+    reset_db
+}
+
+proc nonzero_reserved_bytes {} {
+    # True only in codec builds (non-zero reserved bytes). VibeSQL has no codec.
+    return 0
+}
+
 proc sqlite_register_test_function {args} {
     # SQLite test function registration - not supported
     # This is used to register custom test functions at the C level
