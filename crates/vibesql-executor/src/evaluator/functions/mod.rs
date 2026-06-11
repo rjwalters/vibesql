@@ -111,6 +111,7 @@ pub(super) fn eval_scalar_function(
         "CURRENT_TIME" | "CURTIME" => datetime::current_time(args),
         "CURRENT_TIMESTAMP" | "NOW" => datetime::current_timestamp(args),
         "DATETIME" => datetime::datetime(args),
+        "STRFTIME" => datetime::strftime(args),
         "YEAR" => datetime::year(args),
         "MONTH" => datetime::month(args),
         "DAY" => datetime::day(args),

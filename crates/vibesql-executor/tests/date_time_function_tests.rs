@@ -10,6 +10,7 @@
 //! - **precision**: Precision arguments for fractional seconds
 //! - **extraction**: YEAR, MONTH, DAY, HOUR, MINUTE, SECOND extraction
 //! - **nested_operations**: Nested and combined datetime operations
+//! - **strftime**: SQLite-compatible STRFTIME formatting
 
 mod common;
 
@@ -28,3 +29,6 @@ mod extraction;
 
 #[path = "date_time_function_tests/nested_operations.rs"]
 mod nested_operations;
+
+#[path = "date_time_function_tests/strftime.rs"]
+mod strftime;
