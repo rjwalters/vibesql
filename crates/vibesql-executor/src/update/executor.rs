@@ -314,17 +314,38 @@ pub(super) fn execute_internal(
         let constraint_validator = ConstraintValidator::new(schema);
 
         if use_ignore {
+            // Non-deterministic date/time uses in index expressions /
+            // partial-index predicates abort the statement even under
+            // OR IGNORE — SQLite raises a runtime SQL function error, not a
+            // constraint conflict, so conflict resolution does not apply
+            // (issue #5324). Runs pre-application so no mutation occurs and
+            // the lenient index-maintenance paths never see the row.
+            crate::insert::constraints::enforce_index_expression_determinism(
+                database,
+                schema,
+                table_name,
+                &new_row.values,
+            )?;
+
             // For IGNORE: try validation and skip row on any constraint violation
             let validation_result =
                 constraint_validator.validate_row(table, table_name, row_index, &new_row, &row);
-            if validation_result.is_err() {
+            if let Err(e) = validation_result {
+                // Non-deterministic date/time use in a CHECK constraint is a
+                // statement-level error, not an ignorable conflict (issue #5324).
+                if e.is_non_deterministic_use() {
+                    return Err(e);
+                }
                 continue; // Skip this row
             }
 
             // Validate user-defined UNIQUE indexes
             let unique_index_result =
                 constraint_validator.validate_unique_indexes(database, table_name, &new_row, &row);
-            if unique_index_result.is_err() {
+            if let Err(e) = unique_index_result {
+                if e.is_non_deterministic_use() {
+                    return Err(e);
+                }
                 continue; // Skip this row
             }
 
@@ -343,6 +364,18 @@ pub(super) fn execute_internal(
             // For REPLACE: validate NOT NULL and CHECK constraints, but skip PK/UNIQUE
             // since conflicting rows will be deleted
             validate_non_uniqueness_constraints(schema, table_name, &new_row)?;
+
+            // Non-deterministic date/time uses in index expressions /
+            // partial-index predicates abort the statement even under
+            // OR REPLACE — runtime SQL function error, not a resolvable
+            // conflict (issue #5324). Runs before any conflicting rows are
+            // deleted, so the statement aborts with no mutation.
+            crate::insert::constraints::enforce_index_expression_determinism(
+                database,
+                schema,
+                table_name,
+                &new_row.values,
+            )?;
 
             // Validate foreign key constraints
             if !schema.foreign_keys.is_empty() {
@@ -1273,6 +1306,18 @@ fn execute_update_from(
         let mut kept_updates: Vec<PendingUpdate> = Vec::with_capacity(updates.len());
 
         for u in updates.drain(..) {
+            // Non-deterministic date/time uses in index expressions /
+            // partial-index predicates abort the statement even under
+            // OR IGNORE — SQLite raises a runtime SQL function error, not a
+            // constraint conflict, so conflict resolution does not apply
+            // (issue #5324).
+            crate::insert::constraints::enforce_index_expression_determinism(
+                database,
+                schema,
+                table_name,
+                &u.new_row.values,
+            )?;
+
             // Per-row: try full validation including PK/UNIQUE; skip on violation.
             let validation_result = constraint_validator.validate_row(
                 table,
@@ -1281,14 +1326,22 @@ fn execute_update_from(
                 &u.new_row,
                 &u.old_row,
             );
-            if validation_result.is_err() {
+            if let Err(e) = validation_result {
+                // Non-deterministic date/time use in a CHECK constraint is a
+                // statement-level error, not an ignorable conflict (issue #5324).
+                if e.is_non_deterministic_use() {
+                    return Err(e);
+                }
                 continue;
             }
 
             // Validate user-defined UNIQUE indexes
             let unique_index_result = constraint_validator
                 .validate_unique_indexes(database, table_name, &u.new_row, &u.old_row);
-            if unique_index_result.is_err() {
+            if let Err(e) = unique_index_result {
+                if e.is_non_deterministic_use() {
+                    return Err(e);
+                }
                 continue;
             }
 
@@ -1336,6 +1389,18 @@ fn execute_update_from(
                 // NOT NULL + CHECK only (no PK/UNIQUE — those collisions get
                 // resolved by deletion).
                 validate_non_uniqueness_constraints(schema, table_name, &u.new_row)?;
+
+                // Non-deterministic date/time uses in index expressions /
+                // partial-index predicates abort the statement even under
+                // OR REPLACE — runtime SQL function error, not a resolvable
+                // conflict (issue #5324). Runs before any conflicting rows
+                // are deleted, so the statement aborts with no mutation.
+                crate::insert::constraints::enforce_index_expression_determinism(
+                    database,
+                    schema,
+                    table_name,
+                    &u.new_row.values,
+                )?;
 
                 // Foreign key constraints still apply.
                 if !schema.foreign_keys.is_empty() {

@@ -334,6 +334,138 @@ fn create_partial_index_fails_when_predicate_hits_now_row() {
 }
 
 // ============================================================================
+// UPDATE OR IGNORE / OR REPLACE conflict clauses (issue #5324)
+//
+// SQLite aborts the statement even under OR IGNORE / OR REPLACE: the
+// non-deterministic error is a runtime SQL function error, not a constraint
+// conflict, so conflict resolution does not apply. Verified with sqlite3
+// 3.51.0:
+//
+//     CREATE TABLE t2(a INT, b TEXT);
+//     CREATE INDEX i2 ON t2(date(b));
+//     INSERT INTO t2 VALUES(1,'2024-01-01');
+//     UPDATE OR IGNORE t2 SET b='now';
+//     -- Runtime error: non-deterministic use of date() in an index
+//     -- row remains b='2024-01-01'
+// ============================================================================
+
+/// Fetch column `col` of every live row in `table` as display strings.
+fn column_values(db: &Database, table: &str, col: usize) -> Vec<String> {
+    db.get_table(table)
+        .expect("table not found")
+        .scan_live()
+        .map(|(_, row)| format!("{}", row.values[col]))
+        .collect()
+}
+
+fn setup_expression_index_table(db: &mut Database) {
+    run_sql(
+        db,
+        "CREATE TABLE t2(a INT, b TEXT);
+         INSERT INTO t2 VALUES(1, '2024-01-01');
+         CREATE INDEX i2 ON t2(date(b))",
+    );
+}
+
+#[test]
+fn update_or_ignore_expression_index_now_value_rejected() {
+    let mut db = Database::new();
+    setup_expression_index_table(&mut db);
+    assert_sql_error(
+        &mut db,
+        "UPDATE OR IGNORE t2 SET b='now'",
+        "non-deterministic use of date() in an index",
+    );
+    // The statement must abort with no mutation: the row keeps its old value
+    assert_eq!(column_values(&db, "t2", 1), vec!["2024-01-01"]);
+}
+
+#[test]
+fn update_or_replace_expression_index_now_value_rejected() {
+    let mut db = Database::new();
+    setup_expression_index_table(&mut db);
+    assert_sql_error(
+        &mut db,
+        "UPDATE OR REPLACE t2 SET b='now'",
+        "non-deterministic use of date() in an index",
+    );
+    assert_eq!(column_values(&db, "t2", 1), vec!["2024-01-01"]);
+}
+
+#[test]
+fn update_or_ignore_and_or_replace_deterministic_values_still_work() {
+    let mut db = Database::new();
+    setup_expression_index_table(&mut db);
+    run_sql(&mut db, "UPDATE OR IGNORE t2 SET b='2024-02-02'");
+    assert_eq!(column_values(&db, "t2", 1), vec!["2024-02-02"]);
+    run_sql(&mut db, "UPDATE OR REPLACE t2 SET b='2024-03-03'");
+    assert_eq!(column_values(&db, "t2", 1), vec!["2024-03-03"]);
+}
+
+#[test]
+fn update_or_ignore_partial_index_predicate_now_value_rejected() {
+    // The partial-index WHERE predicate counts as an index expression
+    let mut db = Database::new();
+    run_sql(
+        &mut db,
+        "CREATE TABLE t6(a INT, b TEXT);
+         INSERT INTO t6 VALUES(1, '2024-01-01');
+         CREATE INDEX i6 ON t6(b) WHERE date(b) > '2020-01-01'",
+    );
+    assert_sql_error(
+        &mut db,
+        "UPDATE OR IGNORE t6 SET b='now'",
+        "non-deterministic use of date() in an index",
+    );
+    assert_eq!(column_values(&db, "t6", 1), vec!["2024-01-01"]);
+}
+
+#[test]
+fn update_or_ignore_check_constraint_now_value_aborts() {
+    // A non-deterministic use inside a CHECK constraint is a statement-level
+    // error under OR IGNORE, not an ignorable conflict (SQLite aborts).
+    let mut db = Database::new();
+    run_sql(
+        &mut db,
+        "CREATE TABLE t7(x, CHECK( date(x) BETWEEN '2017-07-01' AND '2017-07-31' ));
+         INSERT INTO t7(x) VALUES('2017-07-20')",
+    );
+    assert_sql_error(
+        &mut db,
+        "UPDATE OR IGNORE t7 SET x='now'",
+        "non-deterministic use of date() in a CHECK constraint",
+    );
+    assert_eq!(column_values(&db, "t7", 0), vec!["2017-07-20"]);
+}
+
+#[test]
+fn update_from_or_ignore_expression_index_now_value_rejected() {
+    // The UPDATE ... FROM dispatch path has its own IGNORE/REPLACE branches
+    let mut db = Database::new();
+    setup_expression_index_table(&mut db);
+    run_sql(&mut db, "CREATE TABLE src(a INT, v TEXT); INSERT INTO src VALUES(1, 'now')");
+    assert_sql_error(
+        &mut db,
+        "UPDATE OR IGNORE t2 SET b=src.v FROM src WHERE t2.a=src.a",
+        "non-deterministic use of date() in an index",
+    );
+    assert_eq!(column_values(&db, "t2", 1), vec!["2024-01-01"]);
+}
+
+#[test]
+fn update_from_or_replace_expression_index_now_value_rejected() {
+    let mut db = Database::new();
+    setup_expression_index_table(&mut db);
+    run_sql(&mut db, "CREATE TABLE src(a INT, v TEXT); INSERT INTO src VALUES(1, 'now')");
+    assert_sql_error(
+        &mut db,
+        "UPDATE OR REPLACE t2 SET b=src.v FROM src WHERE t2.a=src.a",
+        "non-deterministic use of date() in an index",
+    );
+    assert_eq!(column_values(&db, "t2", 1), vec!["2024-01-01"]);
+}
+
+// ============================================================================
 // 'localtime' / 'utc' modifiers from row data (date2-500..520)
 // ============================================================================
 
