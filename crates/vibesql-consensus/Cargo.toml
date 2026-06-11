@@ -25,4 +25,7 @@ tokio = { version = "1.0", features = ["sync"] }
 
 [dev-dependencies]
 tempfile = "3.19"
-tokio = { version = "1.0", features = ["rt", "macros"] }
+# `rt` also unlocks `tokio::spawn` for the in-process channel network's
+# per-node server loops (Phase A3, PR 1); `time` provides the bounded waits
+# in the multi-node cluster tests.
+tokio = { version = "1.0", features = ["rt", "macros", "time"] }
