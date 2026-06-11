@@ -94,6 +94,16 @@ impl SelectExecutor<'_> {
             let metadata = self.database.get_index(idx_name)?;
             if metadata.columns.len() == 1
                 && metadata.columns[0].expect_column_name().eq_ignore_ascii_case(pk_col)
+                // Partial indexes (CREATE INDEX ... WHERE expr) are usable only
+                // when the query WHERE clause structurally implies the index
+                // predicate: since PR #5323 the index body excludes
+                // predicate-false rows, so an ungated probe would silently
+                // drop matching rows (issue #5330).
+                && crate::optimizer::predicate_implication::partial_index_usable(
+                    self.database,
+                    idx_name,
+                    Some(where_clause),
+                )
             {
                 self.database.get_index_data(idx_name)
             } else {

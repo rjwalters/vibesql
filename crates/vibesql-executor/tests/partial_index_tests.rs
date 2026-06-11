@@ -708,3 +708,138 @@ fn like_escape_predicate_is_not_implied_by_escapeless_like() {
     let implied_sql = "SELECT id FROM t WHERE name LIKE 'x!%y' ESCAPE '!' AND id = 1";
     assert_eq!(select_first_column_ints(&db, implied_sql), vec![1]);
 }
+
+// ---------------------------------------------------------------------------
+// Ungated partial-index probes in direct-probe execution paths (issue #5330)
+//
+// These paths pick an index by inspecting metadata directly (bypassing the
+// gated planner selection in selection.rs / index_planner.rs), so each needs
+// its own `partial_index_usable` gate. Before the fix, each test below
+// silently dropped the rows that the partial-index body excludes.
+// ---------------------------------------------------------------------------
+
+/// Execute a single-row, single-column SELECT (e.g. an aggregate) and return
+/// the value as i64, accepting any integer-like representation.
+fn select_single_int(db: &Database, sql: &str) -> i64 {
+    let stmt = Parser::parse_sql(sql).expect("Failed to parse SELECT");
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let executor = vibesql_executor::SelectExecutor::new(db);
+        let rows = executor.execute(&select_stmt).expect("SELECT failed");
+        assert_eq!(rows.len(), 1, "expected exactly one result row");
+        match &rows[0].values[0] {
+            SqlValue::Integer(n) => *n,
+            SqlValue::Bigint(n) => *n,
+            SqlValue::Smallint(n) => *n as i64,
+            SqlValue::Double(n) => *n as i64,
+            SqlValue::Real(n) => *n as i64,
+            SqlValue::Float(n) => *n as i64,
+            other => panic!("expected numeric value, got {:?}", other),
+        }
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+/// PK range-scan fast path (`try_pk_range_scan_with_early_projection`): a
+/// partial single-column index on the PK column must not be probed unless the
+/// query WHERE implies the index predicate. Before the fix this query
+/// returned only the kind=1 rows (1, 3, 5) — the partial-index body excludes
+/// the rest since PR #5323.
+#[test]
+fn pk_range_scan_fast_path_skips_unusable_partial_index() {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE events (id INTEGER PRIMARY KEY, kind INTEGER);
+        INSERT INTO events VALUES (1, 1);
+        INSERT INTO events VALUES (2, 0);
+        INSERT INTO events VALUES (3, 1);
+        INSERT INTO events VALUES (4, 0);
+        INSERT INTO events VALUES (5, 1);
+        CREATE INDEX idx_kind1 ON events(id) WHERE kind = 1
+        "#,
+    );
+
+    // Sanity: the partial-index body excludes kind=0 rows.
+    assert_eq!(index_row_indices(&db, "idx_kind1"), vec![0, 2, 4]);
+
+    // The BETWEEN-on-PK shape routes through the range-scan fast path; the
+    // WHERE clause does not imply `kind = 1`, so all five rows must come back.
+    let mut ids = select_first_column_ints(&db, "SELECT id FROM events WHERE id BETWEEN 1 AND 5");
+    ids.sort_unstable();
+    assert_eq!(ids, vec![1, 2, 3, 4, 5], "range scan must not drop rows outside the partial index");
+}
+
+/// Streaming-aggregate fast path (`execute_streaming_aggregate`): same probe
+/// pattern as the range scan. Before the fix this SUM came back as 60
+/// (only the flag=1 rows 20 + 40) instead of 100.
+#[test]
+fn streaming_aggregate_fast_path_skips_unusable_partial_index() {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE metrics (id INTEGER PRIMARY KEY, val INTEGER, flag INTEGER);
+        INSERT INTO metrics VALUES (1, 10, 0);
+        INSERT INTO metrics VALUES (2, 20, 1);
+        INSERT INTO metrics VALUES (3, 30, 0);
+        INSERT INTO metrics VALUES (4, 40, 1);
+        CREATE INDEX idx_flag1 ON metrics(id) WHERE flag = 1
+        "#,
+    );
+
+    // Sanity: only flag=1 rows are in the partial-index body.
+    assert_eq!(index_row_indices(&db, "idx_flag1"), vec![1, 3]);
+
+    let sum = select_single_int(&db, "SELECT SUM(val) FROM metrics WHERE id BETWEEN 1 AND 4");
+    assert_eq!(sum, 100, "streaming aggregate must not drop rows outside the partial index");
+
+    let count = select_single_int(&db, "SELECT COUNT(val) FROM metrics WHERE id BETWEEN 1 AND 4");
+    assert_eq!(count, 4, "streaming COUNT must see all rows in the PK range");
+}
+
+/// INL prefix-scan semi-join (`try_prefix_scan_semi_join`): a partial index
+/// whose first column matches the join key must not be probed unless the
+/// right-side filters imply the index predicate. This is the realistic shape
+/// (e.g. `CREATE INDEX ... ON orders(customer_id) WHERE status = 1`). Before
+/// the fix, customer 1 — whose only order has status=0 and is therefore
+/// absent from the index body — was silently dropped from the IN result.
+#[test]
+fn inl_semi_join_skips_partial_index_without_implying_filters() {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE customers (id INTEGER PRIMARY KEY);
+        INSERT INTO customers VALUES (1);
+        INSERT INTO customers VALUES (2);
+        INSERT INTO customers VALUES (3);
+        CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER, status INTEGER);
+        INSERT INTO orders VALUES (1, 1, 0);
+        INSERT INTO orders VALUES (2, 2, 1);
+        CREATE INDEX idx_open ON orders(customer_id) WHERE status = 1
+        "#,
+    );
+
+    // Sanity: only the status=1 order is in the partial-index body.
+    assert_eq!(index_row_indices(&db, "idx_open"), vec![1]);
+
+    // No status filter in the subquery -> nothing implies the index
+    // predicate -> the partial index must be skipped. Customers 1 and 2 both
+    // have orders; customer 3 has none.
+    let mut ids = select_first_column_ints(
+        &db,
+        "SELECT id FROM customers WHERE id IN (SELECT customer_id FROM orders)",
+    );
+    ids.sort_unstable();
+    assert_eq!(ids, vec![1, 2], "semi join must not drop matches outside the partial index");
+
+    // With the implying filter the result must narrow to customer 2 —
+    // correct whether or not the partial index is selected.
+    let ids_open = select_first_column_ints(
+        &db,
+        "SELECT id FROM customers WHERE id IN (SELECT customer_id FROM orders WHERE status = 1)",
+    );
+    assert_eq!(ids_open, vec![2]);
+}

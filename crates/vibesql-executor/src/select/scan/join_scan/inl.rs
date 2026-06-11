@@ -235,6 +235,23 @@ pub(super) fn try_prefix_scan_semi_join(
         if let Some(idx_metadata) = database.get_index(index_name) {
             if let Some(first_col) = idx_metadata.columns.first() {
                 if first_col.expect_column_name().to_lowercase() == right_col_upper {
+                    // Partial indexes (CREATE INDEX ... WHERE expr) are usable
+                    // only when the right-side filters structurally imply the
+                    // index predicate: since PR #5323 the index body excludes
+                    // predicate-false rows, so an ungated probe would silently
+                    // drop semi-join matches (issue #5330). The right-side
+                    // filters are sound implication context because every
+                    // probed row is post-filtered with them below — a row
+                    // missing from the index body fails the (implied) filters
+                    // and could never have produced a match anyway. With no
+                    // right-side filters, partial indexes are skipped outright.
+                    if !crate::optimizer::predicate_implication::partial_index_usable(
+                        database,
+                        index_name,
+                        right_filters.as_ref(),
+                    ) {
+                        continue;
+                    }
                     usable_index_name = Some(index_name.clone());
                     break;
                 }
