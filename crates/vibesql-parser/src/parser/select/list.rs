@@ -69,12 +69,17 @@ impl Parser {
     pub(crate) fn parse_select_item(&mut self) -> Result<vibesql_ast::SelectItem, ParseError> {
         // Check for qualified wildcard (table.* or alias.*)
         let saved_position = self.position;
-        let qualifier = if let Token::Identifier(ref qualifier)
-        | Token::DelimitedIdentifier(ref qualifier) = self.peek()
-        {
-            Some(qualifier.clone())
-        } else {
-            None
+        let qualifier = match self.peek() {
+            Token::Identifier(ref qualifier) | Token::DelimitedIdentifier(ref qualifier) => {
+                Some(qualifier.clone())
+            }
+            // Allow contextual keywords (M, YEAR, WINDOW, ...) as wildcard qualifiers,
+            // matching the keyword-as-identifier handling in parse_identifier_expression.
+            // SQL:1999 normalizes unquoted identifiers to lowercase.
+            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                Some(format!("{}", kw).to_lowercase())
+            }
+            _ => None,
         };
 
         if let Some(qualifier) = qualifier {
