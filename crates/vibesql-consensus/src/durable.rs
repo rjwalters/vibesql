@@ -48,17 +48,39 @@
 //!   are acknowledged only once durable.
 //! - `truncate` / `purge` / `save_committed` fsync before returning.
 //!
-//! ## Torn-write tolerance
+//! ## Torn-tail tolerance vs. mid-file corruption
 //!
 //! On open, replay stops at the first record whose frame is incomplete or
-//! whose CRC does not match, and the file is physically truncated back to the
-//! end of the last valid record (same recovery rule as
-//! `vibesql-storage::wal::reader::find_recovery_point`). A partially written
-//! trailing record is therefore discarded, not an error. A torn *header*
-//! (file shorter than 32 bytes) means creation itself crashed before any
-//! record could exist, so the file is reinitialized. A CRC-valid record that
-//! fails to deserialize, or a wrong magic, is real corruption and *is* an
-//! error.
+//! whose CRC does not match. What happens next follows etcd's WAL repair
+//! rule: **repair (truncation) is only permitted at the tail.**
+//!
+//! - **Torn tail** — no complete, CRC-valid record exists anywhere after the
+//!   invalid frame. Appends are sequential and every batch is fsynced before
+//!   the next write begins, so only the final (possibly never-acknowledged)
+//!   batch can be in this state. The tail is physically truncated back to the
+//!   end of the last valid record and the open succeeds — same recovery rule
+//!   as `vibesql-storage::wal::reader::find_recovery_point`.
+//! - **Mid-file corruption** — at least one complete, CRC-valid record
+//!   follows the invalid frame ([`scan_for_valid_frame`]). The damage then
+//!   sits inside the fsynced prefix; truncating there would silently drop
+//!   entries already acknowledged via [`LogFlushed`] and roll back the
+//!   fsynced vote (an election-safety violation once peers exist), while
+//!   also destroying the forensic evidence. `open` instead fails loudly with
+//!   an `InvalidData` error and leaves the file byte-for-byte untouched so an
+//!   operator can intervene (post-A4, such a node can heal via snapshot).
+//!
+//! Boundary case: corruption confined to the *last* complete record is
+//! indistinguishable from a torn write of that record at frame granularity
+//! (nothing valid follows in either case), so it is treated as a torn tail.
+//! That drops at most one record — possibly an acknowledged one — but the
+//! alternative (erroring whenever the invalid region could hold a whole
+//! frame) would reject every genuine torn tail longer than 8 bytes and
+//! destroy ordinary crash tolerance. etcd's WAL makes the same trade.
+//!
+//! A torn *header* (file shorter than 32 bytes) means creation itself
+//! crashed before any record could exist, so the file is reinitialized. A
+//! CRC-valid record that fails to deserialize, or a wrong magic, is real
+//! corruption and *is* an error.
 //!
 //! [`OpenraftBackend`]: crate::OpenraftBackend
 
@@ -201,7 +223,12 @@ struct RaftLogFile {
 
 impl RaftLogFile {
     /// Open (or create) the log file at `path`, replaying all valid records
-    /// into a fresh [`RaftLogImage`] and truncating any torn tail.
+    /// into a fresh [`RaftLogImage`].
+    ///
+    /// A torn tail (invalid frame with nothing valid after it) is physically
+    /// truncated. Mid-file corruption (invalid frame with a valid record
+    /// somewhere after it) is an error and leaves the file untouched — see
+    /// the module docs for the rationale (etcd's tail-only repair rule).
     fn open(path: &Path) -> io::Result<(Self, RaftLogImage)> {
         let mut file =
             OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
@@ -223,9 +250,25 @@ impl RaftLogFile {
         } else {
             validate_header(&buf)?;
             let valid_end = replay_records(&buf, &mut image)?;
-            if (valid_end as u64) < buf.len() as u64 {
-                // Torn trailing record: discard it so future appends start
-                // from a clean boundary.
+            if valid_end < buf.len() {
+                // Replay stopped at an invalid frame. Truncation is only
+                // legitimate if this is the tail: if any complete, CRC-valid
+                // record exists after the invalid frame, the damage is in the
+                // fsynced prefix and silently truncating would drop
+                // acknowledged entries and roll back the fsynced vote.
+                if let Some(later) = scan_for_valid_frame(&buf, valid_end + 1) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "raft log mid-file corruption: invalid record frame at offset \
+                             {valid_end}, but a valid record follows at offset {later}; \
+                             refusing to truncate acknowledged state — the file has been \
+                             left untouched for inspection"
+                        ),
+                    ));
+                }
+                // True torn tail: discard it so future appends start from a
+                // clean boundary.
                 file.set_len(valid_end as u64)?;
                 file.sync_data()?;
             }
@@ -285,9 +328,10 @@ fn validate_header(buf: &[u8]) -> io::Result<()> {
 /// Replay all valid records from `buf` into `image`.
 ///
 /// Returns the byte offset just past the last valid record. Stops (without
-/// error) at the first incomplete frame or CRC mismatch — the torn-tail
-/// recovery rule. A CRC-valid record that fails to deserialize is real
-/// corruption and returns an error.
+/// error) at the first incomplete frame or CRC mismatch; the *caller*
+/// decides whether that is a tolerable torn tail or mid-file corruption (via
+/// [`scan_for_valid_frame`]). A CRC-valid record that fails to deserialize
+/// is real corruption and returns an error.
 fn replay_records(buf: &[u8], image: &mut RaftLogImage) -> io::Result<usize> {
     let mut offset = RAFT_LOG_HEADER_SIZE;
     while offset < buf.len() {
@@ -317,6 +361,43 @@ fn replay_records(buf: &[u8], image: &mut RaftLogImage) -> io::Result<usize> {
         offset = data_end;
     }
     Ok(offset)
+}
+
+/// Scan `buf[from..]` byte-by-byte for any complete, CRC-valid, decodable
+/// record frame, returning the offset of the first one found.
+///
+/// Used by [`RaftLogFile::open`] to distinguish a torn tail (no valid record
+/// after the invalid frame → truncation is safe) from mid-file corruption
+/// (a valid record follows → truncating would destroy acknowledged state).
+///
+/// The scan advances one **byte** at a time rather than jumping frame
+/// boundaries, because the corruption may be in the invalid frame's *length
+/// field* — in that case the next frame boundary is unknowable, and only a
+/// byte-forward scan can find the genuine record that starts right after the
+/// corrupted frame's real extent. A candidate counts only if its length fits
+/// inside the buffer, its CRC validates over the following bytes, *and* it
+/// deserializes as a [`LogRecord`]; a random 8-byte window passing all three
+/// is astronomically unlikely, and even a false positive errs in the safe
+/// direction (refuse to open, operator inspects) rather than silently
+/// truncating. The scan only runs on the already-exceptional invalid-frame
+/// path, so its O(file bytes) cost is irrelevant.
+fn scan_for_valid_frame(buf: &[u8], from: usize) -> Option<usize> {
+    let mut offset = from;
+    while offset + RECORD_FRAME_SIZE <= buf.len() {
+        let len =
+            u32::from_le_bytes(buf[offset..offset + 4].try_into().expect("4-byte slice")) as usize;
+        let data_start = offset + RECORD_FRAME_SIZE;
+        if let Some(data_end) = data_start.checked_add(len).filter(|&end| end <= buf.len()) {
+            let crc =
+                u32::from_le_bytes(buf[offset + 4..offset + 8].try_into().expect("4-byte slice"));
+            let data = &buf[data_start..data_end];
+            if crc32(data) == crc && serde_json::from_slice::<LogRecord>(data).is_ok() {
+                return Some(offset);
+            }
+        }
+        offset += 1;
+    }
+    None
 }
 
 /// fsync the directory containing `path` so the file's creation itself is
@@ -671,6 +752,13 @@ mod tests {
         assert_eq!(entry_indices(&store), vec![1]);
     }
 
+    /// Boundary case: corruption in the LAST complete frame, with nothing
+    /// valid after it, is indistinguishable from a torn write of that frame
+    /// at frame granularity — so it falls under the torn-tail rule (truncate
+    /// and open) rather than the mid-file rule (refuse). This drops at most
+    /// that one final record; see the module docs for why the alternative
+    /// (erroring whenever the invalid region could hold a frame) would
+    /// reject every genuine torn tail and destroy ordinary crash tolerance.
     #[test]
     fn corrupt_checksum_truncates_the_tail() {
         let dir = TempDir::new().unwrap();
@@ -688,6 +776,89 @@ mod tests {
 
         let store = DurableLogStore::open(dir.path()).unwrap();
         assert_eq!(entry_indices(&store), vec![1]);
+    }
+
+    /// Byte offsets of every complete record frame in `buf`, in order.
+    fn record_offsets(buf: &[u8]) -> Vec<usize> {
+        let mut offsets = Vec::new();
+        let mut offset = RAFT_LOG_HEADER_SIZE;
+        while offset < buf.len() {
+            offsets.push(offset);
+            let len = u32::from_le_bytes(buf[offset..offset + 4].try_into().unwrap()) as usize;
+            offset += RECORD_FRAME_SIZE + len;
+        }
+        offsets
+    }
+
+    /// The reproduction from the PR #5357 judge review: 5 fsync-acknowledged
+    /// entries plus a fsynced `Vote(term 7)` and `Committed(5)`, then a
+    /// single bit flip inside **entry 2's** data. Valid records follow the
+    /// damaged frame, so this is mid-file corruption, not a torn tail: open
+    /// must refuse (no silent rollback of acknowledged entries or of the
+    /// vote) and must not truncate a single byte (forensic evidence).
+    #[test]
+    fn mid_file_corruption_is_rejected_and_file_untouched() {
+        let dir = TempDir::new().unwrap();
+        {
+            let store = DurableLogStore::open(dir.path()).unwrap();
+            store.append_entries((1..=5).map(|i| entry(1, i, b"payload")).collect()).unwrap();
+            store.append_and_apply(LogRecord::Vote(Vote::new(7, 1))).unwrap();
+            store
+                .append_and_apply(LogRecord::Committed(Some(LogId::new(
+                    CommittedLeaderId::new(1, 1),
+                    5,
+                ))))
+                .unwrap();
+        }
+
+        let path = log_file_path(&dir);
+        let mut buf = std::fs::read(&path).unwrap();
+        let len_before = buf.len() as u64;
+        // Flip one byte inside entry 2's data.
+        let frame2 = record_offsets(&buf)[1];
+        buf[frame2 + RECORD_FRAME_SIZE + 2] ^= 0xFF;
+        std::fs::write(&path, &buf).unwrap();
+
+        let err = DurableLogStore::open(dir.path()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("mid-file corruption"), "unexpected error: {err}");
+        // The file was left byte-for-byte untouched: nothing truncated.
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), len_before);
+
+        // The refusal is stable: a second open attempt fails the same way.
+        let err = DurableLogStore::open(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("mid-file corruption"), "unexpected error: {err}");
+    }
+
+    /// Corruption in a middle frame's LENGTH field — the nastiest case,
+    /// because the next frame boundary becomes unknowable from the frame
+    /// itself. The byte-forward scan still finds the genuine records that
+    /// follow, so both an out-of-bounds corrupted length (`u32::MAX`) and a
+    /// plausible in-bounds one (`1`, which misaligns the CRC check) are
+    /// detected as mid-file corruption rather than a torn tail.
+    #[test]
+    fn mid_file_corruption_in_length_field_is_rejected() {
+        for corrupt_len in [u32::MAX, 1u32] {
+            let dir = TempDir::new().unwrap();
+            {
+                let store = DurableLogStore::open(dir.path()).unwrap();
+                store.append_entries((1..=5).map(|i| entry(1, i, b"payload")).collect()).unwrap();
+            }
+
+            let path = log_file_path(&dir);
+            let mut buf = std::fs::read(&path).unwrap();
+            let len_before = buf.len() as u64;
+            let frame2 = record_offsets(&buf)[1];
+            buf[frame2..frame2 + 4].copy_from_slice(&corrupt_len.to_le_bytes());
+            std::fs::write(&path, &buf).unwrap();
+
+            let err = DurableLogStore::open(dir.path()).unwrap_err();
+            assert!(
+                err.to_string().contains("mid-file corruption"),
+                "len={corrupt_len}: unexpected error: {err}"
+            );
+            assert_eq!(std::fs::metadata(&path).unwrap().len(), len_before);
+        }
     }
 
     #[test]
