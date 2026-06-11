@@ -244,19 +244,16 @@ impl<'a> IndexPlanner<'a> {
 
         for index_name in &indexes {
             if let Some(index_metadata) = self.database.get_index(index_name) {
-                // Skip partial indexes (CREATE INDEX ... WHERE expr): without
-                // a predicate-implication checker, we can't guarantee the
-                // partial index covers every row the skip-scan path would
-                // expect. Mirrors the conservative exclusion in
-                // `select::scan::index_scan::selection`. The partial flag is
-                // stored on the catalog-side IndexMetadata.
-                if self
-                    .database
-                    .catalog
-                    .find_index_by_name(index_name)
-                    .map(|m| m.is_partial())
-                    .unwrap_or(false)
-                {
+                // Partial indexes (CREATE INDEX ... WHERE expr) are usable
+                // only when the query WHERE clause structurally implies the
+                // index predicate. Mirrors the gate in
+                // `select::scan::index_scan::selection`. The partial
+                // predicate is stored on the catalog-side IndexMetadata.
+                if !crate::optimizer::predicate_implication::partial_index_usable(
+                    self.database,
+                    index_name,
+                    Some(where_clause),
+                ) {
                     continue;
                 }
 
@@ -497,16 +494,15 @@ impl<'a> IndexPlanner<'a> {
             None => return false,
         };
 
-        // Conservative exclusion of partial indexes from query selection.
-        // See `select::scan::index_scan::selection` for the rationale. The
-        // partial flag is stored on the catalog-side IndexMetadata.
-        if self
-            .database
-            .catalog
-            .find_index_by_name(index_name)
-            .map(|m| m.is_partial())
-            .unwrap_or(false)
-        {
+        // Partial indexes are usable only when the query WHERE clause
+        // structurally implies the index predicate. See
+        // `select::scan::index_scan::selection` for the rationale. The
+        // partial predicate is stored on the catalog-side IndexMetadata.
+        if !crate::optimizer::predicate_implication::partial_index_usable(
+            self.database,
+            index_name,
+            where_clause,
+        ) {
             return false;
         }
 

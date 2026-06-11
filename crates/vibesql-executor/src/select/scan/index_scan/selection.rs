@@ -121,21 +121,20 @@ pub(crate) fn should_use_index_scan(
 
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
-            // Skip partial indexes (CREATE INDEX ... WHERE expr): they only
-            // cover the subset of rows for which the predicate evaluates to
-            // TRUE. We don't yet have a predicate-implication checker to
-            // prove the query's WHERE clause restricts the scan to the
-            // index's covered rows, so using a partial index could silently
-            // return wrong rows. Conservative exclusion is safe and keeps
-            // the FK-mismatch fix from costing query correctness. The
-            // partial flag lives on the catalog-side `IndexMetadata` (the
-            // storage struct does not yet carry it).
-            if database
-                .catalog
-                .find_index_by_name(index_name)
-                .map(|m| m.is_partial())
-                .unwrap_or(false)
-            {
+            // Partial indexes (CREATE INDEX ... WHERE expr) only cover the
+            // subset of rows for which the predicate evaluates to TRUE. They
+            // are usable only when the query's WHERE clause structurally
+            // implies the index predicate (every index-predicate conjunct
+            // appears among the query's top-level AND conjuncts). The full
+            // WHERE clause is re-applied as a post-filter in
+            // execute_index_scan(), so an over-inclusive index body cannot
+            // produce wrong rows. The partial predicate lives on the
+            // catalog-side `IndexMetadata`.
+            if !crate::optimizer::predicate_implication::partial_index_usable(
+                database,
+                index_name,
+                where_clause,
+            ) {
                 continue;
             }
 
@@ -656,15 +655,14 @@ pub(crate) fn needs_temp_btree_for_order_by_eqp(
     let indexes = database.list_indexes_for_table(table_name);
     for index_name in &indexes {
         let Some(index_metadata) = database.get_index(index_name) else { continue };
-        // Skip partial indexes from EQP exemption — until the planner can
-        // prove the query predicate implies the index predicate, a partial
-        // index can't be relied on to satisfy ORDER BY.
-        if database
-            .catalog
-            .find_index_by_name(index_name)
-            .map(|m| m.is_partial())
-            .unwrap_or(false)
-        {
+        // Partial indexes participate in the EQP exemption only when the
+        // query's WHERE clause structurally implies the index predicate —
+        // otherwise the index cannot be relied on to satisfy ORDER BY.
+        if !crate::optimizer::predicate_implication::partial_index_usable(
+            database,
+            index_name,
+            where_clause,
+        ) {
             continue;
         }
         if index_metadata.columns.is_empty() {
@@ -1050,18 +1048,17 @@ pub(crate) fn cost_based_index_selection(
 
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
-            // Skip partial indexes — see `should_use_index_scan` for rationale.
-            // Until a predicate-implication checker exists, picking a partial
-            // index could return incomplete results.
-            if database
-                .catalog
-                .find_index_by_name(index_name)
-                .map(|m| m.is_partial())
-                .unwrap_or(false)
-            {
+            // Partial indexes are usable only when the query WHERE clause
+            // structurally implies the index predicate — see
+            // `should_use_index_scan` for the full rationale.
+            if !crate::optimizer::predicate_implication::partial_index_usable(
+                database,
+                index_name,
+                where_clause,
+            ) {
                 if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
                     eprintln!(
-                        "[INDEX_SELECT] skipping {} - partial index (WHERE clause)",
+                        "[INDEX_SELECT] skipping {} - partial index predicate not implied by query WHERE",
                         index_name
                     );
                 }

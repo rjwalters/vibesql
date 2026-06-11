@@ -514,3 +514,197 @@ fn partial_index_body_empty_after_compaction_removes_all_truthy_rows() {
     let table = db.get_table("orders").expect("table missing");
     assert_eq!(table.row_count(), 4);
 }
+
+// ---------------------------------------------------------------------------
+// Planner selection of partial indexes via structural predicate implication
+// (issue #5325; v1 covers non-expression partial indexes only — expression
+// ones are excluded until the probe bug #5333 is fixed)
+// ---------------------------------------------------------------------------
+
+/// Run EXPLAIN QUERY PLAN and return the text output.
+fn explain_query_plan(db: &Database, sql: &str) -> String {
+    let explain_sql = format!("EXPLAIN QUERY PLAN {}", sql);
+    let stmt = Parser::parse_sql(&explain_sql).expect("Failed to parse EXPLAIN QUERY PLAN");
+    if let vibesql_ast::Statement::Explain(explain_stmt) = stmt {
+        vibesql_executor::ExplainExecutor::execute(&explain_stmt, db)
+            .expect("EXPLAIN QUERY PLAN failed")
+            .to_text()
+    } else {
+        panic!("Expected EXPLAIN statement");
+    }
+}
+
+/// Execute a SELECT and return the first column of each row as integers.
+fn select_first_column_ints(db: &Database, sql: &str) -> Vec<i64> {
+    let stmt = Parser::parse_sql(sql).expect("Failed to parse SELECT");
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let executor = vibesql_executor::SelectExecutor::new(db);
+        let rows = executor.execute(&select_stmt).expect("SELECT failed");
+        rows.iter()
+            .map(|row| match &row.values[0] {
+                SqlValue::Integer(i) => *i,
+                other => panic!("expected integer, got {:?}", other),
+            })
+            .collect()
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+/// date2-330/331 shape: partial EXPRESSION indexes are excluded from planner
+/// selection (v1, issue #5333) even when the query WHERE contains the index
+/// predicate verbatim as a conjunct. The expression-index equality/BETWEEN
+/// probe machinery compares Timestamp keys against string bounds incorrectly
+/// and returns 0 rows — with `t3b1` selected this exact query returns `{}`
+/// instead of `{1, 2}` (silent row loss; the WHERE post-filter can only
+/// narrow an empty probe result, never widen it). So the plan must be a full
+/// scan AND the rows must be correct. When #5333 fixes the probes, flip the
+/// plan assertion back to expecting `USING INDEX t3b1` and keep the row
+/// assertion — the rows are the real guard.
+#[test]
+fn planner_excludes_partial_expression_index_from_selection() {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE t3 (a INTEGER PRIMARY KEY, b REAL);
+        INSERT INTO t3 VALUES (1, 2457939.5);
+        INSERT INTO t3 VALUES (2, 2457940.5);
+        INSERT INTO t3 VALUES (3, 2457950.5);
+        CREATE INDEX t3b1 ON t3(datetime(b)) WHERE typeof(b)='real'
+        "#,
+    );
+
+    let sql = "SELECT a FROM t3 WHERE typeof(b)='real' \
+               AND datetime(b) BETWEEN '2017-07-04' AND '2017-07-08'";
+
+    let plan = explain_query_plan(&db, sql);
+    assert!(
+        !plan.contains("t3b1"),
+        "partial expression index must be excluded from selection until #5333, got:\n{}",
+        plan
+    );
+
+    // Row correctness is the point: 2457939.5 = 2017-07-05, 2457940.5 =
+    // 2017-07-06 (in range); 2457950.5 = 2017-07-16 (out of range).
+    let mut rows = select_first_column_ints(&db, sql);
+    rows.sort_unstable();
+    assert_eq!(rows, vec![1, 2], "query must return correct rows via full scan");
+}
+
+/// Without the typeof(b)='real' conjunct the implication fails and the
+/// partial index must NOT be selected.
+#[test]
+fn planner_skips_partial_expression_index_when_predicate_not_implied() {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE t3 (a INTEGER PRIMARY KEY, b REAL);
+        INSERT INTO t3 VALUES (1, 2457939.5);
+        CREATE INDEX t3b1 ON t3(datetime(b)) WHERE typeof(b)='real'
+        "#,
+    );
+
+    let plan = explain_query_plan(
+        &db,
+        "SELECT a FROM t3 WHERE datetime(b) BETWEEN '2017-07-04' AND '2017-07-08'",
+    );
+    assert!(
+        !plan.contains("t3b1"),
+        "partial index must not be selected without an implying WHERE conjunct, got:\n{}",
+        plan
+    );
+
+    // OR at top level must not imply either.
+    let plan_or = explain_query_plan(
+        &db,
+        "SELECT a FROM t3 WHERE typeof(b)='real' OR datetime(b) > '2017-07-04'",
+    );
+    assert!(
+        !plan_or.contains("t3b1"),
+        "top-level OR must not imply the index predicate, got:\n{}",
+        plan_or
+    );
+}
+
+/// Partial NON-expression indexes get the same treatment: selected when the
+/// query repeats the predicate conjunct, skipped otherwise. Results must be
+/// identical either way (full WHERE is re-applied as a post-filter).
+#[test]
+fn planner_selects_partial_non_expression_index_when_predicate_implied() {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE orders (id INTEGER PRIMARY KEY, status INTEGER, sku INTEGER);
+        INSERT INTO orders VALUES (1, 0, 100);
+        INSERT INTO orders VALUES (2, 1, 200);
+        INSERT INTO orders VALUES (3, 1, 300);
+        INSERT INTO orders VALUES (4, 0, 300);
+        CREATE INDEX idx_open_sku ON orders(sku) WHERE status = 1
+        "#,
+    );
+
+    // Implied: predicate conjunct repeated in the query WHERE.
+    let implied_sql = "SELECT id FROM orders WHERE status = 1 AND sku = 300";
+    let plan = explain_query_plan(&db, implied_sql);
+    assert!(
+        plan.contains("USING INDEX idx_open_sku"),
+        "partial non-expression index must be selected when implied, got:\n{}",
+        plan
+    );
+    assert_eq!(select_first_column_ints(&db, implied_sql), vec![3]);
+
+    // Not implied: same filter column but no status conjunct.
+    let not_implied_sql = "SELECT id FROM orders WHERE sku = 300";
+    let plan = explain_query_plan(&db, not_implied_sql);
+    assert!(
+        !plan.contains("idx_open_sku"),
+        "partial index must not be selected without the status conjunct, got:\n{}",
+        plan
+    );
+    let mut ids = select_first_column_ints(&db, not_implied_sql);
+    ids.sort_unstable();
+    assert_eq!(ids, vec![3, 4]);
+}
+
+/// Regression (PR #5331 review): `LIKE 'x!%y' ESCAPE '!'` matches only the
+/// literal 'x%y', while `LIKE 'x!%y'` matches 'x!…y'. ExpressionHasher does
+/// not hash the `escape` field, so a hash-only implication check falsely
+/// claimed the escape-less query LIKE implied the index predicate, selected
+/// the partial index, and silently dropped row 2 (which is not in the index
+/// body). Structural equality must reject the implication and return the
+/// correct rows via a full scan.
+#[test]
+fn like_escape_predicate_is_not_implied_by_escapeless_like() {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT);
+        INSERT INTO t VALUES (1, 'x%y');
+        INSERT INTO t VALUES (2, 'x!zzy');
+        CREATE INDEX idx_name ON t(name) WHERE name LIKE 'x!%y' ESCAPE '!'
+        "#,
+    );
+
+    // Index body contains only row 1 ('x%y' is the sole escaped-LIKE match).
+    assert_eq!(index_row_indices(&db, "idx_name"), vec![0]);
+
+    // The escape-less LIKE matches both rows; the extra equality conjunct
+    // narrows it to row 2 — which is NOT in the partial index body.
+    let sql = "SELECT id FROM t WHERE name LIKE 'x!%y' AND name = 'x!zzy'";
+    let plan = explain_query_plan(&db, sql);
+    assert!(
+        !plan.contains("idx_name"),
+        "escape-less LIKE must not imply the LIKE ... ESCAPE index predicate, got:\n{}",
+        plan
+    );
+    assert_eq!(select_first_column_ints(&db, sql), vec![2]);
+
+    // Sanity: the structurally identical LIKE ... ESCAPE conjunct still
+    // implies the predicate, and returns the right row.
+    let implied_sql = "SELECT id FROM t WHERE name LIKE 'x!%y' ESCAPE '!' AND id = 1";
+    assert_eq!(select_first_column_ints(&db, implied_sql), vec![1]);
+}
