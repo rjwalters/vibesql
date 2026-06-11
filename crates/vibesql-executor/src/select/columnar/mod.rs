@@ -373,252 +373,39 @@ pub fn fast_aggregate_on_rows(
 }
 
 /// Evaluate a column predicate against a row
+///
+/// Delegates to the canonical comparator in `filter::evaluation`. Issue
+/// #5335: this module previously carried a near-duplicate `compare_values`
+/// whose incomparable-types catch-all returned `Ordering::Equal`, turning
+/// equality/range predicates on temporal columns into tautologies or
+/// contradictions. Routing through the filter module keeps a single source
+/// of truth for predicate comparison semantics.
 fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
-    match predicate {
-        ColumnPredicate::LessThan { column_idx, value } => row
-            .get(*column_idx)
-            .map(|v| compare_values(v, value) == std::cmp::Ordering::Less)
-            .unwrap_or(false),
-        ColumnPredicate::LessThanOrEqual { column_idx, value } => row
-            .get(*column_idx)
-            .map(|v| compare_values(v, value) != std::cmp::Ordering::Greater)
-            .unwrap_or(false),
-        ColumnPredicate::GreaterThan { column_idx, value } => row
-            .get(*column_idx)
-            .map(|v| compare_values(v, value) == std::cmp::Ordering::Greater)
-            .unwrap_or(false),
-        ColumnPredicate::GreaterThanOrEqual { column_idx, value } => row
-            .get(*column_idx)
-            .map(|v| compare_values(v, value) != std::cmp::Ordering::Less)
-            .unwrap_or(false),
-        ColumnPredicate::Equal { column_idx, value } => row
-            .get(*column_idx)
-            .map(|v| compare_values(v, value) == std::cmp::Ordering::Equal)
-            .unwrap_or(false),
-        ColumnPredicate::NotEqual { column_idx, value } => row
-            .get(*column_idx)
-            .map(|v| compare_values(v, value) != std::cmp::Ordering::Equal)
-            .unwrap_or(false),
-        ColumnPredicate::Between { column_idx, low, high } => row
-            .get(*column_idx)
-            .map(|v| {
-                compare_values(v, low) != std::cmp::Ordering::Less
-                    && compare_values(v, high) != std::cmp::Ordering::Greater
-            })
-            .unwrap_or(false),
-        ColumnPredicate::Like { column_idx, pattern, negated, case_sensitive, escape } => {
-            // LIKE pattern matching using the proper evaluator
-            let matches = row
-                .get(*column_idx)
-                .map(|v| {
-                    let text: std::borrow::Cow<str> = match v {
-                        SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                            std::borrow::Cow::Borrowed(s.as_str())
-                        }
-                        SqlValue::Integer(i) => std::borrow::Cow::Owned(i.to_string()),
-                        SqlValue::Bigint(i) => std::borrow::Cow::Owned(i.to_string()),
-                        SqlValue::Float(f) => std::borrow::Cow::Owned(f.to_string()),
-                        SqlValue::Double(f) => std::borrow::Cow::Owned(f.to_string()),
-                        SqlValue::Real(f) => std::borrow::Cow::Owned(f.to_string()),
-                        SqlValue::Blob(b) => String::from_utf8_lossy(b),
-                        _ => return false,
-                    };
-                    crate::evaluator::pattern::like_match(
-                        &text,
-                        pattern,
-                        *case_sensitive,
-                        *escape,
-                    )
-                })
-                .unwrap_or(false);
-            if *negated {
-                !matches
-            } else {
-                matches
-            }
-        }
-        ColumnPredicate::InList { column_idx, values, negated, use_strict_type_ordering } => {
-            // Check if column value matches any value in the list
-            let matches = row
-                .get(*column_idx)
-                .map(|v| {
-                    values.iter().any(|list_val| {
-                        if *use_strict_type_ordering {
-                            // Use strict type ordering - no coercion
-                            strict_type_equal(v, list_val)
-                        } else {
-                            compare_values(v, list_val) == std::cmp::Ordering::Equal
-                        }
-                    })
-                })
-                .unwrap_or(false);
-            if *negated {
-                !matches
-            } else {
-                matches
-            }
-        }
-        ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } => {
-            // Column-to-column comparison
-            let left_val = row.get(*left_column_idx);
-            let right_val = row.get(*right_column_idx);
-            match (left_val, right_val) {
-                (Some(l), Some(r)) => {
-                    use std::cmp::Ordering;
-                    let cmp = compare_values(l, r);
-                    match op {
-                        filter::CompareOp::LessThan => cmp == Ordering::Less,
-                        filter::CompareOp::GreaterThan => cmp == Ordering::Greater,
-                        filter::CompareOp::LessThanOrEqual => cmp != Ordering::Greater,
-                        filter::CompareOp::GreaterThanOrEqual => cmp != Ordering::Less,
-                        filter::CompareOp::Equal => cmp == Ordering::Equal,
-                        filter::CompareOp::NotEqual => cmp != Ordering::Equal,
-                    }
-                }
-                _ => false, // NULL comparison returns false
-            }
-        }
-    }
-}
-
-/// Compare two SqlValues
-fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
-
-    match (a, b) {
-        (SqlValue::Integer(a), SqlValue::Integer(b)) => a.cmp(b),
-        (SqlValue::Bigint(a), SqlValue::Bigint(b)) => a.cmp(b),
-        (SqlValue::Double(a), SqlValue::Double(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
-        (SqlValue::Float(a), SqlValue::Float(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
-        // Cross-type comparisons
-        (SqlValue::Integer(a), SqlValue::Double(b)) => {
-            (*a as f64).partial_cmp(b).unwrap_or(Ordering::Equal)
-        }
-        (SqlValue::Double(a), SqlValue::Integer(b)) => {
-            a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
-        }
-        (SqlValue::Integer(a), SqlValue::Bigint(b)) => (*a).cmp(b),
-        (SqlValue::Bigint(a), SqlValue::Integer(b)) => a.cmp(&{ *b }),
-        // String comparisons
-        (SqlValue::Varchar(a), SqlValue::Varchar(b)) => a.cmp(b),
-        // Date comparisons
-        (SqlValue::Date(a), SqlValue::Date(b)) => {
-            // Compare year, month, day
-            match a.year.cmp(&b.year) {
-                Ordering::Equal => match a.month.cmp(&b.month) {
-                    Ordering::Equal => a.day.cmp(&b.day),
-                    other => other,
-                },
-                other => other,
-            }
-        }
-        // NULL handling
-        (SqlValue::Null, _) | (_, SqlValue::Null) => Ordering::Equal, /* NULL comparisons are */
-        // undefined
-        _ => Ordering::Equal, // Incompatible types
-    }
-}
-
-/// Strict equality comparison without string-to-number coercion
-///
-/// Returns true if both values can be considered equal WITHOUT coercing
-/// string values to numbers. This is used for columns with NONE or INTEGER
-/// affinity in IN expressions, where string values should NOT be coerced.
-///
-/// Numeric types (Integer, Float, Real, Double, etc.) can still be compared
-/// with each other since they're all in the same storage class.
-fn strict_type_equal(a: &SqlValue, b: &SqlValue) -> bool {
-    // NULL never equals anything
-    if matches!(a, SqlValue::Null) || matches!(b, SqlValue::Null) {
-        return false;
+    // Column-to-column comparison needs two values
+    if let ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } = predicate {
+        return filter::evaluate_column_compare(
+            *op,
+            row.get(*left_column_idx),
+            row.get(*right_column_idx),
+        );
     }
 
-    // Helper to check if a value is a string type
-    let is_string = |v: &SqlValue| matches!(v, SqlValue::Varchar(_) | SqlValue::Character(_));
-
-    // Helper to check if a value is a numeric type
-    let is_numeric = |v: &SqlValue| {
-        matches!(
-            v,
-            SqlValue::Integer(_)
-                | SqlValue::Bigint(_)
-                | SqlValue::Smallint(_)
-                | SqlValue::Float(_)
-                | SqlValue::Real(_)
-                | SqlValue::Double(_)
-                | SqlValue::Numeric(_)
-        )
+    let column_idx = match predicate {
+        ColumnPredicate::LessThan { column_idx, .. }
+        | ColumnPredicate::GreaterThan { column_idx, .. }
+        | ColumnPredicate::GreaterThanOrEqual { column_idx, .. }
+        | ColumnPredicate::LessThanOrEqual { column_idx, .. }
+        | ColumnPredicate::Equal { column_idx, .. }
+        | ColumnPredicate::NotEqual { column_idx, .. }
+        | ColumnPredicate::Between { column_idx, .. }
+        | ColumnPredicate::Like { column_idx, .. }
+        | ColumnPredicate::InList { column_idx, .. } => *column_idx,
+        ColumnPredicate::ColumnCompare { .. } => unreachable!(), // Handled above
     };
 
-    // Different storage classes (string vs numeric) - NOT equal without coercion
-    if (is_string(a) && is_numeric(b)) || (is_numeric(a) && is_string(b)) {
-        return false;
-    }
-
-    // Same storage class - use normal comparison
-    match (a, b) {
-        // Same integer types
-        (SqlValue::Integer(x), SqlValue::Integer(y)) => x == y,
-        (SqlValue::Bigint(x), SqlValue::Bigint(y)) => x == y,
-        (SqlValue::Smallint(x), SqlValue::Smallint(y)) => x == y,
-
-        // Same string types (VARCHAR and CHAR are compatible)
-        (SqlValue::Varchar(x), SqlValue::Varchar(y))
-        | (SqlValue::Character(x), SqlValue::Character(y)) => x == y,
-        (SqlValue::Varchar(x), SqlValue::Character(y))
-        | (SqlValue::Character(x), SqlValue::Varchar(y)) => x == y,
-
-        // Same float types
-        (SqlValue::Float(x), SqlValue::Float(y)) => (x - y).abs() < f32::EPSILON,
-        (SqlValue::Double(x), SqlValue::Double(y)) => (x - y).abs() < f64::EPSILON,
-        (SqlValue::Real(x), SqlValue::Real(y)) => (x - y).abs() < f64::EPSILON,
-
-        // Cross-type numeric comparisons (all numeric types are comparable)
-        (SqlValue::Integer(x), SqlValue::Bigint(y))
-        | (SqlValue::Bigint(y), SqlValue::Integer(x)) => *x as i64 == *y,
-
-        // Float types with integer
-        (SqlValue::Float(x), SqlValue::Integer(y)) | (SqlValue::Integer(y), SqlValue::Float(x)) => {
-            (*x as f64 - *y as f64).abs() < f64::EPSILON
-        }
-        (SqlValue::Double(x), SqlValue::Integer(y))
-        | (SqlValue::Integer(y), SqlValue::Double(x)) => (*x - *y as f64).abs() < f64::EPSILON,
-        (SqlValue::Real(x), SqlValue::Integer(y)) | (SqlValue::Integer(y), SqlValue::Real(x)) => {
-            (*x - *y as f64).abs() < f64::EPSILON
-        }
-
-        // Mixed float types
-        (SqlValue::Float(x), SqlValue::Double(y)) | (SqlValue::Double(y), SqlValue::Float(x)) => {
-            (*x as f64 - *y).abs() < f64::EPSILON
-        }
-        (SqlValue::Float(x), SqlValue::Real(y)) | (SqlValue::Real(y), SqlValue::Float(x)) => {
-            (*x as f64 - *y).abs() < f64::EPSILON
-        }
-        (SqlValue::Double(x), SqlValue::Real(y)) | (SqlValue::Real(y), SqlValue::Double(x)) => {
-            (*x - *y).abs() < f64::EPSILON
-        }
-
-        // Numeric type (f64) with integer types
-        (SqlValue::Numeric(x), SqlValue::Integer(y))
-        | (SqlValue::Integer(y), SqlValue::Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
-        (SqlValue::Numeric(x), SqlValue::Bigint(y))
-        | (SqlValue::Bigint(y), SqlValue::Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
-        (SqlValue::Numeric(x), SqlValue::Smallint(y))
-        | (SqlValue::Smallint(y), SqlValue::Numeric(x)) => (*x - *y as f64).abs() < f64::EPSILON,
-
-        // Numeric with float types
-        (SqlValue::Numeric(x), SqlValue::Float(y)) | (SqlValue::Float(y), SqlValue::Numeric(x)) => {
-            (*x - *y as f64).abs() < f64::EPSILON
-        }
-        (SqlValue::Numeric(x), SqlValue::Double(y))
-        | (SqlValue::Double(y), SqlValue::Numeric(x)) => (*x - *y).abs() < f64::EPSILON,
-        (SqlValue::Numeric(x), SqlValue::Real(y)) | (SqlValue::Real(y), SqlValue::Numeric(x)) => {
-            (*x - *y).abs() < f64::EPSILON
-        }
-        (SqlValue::Numeric(x), SqlValue::Numeric(y)) => (*x - *y).abs() < f64::EPSILON,
-
-        // Different storage classes not handled above - NOT equal
-        _ => false,
+    match row.get(column_idx) {
+        Some(value) => filter::evaluate_predicate(predicate, value),
+        None => false,
     }
 }
 

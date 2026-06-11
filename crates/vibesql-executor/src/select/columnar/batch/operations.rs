@@ -670,7 +670,11 @@ fn days_since_epoch_to_date(days: i32) -> Date {
 }
 
 /// Convert microseconds since Unix epoch to Timestamp
-fn microseconds_to_timestamp(micros: i64) -> Timestamp {
+///
+/// `pub(crate)` so the SIMD filter kernels can render Timestamp column values
+/// (stored as i64 microseconds) back to `Timestamp` for TEXT-rendering string
+/// comparisons (issue #5335).
+pub(crate) fn microseconds_to_timestamp(micros: i64) -> Timestamp {
     let days = (micros / 86_400_000_000) as i32;
     let remaining_micros = micros % 86_400_000_000;
 
