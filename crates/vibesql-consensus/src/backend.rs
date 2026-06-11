@@ -66,11 +66,16 @@ pub type Result<T> = std::result::Result<T, ConsensusError>;
 /// or even the replication topology can be swapped without rewriting them.
 ///
 /// Native `async fn` in traits is used deliberately (stable since Rust
-/// 1.75). The `async_fn_in_trait` lint is allowed because this is Phase A1
-/// scaffolding: `Send` bounds on the returned futures and dyn-compatibility
-/// will be revisited in Phase A2 when the first real backend lands; if dyn
-/// dispatch is needed then, this will switch to explicit
-/// `impl Future + Send` returns or boxed futures.
+/// 1.75), and the `async_fn_in_trait` lint stays allowed. Phase A2 resolved
+/// the question this lint flags: wiring the first real backend
+/// (`OpenraftBackend`, openraft 0.9) required **no** `Send` bounds on the
+/// returned futures and no dyn dispatch — openraft's `Raft` handle methods
+/// already return `Send` futures, and current consumers await these methods
+/// from generic (static-dispatch) contexts. If a later phase needs to hold a
+/// backend behind `dyn` or `tokio::spawn` a future returned by a generic
+/// `B: ConsensusBackend`, the anticipated fallback from ADR-0004 still
+/// applies: switch these methods to explicit `impl Future + Send` returns or
+/// boxed futures at that point.
 #[allow(async_fn_in_trait)]
 pub trait ConsensusBackend: Send + Sync {
     /// The log entry type replicated through consensus (e.g. a serialized
