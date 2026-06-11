@@ -51,7 +51,9 @@ jobs:
   # ============================================================================
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Recent successful runs take 18-23 min (growing with the test suite); 25 min
+    # left too little headroom and caused timeout-kill flakes (see issue #5342).
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
         with:
