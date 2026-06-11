@@ -147,6 +147,41 @@ fn test_create_view_error_is_prefixed_with_view_name() {
     );
 }
 
+#[test]
+fn test_create_view_set_operation_mismatch_is_not_prefixed() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE t01(x INTEGER, y INTEGER)").unwrap();
+    execute_sql(&mut db, "CREATE TABLE t02(x INTEGER)").unwrap();
+
+    // select7.test 8.2 shape: SQLite surfaces set-operation arity mismatches at
+    // query time with NO "error in view" prefix; VibeSQL compiles views eagerly,
+    // so the bare message must surface at CREATE VIEW time.
+    let err =
+        execute_sql(&mut db, "CREATE VIEW v0 AS SELECT x, y FROM t01 UNION SELECT x FROM t02")
+            .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "SELECTs to the left and right of UNION do not have the same number of result columns"
+    );
+}
+
+#[test]
+fn test_create_view_intersect_mismatch_is_not_prefixed() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE t01(x INTEGER, y INTEGER)").unwrap();
+    execute_sql(&mut db, "CREATE TABLE t02(x INTEGER)").unwrap();
+
+    let err =
+        execute_sql(&mut db, "CREATE VIEW v1 AS SELECT x, y FROM t01 INTERSECT SELECT x FROM t02")
+            .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        !msg.starts_with("error in view"),
+        "INTERSECT arity mismatch must not carry the view prefix, got: {msg}"
+    );
+    assert!(msg.contains("INTERSECT"), "expected INTERSECT in message, got: {msg}");
+}
+
 // ------------------------------------------------------------------------
 // 61.1 — CAST to unknown type names (SQLite affinity rules)
 // ------------------------------------------------------------------------
