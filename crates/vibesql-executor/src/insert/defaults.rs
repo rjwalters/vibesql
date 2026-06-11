@@ -8,17 +8,29 @@ pub fn evaluate_insert_expression(
     column: &vibesql_catalog::ColumnSchema,
     procedural_context: Option<&crate::procedural::ExecutionContext>,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
-    evaluate_insert_expression_with_trigger_context(expr, column, procedural_context, None, None)
+    evaluate_insert_expression_with_trigger_context(
+        expr,
+        column,
+        procedural_context,
+        None,
+        None,
+        None,
+    )
 }
 
 /// Evaluate an INSERT expression with trigger context support
 /// This is used when executing INSERT statements inside trigger bodies
+///
+/// `cte_results` carries the enclosing INSERT statement's WITH-clause CTEs
+/// (if any) so subqueries in VALUES rows can reference CTE names, matching
+/// SQLite (issue #5359).
 pub fn evaluate_insert_expression_with_trigger_context(
     expr: &vibesql_ast::Expression,
     column: &vibesql_catalog::ColumnSchema,
     procedural_context: Option<&crate::procedural::ExecutionContext>,
     trigger_context: Option<&crate::trigger_execution::TriggerContext>,
     database: Option<&vibesql_storage::Database>,
+    cte_results: Option<&std::collections::HashMap<String, crate::select::cte::CteResult>>,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     match expr {
         vibesql_ast::Expression::Literal(lit) => Ok(lit.clone()),
@@ -69,8 +81,11 @@ pub fn evaluate_insert_expression_with_trigger_context(
             if let (Some(ctx), Some(db)) = (trigger_context, database) {
                 // Create a dummy row for evaluation (trigger context available)
                 let dummy_row = vibesql_storage::Row::new(vec![]);
-                let evaluator =
+                let mut evaluator =
                     crate::ExpressionEvaluator::with_trigger_context(ctx.table_schema, db, ctx);
+                if let Some(ctes) = cte_results {
+                    evaluator = evaluator.with_cte_context(ctes);
+                }
                 evaluator.eval(expr, &dummy_row)
             } else if let Some(db) = database {
                 // No trigger context, but we have database access - evaluate the expression
@@ -79,7 +94,10 @@ pub fn evaluate_insert_expression_with_trigger_context(
                 let dummy_schema =
                     vibesql_catalog::TableSchema::new("__insert_expr__".to_string(), vec![]);
                 let dummy_row = vibesql_storage::Row::new(vec![]);
-                let evaluator = crate::ExpressionEvaluator::with_database(&dummy_schema, db);
+                let mut evaluator = crate::ExpressionEvaluator::with_database(&dummy_schema, db);
+                if let Some(ctes) = cte_results {
+                    evaluator = evaluator.with_cte_context(ctes);
+                }
                 evaluator.eval(expr, &dummy_row)
             } else {
                 Err(ExecutorError::UnsupportedExpression(

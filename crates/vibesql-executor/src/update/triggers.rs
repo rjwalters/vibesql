@@ -109,6 +109,7 @@ pub(super) fn execute_update_on_view(
             database,
             stmt.alias.as_deref(),
             &new_rows,
+            None,
         )?)
     } else {
         None

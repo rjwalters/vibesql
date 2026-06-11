@@ -22,14 +22,22 @@ use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator, select::Selec
 /// affected row / trigger fire). Returns a `SelectResult` whose columns are
 /// derived from the RETURNING items (aliases win, then original source
 /// text, then the expression's column name).
+///
+/// `cte_results` carries the enclosing statement's WITH-clause CTEs (if any)
+/// so subqueries in RETURNING expressions can reference CTE names, matching
+/// SQLite (issue #5359).
 pub(crate) fn project_returning(
     items: &[SelectItem],
     schema: &TableSchema,
     database: &Database,
     table_alias: Option<&str>,
     rows: &[&Row],
+    cte_results: Option<&std::collections::HashMap<String, crate::select::cte::CteResult>>,
 ) -> Result<SelectResult, ExecutorError> {
     let mut evaluator = ExpressionEvaluator::with_database(schema, database);
+    if let Some(ctes) = cte_results {
+        evaluator = evaluator.with_cte_context(ctes);
+    }
     if let Some(alias) = table_alias {
         evaluator.set_table_alias(alias.to_string());
     }
