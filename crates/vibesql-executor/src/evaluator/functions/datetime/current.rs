@@ -5,7 +5,7 @@
 use chrono::{Datelike, Duration, Local, NaiveDateTime, Timelike, Weekday};
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
+use crate::{errors::ExecutorError, evaluator::SchemaExprContext};
 
 /// Milliseconds between the start of the Julian Day epoch (-4713-11-24 12:00:00)
 /// and the Unix epoch (1970-01-01 00:00:00). Matches SQLite's internal iJD origin.
@@ -184,9 +184,9 @@ fn format_time_with_precision(time: chrono::NaiveTime, precision: u32) -> String
 /// current date and time).
 ///
 /// SQLite Reference: https://www.sqlite.org/lang_datefunc.html
-pub fn datetime(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+pub fn datetime(args: &[SqlValue], ctx: SchemaExprContext) -> Result<SqlValue, ExecutorError> {
     // Resolve the time value (base + modifiers); None means SQL NULL
-    let dt = match resolve_time_value(args, "DATETIME")? {
+    let dt = match resolve_time_value(args, "DATETIME", ctx)? {
         Some(dt) => dt,
         None => return Ok(SqlValue::Null),
     };
@@ -248,12 +248,25 @@ fn compute_floor(year: i32, month: u32, day: i64) -> i64 {
 /// - `Err(...)` for argument types that are not supported at all
 ///
 /// Shared by `datetime()` and `strftime()`; `func_name` is used in error messages.
+///
+/// `ctx` is the schema-expression context: when the call is evaluated inside
+/// a CHECK constraint, generated column, or index expression, any resolution
+/// of the current time ('now' or an omitted time-value) or use of the
+/// 'localtime'/'utc' modifiers raises the SQLite-compatible
+/// `non-deterministic use of <fn>() in <context>` error instead of
+/// evaluating (SQLite date.c `setDateTimeToCurrent`/`toLocaltime` via
+/// `sqlite3NotPureFunc`).
 pub(super) fn resolve_time_value(
     args: &[SqlValue],
     func_name: &str,
+    ctx: SchemaExprContext,
 ) -> Result<Option<NaiveDateTime>, ExecutorError> {
     if args.is_empty() {
-        // SQLite: omitted time-value defaults to 'now'
+        // SQLite: omitted time-value defaults to 'now' — which is a
+        // non-deterministic use in schema-attached expressions (date2-140)
+        if let Some(err) = ctx.non_deterministic_error(func_name) {
+            return Err(err);
+        }
         return Ok(Some(Local::now().naive_local()));
     }
 
@@ -271,9 +284,11 @@ pub(super) fn resolve_time_value(
             // For unixepoch, parse numeric values as Unix timestamps instead of Julian Days
             parse_base_datetime_for_unixepoch(&args[0], func_name)?
         }
-        Some(m) if m.eq_ignore_ascii_case("auto") => parse_base_datetime_auto(&args[0], func_name)?,
+        Some(m) if m.eq_ignore_ascii_case("auto") => {
+            parse_base_datetime_auto(&args[0], func_name, ctx)?
+        }
         Some(m) if m.eq_ignore_ascii_case("julianday") => parse_base_datetime_julianday(&args[0]),
-        _ => parse_base_datetime(&args[0], func_name)?,
+        _ => parse_base_datetime(&args[0], func_name, ctx)?,
     };
 
     // If base value is NULL, return NULL
@@ -310,6 +325,16 @@ pub(super) fn resolve_time_value(
             continue;
         }
 
+        // 'localtime' and 'utc' depend on the session time zone: SQLite
+        // rejects them at evaluation time in schema-attached expressions
+        // even when the base value is a literal (date2-510/520)
+        let trimmed = modifier_str.trim();
+        if trimmed.eq_ignore_ascii_case("localtime") || trimmed.eq_ignore_ascii_case("utc") {
+            if let Some(err) = ctx.non_deterministic_error(func_name) {
+                return Err(err);
+            }
+        }
+
         // Apply the modifier
         match apply_datetime_modifier(rdt, modifier_str) {
             Some(new_rdt) => rdt = new_rdt,
@@ -331,12 +356,20 @@ pub(super) fn resolve_time_value(
 fn parse_base_datetime(
     value: &SqlValue,
     func_name: &str,
+    ctx: SchemaExprContext,
 ) -> Result<Option<ResolvedDateTime>, ExecutorError> {
     match value {
         SqlValue::Null => Ok(None),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             // Handle 'now' special case
             if s.eq_ignore_ascii_case("now") {
+                // Resolving the current time is non-deterministic: rejected
+                // in schema-attached expressions. The trigger can come from
+                // ROW DATA, not just schema text (date2-110: CHECK(date(x))
+                // with the value 'now'), so this must be evaluation-time.
+                if let Some(err) = ctx.non_deterministic_error(func_name) {
+                    return Err(err);
+                }
                 let now = Local::now();
                 Ok(Some(ResolvedDateTime::exact(now.naive_local())))
             } else {
@@ -451,6 +484,7 @@ fn numeric_time_value(value: &SqlValue) -> Option<f64> {
 fn parse_base_datetime_auto(
     value: &SqlValue,
     func_name: &str,
+    ctx: SchemaExprContext,
 ) -> Result<Option<ResolvedDateTime>, ExecutorError> {
     if matches!(value, SqlValue::Null) {
         return Ok(None);
@@ -463,7 +497,7 @@ fn parse_base_datetime_auto(
             Ok(unix_epoch_seconds_f64_to_datetime(n).map(ResolvedDateTime::exact))
         }
         Some(_) => Ok(None), // Out of range for both interpretations
-        None => parse_base_datetime(value, func_name), // No-op for text values
+        None => parse_base_datetime(value, func_name, ctx), // No-op for text values
     }
 }
 

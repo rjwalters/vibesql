@@ -36,11 +36,18 @@ mod vector;
 ///
 /// This handles SQL scalar functions that don't depend on table schemas
 /// (unlike aggregates like COUNT, SUM which are handled elsewhere).
+///
+/// `schema_context` identifies whether the expression being evaluated is a
+/// schema-attached expression (CHECK constraint, generated column, or index
+/// expression). The SQLite date/time functions consult it to reject
+/// non-deterministic uses ('now', zero-argument defaults, 'localtime'/'utc')
+/// at evaluation time.
 pub(super) fn eval_scalar_function(
     name: &str,
     args: &[vibesql_types::SqlValue],
     character_unit: &Option<vibesql_ast::CharacterUnit>,
     sql_mode: &vibesql_types::SqlMode,
+    schema_context: super::SchemaExprContext,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     match name.to_uppercase().as_str() {
         // NULL handling functions
@@ -122,13 +129,13 @@ pub(super) fn eval_scalar_function(
         "CURRENT_DATE" | "CURDATE" => datetime::current_date(args),
         "CURRENT_TIME" | "CURTIME" => datetime::current_time(args),
         "CURRENT_TIMESTAMP" | "NOW" => datetime::current_timestamp(args),
-        "DATETIME" => datetime::datetime(args),
-        "DATE" => datetime::date(args),
-        "TIME" => datetime::time(args),
-        "STRFTIME" => datetime::strftime(args),
-        "JULIANDAY" => datetime::julianday(args),
-        "UNIXEPOCH" => datetime::unixepoch(args),
-        "TIMEDIFF" => datetime::timediff(args),
+        "DATETIME" => datetime::datetime(args, schema_context),
+        "DATE" => datetime::date(args, schema_context),
+        "TIME" => datetime::time(args, schema_context),
+        "STRFTIME" => datetime::strftime(args, schema_context),
+        "JULIANDAY" => datetime::julianday(args, schema_context),
+        "UNIXEPOCH" => datetime::unixepoch(args, schema_context),
+        "TIMEDIFF" => datetime::timediff(args, schema_context),
         "YEAR" => datetime::year(args),
         "MONTH" => datetime::month(args),
         "DAY" => datetime::day(args),

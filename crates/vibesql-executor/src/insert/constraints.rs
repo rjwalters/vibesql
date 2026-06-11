@@ -204,7 +204,10 @@ pub fn enforce_check_constraints(
     if !schema.check_constraints.is_empty() {
         // Create a row from the values to evaluate the expression
         let row = vibesql_storage::Row::new(row_values.to_vec());
-        let evaluator = crate::evaluator::ExpressionEvaluator::new(schema);
+        // CHECK context: non-deterministic date/time uses ('now', date(),
+        // 'localtime'/'utc') are rejected at evaluation time (SQLite).
+        let evaluator = crate::evaluator::ExpressionEvaluator::new(schema)
+            .with_schema_context(crate::evaluator::SchemaExprContext::CheckConstraint);
 
         for (constraint_name, check_expr) in &schema.check_constraints {
             // Evaluate the CHECK expression against the row
@@ -254,11 +257,16 @@ pub fn enforce_unique_indexes(
             // enters the index, so it cannot violate its uniqueness.
             if let Some(predicate) = index_metadata.where_clause.as_deref() {
                 let candidate_row = vibesql_storage::Row::new(row_values.to_vec());
-                let evaluator = crate::evaluator::ExpressionEvaluator::new(schema);
-                let satisfied = evaluator
-                    .eval(predicate, &candidate_row)
-                    .map(|v| crate::partial_index_maintenance::is_predicate_truthy(&v))
-                    .unwrap_or(false);
+                let evaluator = crate::evaluator::ExpressionEvaluator::new(schema)
+                    .with_schema_context(crate::evaluator::SchemaExprContext::Index);
+                // Lenient on ordinary eval errors (row treated as
+                // not-in-index), but the non-deterministic date/time
+                // rejection must PROPAGATE and abort the INSERT.
+                let satisfied = match evaluator.eval(predicate, &candidate_row) {
+                    Ok(v) => crate::partial_index_maintenance::is_predicate_truthy(&v),
+                    Err(e) if e.is_non_deterministic_use() => return Err(e),
+                    Err(_) => false,
+                };
                 if !satisfied {
                     continue;
                 }
@@ -361,13 +369,15 @@ fn enforce_unique_expression_index(
         return Ok(());
     };
 
-    let evaluator = crate::evaluator::ExpressionEvaluator::new(schema);
+    let evaluator = crate::evaluator::ExpressionEvaluator::new(schema)
+        .with_schema_context(crate::evaluator::SchemaExprContext::Index);
     let candidate_row = vibesql_storage::Row::new(row_values.to_vec());
 
-    // Build the candidate key. Evaluation failures become NULL (matching
-    // expression-index maintenance), and NULL keys never conflict.
+    // Build the candidate key. Ordinary evaluation failures become NULL
+    // (matching expression-index maintenance), and NULL keys never conflict;
+    // the non-deterministic date/time rejection propagates and aborts.
     let Some(new_key) =
-        eval_expression_index_key(&evaluator, schema, index_metadata, &candidate_row)
+        eval_expression_index_key(&evaluator, schema, index_metadata, &candidate_row)?
     else {
         return Ok(());
     };
@@ -375,16 +385,20 @@ fn enforce_unique_expression_index(
     for (_idx, existing_row) in table.scan_visible(snapshot) {
         // Partial expression indexes: rows outside the predicate are not in
         // the index. (The caller already verified the candidate row.)
+        // Existing rows passed evaluation-time determinism checks when they
+        // were inserted, so only ordinary errors can occur here — but
+        // propagate the non-deterministic rejection anyway for safety.
         if let Some(predicate) = index_metadata.where_clause.as_deref() {
-            let in_index = evaluator
-                .eval(predicate, existing_row)
-                .map(|v| crate::partial_index_maintenance::is_predicate_truthy(&v))
-                .unwrap_or(false);
+            let in_index = match evaluator.eval(predicate, existing_row) {
+                Ok(v) => crate::partial_index_maintenance::is_predicate_truthy(&v),
+                Err(e) if e.is_non_deterministic_use() => return Err(e),
+                Err(_) => false,
+            };
             if !in_index {
                 continue;
             }
         }
-        if eval_expression_index_key(&evaluator, schema, index_metadata, existing_row).as_deref()
+        if eval_expression_index_key(&evaluator, schema, index_metadata, existing_row)?.as_deref()
             == Some(&new_key[..])
         {
             // SQLite format for expression indexes: index name, not columns.
@@ -398,27 +412,107 @@ fn enforce_unique_expression_index(
     Ok(())
 }
 
-/// Evaluate an expression index's key for a row. Returns `None` when any
-/// component is NULL (NULL keys never conflict) or fails to evaluate.
+/// Evaluate an expression index's key for a row. Returns `Ok(None)` when any
+/// component is NULL (NULL keys never conflict) or fails to evaluate with an
+/// ordinary error. The evaluation-time "non-deterministic use of <fn>() in
+/// an index" rejection is the one error that must NOT be swallowed into a
+/// NULL key — it propagates so the enclosing statement aborts (date2-612).
 fn eval_expression_index_key(
     evaluator: &crate::evaluator::ExpressionEvaluator,
     schema: &vibesql_catalog::TableSchema,
     index_metadata: &vibesql_storage::database::indexes::IndexMetadata,
     row: &vibesql_storage::Row,
-) -> Option<Vec<vibesql_types::SqlValue>> {
+) -> Result<Option<Vec<vibesql_types::SqlValue>>, ExecutorError> {
     let mut key = Vec::with_capacity(index_metadata.columns.len());
     for col in &index_metadata.columns {
         let value = if let Some(expr) = col.get_expression() {
-            evaluator.eval(expr, row).unwrap_or(vibesql_types::SqlValue::Null)
+            match evaluator.eval(expr, row) {
+                Ok(v) => v,
+                Err(e) if e.is_non_deterministic_use() => return Err(e),
+                Err(_) => vibesql_types::SqlValue::Null,
+            }
         } else if let Some(name) = col.column_name() {
-            row.values.get(schema.get_column_index(name)?)?.clone()
+            match schema.get_column_index(name).and_then(|idx| row.values.get(idx)) {
+                Some(v) => v.clone(),
+                None => return Ok(None),
+            }
         } else {
             vibesql_types::SqlValue::Null
         };
         if matches!(value, vibesql_types::SqlValue::Null) {
-            return None;
+            return Ok(None);
         }
         key.push(value);
     }
-    Some(key)
+    Ok(Some(key))
+}
+
+/// Reject non-deterministic date/time function uses in index expressions and
+/// partial-index WHERE predicates for a candidate row (SQLite semantics).
+///
+/// SQLite evaluates every index expression / partial-index predicate when a
+/// row is inserted or updated; if a date/time function in one of them
+/// resolves the current time ('now', zero-argument `date()`, ...) or applies
+/// 'localtime'/'utc' — possibly triggered by the ROW DATA, e.g. inserting the
+/// value 'now' under an index on `date(b)` — the statement fails with
+/// `non-deterministic use of <fn>() in an index` (date2-210/430/510/520/612).
+///
+/// This runs as a PRE-insert/update validation phase so the statement aborts
+/// before any mutation: the index-maintenance paths run after the row is
+/// physically written and intentionally stay lenient (they map evaluation
+/// errors to NULL/not-in-index), which would otherwise swallow this error.
+///
+/// Ordinary evaluation errors are ignored here — they keep their existing
+/// lenient behavior in the maintenance paths.
+pub fn enforce_index_expression_determinism(
+    db: &vibesql_storage::Database,
+    schema: &vibesql_catalog::TableSchema,
+    table_name: &str,
+    row_values: &[vibesql_types::SqlValue],
+) -> Result<(), ExecutorError> {
+    // Catalog metadata carries both the expressions and the partial-index
+    // WHERE predicate (storage metadata lacks the predicate for expression
+    // indexes, whose bodies are pre-filtered at build time).
+    let indexes = db.catalog.get_table_indexes(table_name);
+    // Fast path: plain column indexes have no schema-attached expressions to
+    // evaluate — skip the row clone and evaluator construction entirely.
+    if !indexes
+        .iter()
+        .any(|idx| idx.is_partial() || idx.columns.iter().any(|col| col.is_expression()))
+    {
+        return Ok(());
+    }
+
+    let row = vibesql_storage::Row::new(row_values.to_vec());
+    let evaluator = crate::evaluator::ExpressionEvaluator::new(schema)
+        .with_schema_context(crate::evaluator::SchemaExprContext::Index);
+
+    for index in indexes {
+        // Partial index: the WHERE predicate is itself an index expression in
+        // SQLite's eyes (NC_PartIdx) — a non-deterministic use inside it is
+        // rejected. When the predicate excludes the row (or fails with an
+        // ordinary error), the index expressions are never evaluated.
+        if let Some(predicate) = index.where_clause.as_deref() {
+            let in_index = match evaluator.eval(predicate, &row) {
+                Ok(v) => crate::partial_index_maintenance::is_predicate_truthy(&v),
+                Err(e) if e.is_non_deterministic_use() => return Err(e),
+                Err(_) => false,
+            };
+            if !in_index {
+                continue;
+            }
+        }
+
+        for col in &index.columns {
+            if let Some(expr) = col.get_expression() {
+                if let Err(e) = evaluator.eval(expr, &row) {
+                    if e.is_non_deterministic_use() {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
 }

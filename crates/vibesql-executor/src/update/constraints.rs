@@ -335,7 +335,10 @@ impl<'a> ConstraintValidator<'a> {
         new_row: &vibesql_storage::Row,
     ) -> Result<(), ExecutorError> {
         if !self.schema.check_constraints.is_empty() {
-            let evaluator = ExpressionEvaluator::new(self.schema);
+            // CHECK context: non-deterministic date/time uses are rejected
+            // at evaluation time (SQLite semantics).
+            let evaluator = ExpressionEvaluator::new(self.schema)
+                .with_schema_context(crate::evaluator::SchemaExprContext::CheckConstraint);
 
             for (constraint_name, check_expr) in &self.schema.check_constraints {
                 // Evaluate the CHECK expression against the updated row

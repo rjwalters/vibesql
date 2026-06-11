@@ -708,19 +708,19 @@ impl ExpressionEvaluator<'_> {
             // Current date/time functions
             vibesql_ast::Expression::CurrentDate => {
                 let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
-                super::super::functions::eval_scalar_function("CURRENT_DATE", &[], &None, &sql_mode)
+                super::super::functions::eval_scalar_function("CURRENT_DATE", &[], &None, &sql_mode, crate::evaluator::SchemaExprContext::None)
             }
             vibesql_ast::Expression::CurrentTime { precision: _ } => {
                 // For now, ignore precision and call existing function
                 // Phase 2 will implement precision-aware formatting
                 let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
-                super::super::functions::eval_scalar_function("CURRENT_TIME", &[], &None, &sql_mode)
+                super::super::functions::eval_scalar_function("CURRENT_TIME", &[], &None, &sql_mode, crate::evaluator::SchemaExprContext::None)
             }
             vibesql_ast::Expression::CurrentTimestamp { precision: _ } => {
                 // For now, ignore precision and call existing function
                 // Phase 2 will implement precision-aware formatting
                 let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
-                super::super::functions::eval_scalar_function("CURRENT_TIMESTAMP", &[], &None, &sql_mode)
+                super::super::functions::eval_scalar_function("CURRENT_TIMESTAMP", &[], &None, &sql_mode, crate::evaluator::SchemaExprContext::None)
             }
 
             // INTERVAL expression

@@ -349,8 +349,11 @@ impl ToSql for Expression {
 
             Expression::Function { name, args, character_unit } => {
                 let args_sql: Vec<String> = args.iter().map(|a| a.to_sql()).collect();
-                let mut result =
-                    format!("{}({})", name.canonical().to_uppercase(), args_sql.join(", "));
+                // Preserve the user's original case (SQLite renders schema
+                // expressions with their source spelling, e.g. the CHECK
+                // constraint text in "CHECK constraint failed: date(x) ..."
+                // — date2-130/602)
+                let mut result = format!("{}({})", name.display(), args_sql.join(", "));
                 if let Some(unit) = character_unit {
                     result.push_str(&format!(" USING {}", unit.to_sql()));
                 }

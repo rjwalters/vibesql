@@ -27,14 +27,20 @@ pub fn create_expression_index(
     table_schema: &TableSchema,
     columns: &[IndexColumn],
     unique: bool,
+    where_clause: Option<&vibesql_ast::Expression>,
 ) -> Result<(), ExecutorError> {
     // Get table for scanning
     let table = database
         .get_table(table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
-    // Create expression evaluator for this table's schema
-    let evaluator = ExpressionEvaluator::new(table_schema);
+    // Create expression evaluator for this table's schema.
+    // Index context: a date/time function call that resolves the current time
+    // ('now', possibly from ROW DATA) or applies 'localtime'/'utc' makes
+    // CREATE INDEX fail with "non-deterministic use of <fn>() in an index"
+    // (SQLite evaluation-time semantics, date2-310).
+    let evaluator = ExpressionEvaluator::new(table_schema)
+        .with_schema_context(crate::evaluator::SchemaExprContext::Index);
 
     // Collect all key-value pairs (key, row_id)
     let mut keys: Vec<(Vec<SqlValue>, usize)> = Vec::new();
@@ -42,6 +48,21 @@ pub fn create_expression_index(
 
     // Scan all live rows
     for (row_idx, row) in table.scan_live() {
+        // Partial expression index: rows excluded by the WHERE predicate are
+        // not in the index, so their index expressions are never evaluated
+        // (date2-320: the predicate shields a 'now' row from rejection). A
+        // non-deterministic use inside the predicate itself is also rejected.
+        if let Some(predicate) = where_clause {
+            let in_index = match evaluator.eval(predicate, row) {
+                Ok(v) => crate::partial_index_maintenance::is_predicate_truthy(&v),
+                Err(e) if e.is_non_deterministic_use() => return Err(e),
+                Err(_) => false,
+            };
+            if !in_index {
+                continue;
+            }
+        }
+
         // Evaluate each expression/column to build the key
         let mut key_values: Vec<SqlValue> = Vec::new();
 

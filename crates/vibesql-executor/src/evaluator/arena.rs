@@ -280,16 +280,17 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
 
             // Current date/time functions - use scalar function path
             ArenaExpression::CurrentDate => {
-                super::functions::eval_scalar_function("CURRENT_DATE", &[], &None, &self.sql_mode)
+                super::functions::eval_scalar_function("CURRENT_DATE", &[], &None, &self.sql_mode, super::SchemaExprContext::None)
             }
             ArenaExpression::CurrentTime { .. } => {
-                super::functions::eval_scalar_function("CURRENT_TIME", &[], &None, &self.sql_mode)
+                super::functions::eval_scalar_function("CURRENT_TIME", &[], &None, &self.sql_mode, super::SchemaExprContext::None)
             }
             ArenaExpression::CurrentTimestamp { .. } => super::functions::eval_scalar_function(
                 "CURRENT_TIMESTAMP",
                 &[],
                 &None,
                 &self.sql_mode,
+                super::SchemaExprContext::None,
             ),
 
             // DEFAULT keyword
@@ -362,6 +363,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                     &evaluated_args?,
                     &char_unit,
                     &self.sql_mode,
+                    super::SchemaExprContext::None,
                 )
             }
 

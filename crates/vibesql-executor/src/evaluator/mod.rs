@@ -19,6 +19,7 @@ pub(crate) mod parallel;
 #[cfg(not(feature = "parallel"))]
 mod parallel;
 pub(crate) mod pattern;
+mod schema_context;
 mod single;
 mod subqueries_shared;
 pub mod window;
@@ -28,6 +29,8 @@ mod tests;
 
 // Re-export public API
 pub use core::{CombinedExpressionEvaluator, ExpressionEvaluator};
+// Schema-attached expression context (CHECK / generated column / index)
+pub use schema_context::SchemaExprContext;
 // Re-export values_are_equal for cross-type hash join comparisons
 pub(crate) use core::values_are_equal;
 

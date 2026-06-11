@@ -4,6 +4,15 @@
 //! INSERT, UPDATE, and DELETE operations. The storage layer can only handle
 //! column-based indexes directly; expression indexes require the executor to
 //! pre-compute key values using the ExpressionEvaluator.
+//!
+//! NOTE on non-deterministic date/time rejection (issue #5313): these
+//! maintenance paths run AFTER the row mutation has been applied, so they
+//! intentionally stay lenient (evaluation errors become NULL keys) and do NOT
+//! evaluate with `SchemaExprContext::Index`. The SQLite-compatible
+//! "non-deterministic use of <fn>() in an index" rejection is enforced
+//! PRE-mutation by `insert::constraints::enforce_index_expression_determinism`
+//! (called from the INSERT row validator and the UPDATE executors), which
+//! guarantees rows reaching this module evaluate deterministically.
 
 use std::collections::HashMap;
 

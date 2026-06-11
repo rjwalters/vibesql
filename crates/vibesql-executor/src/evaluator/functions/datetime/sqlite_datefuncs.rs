@@ -16,7 +16,7 @@ use chrono::{Datelike, NaiveDateTime, Timelike};
 use vibesql_types::SqlValue;
 
 use super::current::{naive_to_ijd_ms, resolve_time_value};
-use crate::errors::ExecutorError;
+use crate::{errors::ExecutorError, evaluator::SchemaExprContext};
 
 /// JULIANDAY - Return the fractional Julian Day number of a time value as REAL
 ///
@@ -25,13 +25,13 @@ use crate::errors::ExecutorError;
 /// SQLite computes `iJD / 86400000.0` where iJD is milliseconds since the Julian
 /// Day origin (-4713-11-24 12:00:00). Returns NULL for NULL/unparseable input or
 /// invalid modifiers.
-pub fn julianday(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+pub fn julianday(args: &[SqlValue], ctx: SchemaExprContext) -> Result<SqlValue, ExecutorError> {
     if has_misplaced_base_modifier(args) {
         return Ok(SqlValue::Null);
     }
     // 'subsec' is accepted but has no effect: julianday is always full precision
     let (filtered, _subsec) = strip_subsec_modifiers(args);
-    let dt = match resolve_time_value(&filtered, "JULIANDAY")? {
+    let dt = match resolve_time_value(&filtered, "JULIANDAY", ctx)? {
         Some(dt) => dt,
         None => return Ok(SqlValue::Null),
     };
@@ -102,14 +102,14 @@ fn strip_subsec_modifiers(args: &[SqlValue]) -> (Vec<SqlValue>, bool) {
 /// Returns INTEGER seconds (floor division, so fractional seconds round toward
 /// negative infinity, matching SQLite). With the `'subsec'` (or `'subsecond'`)
 /// modifier, returns REAL with millisecond precision.
-pub fn unixepoch(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+pub fn unixepoch(args: &[SqlValue], ctx: SchemaExprContext) -> Result<SqlValue, ExecutorError> {
     if has_misplaced_base_modifier(args) {
         return Ok(SqlValue::Null);
     }
     // Strip 'subsec'/'subsecond' modifiers; they only change the output type
     let (filtered, subsec) = strip_subsec_modifiers(args);
 
-    let dt = match resolve_time_value(&filtered, "UNIXEPOCH")? {
+    let dt = match resolve_time_value(&filtered, "UNIXEPOCH", ctx)? {
         Some(dt) => dt,
         None => return Ok(SqlValue::Null),
     };
@@ -131,7 +131,7 @@ pub fn unixepoch(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 /// Years and months are counted by calendar-aware stepping (mirroring SQLite's
 /// `timediffFunc` in date.c), so the day component is month-aware, not a fixed
 /// 30-day approximation. Returns NULL if either argument is NULL/unparseable.
-pub fn timediff(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+pub fn timediff(args: &[SqlValue], ctx: SchemaExprContext) -> Result<SqlValue, ExecutorError> {
     if args.len() != 2 {
         return Err(ExecutorError::UnsupportedFeature(format!(
             "TIMEDIFF requires exactly 2 arguments, got {}",
@@ -139,7 +139,7 @@ pub fn timediff(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         )));
     }
 
-    let d1 = match resolve_time_value(&args[0..1], "TIMEDIFF")? {
+    let d1 = match resolve_time_value(&args[0..1], "TIMEDIFF", ctx)? {
         Some(dt) => dt,
         None => return Ok(SqlValue::Null),
     };
@@ -147,7 +147,7 @@ pub fn timediff(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     let d2 = if is_now(&args[0]) && is_now(&args[1]) {
         d1
     } else {
-        match resolve_time_value(&args[1..2], "TIMEDIFF")? {
+        match resolve_time_value(&args[1..2], "TIMEDIFF", ctx)? {
             Some(dt) => dt,
             None => return Ok(SqlValue::Null),
         }
@@ -272,15 +272,16 @@ mod tests {
     }
 
     fn jd(args: &[SqlValue]) -> SqlValue {
-        julianday(args).expect("julianday should not error")
+        julianday(args, SchemaExprContext::None).expect("julianday should not error")
     }
 
     fn ue(args: &[SqlValue]) -> SqlValue {
-        unixepoch(args).expect("unixepoch should not error")
+        unixepoch(args, SchemaExprContext::None).expect("unixepoch should not error")
     }
 
     fn td(a: &str, b: &str) -> SqlValue {
-        timediff(&[text(a), text(b)]).expect("timediff should not error")
+        timediff(&[text(a), text(b)], SchemaExprContext::None)
+            .expect("timediff should not error")
     }
 
     fn assert_real(value: SqlValue, expected: f64) {
@@ -505,16 +506,16 @@ mod tests {
 
     #[test]
     fn test_timediff_null_and_invalid() {
-        assert_eq!(timediff(&[SqlValue::Null, text("2024-01-01")]).unwrap(), SqlValue::Null);
-        assert_eq!(timediff(&[text("2024-01-01"), SqlValue::Null]).unwrap(), SqlValue::Null);
+        assert_eq!(timediff(&[SqlValue::Null, text("2024-01-01")], SchemaExprContext::None).unwrap(), SqlValue::Null);
+        assert_eq!(timediff(&[text("2024-01-01"), SqlValue::Null], SchemaExprContext::None).unwrap(), SqlValue::Null);
         assert_eq!(td("garbage", "2024-01-01"), SqlValue::Null);
         assert_eq!(td("2024-01-01", "garbage"), SqlValue::Null);
     }
 
     #[test]
     fn test_timediff_wrong_arg_count_errors() {
-        assert!(timediff(&[text("2024-01-01")]).is_err());
-        assert!(timediff(&[text("a"), text("b"), text("c")]).is_err());
+        assert!(timediff(&[text("2024-01-01")], SchemaExprContext::None).is_err());
+        assert!(timediff(&[text("a"), text("b"), text("c")], SchemaExprContext::None).is_err());
     }
 
     #[test]
@@ -529,7 +530,7 @@ mod tests {
     // ---- invariant: datetime(B, timediff(A,B)) == datetime(A) ----
 
     fn datetime_text(args: &[SqlValue]) -> String {
-        match datetime(args).expect("datetime should not error") {
+        match datetime(args, SchemaExprContext::None).expect("datetime should not error") {
             SqlValue::Timestamp(ts) => ts.to_string(),
             other => panic!("expected timestamp, got {:?}", other),
         }
@@ -624,7 +625,7 @@ mod tests {
     // ---- (+|-)YYYY-MM-DD HH:MM:SS.SSS modifiers (timediff1.test section 5) ----
 
     fn datetime_or_null(args: &[SqlValue]) -> Option<String> {
-        match datetime(args).expect("datetime should not error") {
+        match datetime(args, SchemaExprContext::None).expect("datetime should not error") {
             SqlValue::Timestamp(ts) => Some(ts.to_string()),
             SqlValue::Null => None,
             other => panic!("expected timestamp or NULL, got {:?}", other),

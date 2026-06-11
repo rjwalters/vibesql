@@ -1300,6 +1300,23 @@ impl std::fmt::Display for ExecutorError {
     }
 }
 
+impl ExecutorError {
+    /// True for the SQLite-compatible "non-deterministic use of <fn>() in
+    /// <context>" error raised when a date/time function resolves the current
+    /// time (or applies 'localtime'/'utc') inside a CHECK constraint,
+    /// generated column, or index expression.
+    ///
+    /// Lenient evaluation sites (e.g. index-maintenance paths that map other
+    /// evaluation errors to NULL/false) use this to ensure the rejection is
+    /// PROPAGATED instead of swallowed — the enclosing statement must abort.
+    pub fn is_non_deterministic_use(&self) -> bool {
+        matches!(
+            self,
+            ExecutorError::SqliteCompatError(msg) if msg.starts_with("non-deterministic use of ")
+        )
+    }
+}
+
 impl std::error::Error for ExecutorError {}
 
 impl From<vibesql_storage::StorageError> for ExecutorError {

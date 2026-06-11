@@ -263,6 +263,6 @@ impl ExpressionEvaluator<'_> {
         }
 
         let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
-        eval_scalar_function(name, &arg_values, character_unit, &sql_mode)
+        eval_scalar_function(name, &arg_values, character_unit, &sql_mode, self.schema_context)
     }
 }
