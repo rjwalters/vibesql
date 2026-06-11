@@ -294,6 +294,13 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
             use std::cmp::Ordering;
             use vibesql_types::SqlValue;
 
+            // A NULL column value is UNKNOWN for both IN and NOT IN (issue
+            // #5341): excluded in WHERE context. Without this check the
+            // negated branch below returned TRUE for NULL values.
+            if matches!(value, SqlValue::Null) {
+                return false;
+            }
+
             // Check if value matches any in the list
             let matches = list_values.iter().any(|list_val| {
                 // Handle NULL in list

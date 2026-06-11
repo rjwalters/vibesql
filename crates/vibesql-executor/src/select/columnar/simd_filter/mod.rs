@@ -53,10 +53,12 @@ fn predicate_contains_null(predicate: &ColumnPredicate) -> bool {
         }
         // LIKE patterns don't have NULL values in the pattern itself
         ColumnPredicate::Like { .. } => false,
-        // IN list may contain NULL values
-        ColumnPredicate::InList { values, .. } => {
-            values.iter().any(|v| matches!(v, SqlValue::Null))
-        }
+        // IN/NOT IN implement SQL three-valued logic for NULL list elements
+        // in the kernels themselves (issue #5341): a NULL element never
+        // matches for IN, and poisons NOT IN (the result is never TRUE).
+        // Don't short-circuit to all-false here — doing so excluded
+        // genuinely matching rows for `x IN (a, NULL)`.
+        ColumnPredicate::InList { .. } => false,
         // Column-to-column comparisons don't have literal NULLs
         // (NULL columns are handled during evaluation)
         ColumnPredicate::ColumnCompare { .. } => false,

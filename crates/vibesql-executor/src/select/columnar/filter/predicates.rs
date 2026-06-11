@@ -328,6 +328,26 @@ fn is_string_type(t: &DataType) -> bool {
     )
 }
 
+/// Whether a column's declared type is the binary (BLOB) type
+fn is_blob_type(t: &DataType) -> bool {
+    matches!(t, DataType::BinaryLargeObject)
+}
+
+/// Whether a literal value is one of the numeric types the columnar
+/// comparator (`compare_values`) has faithful arms for.
+fn is_numeric_value(v: &SqlValue) -> bool {
+    matches!(
+        v,
+        SqlValue::Integer(_)
+            | SqlValue::Bigint(_)
+            | SqlValue::Smallint(_)
+            | SqlValue::Float(_)
+            | SqlValue::Double(_)
+            | SqlValue::Real(_)
+            | SqlValue::Numeric(_)
+    )
+}
+
 /// Whether a string would be coerced to a number by the expression
 /// evaluator's NUMERIC-affinity rules (`try_coerce_string_to_numeric`).
 /// Temporal columns have NUMERIC affinity, so numeric-parseable string
@@ -372,17 +392,40 @@ fn value_supported_for_column(col_type: Option<&DataType>, value: &SqlValue) -> 
             SqlValue::Varchar(s) | SqlValue::Character(s) => !string_coerces_to_numeric(s),
             _ => false,
         },
+        // Issue #5340: the expression evaluator raises a type-mismatch error
+        // for Boolean vs string/BLOB/temporal operands, and the columnar
+        // comparator has no error channel, so decline those. Boolean vs
+        // Boolean and Boolean vs numeric compare faithfully in both paths
+        // (booleans coerce to 0/1).
+        Some(DataType::Boolean) => matches!(value, SqlValue::Boolean(_)) || is_numeric_value(value),
         Some(other) => match value {
             // Temporal literal against a non-temporal column: only string
             // columns have comparator support (parse-first for Date, TEXT
             // rendering for Timestamp/Time).
             SqlValue::Date(_) | SqlValue::Timestamp(_) | SqlValue::Time(_) => is_string_type(other),
+            // Issue #5340: Blob literals are only supported against BLOB
+            // columns (bytewise comparison). Against numeric/string columns
+            // the evaluator applies storage-class ordering (numeric < TEXT <
+            // BLOB), but the numeric/string SIMD kernels have no blob arm
+            // (they raise ColumnarTypeMismatch), so decline and let the
+            // evaluator handle it.
+            SqlValue::Blob(_) => is_blob_type(other),
+            // Issue #5340: Boolean literal vs string/BLOB column raises a
+            // type-mismatch error in the evaluator; decline (no error
+            // channel in the columnar path).
+            SqlValue::Boolean(_) => !is_string_type(other) && !is_blob_type(other),
+            // Everything else (including string/numeric literals against
+            // BLOB columns, which compare_values orders via the #5340
+            // storage-class arms) keeps existing comparator behavior.
             _ => true,
         },
         // Unknown column type (e.g. outer-scope reference): allow existing
-        // behavior except for temporal literals, where we cannot prove the
-        // comparators have a faithful arm.
-        None => !matches!(value, SqlValue::Date(_) | SqlValue::Timestamp(_) | SqlValue::Time(_)),
+        // behavior except for temporal and Blob literals, where we cannot
+        // prove the comparators have a faithful arm.
+        None => !matches!(
+            value,
+            SqlValue::Date(_) | SqlValue::Timestamp(_) | SqlValue::Time(_) | SqlValue::Blob(_)
+        ),
     }
 }
 
@@ -1042,9 +1085,8 @@ mod tests {
         use std::str::FromStr;
         let schema = create_temporal_schema();
 
-        let ts_literal = SqlValue::Timestamp(
-            vibesql_types::Timestamp::from_str("2017-07-20 15:30:00").unwrap(),
-        );
+        let ts_literal =
+            SqlValue::Timestamp(vibesql_types::Timestamp::from_str("2017-07-20 15:30:00").unwrap());
         for value in [ts_literal, SqlValue::Varchar(arcstr::ArcStr::from("2017-07-21"))] {
             let expr = comparison_expr("ts", BinaryOperator::GreaterThanOrEqual, value.clone());
             assert!(
@@ -1116,6 +1158,89 @@ mod tests {
         );
         assert!(extract_column_predicates(&expr, &schema, false).is_some());
         assert!(extract_predicate_tree(&expr, &schema, false).is_some());
+    }
+
+    fn create_blob_bool_schema() -> CombinedSchema {
+        let schema = TableSchema::new(
+            "t".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("b".to_string(), DataType::BinaryLargeObject, true),
+                ColumnSchema::new("flag".to_string(), DataType::Boolean, true),
+                ColumnSchema::new("s".to_string(), DataType::Varchar { max_length: None }, true),
+            ],
+        );
+        CombinedSchema::from_table("t".to_string(), schema)
+    }
+
+    /// Issue #5340: Blob columns vs string/numeric literals stay on the
+    /// columnar path (compare_values now implements the storage-class
+    /// ordering numeric < TEXT < BLOB), and Blob vs Blob is bytewise.
+    #[test]
+    fn test_blob_column_supported_literals_extracted() {
+        let schema = create_blob_bool_schema();
+        for value in [
+            SqlValue::Varchar(arcstr::ArcStr::from("abc")),
+            SqlValue::Integer(5),
+            SqlValue::Blob(vec![0x61, 0x62]),
+        ] {
+            let expr = comparison_expr("b", BinaryOperator::GreaterThanOrEqual, value.clone());
+            assert!(
+                extract_column_predicates(&expr, &schema, false).is_some(),
+                "expected pushdown for b >= {value:?}"
+            );
+            assert!(extract_predicate_tree(&expr, &schema, false).is_some());
+        }
+    }
+
+    /// Issue #5340: combinations where the evaluator raises a type-mismatch
+    /// error (no columnar error channel) or the SIMD kernels have no blob arm
+    /// must decline pushdown so the expression evaluator handles them.
+    #[test]
+    fn test_blob_boolean_unsupported_pairs_decline_extraction() {
+        let schema = create_blob_bool_schema();
+
+        // Boolean column vs string literal: evaluator raises TypeMismatch
+        let expr = comparison_expr(
+            "flag",
+            BinaryOperator::Equal,
+            SqlValue::Varchar(arcstr::ArcStr::from("true")),
+        );
+        assert!(extract_column_predicates(&expr, &schema, false).is_none());
+        assert!(extract_predicate_tree(&expr, &schema, false).is_none());
+
+        // Boolean column vs Blob literal: evaluator raises TypeMismatch
+        let expr = comparison_expr("flag", BinaryOperator::Equal, SqlValue::Blob(vec![0x01]));
+        assert!(extract_column_predicates(&expr, &schema, false).is_none());
+
+        // Blob column vs Boolean literal: evaluator raises TypeMismatch
+        let expr = comparison_expr("b", BinaryOperator::Equal, SqlValue::Boolean(true));
+        assert!(extract_column_predicates(&expr, &schema, false).is_none());
+
+        // String column vs Boolean literal: evaluator raises TypeMismatch
+        let expr = comparison_expr("s", BinaryOperator::Equal, SqlValue::Boolean(true));
+        assert!(extract_column_predicates(&expr, &schema, false).is_none());
+
+        // Numeric/string column vs Blob literal: the numeric/string SIMD
+        // kernels have no blob arm, so decline (evaluator orders these)
+        let expr = comparison_expr("id", BinaryOperator::LessThan, SqlValue::Blob(vec![0x01]));
+        assert!(extract_column_predicates(&expr, &schema, false).is_none());
+        let expr = comparison_expr("s", BinaryOperator::LessThan, SqlValue::Blob(vec![0x01]));
+        assert!(extract_column_predicates(&expr, &schema, false).is_none());
+    }
+
+    /// Issue #5340: Boolean columns keep pushdown for the pairs both paths
+    /// evaluate faithfully (Boolean and numeric operands coerce to 0/1).
+    #[test]
+    fn test_boolean_column_supported_literals_extracted() {
+        let schema = create_blob_bool_schema();
+        for value in [SqlValue::Boolean(true), SqlValue::Integer(1)] {
+            let expr = comparison_expr("flag", BinaryOperator::Equal, value.clone());
+            assert!(
+                extract_column_predicates(&expr, &schema, false).is_some(),
+                "expected pushdown for flag = {value:?}"
+            );
+        }
     }
 
     #[test]

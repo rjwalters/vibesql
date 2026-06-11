@@ -266,17 +266,15 @@ pub fn evaluate_predicate_string_batch(
         }
 
         ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // SQL three-valued logic (issue #5341): a NULL list element never
+            // matches, but it poisons NOT IN — when no element matches the
+            // result is UNKNOWN, so `x NOT IN (..., NULL)` is never TRUE.
+            if *negated && list_values.iter().any(|v| matches!(v, SqlValue::Null)) {
+                return Ok(vec![false; values.len()]);
+            }
+
             // For string columns, check if value is in the list
             let mut result = vec![false; values.len()];
-
-            // Apply null mask first
-            if let Some(null_mask) = nulls {
-                for (i, &is_null) in null_mask.iter().enumerate() {
-                    if is_null {
-                        result[i] = false;
-                    }
-                }
-            }
 
             // Check each list value
             for list_val in list_values {
@@ -291,7 +289,18 @@ pub fn evaluate_predicate_string_batch(
             }
 
             if *negated {
-                result.iter_mut().for_each(|v| *v = !*v);
+                // Invert only non-NULL rows: a NULL column value is UNKNOWN
+                // for NOT IN, not TRUE (issue #5341 — the unconditional
+                // inversion used to resurrect NULL rows)
+                if let Some(null_mask) = nulls {
+                    for (i, v) in result.iter_mut().enumerate() {
+                        if !null_mask[i] {
+                            *v = !*v;
+                        }
+                    }
+                } else {
+                    result.iter_mut().for_each(|v| *v = !*v);
+                }
             }
             result
         }

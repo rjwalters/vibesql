@@ -221,6 +221,23 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
                 return CompareResult::Ordering(Ordering::Greater);
             }
 
+            // SQLite storage-class ordering (issue #5340): numeric < TEXT <
+            // BLOB. BLOB compares greater than every non-BLOB storage class,
+            // mirroring the expression evaluator
+            // (evaluator/operators/comparison/mod.rs). Without these arms,
+            // Blob-vs-string and Blob-vs-numeric pairs fell through to
+            // Incomparable and excluded every row, while the evaluator orders
+            // them (e.g. `blob_col >= 'abc'` is true for every non-NULL
+            // blob).
+            let a_is_blob = matches!(a, SqlValue::Blob(_));
+            let b_is_blob = matches!(b, SqlValue::Blob(_));
+            if a_is_blob && (is_string(b) || is_numeric(b)) {
+                return CompareResult::Ordering(Ordering::Greater);
+            }
+            if b_is_blob && (is_string(a) || is_numeric(a)) {
+                return CompareResult::Ordering(Ordering::Less);
+            }
+
             // Non-comparable types: no defined ordering in this comparator.
             // Issue #5335: this used to return Ordering::Equal, which made
             // every equality/range predicate on such pairs a tautology or a
@@ -485,6 +502,46 @@ mod tests {
             compare_values(&SqlValue::Blob(vec![0x61, 0x62]), &SqlValue::Blob(vec![0x61, 0x63])),
             CompareResult::Ordering(Ordering::Less)
         );
+    }
+
+    /// Issue #5340: Blob vs string/numeric uses SQLite storage-class ordering
+    /// (numeric < TEXT < BLOB), mirroring the expression evaluator. Before
+    /// this fix these pairs hit the Incomparable catch-all and excluded every
+    /// row (e.g. `blob_col >= 'abc'` matched nothing instead of everything).
+    #[test]
+    fn test_blob_vs_string_and_numeric_type_ordering() {
+        use std::cmp::Ordering;
+        let blob = SqlValue::Blob(vec![0x61, 0x62]); // x'6162' = "ab" bytes
+
+        // BLOB > TEXT, even when the bytes equal the string's bytes
+        assert_eq!(
+            compare_values(&blob, &varchar("ab")),
+            CompareResult::Ordering(Ordering::Greater),
+            "BLOB must compare greater than TEXT (never equal)"
+        );
+        assert_eq!(
+            compare_values(&varchar("zzz"), &blob),
+            CompareResult::Ordering(Ordering::Less),
+            "TEXT must compare less than BLOB"
+        );
+
+        // BLOB > numeric
+        assert_eq!(
+            compare_values(&blob, &SqlValue::Integer(5)),
+            CompareResult::Ordering(Ordering::Greater)
+        );
+        assert_eq!(
+            compare_values(&SqlValue::Double(1e9), &blob),
+            CompareResult::Ordering(Ordering::Less)
+        );
+
+        // NULL still wins over type ordering
+        assert_eq!(compare_values(&blob, &SqlValue::Null), CompareResult::Unknown);
+
+        // Boolean vs Blob has no evaluator ordering (TypeMismatch there);
+        // stays Incomparable here and pushdown is declined in predicates.rs.
+        assert_eq!(compare_values(&SqlValue::Boolean(true), &blob), CompareResult::Incomparable);
+        assert_eq!(compare_values(&blob, &SqlValue::Boolean(false)), CompareResult::Incomparable);
     }
 
     /// Test evaluate_predicate with text vs integer
