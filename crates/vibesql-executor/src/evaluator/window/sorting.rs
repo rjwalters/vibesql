@@ -4,7 +4,7 @@
 
 use std::cmp::Ordering;
 
-use vibesql_ast::{Expression, OrderByItem, OrderDirection};
+use vibesql_ast::{Expression, NullsOrder, OrderByItem, OrderDirection};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
@@ -57,11 +57,33 @@ pub fn sort_partition_with_collations<F>(
             let val_b = eval_fn(&order_item.expr, &rows[b]).unwrap_or(SqlValue::Null);
 
             let collation = collations.get(i).and_then(|c| c.as_deref());
-            let cmp = compare_values_with_collation(&val_a, &val_b, collation);
 
-            let cmp = match order_item.direction {
-                OrderDirection::Asc => cmp,
-                OrderDirection::Desc => cmp.reverse(),
+            // Explicit NULLS FIRST/LAST overrides the default NULL placement.
+            // The placement is absolute (not affected by ASC/DESC), so it must
+            // bypass the direction reversal below. The default behavior
+            // (NULL-sorts-first + direction reversal) matches SQLite's
+            // defaults: NULLS FIRST for ASC, NULLS LAST for DESC.
+            let a_null = matches!(val_a, SqlValue::Null);
+            let b_null = matches!(val_b, SqlValue::Null);
+            let cmp = if a_null != b_null {
+                if let Some(nulls_order) = order_item.nulls_order {
+                    match (nulls_order, a_null) {
+                        (NullsOrder::First, true) | (NullsOrder::Last, false) => Ordering::Less,
+                        (NullsOrder::First, false) | (NullsOrder::Last, true) => Ordering::Greater,
+                    }
+                } else {
+                    let cmp = compare_values(&val_a, &val_b);
+                    match order_item.direction {
+                        OrderDirection::Asc => cmp,
+                        OrderDirection::Desc => cmp.reverse(),
+                    }
+                }
+            } else {
+                let cmp = compare_values_with_collation(&val_a, &val_b, collation);
+                match order_item.direction {
+                    OrderDirection::Asc => cmp,
+                    OrderDirection::Desc => cmp.reverse(),
+                }
             };
 
             if cmp != Ordering::Equal {

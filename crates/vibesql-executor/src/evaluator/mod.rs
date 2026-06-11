@@ -34,5 +34,7 @@ pub(crate) use core::values_are_equal;
 pub use arena::ArenaExpressionEvaluator;
 // Re-export cache clearing function for benchmarks
 pub use combined::clear_in_subquery_cache;
+// Re-export subquery column counting for prepare-time IN validation (#5191)
+pub(crate) use combined::subqueries::schema_utils::compute_select_list_column_count;
 // Re-export eval_unary_op for use in other modules
 pub(crate) use expressions::operators::eval_unary_op;

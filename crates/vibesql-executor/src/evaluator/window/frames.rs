@@ -7,14 +7,15 @@ use std::cmp::Ordering;
 use std::ops::Range;
 
 use vibesql_ast::{
-    Expression, FrameBound, FrameExclude, FrameUnit, OrderByItem, UnaryOperator, WindowFrame,
+    Expression, FrameBound, FrameExclude, FrameUnit, NullsOrder, OrderByItem, OrderDirection,
+    UnaryOperator, WindowFrame,
 };
 use vibesql_types::SqlValue;
 
 use vibesql_storage::Row;
 
 use super::partitioning::Partition;
-use super::sorting::compare_values;
+use super::sorting::{compare_values, compare_values_with_collation};
 
 /// Validate a window frame specification, returning an error if invalid.
 ///
@@ -56,13 +57,11 @@ pub fn validate_range_order_by(
     }
 
     // Check if either bound uses a numeric offset (N PRECEDING or N FOLLOWING)
-    let has_offset_bound = matches!(
-        frame.start,
-        FrameBound::Preceding(_) | FrameBound::Following(_)
-    ) || frame
-        .end
-        .as_ref()
-        .is_some_and(|end| matches!(end, FrameBound::Preceding(_) | FrameBound::Following(_)));
+    let has_offset_bound =
+        matches!(frame.start, FrameBound::Preceding(_) | FrameBound::Following(_))
+            || frame.end.as_ref().is_some_and(|end| {
+                matches!(end, FrameBound::Preceding(_) | FrameBound::Following(_))
+            });
 
     if !has_offset_bound {
         return Ok(());
@@ -72,7 +71,7 @@ pub fn validate_range_order_by(
     let order_by_count = order_by.as_ref().map_or(0, |items| items.len());
     if order_by_count != 1 {
         return Err(
-            "RANGE with offset PRECEDING/FOLLOWING requires one ORDER BY expression".to_string(),
+            "RANGE with offset PRECEDING/FOLLOWING requires one ORDER BY expression".to_string()
         );
     }
 
@@ -362,6 +361,9 @@ where
 
             // For DESC order, PRECEDING means larger values (add offset)
             // For ASC order, PRECEDING means smaller values (subtract offset)
+            // For non-numeric values (text/blob/NULL) the arithmetic is a no-op,
+            // so the target collapses to the current key (SQLite: the frame
+            // degenerates to the current row's peer group).
             let target_value = if is_desc {
                 add_to_value(current_value, offset)
             } else {
@@ -369,23 +371,13 @@ where
             };
 
             if is_start {
-                // For DESC: find first row where value <= target (target is larger, comes first)
-                // For ASC: find first row where value >= target (target is smaller, comes first)
-                if is_desc {
-                    find_first_row_le_desc(partition, order_items, &target_value, eval_fn)
-                } else {
-                    find_first_row_ge(partition, order_items, &target_value, eval_fn)
-                }
+                // First row at-or-after the target in window order
+                find_first_row_at_or_after(partition, order_items, &target_value, eval_fn)
             } else {
-                // Find the boundary row and return exclusive end
+                // Last row at-or-before the target in window order (exclusive end).
                 // If no matching row exists, return 0 (empty frame end)
-                if is_desc {
-                    find_last_row_ge_desc(partition, order_items, &target_value, eval_fn)
-                        .map_or(0, |i| i + 1)
-                } else {
-                    find_last_row_le(partition, order_items, &target_value, eval_fn)
-                        .map_or(0, |i| i + 1)
-                }
+                find_last_row_at_or_before(partition, order_items, &target_value, eval_fn)
+                    .map_or(0, |i| i + 1)
             }
         }
 
@@ -401,23 +393,69 @@ where
             };
 
             if is_start {
-                // For DESC: find first row where value <= target (target is smaller, comes later)
-                // For ASC: find first row where value >= target (target is larger, comes later)
-                if is_desc {
-                    find_first_row_le_desc(partition, order_items, &target_value, eval_fn)
-                } else {
-                    find_first_row_ge(partition, order_items, &target_value, eval_fn)
-                }
+                find_first_row_at_or_after(partition, order_items, &target_value, eval_fn)
             } else {
-                // Find the boundary row and return exclusive end
-                // If no matching row exists, return 0 (empty frame end)
-                if is_desc {
-                    find_last_row_ge_desc(partition, order_items, &target_value, eval_fn)
-                        .map_or(0, |i| i + 1)
-                } else {
-                    find_last_row_le(partition, order_items, &target_value, eval_fn)
-                        .map_or(0, |i| i + 1)
-                }
+                find_last_row_at_or_before(partition, order_items, &target_value, eval_fn)
+                    .map_or(0, |i| i + 1)
+            }
+        }
+    }
+}
+
+/// Whether NULL ORDER BY keys sort before non-NULL keys in the sorted partition.
+///
+/// Honors an explicit NULLS FIRST/LAST modifier; otherwise uses SQLite's
+/// defaults (NULLS FIRST for ASC, NULLS LAST for DESC).
+fn nulls_sort_first(item: &OrderByItem) -> bool {
+    match item.nulls_order {
+        Some(NullsOrder::First) => true,
+        Some(NullsOrder::Last) => false,
+        None => matches!(item.direction, OrderDirection::Asc),
+    }
+}
+
+/// Extract an explicit COLLATE from an ORDER BY expression
+/// (e.g. `ORDER BY a COLLATE nocase`).
+fn explicit_collation(expr: &Expression) -> Option<&str> {
+    match expr {
+        Expression::Collate { collation, .. } => Some(collation),
+        _ => None,
+    }
+}
+
+/// Compare two ORDER BY key values in *window order* — the order in which rows
+/// appear in the sorted partition. Accounts for sort direction, NULLS
+/// FIRST/LAST placement, and explicit collation, so boundary searches stay
+/// consistent with the partition sort (see `sort_partition_with_collations`).
+fn compare_keys_window_order(
+    a: &SqlValue,
+    b: &SqlValue,
+    item: &OrderByItem,
+    collation: Option<&str>,
+) -> Ordering {
+    let a_null = matches!(a, SqlValue::Null);
+    let b_null = matches!(b, SqlValue::Null);
+    match (a_null, b_null) {
+        (true, true) => Ordering::Equal,
+        (true, false) => {
+            if nulls_sort_first(item) {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }
+        }
+        (false, true) => {
+            if nulls_sort_first(item) {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            }
+        }
+        (false, false) => {
+            let cmp = compare_values_with_collation(a, b, collation);
+            match item.direction {
+                OrderDirection::Asc => cmp,
+                OrderDirection::Desc => cmp.reverse(),
             }
         }
     }
@@ -677,8 +715,11 @@ where
     partition.len() - 1
 }
 
-/// Find the first row where ORDER BY value >= target
-fn find_first_row_ge<F>(
+/// Find the first row whose ORDER BY key sorts at-or-after `target` in window order
+///
+/// Window order accounts for direction (ASC/DESC), NULLS FIRST/LAST placement,
+/// and explicit collation, so this works for any sorted partition layout.
+fn find_first_row_at_or_after<F>(
     partition: &Partition,
     order_items: &[OrderByItem],
     target: &SqlValue,
@@ -687,17 +728,19 @@ fn find_first_row_ge<F>(
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
 {
+    let item = &order_items[0];
+    let collation = explicit_collation(&item.expr);
     for (i, row) in partition.rows.iter().enumerate() {
-        let val = eval_fn(&order_items[0].expr, row).unwrap_or(SqlValue::Null);
-        if compare_values(&val, target) != Ordering::Less {
+        let val = eval_fn(&item.expr, row).unwrap_or(SqlValue::Null);
+        if compare_keys_window_order(&val, target, item, collation) != Ordering::Less {
             return i;
         }
     }
     partition.len()
 }
 
-/// Find the last row where ORDER BY value <= target
-fn find_last_row_le<F>(
+/// Find the last row whose ORDER BY key sorts at-or-before `target` in window order
+fn find_last_row_at_or_before<F>(
     partition: &Partition,
     order_items: &[OrderByItem],
     target: &SqlValue,
@@ -706,53 +749,11 @@ fn find_last_row_le<F>(
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
 {
+    let item = &order_items[0];
+    let collation = explicit_collation(&item.expr);
     for i in (0..partition.len()).rev() {
-        let val = eval_fn(&order_items[0].expr, &partition.rows[i]).unwrap_or(SqlValue::Null);
-        if compare_values(&val, target) != Ordering::Greater {
-            return Some(i);
-        }
-    }
-    None
-}
-
-/// Find the first row where ORDER BY value <= target (for DESC sorted partitions)
-///
-/// In a DESC-sorted partition, values decrease as we go through the rows.
-/// This finds the first row (smallest index) where value <= target.
-fn find_first_row_le_desc<F>(
-    partition: &Partition,
-    order_items: &[OrderByItem],
-    target: &SqlValue,
-    eval_fn: &F,
-) -> usize
-where
-    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
-{
-    for (i, row) in partition.rows.iter().enumerate() {
-        let val = eval_fn(&order_items[0].expr, row).unwrap_or(SqlValue::Null);
-        if compare_values(&val, target) != Ordering::Greater {
-            return i;
-        }
-    }
-    partition.len()
-}
-
-/// Find the last row where ORDER BY value >= target (for DESC sorted partitions)
-///
-/// In a DESC-sorted partition, values decrease as we go through the rows.
-/// This finds the last row (largest index) where value >= target.
-fn find_last_row_ge_desc<F>(
-    partition: &Partition,
-    order_items: &[OrderByItem],
-    target: &SqlValue,
-    eval_fn: &F,
-) -> Option<usize>
-where
-    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
-{
-    for i in (0..partition.len()).rev() {
-        let val = eval_fn(&order_items[0].expr, &partition.rows[i]).unwrap_or(SqlValue::Null);
-        if compare_values(&val, target) != Ordering::Less {
+        let val = eval_fn(&item.expr, &partition.rows[i]).unwrap_or(SqlValue::Null);
+        if compare_keys_window_order(&val, target, item, collation) != Ordering::Greater {
             return Some(i);
         }
     }
