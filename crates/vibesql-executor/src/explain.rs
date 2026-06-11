@@ -551,6 +551,22 @@ fn append_scan_entries(node: &PlanNode, entries: &mut Vec<EqpEntry>) {
     }
 }
 
+/// True when any node in `node`'s subtree needs a temp B-tree for ORDER BY.
+///
+/// Used by the view-flattening branch to hoist a body's sort flag onto the
+/// `Subquery` node it nests under, since [`collect_eqp_entries`] only checks
+/// a node and its DIRECT children. Co-routine subtrees are skipped: their
+/// inner entries (including temp B-tree lines) are re-collected inside the
+/// `CO-ROUTINE` block by [`append_scan_entries`], so counting them here
+/// would emit the line twice.
+fn subtree_needs_order_by_temp_btree(node: &PlanNode) -> bool {
+    if node.coroutine.is_some() {
+        return false;
+    }
+    node.needs_temp_btree_for_order_by
+        || node.children.iter().any(subtree_needs_order_by_temp_btree)
+}
+
 /// Collect all EQP entries from the plan tree, including TEMP B-TREE entries
 fn collect_eqp_entries(node: &PlanNode) -> Vec<EqpEntry> {
     let mut entries = Vec::new();
@@ -1190,6 +1206,33 @@ impl ExplainExecutor {
         .unwrap_or(false)
     }
 
+    /// True when a plain (window-free) view body is simple enough for its
+    /// plan to be inlined into the outer EQP output (#5355).
+    ///
+    /// Mirrors SQLite's query-flattener blocking conditions conservatively:
+    /// aggregates, GROUP BY/HAVING, DISTINCT, LIMIT/OFFSET, compound bodies,
+    /// VALUES, and WITH clauses all keep the pre-existing opaque
+    /// `SCAN <view>` rendering (SQLite materializes/co-routines these;
+    /// VibeSQL keeps the conservative opaque line rather than guessing —
+    /// follow-on work can add CO-ROUTINE blocks case by case). Window
+    /// functions are handled separately by the CO-ROUTINE path (#5347).
+    fn view_body_is_flattenable(stmt: &SelectStmt) -> bool {
+        let select_list_has_aggregate = stmt.select_list.iter().any(|item| match item {
+            SelectItem::Expression { expr, .. } => contains_aggregate_function(expr),
+            SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. } => false,
+        });
+
+        stmt.set_operation.is_none()
+            && !stmt.distinct
+            && stmt.group_by.is_none()
+            && stmt.having.is_none()
+            && stmt.limit.is_none()
+            && stmt.offset.is_none()
+            && stmt.values.is_none()
+            && stmt.with_clause.is_none()
+            && !select_list_has_aggregate
+    }
+
     /// Generate plan node for FROM clause
     ///
     /// `order_from_window` is true when `order_by` is a window sort key
@@ -1206,13 +1249,25 @@ impl ExplainExecutor {
     ) -> Result<PlanNode, ExecutorError> {
         match from {
             vibesql_ast::FromClause::Table { name, alias, .. } => {
-                // Expand window-function views (#5347): SQLite's EQP shows
-                // the view body's plan as a CO-ROUTINE block instead of an
-                // opaque `SCAN <view>` (windowpushd.test 2.1.3.6). Only
-                // window views are expanded — plain views keep the existing
-                // opaque rendering (flattening them faithfully would also
-                // require pushing the outer WHERE; follow-on work). CTE
-                // names shadow same-named views and are never expanded.
+                // Expand views in EQP output instead of showing an opaque
+                // `SCAN <view>`. CTE names shadow same-named views and are
+                // never expanded.
+                //
+                // - Window-function views (#5347): SQLite cannot flatten
+                //   them, so the body's plan renders as a CO-ROUTINE block
+                //   plus a trailing `SCAN <name>` (windowpushd.test 2.1.3.6).
+                // - Plain flattenable views (#5355): SQLite inlines the body
+                //   into the outer query and shows the underlying table
+                //   access with no mention of the view. VibeSQL's runtime
+                //   MATERIALIZES views (select/scan/table.rs executes the
+                //   full body, then post-filters the outer WHERE), so the
+                //   inner scans shown here are the truthful access path; we
+                //   deliberately do NOT fabricate SQLite's outer-WHERE
+                //   push-down (`SEARCH <table> (x=?)`) because no index
+                //   probe happens at runtime. Where no index applies the
+                //   output matches SQLite exactly (`SCAN <table>`).
+                // - Blocked bodies (aggregate/GROUP BY/DISTINCT/LIMIT/
+                //   compound/...) keep the opaque rendering.
                 if !ctes.contains(&name.to_ascii_lowercase()) {
                     if let Some(view) = database.catalog.get_view(name) {
                         if Self::select_has_window_functions(&view.query) {
@@ -1221,6 +1276,27 @@ impl ExplainExecutor {
                             let mut view_node = PlanNode::new("Subquery");
                             view_node.object = Some(format!("AS {}", source));
                             view_node.coroutine = Some(source.to_string());
+                            view_node.add_child(child);
+                            return Ok(view_node);
+                        }
+
+                        if Self::view_body_is_flattenable(&view.query) {
+                            let source = alias.as_deref().unwrap_or(name.as_str());
+                            let child = Self::explain_select(&view.query, database, ctes)?;
+                            let mut view_node = PlanNode::new("Subquery");
+                            view_node.object = Some(format!("AS {}", source));
+                            // The body's ORDER BY genuinely sorts at runtime
+                            // (views are materialized), and SQLite's
+                            // flattened plan keeps the body's `USE TEMP
+                            // B-TREE FOR ORDER BY` line. collect_eqp_entries
+                            // only checks the root's DIRECT children for the
+                            // flag, but the body root sits one level deeper
+                            // (root -> Subquery -> body) — and deeper still
+                            // for nested ORDER BY views — so hoist the
+                            // subtree's flag onto this node to keep the line
+                            // rendered (verified against sqlite3 3.51.0).
+                            view_node.needs_temp_btree_for_order_by =
+                                subtree_needs_order_by_temp_btree(&child);
                             view_node.add_child(child);
                             return Ok(view_node);
                         }
@@ -1471,10 +1547,8 @@ impl ExplainExecutor {
             }
 
             idx_node
-        } else if let Some(ordering_index) = order_by
-            .as_deref()
-            .filter(|_| order_from_window)
-            .and_then(|items| {
+        } else if let Some(ordering_index) =
+            order_by.as_deref().filter(|_| order_from_window).and_then(|items| {
                 eqp_ordering_index(table_name, where_clause.as_ref(), items, database, true)
             })
         {
@@ -1532,6 +1606,47 @@ impl ExplainExecutor {
         }
 
         false
+    }
+}
+
+/// Recursively check if an expression contains aggregate functions.
+///
+/// Used by the EQP view-flattening gate (#5355): a view body whose SELECT
+/// list aggregates cannot be flattened. Subqueries are conservatively treated
+/// as containing aggregates (blocking flattening keeps the safe opaque
+/// rendering).
+fn contains_aggregate_function(expr: &Expression) -> bool {
+    match expr {
+        Expression::AggregateFunction { .. } => true,
+        Expression::Function { args, .. } => args.iter().any(contains_aggregate_function),
+        Expression::BinaryOp { left, right, .. } => {
+            contains_aggregate_function(left) || contains_aggregate_function(right)
+        }
+        Expression::UnaryOp { expr, .. } => contains_aggregate_function(expr),
+        Expression::IsNull { expr, .. } => contains_aggregate_function(expr),
+        Expression::Cast { expr, .. } => contains_aggregate_function(expr),
+        Expression::Conjunction(exprs) | Expression::Disjunction(exprs) => {
+            exprs.iter().any(contains_aggregate_function)
+        }
+        Expression::Case { operand, when_clauses, else_result, .. } => {
+            operand.as_ref().is_some_and(|e| contains_aggregate_function(e))
+                || when_clauses.iter().any(|clause| {
+                    clause.conditions.iter().any(contains_aggregate_function)
+                        || contains_aggregate_function(&clause.result)
+                })
+                || else_result.as_ref().is_some_and(|e| contains_aggregate_function(e))
+        }
+        Expression::InList { expr, values, .. } => {
+            contains_aggregate_function(expr) || values.iter().any(contains_aggregate_function)
+        }
+        Expression::Between { expr, low, high, .. } => {
+            contains_aggregate_function(expr)
+                || contains_aggregate_function(low)
+                || contains_aggregate_function(high)
+        }
+        // Conservative: subqueries may contain anything; block flattening.
+        Expression::ScalarSubquery(_) | Expression::In { .. } | Expression::Exists { .. } => true,
+        _ => false,
     }
 }
 
