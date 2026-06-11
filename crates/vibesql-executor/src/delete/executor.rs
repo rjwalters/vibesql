@@ -598,7 +598,12 @@ impl DeleteExecutor {
             let old_rows: Vec<&vibesql_storage::Row> =
                 rows_and_indices_to_delete.iter().map(|(_, row)| row).collect();
             Some(crate::dml_returning::project_returning(
-                items, &schema, database, None, &old_rows,
+                items,
+                &schema,
+                database,
+                None,
+                &old_rows,
+                cte_results.as_ref(),
             )?)
         } else {
             None
@@ -1050,6 +1055,7 @@ fn execute_delete_on_view(
             database,
             None,
             &old_rows,
+            None,
         )?)
     } else {
         None

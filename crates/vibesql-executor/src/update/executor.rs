@@ -710,7 +710,9 @@ pub(super) fn execute_internal(
         return Err(assertion_error);
     }
 
-    // Project RETURNING items against the NEW rows (SQLite 3.35.0+).
+    // Project RETURNING items against the NEW rows (SQLite 3.35.0+), with
+    // the statement's WITH-clause CTEs (if any) visible to subqueries in
+    // RETURNING expressions (issue #5359).
     let returning = if let Some(items) = &stmt.returning {
         let new_rows: Vec<&Row> = updates.iter().map(|u| &u.new_row).collect();
         Some(crate::dml_returning::project_returning(
@@ -719,6 +721,7 @@ pub(super) fn execute_internal(
             database,
             stmt.alias.as_deref(),
             &new_rows,
+            cte_results.as_ref(),
         )?)
     } else {
         None
@@ -1689,6 +1692,8 @@ fn execute_update_from(
     let _ = pk_indices;
 
     // Project RETURNING items against the NEW rows (SQLite 3.35.0+).
+    // UPDATE ... FROM does not currently thread WITH-clause CTEs into this
+    // path, so no CTE context is available here.
     let returning = if let Some(items) = &stmt.returning {
         let new_rows: Vec<&Row> = updates.iter().map(|u| &u.new_row).collect();
         Some(crate::dml_returning::project_returning(
@@ -1697,6 +1702,7 @@ fn execute_update_from(
             database,
             stmt.alias.as_deref(),
             &new_rows,
+            None,
         )?)
     } else {
         None
@@ -1722,6 +1728,7 @@ fn empty_returning(
                 database,
                 stmt.alias.as_deref(),
                 &[],
+                None,
             )
         })
         .transpose()

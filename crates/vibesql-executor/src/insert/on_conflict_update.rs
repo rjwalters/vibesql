@@ -407,6 +407,7 @@ pub fn handle_on_conflict_update(
     target_where: Option<&Expression>,
     assignments: &[Assignment],
     where_clause: Option<&Expression>,
+    cte_results: Option<&std::collections::HashMap<String, crate::select::cte::CteResult>>,
 ) -> Result<UpsertAction, ExecutorError> {
     // Determine which unique constraints/indexes the update arm applies to.
     // SQLite tests the targeted constraint first (upsert1-700 series).
@@ -456,7 +457,12 @@ pub fn handle_on_conflict_update(
     // first — SQLite semantics). Only `excluded.` references need rewriting,
     // since `excluded` is not a real table.
     let new_values = {
-        let evaluator = crate::evaluator::ExpressionEvaluator::with_database(schema, db);
+        let mut evaluator = crate::evaluator::ExpressionEvaluator::with_database(schema, db);
+        // Make the enclosing INSERT statement's WITH-clause CTEs visible to
+        // subqueries in the DO UPDATE SET/WHERE expressions (issue #5359).
+        if let Some(ctes) = cte_results {
+            evaluator = evaluator.with_cte_context(ctes);
+        }
 
         // DO UPDATE ... WHERE: when false or NULL, drop the row silently.
         if let Some(where_expr) = where_clause {

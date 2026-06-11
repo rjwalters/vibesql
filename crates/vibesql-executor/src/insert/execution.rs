@@ -105,6 +105,23 @@ fn execute_insert_internal(
     // Check INSERT privilege on the table
     PrivilegeChecker::check_insert(db, &full_table_name)?;
 
+    // Materialize statement-level WITH-clause CTEs once, up front, so they
+    // are visible to subqueries in VALUES rows, the INSERT ... SELECT
+    // source, the upsert DO UPDATE arm, and RETURNING expressions —
+    // matching SQLite semantics (issue #5359). CTE names shadow same-named
+    // catalog tables/views and resolve ASCII case-insensitively (#5350).
+    let cte_results: Option<std::collections::HashMap<String, crate::select::cte::CteResult>> =
+        if let Some(ref cte_list) = stmt.with_clause {
+            Some(crate::select::cte::execute_ctes(cte_list, db, |cte_query, prior_ctes| {
+                let cte_executor = crate::SelectExecutor::new_with_cte(db, prior_ctes);
+                cte_executor
+                    .execute_with_columns(cte_query)
+                    .map(|result| result.rows.into_iter().collect())
+            })?)
+        } else {
+            None
+        };
+
     // Check if target is a VIEW with INSTEAD OF triggers
     if let Some(view_def) = db.catalog.get_view(&stmt.table_name).cloned() {
         // SQLite: the upsert syntax cannot target a view, even when INSTEAD
@@ -112,12 +129,19 @@ fn execute_insert_internal(
         if stmt.on_conflict.is_some() {
             return Err(ExecutorError::SqliteCompatError("cannot UPSERT a view".to_string()));
         }
-        return execute_insert_on_view(db, stmt, &view_def, procedural_context, trigger_context)
-            .map(|(count, returning)| InsertOutcome {
-                affected_rows: count,
-                upsert_updated_rows: 0,
-                returning,
-            });
+        return execute_insert_on_view(
+            db,
+            stmt,
+            &view_def,
+            procedural_context,
+            trigger_context,
+            cte_results.as_ref(),
+        )
+        .map(|(count, returning)| InsertOutcome {
+            affected_rows: count,
+            upsert_updated_rows: 0,
+            returning,
+        });
     }
 
     // Get table schema from catalog (clone to avoid borrow issues)
@@ -215,19 +239,10 @@ fn execute_insert_internal(
             }
 
             // Fall back to normal path: execute SELECT and convert to expressions
-            // If we have a with_clause (CTEs), execute them first and pass to SelectExecutor
-            let select_result = if let Some(ref cte_list) = stmt.with_clause {
-                // Execute CTEs first
-                let cte_results =
-                    crate::select::cte::execute_ctes(cte_list, db, |cte_query, prior_ctes| {
-                        let cte_executor = crate::SelectExecutor::new_with_cte(db, prior_ctes);
-                        cte_executor
-                            .execute_with_columns(cte_query)
-                            .map(|result| result.rows.into_iter().collect())
-                    })?;
-
+            // If we have a with_clause (CTEs), reuse the results materialized above
+            let select_result = if let Some(ref ctes) = cte_results {
                 // Create executor with CTE results
-                let select_executor = crate::SelectExecutor::new_with_cte(db, &cte_results);
+                let select_executor = crate::SelectExecutor::new_with_cte(db, ctes);
                 select_executor.execute_with_columns(select_stmt)?
             } else {
                 let select_executor = crate::SelectExecutor::new(db);
@@ -537,7 +552,11 @@ fn execute_insert_internal(
                     let dummy_schema =
                         vibesql_catalog::TableSchema::new("__rowid_expr__".to_string(), vec![]);
                     let dummy_row = vibesql_storage::Row::new(vec![]);
-                    let evaluator = crate::ExpressionEvaluator::with_database(&dummy_schema, db);
+                    let mut evaluator =
+                        crate::ExpressionEvaluator::with_database(&dummy_schema, db);
+                    if let Some(ref ctes) = cte_results {
+                        evaluator = evaluator.with_cte_context(ctes);
+                    }
                     let val = evaluator.eval(rowid_expr, &dummy_row)?;
 
                     match val {
@@ -617,6 +636,7 @@ fn execute_insert_internal(
                 procedural_context,
                 trigger_context,
                 Some(db),
+                cte_results.as_ref(),
             )?;
 
             // Type check and coerce: ensure value matches column type
@@ -972,6 +992,7 @@ fn execute_insert_internal(
                     target_where.as_ref(),
                     assignments,
                     where_clause.as_ref(),
+                    cte_results.as_ref(),
                 )? {
                     super::on_conflict_update::UpsertAction::Updated(updated_row_id) => {
                         // Row was updated, count it toward affected rows
@@ -1290,7 +1311,14 @@ fn execute_insert_internal(
     // rows still yield an empty result with the derived column headers.
     let returning_result = if let Some(items) = &stmt.returning {
         let row_refs: Vec<&vibesql_storage::Row> = returned_rows.iter().collect();
-        Some(crate::dml_returning::project_returning(items, &schema, db, None, &row_refs)?)
+        Some(crate::dml_returning::project_returning(
+            items,
+            &schema,
+            db,
+            None,
+            &row_refs,
+            cte_results.as_ref(),
+        )?)
     } else {
         None
     };
@@ -1486,6 +1514,7 @@ fn execute_insert_on_view(
     view_def: &vibesql_catalog::ViewDefinition,
     procedural_context: Option<&crate::procedural::ExecutionContext>,
     trigger_context: Option<&crate::trigger_execution::TriggerContext>,
+    cte_results: Option<&std::collections::HashMap<String, crate::select::cte::CteResult>>,
 ) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
     use vibesql_ast::TriggerTiming;
 
@@ -1522,9 +1551,13 @@ fn execute_insert_on_view(
             vec![default_row]
         }
         vibesql_ast::InsertSource::Select(select_stmt) => {
-            // Execute SELECT and convert to expressions
-            let select_executor = crate::SelectExecutor::new(db);
-            let select_result = select_executor.execute_with_columns(select_stmt)?;
+            // Execute SELECT and convert to expressions, with the enclosing
+            // statement's CTEs (if any) visible to the source query.
+            let select_result = if let Some(ctes) = cte_results {
+                crate::SelectExecutor::new_with_cte(db, ctes).execute_with_columns(select_stmt)?
+            } else {
+                crate::SelectExecutor::new(db).execute_with_columns(select_stmt)?
+            };
             select_result
                 .rows
                 .into_iter()
@@ -1564,13 +1597,16 @@ fn execute_insert_on_view(
     // This avoids borrow conflicts with the evaluator
     let new_rows: Vec<vibesql_storage::Row> = {
         let dummy_row = vibesql_storage::Row::new(vec![]);
-        let evaluator = if let Some(ctx) = trigger_context {
+        let mut evaluator = if let Some(ctx) = trigger_context {
             crate::evaluator::ExpressionEvaluator::with_trigger_context(&view_schema, db, ctx)
         } else if let Some(ctx) = procedural_context {
             crate::evaluator::ExpressionEvaluator::with_procedural_context(&view_schema, db, ctx)
         } else {
             crate::evaluator::ExpressionEvaluator::with_database(&view_schema, db)
         };
+        if let Some(ctes) = cte_results {
+            evaluator = evaluator.with_cte_context(ctes);
+        }
 
         let mut collected_rows = Vec::new();
         for value_exprs in &rows_to_insert {
@@ -1603,7 +1639,14 @@ fn execute_insert_on_view(
     // triggers run since the database must be borrowed mutably below.
     let returning_result = if let Some(items) = &stmt.returning {
         let row_refs: Vec<&vibesql_storage::Row> = new_rows.iter().collect();
-        Some(crate::dml_returning::project_returning(items, &view_schema, db, None, &row_refs)?)
+        Some(crate::dml_returning::project_returning(
+            items,
+            &view_schema,
+            db,
+            None,
+            &row_refs,
+            cte_results,
+        )?)
     } else {
         None
     };
