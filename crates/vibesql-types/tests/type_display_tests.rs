@@ -104,6 +104,18 @@ fn test_date_display() {
 }
 
 #[test]
+fn test_negative_year_date_display() {
+    // SQLite zero-pads negative (astronomical) years to 4 digits after the
+    // sign, e.g. date(1392399.5) renders '-0900-02-28'
+    let date = Date::new(-900, 2, 28).unwrap();
+    let value = SqlValue::Date(date);
+    assert_eq!(format!("{}", value), "-0900-02-28");
+
+    let date = Date::new(900, 2, 28).unwrap();
+    assert_eq!(format!("{}", SqlValue::Date(date)), "0900-02-28");
+}
+
+#[test]
 fn test_time_display() {
     let time = "12:30:00".parse::<Time>().unwrap();
     let value = SqlValue::Time(time);

@@ -755,6 +755,12 @@ impl<'arena> ArenaParser<'arena> {
             // Typed literals: DATE 'string', TIME 'string', TIMESTAMP 'string'
             // If not followed by a string literal, treat as column name (SQLite compatibility)
             Token::Keyword { keyword: Keyword::Date, .. } => {
+                // date(...) is a function call, not a typed literal - don't consume
+                // the keyword; the identifier path routes it to parse_function_call
+                // via can_be_identifier() (issue #5307)
+                if matches!(self.peek_next(), Token::LParen) {
+                    return Ok(None);
+                }
                 self.advance();
                 match self.peek() {
                     Token::String(s) => {
@@ -783,6 +789,12 @@ impl<'arena> ArenaParser<'arena> {
                 }
             }
             Token::Keyword { keyword: Keyword::Time, .. } => {
+                // time(...) is a function call, not a typed literal - don't consume
+                // the keyword; the identifier path routes it to parse_function_call
+                // via can_be_identifier() (issue #5307)
+                if matches!(self.peek_next(), Token::LParen) {
+                    return Ok(None);
+                }
                 self.advance();
                 match self.peek() {
                     Token::String(s) => {

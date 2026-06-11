@@ -46,7 +46,14 @@ impl FromStr for Date {
 
 impl fmt::Display for Date {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:04}-{:02}-{:02}", self.year, self.month, self.day)
+        // Zero-pad the year to 4 digits excluding the sign: SQLite renders
+        // negative (astronomical) years as e.g. '-0900-02-28', but Rust's
+        // `{:04}` counts the '-' toward the width (giving '-900').
+        if self.year < 0 {
+            write!(f, "-{:04}-{:02}-{:02}", -self.year, self.month, self.day)
+        } else {
+            write!(f, "{:04}-{:02}-{:02}", self.year, self.month, self.day)
+        }
     }
 }
 
