@@ -83,15 +83,26 @@ pub(super) fn evaluate_window_functions(
     // Track the column index where window function results start
     let base_column_count = if rows.is_empty() { 0 } else { rows[0].values.len() };
 
-    // Track row reordering from the first window function with PARTITION BY
+    // Track row reordering from the last window function with PARTITION BY/ORDER BY.
+    //
+    // SQLite rewrites multi-window queries into nested sorting passes; when there
+    // is no statement-level ORDER BY, rows are left in the order produced by the
+    // *last* window's sort pass. We mirror that by overwriting the captured order
+    // for each window function that has one (issue #5291, window9.test 1.4).
+    //
+    // Known limitation: each pass's order is computed from the *original* input
+    // order, whereas SQLite's chained passes stable-sort over the previous pass's
+    // output. These differ only when the last window's (PARTITION BY, ORDER BY)
+    // keys have ties. If a future test demands exact tie behavior, reorder `rows`
+    // (plus previously computed window columns) sequentially after each pass.
     let mut row_reordering: Option<Vec<usize>> = None;
 
     for (idx, win_func) in window_functions.iter().enumerate() {
         let result = evaluation::evaluate_single_window_function(&rows, win_func, evaluator)?;
         window_results.push(result.values);
 
-        // Capture row reordering from the first window function that has PARTITION BY
-        if row_reordering.is_none() {
+        // Capture row reordering from the last window function that has one
+        if result.partition_order.is_some() {
             row_reordering = result.partition_order;
         }
 
