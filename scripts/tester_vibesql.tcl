@@ -3245,6 +3245,9 @@ array set vibesql_skip_tests {
     window1-11.3 "Expression indexes with window functions not supported"
     window1-11.4 "Expression indexes with window functions not supported"
 
+    windowC-2.0 "Requires PRAGMA encoding=UTF16le: SQLite reinterprets the blob group_concat separator bytes as text in the database encoding; VibeSQL has no UTF-16 database encoding support (dbsqlfuzz regression test, #5191)"
+    windowC-2.1 "Requires PRAGMA encoding=UTF16be: SQLite reinterprets the blob group_concat separator bytes as text in the database encoding; VibeSQL has no UTF-16 database encoding support (dbsqlfuzz regression test, #5191)"
+
     fkey1-3.5 "Uses sqlite3_db_status internal API"
     fkey1-8.3 "Tests SQLite-internal B-tree corruption via PRAGMA writable_schema + REINDEX (not portable to VibeSQL)"
     fkey6-1.3 "Uses sqlite3_db_status internal API"

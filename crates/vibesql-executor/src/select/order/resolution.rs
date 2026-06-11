@@ -580,6 +580,110 @@ fn resolve_aliases_in_expression(
             }
         }
 
+        // Handle IS / IS NOT (parsed as IsDistinctFrom), e.g. ORDER BY (z IS y)
+        // where z is a SELECT alias (window9.test 7.2/7.3)
+        vibesql_ast::Expression::IsDistinctFrom { left, right, negated } => {
+            let resolved_left = resolve_alias_or_clone(left, select_list);
+            let resolved_right = resolve_alias_or_clone(right, select_list);
+
+            if resolved_left.is_some() || resolved_right.is_some() {
+                Some(vibesql_ast::Expression::IsDistinctFrom {
+                    left: Box::new(resolved_left.unwrap_or_else(|| left.as_ref().clone())),
+                    right: Box::new(resolved_right.unwrap_or_else(|| right.as_ref().clone())),
+                    negated: *negated,
+                })
+            } else {
+                None
+            }
+        }
+
+        // Handle IS NULL / IS NOT NULL (e.g. ORDER BY x IS NULL where x is an alias)
+        vibesql_ast::Expression::IsNull { expr: inner, negated } => {
+            resolve_alias_or_clone(inner, select_list).map(|resolved_inner| {
+                vibesql_ast::Expression::IsNull {
+                    expr: Box::new(resolved_inner),
+                    negated: *negated,
+                }
+            })
+        }
+
+        // Handle IS TRUE / IS FALSE / IS UNKNOWN
+        vibesql_ast::Expression::IsTruthValue { expr: inner, truth_value, negated } => {
+            resolve_alias_or_clone(inner, select_list).map(|resolved_inner| {
+                vibesql_ast::Expression::IsTruthValue {
+                    expr: Box::new(resolved_inner),
+                    truth_value: *truth_value,
+                    negated: *negated,
+                }
+            })
+        }
+
+        // Handle CAST(x AS type)
+        vibesql_ast::Expression::Cast { expr: inner, data_type } => {
+            resolve_alias_or_clone(inner, select_list).map(|resolved_inner| {
+                vibesql_ast::Expression::Cast {
+                    expr: Box::new(resolved_inner),
+                    data_type: data_type.clone(),
+                }
+            })
+        }
+
+        // Handle x COLLATE name
+        vibesql_ast::Expression::Collate { expr: inner, collation } => {
+            resolve_alias_or_clone(inner, select_list).map(|resolved_inner| {
+                vibesql_ast::Expression::Collate {
+                    expr: Box::new(resolved_inner),
+                    collation: collation.clone(),
+                }
+            })
+        }
+
+        // Handle x BETWEEN low AND high
+        vibesql_ast::Expression::Between { expr: inner, low, high, negated, symmetric } => {
+            let resolved_inner = resolve_alias_or_clone(inner, select_list);
+            let resolved_low = resolve_alias_or_clone(low, select_list);
+            let resolved_high = resolve_alias_or_clone(high, select_list);
+
+            if resolved_inner.is_some() || resolved_low.is_some() || resolved_high.is_some() {
+                Some(vibesql_ast::Expression::Between {
+                    expr: Box::new(resolved_inner.unwrap_or_else(|| inner.as_ref().clone())),
+                    low: Box::new(resolved_low.unwrap_or_else(|| low.as_ref().clone())),
+                    high: Box::new(resolved_high.unwrap_or_else(|| high.as_ref().clone())),
+                    negated: *negated,
+                    symmetric: *symmetric,
+                })
+            } else {
+                None
+            }
+        }
+
+        // Handle x IN (a, b, c)
+        vibesql_ast::Expression::InList { expr: inner, values, negated } => {
+            let resolved_inner = resolve_alias_or_clone(inner, select_list);
+            let mut any_resolved = resolved_inner.is_some();
+            let resolved_values: Vec<_> = values
+                .iter()
+                .map(|v| {
+                    if let Some(resolved) = resolve_alias_or_clone(v, select_list) {
+                        any_resolved = true;
+                        resolved
+                    } else {
+                        v.clone()
+                    }
+                })
+                .collect();
+
+            if any_resolved {
+                Some(vibesql_ast::Expression::InList {
+                    expr: Box::new(resolved_inner.unwrap_or_else(|| inner.as_ref().clone())),
+                    values: resolved_values,
+                    negated: *negated,
+                })
+            } else {
+                None
+            }
+        }
+
         // For other expression types, no resolution needed
         _ => None,
     }

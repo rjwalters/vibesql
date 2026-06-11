@@ -58,6 +58,13 @@ impl SelectExecutor<'_> {
         // This catches queries like SELECT * FROM t, t, t, ... (65+ times)
         super::validation::validate_join_table_limit(stmt)?;
 
+        // Validate IN (SELECT ...) subquery column counts (issue #5191)
+        // SQLite raises "sub-select returns N columns - expected 1" at
+        // prepare time; the runtime check in the expression evaluator only
+        // fires when a row is actually evaluated, so it misses the
+        // empty-table case (window9.test 3.4).
+        super::validation::validate_in_subquery_column_counts(stmt, self.database)?;
+
         // Validate SQLite index hints (issue #5235)
         // INDEXED BY must name an index that exists on that table; SQLite
         // reports "no such index: X" at prepare time. The hint is otherwise
