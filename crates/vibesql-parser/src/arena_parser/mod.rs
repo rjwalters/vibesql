@@ -596,6 +596,23 @@ impl<'arena> ArenaParser<'arena> {
         }
     }
 
+    /// Require end of statement after the final clause of a statement.
+    ///
+    /// Consumes a trailing semicolon if present. Any token other than `;` or
+    /// EOF is a syntax error matching SQLite's `near "X": syntax error`
+    /// (issue #5261: trailing garbage after UPDATE/DELETE/INSERT was
+    /// previously ignored silently).
+    pub(crate) fn expect_statement_end(&mut self) -> Result<(), ParseError> {
+        match self.peek() {
+            Token::Semicolon => {
+                self.advance();
+                Ok(())
+            }
+            Token::Eof => Ok(()),
+            token => Err(ParseError { message: token.syntax_error() }),
+        }
+    }
+
     /// Get the next placeholder index.
     pub(crate) fn next_placeholder(&mut self) -> usize {
         let index = self.placeholder_count;

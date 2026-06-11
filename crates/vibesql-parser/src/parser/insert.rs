@@ -123,10 +123,8 @@ impl Parser {
             None
         };
 
-        // Expect semicolon or EOF
-        if matches!(self.peek(), Token::Semicolon) {
-            self.advance();
-        }
+        // Require end of statement: trailing tokens are a syntax error (issue #5261)
+        self.expect_statement_end()?;
 
         Ok(vibesql_ast::InsertStmt {
             with_clause: None,
@@ -263,10 +261,8 @@ impl Parser {
             None
         };
 
-        // Expect semicolon or EOF
-        if matches!(self.peek(), Token::Semicolon) {
-            self.advance();
-        }
+        // Require end of statement: trailing tokens are a syntax error (issue #5261)
+        self.expect_statement_end()?;
 
         Ok(vibesql_ast::InsertStmt {
             with_clause: Some(with_clause),
@@ -372,10 +368,8 @@ impl Parser {
             None
         };
 
-        // Expect semicolon or EOF
-        if matches!(self.peek(), Token::Semicolon) {
-            self.advance();
-        }
+        // Require end of statement: trailing tokens are a syntax error (issue #5261)
+        self.expect_statement_end()?;
 
         Ok(vibesql_ast::InsertStmt {
             with_clause: None,

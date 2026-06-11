@@ -100,6 +100,23 @@ impl Parser {
         }
     }
 
+    /// Require end of statement after the final clause of a statement.
+    ///
+    /// Consumes a trailing semicolon if present. Any token other than `;` or
+    /// EOF is a syntax error matching SQLite's `near "X": syntax error`
+    /// (issue #5261: trailing garbage after UPDATE/DELETE/INSERT was
+    /// previously ignored silently).
+    pub(super) fn expect_statement_end(&mut self) -> Result<(), ParseError> {
+        match self.peek() {
+            Token::Semicolon => {
+                self.advance();
+                Ok(())
+            }
+            Token::Eof => Ok(()),
+            token => Err(ParseError { message: token.syntax_error() }),
+        }
+    }
+
     /// Parse an identifier token (regular or delimited).
     pub(super) fn parse_identifier(&mut self) -> Result<String, ParseError> {
         match self.peek() {
