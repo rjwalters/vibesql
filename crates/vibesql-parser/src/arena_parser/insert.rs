@@ -145,8 +145,8 @@ impl<'arena> ArenaParser<'arena> {
             None
         };
 
-        // Consume optional semicolon
-        self.try_consume(&Token::Semicolon);
+        // Require end of statement: trailing tokens are a syntax error (issue #5261)
+        self.expect_statement_end()?;
 
         let stmt = InsertStmt {
             with_clause: None,
@@ -212,8 +212,8 @@ impl<'arena> ArenaParser<'arena> {
             None
         };
 
-        // Consume optional semicolon
-        self.try_consume(&Token::Semicolon);
+        // Require end of statement: trailing tokens are a syntax error (issue #5261)
+        self.expect_statement_end()?;
 
         let stmt = InsertStmt {
             with_clause: None,

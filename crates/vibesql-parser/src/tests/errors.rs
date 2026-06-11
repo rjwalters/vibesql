@@ -556,3 +556,163 @@ fn test_issue_5271_bare_select_returning_arena_fallback_is_error() {
     let result = crate::parse_with_arena_fallback("SELECT 1 RETURNING a");
     assert!(result.is_err(), "bare SELECT ... RETURNING should be a syntax error in both parsers");
 }
+
+// ========================================================================
+// Issue #5261: trailing garbage tokens after the last clause of
+// UPDATE/DELETE/INSERT must be a syntax error (SQLite: near "X": syntax
+// error). Previously the parser stopped consuming after the last clause
+// and silently ignored the rest of the input.
+// ========================================================================
+
+#[test]
+fn test_issue_5261_update_trailing_garbage_is_error() {
+    let result = Parser::parse_sql("UPDATE t SET a=1 WHERE b=2 XYZZY");
+    assert!(result.is_err(), "UPDATE with trailing garbage should be a syntax error");
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("near \"XYZZY\": syntax error"), "unexpected error message: {}", msg);
+}
+
+#[test]
+fn test_issue_5261_update_trailing_garbage_multiple_tokens_is_error() {
+    let result = Parser::parse_sql("UPDATE t SET a=8 WHERE a=7 GARBAGE TOKENS");
+    assert!(result.is_err(), "UPDATE with trailing garbage should be a syntax error");
+}
+
+#[test]
+fn test_issue_5261_update_returning_trailing_garbage_is_error() {
+    // Note: `RETURNING a XYZZY` is valid SQLite (XYZZY is an implicit column
+    // alias), so use a reserved keyword that cannot be an alias instead.
+    let result = Parser::parse_sql("UPDATE t SET a=1 RETURNING a WHERE b=2");
+    assert!(result.is_err(), "UPDATE ... RETURNING with trailing clause should be a syntax error");
+}
+
+#[test]
+fn test_issue_5261_update_with_cte_trailing_garbage_is_error() {
+    let result = Parser::parse_sql("WITH c AS (SELECT 1) UPDATE t SET a=1 WHERE b=2 XYZZY");
+    assert!(result.is_err(), "WITH ... UPDATE with trailing garbage should be a syntax error");
+}
+
+#[test]
+fn test_issue_5261_delete_trailing_garbage_is_error() {
+    let result = Parser::parse_sql("DELETE FROM t WHERE a=1 XYZZY");
+    assert!(result.is_err(), "DELETE with trailing garbage should be a syntax error");
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("near \"XYZZY\": syntax error"), "unexpected error message: {}", msg);
+}
+
+#[test]
+fn test_issue_5261_delete_limit_trailing_garbage_is_error() {
+    let result = Parser::parse_sql("DELETE FROM t WHERE a=1 ORDER BY a LIMIT 1 XYZZY");
+    assert!(result.is_err(), "DELETE ... LIMIT with trailing garbage should be a syntax error");
+}
+
+#[test]
+fn test_issue_5261_delete_with_cte_trailing_garbage_is_error() {
+    let result = Parser::parse_sql("WITH c AS (SELECT 1) DELETE FROM t WHERE a=1 XYZZY");
+    assert!(result.is_err(), "WITH ... DELETE with trailing garbage should be a syntax error");
+}
+
+#[test]
+fn test_issue_5261_insert_trailing_garbage_is_error() {
+    let result = Parser::parse_sql("INSERT INTO t VALUES (1) XYZZY");
+    assert!(result.is_err(), "INSERT with trailing garbage should be a syntax error");
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("near \"XYZZY\": syntax error"), "unexpected error message: {}", msg);
+}
+
+#[test]
+fn test_issue_5261_insert_returning_trailing_garbage_is_error() {
+    // Note: `RETURNING a XYZZY` is valid SQLite (implicit alias); a numeric
+    // literal cannot be an alias, matching SQLite's near "123" error.
+    let result = Parser::parse_sql("INSERT INTO t VALUES (1) RETURNING a 123");
+    assert!(result.is_err(), "INSERT ... RETURNING with trailing garbage should be a syntax error");
+}
+
+#[test]
+fn test_issue_5261_insert_on_conflict_trailing_garbage_is_error() {
+    let result = Parser::parse_sql("INSERT INTO t VALUES (1) ON CONFLICT DO NOTHING XYZZY");
+    assert!(
+        result.is_err(),
+        "INSERT ... ON CONFLICT with trailing garbage should be a syntax error"
+    );
+}
+
+#[test]
+fn test_issue_5261_insert_with_cte_trailing_garbage_is_error() {
+    // Note: `FROM c XYZZY` is valid SQLite (implicit table alias), so use a
+    // dangling GROUP keyword that cannot be an alias instead.
+    let result =
+        Parser::parse_sql("WITH c AS (SELECT 1) INSERT INTO t SELECT * FROM c WHERE 1 GROUP");
+    assert!(result.is_err(), "WITH ... INSERT with trailing garbage should be a syntax error");
+}
+
+#[test]
+fn test_issue_5261_replace_trailing_garbage_is_error() {
+    let result = Parser::parse_sql("REPLACE INTO t VALUES (1) XYZZY");
+    assert!(result.is_err(), "REPLACE with trailing garbage should be a syntax error");
+}
+
+#[test]
+fn test_issue_5261_garbage_after_semicolon_keyword_token() {
+    // Keyword garbage (not just identifiers) must also be rejected
+    let result = Parser::parse_sql("UPDATE t SET a=1 WHERE b=2 SELECT");
+    assert!(result.is_err(), "UPDATE with trailing keyword should be a syntax error");
+}
+
+#[test]
+fn test_issue_5261_arena_update_trailing_garbage_is_error() {
+    let result = crate::arena_parser::parse_update_to_owned("UPDATE t SET a=1 WHERE b=2 XYZZY");
+    assert!(result.is_err(), "arena UPDATE with trailing garbage should be a syntax error");
+}
+
+#[test]
+fn test_issue_5261_arena_delete_trailing_garbage_is_error() {
+    let result = crate::arena_parser::parse_delete_to_owned("DELETE FROM t WHERE a=1 XYZZY");
+    assert!(result.is_err(), "arena DELETE with trailing garbage should be a syntax error");
+}
+
+#[test]
+fn test_issue_5261_arena_insert_trailing_garbage_is_error() {
+    let result = crate::arena_parser::parse_insert_to_owned("INSERT INTO t VALUES (1) XYZZY");
+    assert!(result.is_err(), "arena INSERT with trailing garbage should be a syntax error");
+}
+
+// Valid statements must be unaffected by the end-of-statement check.
+
+#[test]
+fn test_issue_5261_valid_dml_statements_still_parse() {
+    let valid = [
+        "UPDATE t SET a=1 WHERE b=2",
+        "UPDATE t SET a=1 WHERE b=2;",
+        "UPDATE t SET a=1 RETURNING a, b",
+        "UPDATE t SET a=1 FROM u WHERE t.id=u.id RETURNING *;",
+        "DELETE FROM t WHERE a=1",
+        "DELETE FROM t WHERE a=1;",
+        "DELETE FROM t WHERE a=1 ORDER BY a LIMIT 1 OFFSET 2",
+        "DELETE FROM t RETURNING *",
+        "INSERT INTO t VALUES (1)",
+        "INSERT INTO t VALUES (1);",
+        "INSERT INTO t VALUES (1) RETURNING rowid",
+        "INSERT INTO t VALUES (1) ON CONFLICT DO NOTHING",
+        "INSERT INTO t VALUES (1) ON CONFLICT(a) DO UPDATE SET b=2 RETURNING a",
+        "INSERT INTO t SELECT * FROM u",
+        "REPLACE INTO t VALUES (1)",
+        "WITH c AS (SELECT 1) UPDATE t SET a=1 WHERE b IN (SELECT * FROM c)",
+        "WITH c AS (SELECT 1) DELETE FROM t WHERE a IN (SELECT * FROM c)",
+        "WITH c AS (SELECT 1) INSERT INTO t SELECT * FROM c",
+    ];
+    for sql in valid {
+        let result = Parser::parse_sql(sql);
+        assert!(result.is_ok(), "valid statement should parse: {} -> {:?}", sql, result.err());
+    }
+}
+
+#[test]
+fn test_issue_5261_valid_arena_dml_statements_still_parse() {
+    assert!(crate::arena_parser::parse_update_to_owned("UPDATE t SET a=1 WHERE b=2;").is_ok());
+    assert!(crate::arena_parser::parse_delete_to_owned("DELETE FROM t WHERE a=1;").is_ok());
+    assert!(crate::arena_parser::parse_insert_to_owned(
+        "INSERT INTO t VALUES (1) ON CONFLICT DO NOTHING RETURNING a;"
+    )
+    .is_ok());
+}
