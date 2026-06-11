@@ -1,12 +1,13 @@
 //! [`OpenraftBackend`]: a [`ConsensusBackend`] implementation driven by the
 //! `openraft` engine selected in ADR-0004.
 //!
-//! Raft Phase A2, PR 1 scope (see issue #5196): a **single-node, in-memory**
-//! configuration. The Raft log and state machine live in memory; durability
-//! (log + vote persistence under the database directory, crash recovery) is
-//! PR 2. Multi-node networking is Phase A3 — the network factory here is a
-//! no-op that is never exercised because a single-voter cluster sends no
-//! RPCs.
+//! Raft Phase A2 scope (see issue #5196): a **single-node** configuration in
+//! two flavors. [`OpenraftBackend::new`] keeps the Raft log in memory (PR 1);
+//! [`OpenraftBackend::with_data_dir`] persists the log and vote on disk via
+//! [`DurableLogStore`] and recovers them on restart (PR 2). The state machine
+//! is in-memory in both — applying entries to VibeSQL storage is Phase B1.
+//! Multi-node networking is Phase A3 — the network factory here is a no-op
+//! that is never exercised because a single-voter cluster sends no RPCs.
 //!
 //! ## Log index mapping
 //!
@@ -26,6 +27,7 @@ use std::fmt::Debug;
 use std::io::Cursor;
 use std::marker::PhantomData;
 use std::ops::RangeBounds;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -38,13 +40,13 @@ use openraft::raft::{
 use openraft::storage::{LogFlushed, RaftLogStorage, RaftStateMachine};
 use openraft::{
     BasicNode, Config, Entry, EntryPayload, LogId, LogState, Raft, RaftLogReader,
-    RaftSnapshotBuilder, ServerState, SnapshotMeta, StorageError, StoredMembership,
-    Vote,
+    RaftSnapshotBuilder, ServerState, SnapshotMeta, StorageError, StoredMembership, Vote,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Role, Snapshot};
+use crate::durable::DurableLogStore;
 
 openraft::declare_raft_types!(
     /// Raft type configuration for VibeSQL consensus.
@@ -74,9 +76,10 @@ struct LogStoreInner {
     log: BTreeMap<u64, Entry<TypeConfig>>,
     /// Last committed log id saved by openraft (optional API).
     committed: Option<LogId<u64>>,
-    /// Persistent vote state (term + voted_for). In-memory in PR 1; PR 2
-    /// moves this to disk, because losing it across restarts breaks
-    /// election safety.
+    /// Vote state (term + voted_for). In-memory here, so it does not survive
+    /// restarts — acceptable only because this store is for tests/dev. The
+    /// durable configuration ([`DurableLogStore`]) persists it, because
+    /// losing it across restarts breaks election safety.
     vote: Option<Vote<u64>>,
 }
 
@@ -108,7 +111,9 @@ impl RaftLogReader<TypeConfig> for InMemoryLogStore {
 impl RaftLogStorage<TypeConfig> for InMemoryLogStore {
     type LogReader = Self;
 
-    async fn get_log_state(&mut self) -> std::result::Result<LogState<TypeConfig>, StorageError<u64>> {
+    async fn get_log_state(
+        &mut self,
+    ) -> std::result::Result<LogState<TypeConfig>, StorageError<u64>> {
         let inner = self.lock();
         let last_log_id =
             inner.log.values().next_back().map(|e| e.log_id).or(inner.last_purged_log_id);
@@ -158,7 +163,8 @@ impl RaftLogStorage<TypeConfig> for InMemoryLogStore {
             }
         }
         // In-memory storage: entries are "flushed" the moment they are
-        // inserted. PR 2 calls this only after an fsync of the on-disk log.
+        // inserted. The durable store ([`DurableLogStore`]) invokes this only
+        // after an fsync of the on-disk log.
         callback.log_io_completed(Ok(()));
         Ok(())
     }
@@ -221,10 +227,8 @@ impl RaftSnapshotBuilder<TypeConfig> for InMemoryStateMachine {
         &mut self,
     ) -> std::result::Result<openraft::Snapshot<TypeConfig>, StorageError<u64>> {
         let mut inner = self.lock();
-        let data = serde_json::to_vec(&inner.entries).map_err(|e| {
-            StorageError::IO {
-                source: openraft::StorageIOError::write_state_machine(&e),
-            }
+        let data = serde_json::to_vec(&inner.entries).map_err(|e| StorageError::IO {
+            source: openraft::StorageIOError::write_state_machine(&e),
         })?;
 
         inner.snapshot_seq += 1;
@@ -244,8 +248,10 @@ impl RaftStateMachine<TypeConfig> for InMemoryStateMachine {
 
     async fn applied_state(
         &mut self,
-    ) -> std::result::Result<(Option<LogId<u64>>, StoredMembership<u64, BasicNode>), StorageError<u64>>
-    {
+    ) -> std::result::Result<
+        (Option<LogId<u64>>, StoredMembership<u64, BasicNode>),
+        StorageError<u64>,
+    > {
         let inner = self.lock();
         Ok((inner.last_applied, inner.last_membership.clone()))
     }
@@ -294,9 +300,7 @@ impl RaftStateMachine<TypeConfig> for InMemoryStateMachine {
     ) -> std::result::Result<(), StorageError<u64>> {
         let data = snapshot.into_inner();
         let entries: Vec<Vec<u8>> = serde_json::from_slice(&data).map_err(|e| {
-            StorageError::IO {
-                source: openraft::StorageIOError::write_state_machine(&e),
-            }
+            StorageError::IO { source: openraft::StorageIOError::write_state_machine(&e) }
         })?;
 
         let mut inner = self.lock();
@@ -382,14 +386,32 @@ impl openraft::RaftNetworkFactory<TypeConfig> for NoopNetworkFactory {
 // The backend
 // ---------------------------------------------------------------------------
 
+/// How a starting backend obtains its single-voter membership.
+#[derive(Debug, Clone, Copy)]
+enum Bootstrap {
+    /// Fresh log: form the cluster by writing the single-voter membership
+    /// entry ([`Raft::initialize`]).
+    Initialize,
+    /// Prior Raft state was recovered from disk: the membership entry (and
+    /// vote) are already in the log, so re-running `initialize` would be
+    /// rejected by openraft. `last_log_index` is the raw index of the last
+    /// recovered entry; startup waits until the state machine has re-applied
+    /// up to it so reads reflect pre-restart state.
+    Recover { last_log_index: Option<u64> },
+}
+
 /// [`ConsensusBackend`] backed by `openraft` (ADR-0004), running a
-/// single-node, in-memory configuration (Raft Phase A2, PR 1).
+/// single-node configuration (Raft Phase A2).
 ///
 /// The node initializes itself as the sole voter of the consensus group and
 /// immediately elects itself leader, so `propose` succeeds locally while
 /// still flowing through openraft's real append → commit → apply pipeline.
 /// Entries are serialized with `serde_json` at this boundary so openraft
 /// types never appear in the public API.
+///
+/// [`new`](Self::new) keeps the Raft log in memory;
+/// [`with_data_dir`](Self::with_data_dir) persists log + vote on disk and
+/// recovers them on restart.
 pub struct OpenraftBackend<E> {
     raft: Raft<TypeConfig>,
     state_machine: InMemoryStateMachine,
@@ -408,13 +430,30 @@ impl<E> Debug for OpenraftBackend<E> {
 }
 
 impl<E> OpenraftBackend<E> {
-    /// Create a backend with an empty log and wait until the single-voter
-    /// cluster has elected this node leader.
+    /// Create a backend with an empty **in-memory** log and wait until the
+    /// single-voter cluster has elected this node leader. Nothing survives a
+    /// restart; use [`with_data_dir`](Self::with_data_dir) for durability.
     ///
     /// Must be called from within a tokio runtime (openraft spawns its core
     /// tasks on it).
     pub async fn new() -> Result<Self> {
-        Self::with_seeded_entries(Vec::new()).await
+        Self::start(InMemoryLogStore::default(), Vec::new(), Bootstrap::Initialize).await
+    }
+
+    /// Create a backend whose Raft log and vote are **persisted on disk**
+    /// under `dir` (created if absent), in `raft.log` (Raft Phase A2, PR 2).
+    ///
+    /// If `dir` already contains Raft state, it is recovered before this
+    /// returns: log entries are re-applied to the state machine (so
+    /// `read_committed` immediately reflects pre-restart commits) and the
+    /// persisted vote keeps election safety — the restarted node resumes at
+    /// its prior term and never votes twice in a term it already voted in.
+    /// A partially written trailing record (torn write) is discarded during
+    /// recovery, not treated as an error.
+    ///
+    /// Must be called from within a tokio runtime.
+    pub async fn with_data_dir(dir: impl AsRef<Path>) -> Result<Self> {
+        Self::start_durable(dir.as_ref(), None).await
     }
 
     /// The application log index of the most recently applied entry (`0` if
@@ -440,7 +479,40 @@ impl<E> OpenraftBackend<E> {
         }
     }
 
-    async fn with_seeded_entries(entries: Vec<Vec<u8>>) -> Result<Self> {
+    #[cfg(test)]
+    pub(crate) fn current_term(&self) -> u64 {
+        self.metrics.borrow().current_term
+    }
+
+    /// Open (or create) the durable log under `dir` and start the node.
+    ///
+    /// `restore` carries state-machine entries decoded from a snapshot; it
+    /// must only be combined with a *fresh* data directory, since seeding a
+    /// snapshot next to recovered log state would produce two competing
+    /// histories.
+    async fn start_durable(dir: &Path, restore: Option<Vec<Vec<u8>>>) -> Result<Self> {
+        let log_store = DurableLogStore::open(dir).map_err(|e| {
+            ConsensusError::Backend(format!(
+                "failed to open durable raft log in {}: {e}",
+                dir.display()
+            ))
+        })?;
+        let (has_state, last_log_index) = log_store.recovery_summary();
+        if has_state && restore.is_some() {
+            return Err(ConsensusError::Backend(format!(
+                "cannot restore a snapshot into {}: it already contains raft state",
+                dir.display()
+            )));
+        }
+        let bootstrap =
+            if has_state { Bootstrap::Recover { last_log_index } } else { Bootstrap::Initialize };
+        Self::start(log_store, restore.unwrap_or_default(), bootstrap).await
+    }
+
+    async fn start<LS>(log_store: LS, entries: Vec<Vec<u8>>, bootstrap: Bootstrap) -> Result<Self>
+    where
+        LS: RaftLogStorage<TypeConfig>,
+    {
         // Short election timeouts keep single-node startup snappy; with one
         // voter there is no contention to back off from.
         let config = Config {
@@ -452,28 +524,27 @@ impl<E> OpenraftBackend<E> {
         let config =
             Arc::new(config.validate().map_err(|e| ConsensusError::Backend(e.to_string()))?);
 
-        let log_store = InMemoryLogStore::default();
         let state_machine = InMemoryStateMachine::default();
         // Seed the state machine before the Raft core starts so restored
         // entries keep their application log indices and new proposals
         // continue numbering after them.
         state_machine.lock().entries = entries;
 
-        let raft = Raft::new(
-            NODE_ID,
-            config,
-            NoopNetworkFactory,
-            log_store,
-            state_machine.clone(),
-        )
-        .await
-        .map_err(|e| ConsensusError::Backend(format!("failed to start raft core: {e}")))?;
-
-        let mut members = BTreeMap::new();
-        members.insert(NODE_ID, BasicNode::default());
-        raft.initialize(members)
+        let raft = Raft::new(NODE_ID, config, NoopNetworkFactory, log_store, state_machine.clone())
             .await
-            .map_err(|e| ConsensusError::Backend(format!("failed to initialize cluster: {e}")))?;
+            .map_err(|e| ConsensusError::Backend(format!("failed to start raft core: {e}")))?;
+
+        if matches!(bootstrap, Bootstrap::Initialize) {
+            let mut members = BTreeMap::new();
+            members.insert(NODE_ID, BasicNode::default());
+            raft.initialize(members).await.map_err(|e| {
+                ConsensusError::Backend(format!("failed to initialize cluster: {e}"))
+            })?;
+        }
+        // When recovering, the membership entry and vote are already in the
+        // recovered log (`Raft::new` read them); openraft restores a node
+        // whose persisted vote marks it leader straight back into
+        // leadership at the same term.
 
         // A single voter elects itself; wait for leadership so `propose`
         // never races the initial election.
@@ -481,6 +552,22 @@ impl<E> OpenraftBackend<E> {
             .state(ServerState::Leader, "single-node leader election")
             .await
             .map_err(|e| ConsensusError::Backend(format!("leader election did not settle: {e}")))?;
+
+        if let Bootstrap::Recover { last_log_index: Some(last) } = bootstrap {
+            // The state machine is in-memory (until Phase B1) and therefore
+            // starts empty on every boot; wait for the recovered log to be
+            // re-applied so `read_committed` and `last_index` reflect
+            // pre-restart state before the constructor returns.
+            raft.wait(Some(Duration::from_secs(10)))
+                .metrics(
+                    move |m| m.last_applied.map_or(0, |id| id.index) >= last,
+                    "recovered log entries re-applied",
+                )
+                .await
+                .map_err(|e| {
+                    ConsensusError::Backend(format!("recovered log replay did not settle: {e}"))
+                })?;
+        }
 
         let metrics = raft.metrics();
         Ok(Self { raft, state_machine, metrics, _entry: PhantomData })
@@ -494,9 +581,31 @@ impl<E: DeserializeOwned> OpenraftBackend<E> {
     /// Like [`SingleNodeBackend::from_snapshot`](crate::SingleNodeBackend::from_snapshot)
     /// this is an inherent method: snapshot *installation* hooks join the
     /// trait in later Raft phases. The restored entries seed the state
-    /// machine; the Raft log itself starts fresh (durable log recovery is
-    /// PR 2 of Phase A2).
+    /// machine; the Raft log itself starts fresh (and in-memory — see
+    /// [`from_snapshot_with_data_dir`](Self::from_snapshot_with_data_dir)
+    /// for a durable restore).
     pub async fn from_snapshot(snapshot: &Snapshot) -> Result<Self> {
+        let entries = Self::decode_snapshot(snapshot)?;
+        Self::start(InMemoryLogStore::default(), entries, Bootstrap::Initialize).await
+    }
+
+    /// Like [`from_snapshot`](Self::from_snapshot), but the restored node
+    /// persists its Raft log and vote under `dir` (Raft Phase A2, PR 2).
+    ///
+    /// `dir` must not already contain Raft state: a snapshot seeded next to a
+    /// recovered log would be two competing histories, so that case is
+    /// rejected.
+    pub async fn from_snapshot_with_data_dir(
+        snapshot: &Snapshot,
+        dir: impl AsRef<Path>,
+    ) -> Result<Self> {
+        let entries = Self::decode_snapshot(snapshot)?;
+        Self::start_durable(dir.as_ref(), Some(entries)).await
+    }
+
+    /// Decode and validate a [`Snapshot`] produced by
+    /// [`ConsensusBackend::snapshot`] into state-machine entries.
+    fn decode_snapshot(snapshot: &Snapshot) -> Result<Vec<Vec<u8>>> {
         let entries: Vec<Vec<u8>> = serde_json::from_slice(&snapshot.data)
             .map_err(|e| ConsensusError::SnapshotCodec(e.to_string()))?;
         if entries.len() as LogIndex != snapshot.last_included_index {
@@ -512,7 +621,7 @@ impl<E: DeserializeOwned> OpenraftBackend<E> {
             serde_json::from_slice::<E>(payload)
                 .map_err(|e| ConsensusError::SnapshotCodec(e.to_string()))?;
         }
-        Self::with_seeded_entries(entries).await
+        Ok(entries)
     }
 }
 
@@ -563,5 +672,31 @@ where
 
     fn role(&self) -> Role {
         self.current_role()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `shutdown` stops the Raft core cleanly: subsequent proposals fail
+    /// fast (rather than hanging), while reads of already-applied state
+    /// still succeed. (Judge follow-up from PR #5351.)
+    #[tokio::test]
+    async fn shutdown_stops_the_raft_core() {
+        let backend = OpenraftBackend::<String>::new().await.unwrap();
+        backend.propose("before".to_string()).await.unwrap();
+
+        backend.shutdown().await.unwrap();
+
+        let err = backend.propose("after".to_string()).await.unwrap_err();
+        assert!(
+            matches!(err, ConsensusError::Backend(_)),
+            "propose after shutdown should fail with a backend error, got: {err:?}"
+        );
+
+        // Applied state is served from the state machine, not the core.
+        assert_eq!(backend.read_committed(1).await.unwrap(), "before");
+        assert_eq!(backend.last_index(), 1);
     }
 }
