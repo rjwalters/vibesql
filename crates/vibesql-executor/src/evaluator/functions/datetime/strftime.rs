@@ -33,12 +33,8 @@
 use chrono::{Datelike, NaiveDateTime, Timelike};
 use vibesql_types::SqlValue;
 
-use super::current::resolve_time_value;
+use super::current::{resolve_time_value, JULIAN_EPOCH_OFFSET_MS};
 use crate::errors::ExecutorError;
-
-/// Milliseconds between the start of the Julian Day epoch (-4714-11-24 12:00:00)
-/// and the Unix epoch (1970-01-01 00:00:00). Matches SQLite's internal iJD origin.
-const JULIAN_EPOCH_OFFSET_MS: i64 = 210_866_760_000_000;
 
 /// STRFTIME - Format a time value according to a format string
 ///
