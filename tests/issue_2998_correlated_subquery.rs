@@ -61,3 +61,28 @@ fn test_correlated_subquery_outer_table_reference() {
         }
     }
 }
+
+/// Regression test for issue #5288: the legacy parser represents COUNT(*) as
+/// ColumnRef { column: "*" }, which the implicit-outer-aggregate-collapse
+/// detection misclassified as an outer column reference. A bare (FROM-less)
+/// scalar subquery `(SELECT count(*))` must NOT collapse the outer query to a
+/// single row. sqlite3 returns one row per outer row, each with count 1.
+#[test]
+fn test_bare_count_star_subquery_does_not_collapse_outer_query() {
+    let mut db = Database::new();
+
+    execute_sql(&mut db, "CREATE TABLE t1(a INTEGER, b INTEGER, c INTEGER, d INTEGER, e INTEGER)")
+        .expect("Failed to create table");
+    execute_sql(&mut db, "INSERT INTO t1 VALUES(1,2,3,4,5)").expect("Failed to insert row 1");
+    execute_sql(&mut db, "INSERT INTO t1 VALUES(2,3,4,5,6)").expect("Failed to insert row 2");
+
+    let rows =
+        execute_sql(&mut db, "SELECT a, (SELECT count(*)) FROM t1").expect("Query should succeed");
+
+    for row in &rows {
+        println!("{:?}", row);
+    }
+    // sqlite3: 1|1 and 2|1 — one row per outer row, count(*) of a FROM-less
+    // subquery is always 1.
+    assert_eq!(rows.len(), 2, "outer query must not collapse to a single row");
+}
