@@ -8,11 +8,12 @@ use vibesql_ast::Expression;
 use vibesql_storage::{Database, Row};
 
 use super::predicate::{
-    build_residual_where_clause, extract_composite_predicates_with_in,
-    extract_index_predicate_for_indexed_column, extract_prefix_equality_predicates,
-    extract_prefix_with_trailing_range, generate_composite_keys,
-    where_clause_fully_satisfied_by_composite_key, where_clause_fully_satisfied_by_indexed_column,
-    CompositePredicateType, IndexPredicate, PrefixPredicateResult, PrefixWithRangeResult,
+    build_residual_where_clause, coerce_index_predicate_for_temporal_keys,
+    extract_composite_predicates_with_in, extract_index_predicate_for_indexed_column,
+    extract_prefix_equality_predicates, extract_prefix_with_trailing_range,
+    generate_composite_keys, where_clause_fully_satisfied_by_composite_key,
+    where_clause_fully_satisfied_by_indexed_column, CompositePredicateType, IndexPredicate,
+    PrefixPredicateResult, PrefixWithRangeResult,
 };
 use crate::{
     errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSchema, select::cte::CteResult,
@@ -144,6 +145,16 @@ pub(crate) fn execute_index_scan(
             where_clause.and_then(|expr| extract_index_predicate_for_indexed_column(expr, idx_col))
         })
     };
+
+    // Issue #5333: when the index stores temporal keys (e.g. an expression
+    // index on date()/datetime(), or a plain TIMESTAMP column index) but the
+    // WHERE clause supplies string bounds, coerce the bounds to the stored
+    // key type so the probe matches executor comparison semantics. Without
+    // this, type-tag ordering makes equality/upper-bounded probes silently
+    // lose rows and lower-bounded probes over-return. If no faithful
+    // coercion exists the predicate is dropped, falling back to the
+    // full-index-scan + WHERE-filter path below (correct, just slower).
+    let index_predicate = coerce_index_predicate_for_temporal_keys(index_predicate, index_data);
 
     // Build residual WHERE clause for prefix lookups
     // This contains only the predicates NOT covered by the index prefix
