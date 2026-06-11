@@ -51,9 +51,95 @@ fn test_date_with_modifiers() {
     assert_renders("date('2024-01-01', '+1 day')", "2024-01-02");
     assert_renders("date('2024-03-15', 'start of month')", "2024-03-01");
     assert_renders("date('2024-01-15', '+1 month')", "2024-02-15");
-    // NOTE: SQLite month-overflow rollover (2024-01-31 '+1 month' -> 2024-03-02)
-    // is a known divergence tracked in #5309; not asserted here.
     assert_renders("date('2024-01-01', '-1 day')", "2023-12-31");
+}
+
+#[test]
+fn test_month_overflow_normalizes_like_sqlite() {
+    // SQLite timediff1.test 1.x/2.x: day-of-month overflow rolls into the
+    // following month rather than clamping (date.c computeJD normalization)
+    assert_renders("datetime('2000-01-31','+1 month')", "2000-03-02 00:00:00");
+    assert_renders("datetime('2004-01-29','+1 month')", "2004-02-29 00:00:00");
+    assert_renders("datetime('2000-03-31','-1 month')", "2000-03-02 00:00:00");
+    assert_renders("datetime('2000-02-29','+1 year')", "2001-03-01 00:00:00");
+    assert_renders("datetime('2001-01-31','+1 month')", "2001-03-03 00:00:00");
+    assert_renders("datetime('2001-03-31','-1 month')", "2001-03-03 00:00:00");
+}
+
+#[test]
+fn test_timezone_offset_suffix() {
+    // SQLite date.test 5.x: TZ-offset/Z suffix converts the timestamp to UTC
+    assert_renders("datetime('1994-04-16 14:00:00 +05:00')", "1994-04-16 09:00:00");
+    assert_renders("datetime('1994-04-16 14:00:00 -05:15')", "1994-04-16 19:15:00");
+    assert_renders("datetime('1994-04-16 05:00:00 +08:30')", "1994-04-15 20:30:00");
+    assert_renders("datetime('1994-04-16 14:00:00 -11:55')", "1994-04-17 01:55:00");
+    assert_renders("datetime('1994-04-16 14:00:00 -11:55  ')", "1994-04-17 01:55:00");
+    assert_renders("datetime('1994-04-16T14:00:00Z')", "1994-04-16 14:00:00");
+    assert_renders("datetime('1994-04-16 14:00:00z')", "1994-04-16 14:00:00");
+    assert_renders("datetime('1994-04-16 14:00:00 Z')", "1994-04-16 14:00:00");
+    assert_renders("datetime('1994-04-16 14:00:00z    ')", "1994-04-16 14:00:00");
+    // Invalid offsets / trailing junk / combined Z+offset -> NULL
+    assert_null("datetime('1994-04-16 14:00:00 -11:60')");
+    assert_null("datetime('1994-04-16 14:00:00 -11:55 x')");
+    assert_null("datetime('1994-04-16 14:00:00Zulu')");
+    assert_null("datetime('1994-04-16 14:00:00Z +05:00')");
+    assert_null("datetime('1994-04-16 14:00:00 +05:00 Z')");
+}
+
+#[test]
+fn test_hh_mm_ss_modifiers() {
+    // SQLite date.test 11.x: ±HH:MM[:SS] modifiers; no sign means plus
+    assert_renders("datetime('2004-02-28 20:00:00', '-01:20:30')", "2004-02-28 18:39:30");
+    assert_renders("datetime('2004-02-28 20:00:00', '+12:30:00')", "2004-02-29 08:30:00");
+    assert_renders("datetime('2004-02-28 20:00:00', '+12:30')", "2004-02-29 08:30:00");
+    assert_renders("datetime('2004-02-28 20:00:00', '12:30')", "2004-02-29 08:30:00");
+    assert_renders("datetime('2004-02-28 20:00:00', '-12:00')", "2004-02-28 08:00:00");
+    assert_renders("datetime('2004-02-28 20:00:00', '-12:01')", "2004-02-28 07:59:00");
+    assert_renders("datetime('2004-02-28 20:00:00', '12:01')", "2004-02-29 08:01:00");
+    // Out-of-range minutes -> NULL
+    assert_null("datetime('2004-02-28 20:00:00', '12:60')");
+}
+
+#[test]
+fn test_auto_modifier() {
+    // SQLite date3.test 2.x: numeric values in the julian-day range are
+    // julian days; other in-range numerics are unix timestamps
+    assert_renders("datetime(2440587.5, 'auto')", "1970-01-01 00:00:00");
+    assert_renders("datetime(2440615.7475463, 'auto')", "1970-01-29 05:56:28");
+    assert_renders("datetime(-1, 'auto')", "1969-12-31 23:59:59");
+    assert_renders("datetime(5373485, 'auto')", "1970-03-04 04:38:05");
+    assert_renders("datetime(253402300799, 'auto')", "9999-12-31 23:59:59");
+    // Out of range for both interpretations -> NULL
+    assert_null("datetime(-210866760001, 'auto')");
+    assert_null("datetime(253402300800, 'auto')");
+    // No-op for text values
+    assert_renders("date('2022-01-29', 'auto')", "2022-01-29");
+    // Only valid as the first modifier
+    assert_null("datetime(2459607.05, '+1 hour', 'auto')");
+}
+
+#[test]
+fn test_julianday_modifier() {
+    // SQLite date3.test 4.x: 'julianday' forces julian-day interpretation
+    // and is only valid immediately after a numeric time value
+    assert_renders("datetime(2459607, 'julianday')", "2022-01-27 12:00:00");
+    assert_renders("datetime('2459607', 'julianday')", "2022-01-27 12:00:00");
+    assert_null("datetime(2459607, '+1 hour', 'julianday')");
+    assert_null("datetime('2022-01-27', 'julianday')");
+}
+
+#[test]
+fn test_julian_day_range_bounds() {
+    // SQLite date.test 16.x/17.x: modifiers that push the result outside the
+    // valid julian-day range yield NULL
+    assert_renders("datetime(0, '+464269060799 seconds')", "9999-12-31 23:59:59");
+    assert_null("datetime(0, '+464269060800 seconds')");
+    assert_null("datetime(0, '+5373485 days')");
+    assert_null("datetime(0, '+176546 months')");
+    assert_null("datetime(0, '+14713 years')");
+    assert_null("datetime(5373484, '-5373485 days')");
+    assert_null("datetime(37, 'start of year')");
+    assert_renders("datetime(38, 'start of year')", "-4712-01-01 00:00:00");
 }
 
 #[test]

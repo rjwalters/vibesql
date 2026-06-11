@@ -5,28 +5,42 @@
 //! `datetime()` (see `current::resolve_time_value`), then the resolved instant
 //! is rendered through the format string.
 //!
-//! Supported format specifiers (the classic SQLite set):
+//! Supported format specifiers (the classic SQLite set plus the 3.44+
+//! additions):
 //!
 //! | Specifier | Meaning                                  | Example (`2003-10-31 12:34:56.432`) |
 //! |-----------|------------------------------------------|--------------------------------------|
 //! | `%d`      | day of month, zero-padded (01-31)        | `31`                                 |
+//! | `%e`      | day of month, space-padded ( 1-31)       | `31`                                 |
 //! | `%f`      | fractional seconds `SS.SSS`              | `56.432`                             |
+//! | `%F`      | ISO 8601 date, same as `%Y-%m-%d`        | `2003-10-31`                         |
+//! | `%G`      | ISO 8601 week-based year                 | `2003`                               |
+//! | `%g`      | ISO 8601 week-based year, 2 digits       | `03`                                 |
 //! | `%H`      | hour, zero-padded (00-23)                | `12`                                 |
+//! | `%I`      | 12-hour clock hour, zero-padded (01-12)  | `12`                                 |
 //! | `%j`      | day of year, zero-padded (001-366)       | `304`                                |
 //! | `%J`      | fractional Julian Day number             | `2452944.024264259`                  |
+//! | `%k`      | hour, space-padded ( 0-23)               | `12`                                 |
+//! | `%l`      | 12-hour clock hour, space-padded ( 1-12) | `12`                                 |
 //! | `%m`      | month, zero-padded (01-12)               | `10`                                 |
 //! | `%M`      | minute, zero-padded (00-59)              | `34`                                 |
+//! | `%p`      | `AM` or `PM`                             | `PM`                                 |
+//! | `%P`      | `am` or `pm`                             | `pm`                                 |
+//! | `%R`      | same as `%H:%M`                          | `12:34`                              |
 //! | `%s`      | seconds since Unix epoch (integer)       | `1067603696`                         |
 //! | `%S`      | seconds, zero-padded (00-59)             | `56`                                 |
+//! | `%T`      | same as `%H:%M:%S`                       | `12:34:56`                           |
+//! | `%u`      | ISO day of week (1-7, Monday=1)          | `5`                                  |
+//! | `%U`      | week of year (00-53, Sunday-based)       | `43`                                 |
+//! | `%V`      | ISO 8601 week of year (01-53)            | `44`                                 |
 //! | `%w`      | day of week (0-6, Sunday=0)              | `5`                                  |
 //! | `%W`      | week of year (00-53, Monday-based)       | `43`                                 |
 //! | `%Y`      | year, zero-padded to 4 digits            | `2003`                               |
 //! | `%%`      | literal `%`                              | `%`                                  |
 //!
-//! Out of scope for v1 (returns NULL like older SQLite versions):
-//! - SQLite 3.44+ additions: `%e %F %G %g %I %k %l %p %P %R %T %u %U %V`
+//! Out of scope (returns NULL like SQLite does for unknown specifiers):
 //! - Modifiers beyond what `datetime()` supports (`subsec`, real timezone
-//!   conversion for `localtime`/`utc`, `±HH:MM` offsets, `auto`, `julianday`)
+//!   conversion for `localtime`/`utc`)
 //!
 //! SQLite Reference: https://www.sqlite.org/lang_datefunc.html
 
@@ -93,19 +107,42 @@ fn format_datetime(format: &str, dt: NaiveDateTime) -> Option<String> {
         let spec = chars.next()?; // trailing '%' is an error -> NULL
         match spec {
             'd' => write!(out, "{:02}", dt.day()).ok()?,
+            'e' => write!(out, "{:2}", dt.day()).ok()?,
             'f' => {
                 // Seconds with milliseconds, "%06.3f" in SQLite (e.g. 56.432, 06.400).
                 // Truncate (not round) sub-millisecond precision; clamp leap seconds.
                 let millis = (dt.nanosecond() / 1_000_000).min(999);
                 write!(out, "{:02}.{:03}", dt.second(), millis).ok()?
             }
+            'F' => write!(out, "{:04}-{:02}-{:02}", dt.year(), dt.month(), dt.day()).ok()?,
+            'G' => write!(out, "{:04}", dt.iso_week().year()).ok()?,
+            'g' => write!(out, "{:02}", dt.iso_week().year().rem_euclid(100)).ok()?,
             'H' => write!(out, "{:02}", dt.hour()).ok()?,
+            'I' => write!(out, "{:02}", hour_12(&dt)).ok()?,
             'j' => write!(out, "{:03}", dt.ordinal()).ok()?,
             'J' => out.push_str(&format_julian_day(dt)),
+            'k' => write!(out, "{:2}", dt.hour()).ok()?,
+            'l' => write!(out, "{:2}", hour_12(&dt)).ok()?,
             'm' => write!(out, "{:02}", dt.month()).ok()?,
             'M' => write!(out, "{:02}", dt.minute()).ok()?,
+            'p' => out.push_str(if dt.hour() >= 12 { "PM" } else { "AM" }),
+            'P' => out.push_str(if dt.hour() >= 12 { "pm" } else { "am" }),
+            'R' => write!(out, "{:02}:{:02}", dt.hour(), dt.minute()).ok()?,
             's' => write!(out, "{}", dt.and_utc().timestamp()).ok()?,
             'S' => write!(out, "{:02}", dt.second()).ok()?,
+            'T' => write!(out, "{:02}:{:02}:{:02}", dt.hour(), dt.minute(), dt.second()).ok()?,
+            'u' => {
+                // ISO day of week: Monday=1 .. Sunday=7
+                write!(out, "{}", dt.weekday().num_days_from_monday() + 1).ok()?
+            }
+            'U' => {
+                // Week 01 starts on the first Sunday of the year; days before
+                // that are week 00 (Sunday-based analog of %W).
+                let n_day = dt.ordinal0();
+                let wd = dt.weekday().num_days_from_sunday();
+                write!(out, "{:02}", (n_day + 7 - wd) / 7).ok()?
+            }
+            'V' => write!(out, "{:02}", dt.iso_week().week()).ok()?,
             'w' => write!(out, "{}", dt.weekday().num_days_from_sunday()).ok()?,
             'W' => {
                 // SQLite: week 01 starts on the first Monday of the year; days
@@ -123,6 +160,16 @@ fn format_datetime(format: &str, dt: NaiveDateTime) -> Option<String> {
     }
 
     Some(out)
+}
+
+/// 12-hour clock hour for `%I`/`%l`: 00:xx is 12, 13:xx is 1.
+fn hour_12(dt: &NaiveDateTime) -> u32 {
+    let h = dt.hour() % 12;
+    if h == 0 {
+        12
+    } else {
+        h
+    }
 }
 
 /// Format the fractional Julian Day number for `%J`.
@@ -307,17 +354,61 @@ mod tests {
     fn test_unknown_specifier_returns_null() {
         // date.test 3.14: %_ -> NULL
         assert_eq!(sf(&[text("%_"), text("2003-10-31 12:34:56.432")]), SqlValue::Null);
-        // 3.44+ specifiers are out of scope for v1 -> NULL
-        for spec in ["%e", "%F", "%I", "%k", "%p", "%P", "%R", "%T", "%u", "%G", "%g", "%U", "%V"] {
+        // date.test 3.18: genuinely unknown specifiers -> NULL
+        for c in [
+            'a', 'b', 'c', 'h', 'i', 'n', 'o', 'q', 'r', 't', 'v', 'x', 'y', 'z', 'A', 'B', 'C',
+            'D', 'E', 'K', 'L', 'N', 'O', 'Q', 'Z', '0', '1', '9', '_',
+        ] {
             assert_eq!(
-                sf(&[text(spec), text("2003-10-31")]),
+                sf(&[text(&format!("%{}", c)), text("2003-10-31")]),
                 SqlValue::Null,
-                "{} should return NULL",
-                spec
+                "%{} should return NULL",
+                c
             );
         }
         // Trailing bare '%' -> NULL
         assert_eq!(sf(&[text("abc%"), text("2003-10-31")]), SqlValue::Null);
+    }
+
+    #[test]
+    fn test_extended_specifiers() {
+        // date.test 3.20-3.30 (SQLite 3.44+ additions)
+        assert_strftime("%e", "2023-08-09", " 9");
+        assert_strftime("%e", "2023-08-19", "19");
+        assert_strftime("%F %T", "2023-08-09 01:23", "2023-08-09 01:23:00");
+        assert_strftime("%k", "2023-08-09 04:59:59", " 4");
+        assert_strftime("%I%P", "2023-08-09 11:59:59", "11am");
+        assert_strftime("%I%p", "2023-08-09 12:00:00", "12PM");
+        assert_strftime("%I%P", "2023-08-09 12:59:59.9", "12pm");
+        assert_strftime("%I%p", "2023-08-09 13:00:00", "01PM");
+        assert_strftime("%I%P", "2023-08-09 23:59:59", "11pm");
+        assert_strftime("%I%p", "2023-08-09 00:00:00", "12AM");
+        assert_strftime("%l:%M%P", "2023-08-09 13:00:00", " 1:00pm");
+        assert_strftime("%F %R", "2023-08-09 12:34:56", "2023-08-09 12:34");
+    }
+
+    #[test]
+    fn test_iso_weekday() {
+        // date.test 3.31-3.37: %u is 1-7 with Monday=1, Sunday=7
+        assert_strftime("%w %u", "2023-01-01", "0 7");
+        assert_strftime("%w %u", "2023-01-02", "1 1");
+        assert_strftime("%w %u", "2023-01-03", "2 2");
+        assert_strftime("%w %u", "2023-01-07", "6 6");
+    }
+
+    #[test]
+    fn test_iso_week_specifiers() {
+        // %V/%G/%g: ISO 8601 week numbering (2023-01-01 is week 52 of 2022)
+        assert_strftime("%V", "2023-01-01", "52");
+        assert_strftime("%G", "2023-01-01", "2022");
+        assert_strftime("%g", "2023-01-01", "22");
+        assert_strftime("%V", "2023-01-02", "01");
+        assert_strftime("%G", "2023-01-02", "2023");
+        // %U: Sunday-based week of year (week 01 starts on the first Sunday)
+        assert_strftime("%U", "2023-01-01", "01");
+        assert_strftime("%U", "2022-12-31", "52");
+        assert_strftime("%U", "2004-01-03", "00");
+        assert_strftime("%U", "2004-01-04", "01");
     }
 
     #[test]
