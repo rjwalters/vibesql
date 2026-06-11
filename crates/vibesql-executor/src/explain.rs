@@ -192,15 +192,10 @@ impl ExplainResult {
         // Add "QUERY PLAN" header to match SQLite's EQP format
         writeln!(output, "QUERY PLAN").unwrap();
 
-        // Check if this is a compound query
-        if self.plan.is_compound_query {
-            format_compound_query_eqp(&self.plan, "", true, &mut output);
-        } else {
-            // Collect all EQP entries (scan nodes, CO-ROUTINE blocks, temp
-            // b-tree entries) and render the tree.
-            let entries = collect_eqp_entries(&self.plan);
-            write_eqp_entries(&entries, "", &mut output);
-        }
+        // Collect all EQP entries (scan nodes, CO-ROUTINE blocks, COMPOUND
+        // QUERY blocks, temp b-tree entries) and render the tree.
+        let entries = collect_eqp_entries(&self.plan);
+        write_eqp_entries(&entries, "", &mut output);
 
         output
     }
@@ -542,6 +537,19 @@ fn append_scan_entries(node: &PlanNode, entries: &mut Vec<EqpEntry>) {
         return;
     }
 
+    // Compound (UNION/INTERSECT/EXCEPT) roots render as a nested
+    // `COMPOUND QUERY` block. This both drives the top-level rendering in
+    // `to_sqlite_eqp` and lets compound view/subquery bodies nest inside
+    // `CO-ROUTINE` blocks (#5361), matching SQLite's shape:
+    //   |--CO-ROUTINE cv
+    //   |  `--COMPOUND QUERY
+    //   |     |--LEFT-MOST SUBQUERY
+    //   ...
+    if node.is_compound_query {
+        entries.push(compound_eqp_entry(node));
+        return;
+    }
+
     if node.scan_type.is_some() {
         entries.push(EqpEntry::leaf(format_sqlite_eqp_node(node)));
     }
@@ -549,6 +557,27 @@ fn append_scan_entries(node: &PlanNode, entries: &mut Vec<EqpEntry>) {
     for child in &node.children {
         append_scan_entries(child, entries);
     }
+}
+
+/// Build the `COMPOUND QUERY` entry tree for a compound-query plan root:
+/// a `LEFT-MOST SUBQUERY` child for the first branch, then one child per
+/// set operation (`UNION`, `UNION ALL`, `INTERSECT`, `EXCEPT`, ...), each
+/// containing that branch's scan entries.
+fn compound_eqp_entry(node: &PlanNode) -> EqpEntry {
+    let mut children = Vec::new();
+    for (i, branch) in node.children.iter().enumerate() {
+        let label = if i == 0 {
+            "LEFT-MOST SUBQUERY".to_string()
+        } else {
+            branch.set_operation_type.clone().unwrap_or_else(|| "UNION ALL".to_string())
+        };
+        let scans = collect_scan_nodes(branch)
+            .into_iter()
+            .map(|scan| EqpEntry::leaf(format_sqlite_eqp_node(scan)))
+            .collect();
+        children.push(EqpEntry { text: label, children: scans });
+    }
+    EqpEntry { text: "COMPOUND QUERY".to_string(), children }
 }
 
 /// True when any node in `node`'s subtree needs a temp B-tree for ORDER BY.
@@ -598,69 +627,12 @@ fn collect_eqp_entries(node: &PlanNode) -> Vec<EqpEntry> {
     entries
 }
 
-/// Format a compound query in SQLite EQP style
-fn format_compound_query_eqp(node: &PlanNode, indent: &str, is_last: bool, output: &mut String) {
-    let connector = if is_last { "`--" } else { "|--" };
-    let child_indent = if is_last { format!("{}   ", indent) } else { format!("{}|  ", indent) };
-
-    // Write COMPOUND QUERY header
-    writeln!(output, "{}{}COMPOUND QUERY", indent, connector).unwrap();
-
-    // Write compound query children
-    let child_count = node.children.len();
-    for (i, child) in node.children.iter().enumerate() {
-        let is_child_last = i == child_count - 1;
-        let child_connector = if is_child_last { "`--" } else { "|--" };
-        let grandchild_indent = if is_child_last {
-            format!("{}   ", child_indent)
-        } else {
-            format!("{}|  ", child_indent)
-        };
-
-        if i == 0 {
-            // First subquery
-            writeln!(output, "{}{}LEFT-MOST SUBQUERY", child_indent, child_connector).unwrap();
-            // Write scan nodes for this subquery
-            let scan_nodes = collect_scan_nodes(child);
-            for (j, scan_node) in scan_nodes.iter().enumerate() {
-                let is_scan_last = j == scan_nodes.len() - 1;
-                let scan_connector = if is_scan_last { "`--" } else { "|--" };
-                writeln!(
-                    output,
-                    "{}{}{}",
-                    grandchild_indent,
-                    scan_connector,
-                    format_sqlite_eqp_node(scan_node)
-                )
-                .unwrap();
-            }
-        } else {
-            // Subsequent parts with set operation label
-            let set_op = child.set_operation_type.as_deref().unwrap_or("UNION ALL");
-            writeln!(output, "{}{}{}", child_indent, child_connector, set_op).unwrap();
-            // Write scan nodes for this subquery
-            let scan_nodes = collect_scan_nodes(child);
-            for (j, scan_node) in scan_nodes.iter().enumerate() {
-                let is_scan_last = j == scan_nodes.len() - 1;
-                let scan_connector = if is_scan_last { "`--" } else { "|--" };
-                writeln!(
-                    output,
-                    "{}{}{}",
-                    grandchild_indent,
-                    scan_connector,
-                    format_sqlite_eqp_node(scan_node)
-                )
-                .unwrap();
-            }
-        }
-    }
-}
-
 /// Format a single node in SQLite EQP style
 fn format_sqlite_eqp_node(node: &PlanNode) -> String {
-    // Handle constant row scan (no FROM clause)
-    if node.operation == "SCAN CONSTANT ROW" {
-        return "SCAN CONSTANT ROW".to_string();
+    // Handle constant row scan (no FROM clause / VALUES), e.g.
+    // `SCAN CONSTANT ROW` or `SCAN 2 CONSTANT ROWS`.
+    if node.operation == "SCAN CONSTANT ROW" || node.operation.ends_with("CONSTANT ROWS") {
+        return node.operation.clone();
     }
 
     let table_name = node.object.as_deref().unwrap_or("?");
@@ -864,10 +836,16 @@ impl ExplainExecutor {
             )?;
             root.add_child(scan_node);
         } else {
-            // No FROM clause - this is a constant expression scan
+            // No FROM clause - this is a constant expression scan. Multi-row
+            // VALUES bodies render SQLite's plural `SCAN <n> CONSTANT ROWS`;
+            // a single row (or a plain FROM-less SELECT) keeps the singular
+            // `SCAN CONSTANT ROW` (verified against sqlite3 3.51.0, #5361).
             let mut constant_node = PlanNode::new("Constant Row");
             constant_node.scan_type = Some(ScanType::Scan);
-            constant_node.operation = "SCAN CONSTANT ROW".to_string();
+            constant_node.operation = match &stmt.values {
+                Some(rows) if rows.len() > 1 => format!("SCAN {} CONSTANT ROWS", rows.len()),
+                _ => "SCAN CONSTANT ROW".to_string(),
+            };
             root.add_child(constant_node);
         }
 
@@ -1211,11 +1189,10 @@ impl ExplainExecutor {
     ///
     /// Mirrors SQLite's query-flattener blocking conditions conservatively:
     /// aggregates, GROUP BY/HAVING, DISTINCT, LIMIT/OFFSET, compound bodies,
-    /// VALUES, and WITH clauses all keep the pre-existing opaque
-    /// `SCAN <view>` rendering (SQLite materializes/co-routines these;
-    /// VibeSQL keeps the conservative opaque line rather than guessing —
-    /// follow-on work can add CO-ROUTINE blocks case by case). Window
-    /// functions are handled separately by the CO-ROUTINE path (#5347).
+    /// VALUES, and WITH clauses all render as `CO-ROUTINE <view>` blocks
+    /// showing the body's inner plan (#5361) — truthful because the runtime
+    /// materializes every view body. Window functions take the same
+    /// CO-ROUTINE path (#5347).
     fn view_body_is_flattenable(stmt: &SelectStmt) -> bool {
         let select_list_has_aggregate = stmt.select_list.iter().any(|item| match item {
             SelectItem::Expression { expr, .. } => contains_aggregate_function(expr),
@@ -1253,9 +1230,17 @@ impl ExplainExecutor {
                 // `SCAN <view>`. CTE names shadow same-named views and are
                 // never expanded.
                 //
-                // - Window-function views (#5347): SQLite cannot flatten
+                // - Window-function views (#5347) and blocked bodies —
+                //   aggregates, GROUP BY/HAVING, DISTINCT, LIMIT/OFFSET,
+                //   compound, VALUES, WITH (#5361): SQLite cannot flatten
                 //   them, so the body's plan renders as a CO-ROUTINE block
-                //   plus a trailing `SCAN <name>` (windowpushd.test 2.1.3.6).
+                //   plus a trailing `SCAN <name>` (windowpushd.test 2.1.3.6;
+                //   sqlite3 3.51.0 verified per category). VibeSQL's runtime
+                //   materializes every view body, so the block + inner plan
+                //   is truthful even where SQLite manages to flatten a
+                //   specific shape (LIMIT-only bodies, UNION ALL bodies,
+                //   single-use plain CTEs — documented divergences in
+                //   explain_view_expansion_tests.rs).
                 // - Plain flattenable views (#5355): SQLite inlines the body
                 //   into the outer query and shows the underlying table
                 //   access with no mention of the view. VibeSQL's runtime
@@ -1266,25 +1251,24 @@ impl ExplainExecutor {
                 //   push-down (`SEARCH <table> (x=?)`) because no index
                 //   probe happens at runtime. Where no index applies the
                 //   output matches SQLite exactly (`SCAN <table>`).
-                // - Blocked bodies (aggregate/GROUP BY/DISTINCT/LIMIT/
-                //   compound/...) keep the opaque rendering.
                 if !ctes.contains(&name.to_ascii_lowercase()) {
                     if let Some(view) = database.catalog.get_view(name) {
-                        if Self::select_has_window_functions(&view.query) {
-                            let source = alias.as_deref().unwrap_or(name.as_str());
-                            let child = Self::explain_select(&view.query, database, ctes)?;
-                            let mut view_node = PlanNode::new("Subquery");
-                            view_node.object = Some(format!("AS {}", source));
-                            view_node.coroutine = Some(source.to_string());
-                            view_node.add_child(child);
-                            return Ok(view_node);
-                        }
+                        let source = alias.as_deref().unwrap_or(name.as_str());
+                        let child = Self::explain_select(&view.query, database, ctes)?;
+                        let mut view_node = PlanNode::new("Subquery");
+                        view_node.object = Some(format!("AS {}", source));
 
-                        if Self::view_body_is_flattenable(&view.query) {
-                            let source = alias.as_deref().unwrap_or(name.as_str());
-                            let child = Self::explain_select(&view.query, database, ctes)?;
-                            let mut view_node = PlanNode::new("Subquery");
-                            view_node.object = Some(format!("AS {}", source));
+                        if Self::select_has_window_functions(&view.query)
+                            || !Self::view_body_is_flattenable(&view.query)
+                        {
+                            // CO-ROUTINE block: the inner plan (including
+                            // the body's own temp B-tree entries) renders
+                            // inside the block via collect_eqp_entries, so
+                            // no flag hoisting — subtree_needs_order_by_
+                            // temp_btree skips co-routine subtrees to avoid
+                            // double emission.
+                            view_node.coroutine = Some(source.to_string());
+                        } else {
                             // The body's ORDER BY genuinely sorts at runtime
                             // (views are materialized), and SQLite's
                             // flattened plan keeps the body's `USE TEMP
@@ -1297,9 +1281,10 @@ impl ExplainExecutor {
                             // rendered (verified against sqlite3 3.51.0).
                             view_node.needs_temp_btree_for_order_by =
                                 subtree_needs_order_by_temp_btree(&child);
-                            view_node.add_child(child);
-                            return Ok(view_node);
                         }
+
+                        view_node.add_child(child);
+                        return Ok(view_node);
                     }
                 }
 
