@@ -246,6 +246,12 @@ pub fn evaluate_predicate_i64_simd(
         }
 
         ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // SQL three-valued logic (issue #5341): a NULL list element never
+            // matches, but it poisons NOT IN — when no element matches the
+            // result is UNKNOWN, so `x NOT IN (..., NULL)` is never TRUE.
+            if *negated && list_values.iter().any(|v| matches!(v, SqlValue::Null)) {
+                return Ok(vec![false; values.len()]);
+            }
             // For i64 columns, check if value is in the list
             let mut result = vec![false; values.len()];
             for i64_val in list_values {
@@ -407,6 +413,12 @@ pub fn evaluate_predicate_timestamp_simd(
             low_mask.iter().zip(high_mask.iter()).map(|(&l, &h)| l && h).collect()
         }
         ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // SQL three-valued logic (issue #5341): a NULL list element never
+            // matches, but it poisons NOT IN — when no element matches the
+            // result is UNKNOWN, so `x NOT IN (..., NULL)` is never TRUE.
+            if *negated && list_values.iter().any(|v| matches!(v, SqlValue::Null)) {
+                return Ok(vec![false; values.len()]);
+            }
             let mut result = vec![false; values.len()];
             for list_val in list_values {
                 // NULL list elements match nothing
@@ -561,6 +573,12 @@ pub fn evaluate_predicate_i32_simd(
         }
 
         ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // SQL three-valued logic (issue #5341): a NULL list element never
+            // matches, but it poisons NOT IN — when no element matches the
+            // result is UNKNOWN, so `x NOT IN (..., NULL)` is never TRUE.
+            if *negated && list_values.iter().any(|v| matches!(v, SqlValue::Null)) {
+                return Ok(vec![false; values.len()]);
+            }
             // For date (i32) columns, check if value is in the list
             let mut result = vec![false; values.len()];
             for date_val in list_values {
@@ -753,6 +771,12 @@ pub fn evaluate_predicate_f64_simd(
         }
 
         ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // SQL three-valued logic (issue #5341): a NULL list element never
+            // matches, but it poisons NOT IN — when no element matches the
+            // result is UNKNOWN, so `x NOT IN (..., NULL)` is never TRUE.
+            if *negated && list_values.iter().any(|v| matches!(v, SqlValue::Null)) {
+                return Ok(vec![false; values.len()]);
+            }
             // For f64 columns, check if value is in the list
             let mut result = vec![false; values.len()];
             for f_val in list_values {
@@ -1039,6 +1063,12 @@ pub fn evaluate_predicate_i64_packed(
         }
 
         ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // SQL three-valued logic (issue #5341): a NULL list element never
+            // matches, but it poisons NOT IN — when no element matches the
+            // result is UNKNOWN, so `x NOT IN (..., NULL)` is never TRUE.
+            if *negated && list_values.iter().any(|v| matches!(v, SqlValue::Null)) {
+                return Ok(PackedMask::new_all_clear(values.len()));
+            }
             // For i64 columns with packed mask
             let mut result = PackedMask::new_all_clear(values.len());
             for i64_val in list_values {
@@ -1183,6 +1213,12 @@ pub fn evaluate_predicate_i32_packed(
         }
 
         ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // SQL three-valued logic (issue #5341): a NULL list element never
+            // matches, but it poisons NOT IN — when no element matches the
+            // result is UNKNOWN, so `x NOT IN (..., NULL)` is never TRUE.
+            if *negated && list_values.iter().any(|v| matches!(v, SqlValue::Null)) {
+                return Ok(PackedMask::new_all_clear(values.len()));
+            }
             // For date (i32) columns with packed mask
             let mut result = PackedMask::new_all_clear(values.len());
             for date_val in list_values {
@@ -1373,6 +1409,12 @@ pub fn evaluate_predicate_f64_packed(
         }
 
         ColumnPredicate::InList { values: list_values, negated, .. } => {
+            // SQL three-valued logic (issue #5341): a NULL list element never
+            // matches, but it poisons NOT IN — when no element matches the
+            // result is UNKNOWN, so `x NOT IN (..., NULL)` is never TRUE.
+            if *negated && list_values.iter().any(|v| matches!(v, SqlValue::Null)) {
+                return Ok(PackedMask::new_all_clear(values.len()));
+            }
             // For f64 columns with packed mask
             let mut result = PackedMask::new_all_clear(values.len());
             for f_val in list_values {
