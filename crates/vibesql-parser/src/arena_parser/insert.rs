@@ -300,7 +300,7 @@ impl<'arena> ArenaParser<'arena> {
                 });
             };
 
-            Ok((Some(OnConflictClause { conflict_target, action }), None))
+            Ok((Some(OnConflictClause { conflict_target, target_inexact: false, action }), None))
         } else if self.try_consume_keyword(Keyword::Duplicate) {
             // MySQL: ON DUPLICATE KEY UPDATE ...
             self.consume_keyword(Keyword::Key)?;

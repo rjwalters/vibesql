@@ -645,6 +645,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 .conflict_target
                 .as_ref()
                 .map(|cols| cols.iter().map(|s| self.resolve(*s)).collect()),
+            target_inexact: clause.target_inexact,
             action: match &clause.action {
                 arena_dml::OnConflictAction::DoNothing => crate::OnConflictAction::DoNothing,
                 arena_dml::OnConflictAction::DoUpdate { assignments, where_clause } => {

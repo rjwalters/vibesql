@@ -89,6 +89,11 @@ pub struct OnConflictClause<'arena> {
     /// Optional list of indexed columns to match for conflict detection.
     /// When None, matches any unique constraint violation.
     pub conflict_target: Option<BumpVec<'arena, Symbol>>,
+    /// True when the conflict target contains components that a plain
+    /// column-name list cannot represent exactly (expressions, non-BINARY
+    /// COLLATE, or a target WHERE predicate). See the owned-AST
+    /// `OnConflictClause::target_inexact` for details (issue #5269).
+    pub target_inexact: bool,
     /// The action to take when a conflict occurs.
     pub action: OnConflictAction<'arena>,
 }

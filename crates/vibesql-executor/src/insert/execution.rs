@@ -86,6 +86,11 @@ fn execute_insert_internal(
 
     // Check if target is a VIEW with INSTEAD OF triggers
     if let Some(view_def) = db.catalog.get_view(&stmt.table_name).cloned() {
+        // SQLite: the upsert syntax cannot target a view, even when INSTEAD
+        // OF INSERT triggers exist (upsert1-910).
+        if stmt.on_conflict.is_some() {
+            return Err(ExecutorError::SqliteCompatError("cannot UPSERT a view".to_string()));
+        }
         return execute_insert_on_view(db, stmt, &view_def, procedural_context, trigger_context);
     }
 
@@ -118,6 +123,26 @@ fn execute_insert_internal(
 
     // Use the schema's table name for catalog operations (matches how table was created)
     let table_name = &schema.name;
+
+    // Validate an explicit ON CONFLICT (cols) target up front. SQLite does
+    // this at prepare time, even when no row actually conflicts: unknown
+    // columns raise "no such column" and known columns without a matching
+    // PRIMARY KEY / UNIQUE constraint / unique index raise the canonical
+    // "ON CONFLICT clause does not match..." error (upsert1-110/120/300).
+    if let Some(ref on_conflict) = stmt.on_conflict {
+        // Targets the parser could not represent as a plain column list
+        // (expressions, non-BINARY COLLATE, target WHERE) never match in v1
+        // (upsert1-130/210/310/1210; see issue #5269).
+        if on_conflict.target_inexact {
+            return Err(ExecutorError::SqliteCompatError(
+                "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"
+                    .to_string(),
+            ));
+        }
+        if let Some(ref target) = on_conflict.conflict_target {
+            super::on_conflict_update::validate_conflict_target(db, table_name, &schema, target)?;
+        }
+    }
 
     // Determine target column indices and types, including rowid pseudo-column support
     let resolved_columns =
@@ -848,6 +873,49 @@ fn execute_insert_internal(
                     continue;
                 }
                 // No conflict, fall through to insert
+            } else if let Some(vibesql_ast::OnConflictClause {
+                ref conflict_target,
+                action: vibesql_ast::OnConflictAction::DoUpdate { ref assignments, ref where_clause },
+                ..
+            }) = stmt.on_conflict
+            {
+                // SQLite upsert: ON CONFLICT [(cols)] DO UPDATE SET ... [WHERE ...]
+                match super::on_conflict_update::handle_on_conflict_update(
+                    db,
+                    table_name,
+                    &schema,
+                    &full_row_values,
+                    conflict_target.as_ref(),
+                    assignments,
+                    where_clause.as_ref(),
+                )? {
+                    super::on_conflict_update::UpsertAction::Updated(updated_row_id) => {
+                        // Row was updated, count it toward affected rows
+                        rows_inserted += 1;
+
+                        // RETURNING: SQLite returns the post-UPDATE row for
+                        // upserts that take the update arm.
+                        if capture_returning {
+                            if let Some(updated_row) = db
+                                .get_table(table_name)
+                                .and_then(|table| table.scan().get(updated_row_id))
+                            {
+                                returned_rows.push(updated_row.clone());
+                            }
+                        }
+                        continue;
+                    }
+                    super::on_conflict_update::UpsertAction::Skipped => {
+                        // DO UPDATE ... WHERE was false/NULL: the row is
+                        // neither inserted nor updated (SQLite semantics).
+                        continue;
+                    }
+                    super::on_conflict_update::UpsertAction::NoConflict => {
+                        // No conflict on the targeted constraint; fall through
+                        // to a normal insert. Conflicts on OTHER constraints
+                        // still surface as UNIQUE errors (upsert1-201).
+                    }
+                }
             } else if matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace)) {
                 // SQLite REPLACE semantics: allocate the rowid for the new row BEFORE firing
                 // BEFORE DELETE triggers. This ensures that any INSERT within those triggers

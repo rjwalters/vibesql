@@ -403,9 +403,14 @@ impl Parser {
                 // INSERT INTO t SELECT ... RETURNING ... (the clause belongs to
                 // the outer INSERT, issue #5263). For a bare SELECT, a trailing
                 // RETURNING is a syntax error, matching SQLite (issue #5271).
+                // ON is likewise allowed only as a DML source so that
+                // INSERT INTO t SELECT ... ON CONFLICT ... (SQLite upsert,
+                // issue #5269) and ... ON DUPLICATE KEY UPDATE ... parse,
+                // while a bare `SELECT 1 ON ...` remains a syntax error.
                 let valid_end_token = match self.peek() {
                     Token::Semicolon | Token::Eof | Token::RParen => true,
                     Token::Keyword { keyword: Keyword::Returning, .. } if allow_returning => true,
+                    Token::Keyword { keyword: Keyword::On, .. } if allow_returning => true,
                     _ => false,
                 };
                 if !valid_end_token {

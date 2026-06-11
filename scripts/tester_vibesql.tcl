@@ -354,6 +354,13 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "division by zero"
     }
 
+    # SQLite upsert: conflict-target mismatch error passes through verbatim.
+    # It mentions "UNIQUE constraint" and would otherwise be swallowed by the
+    # generic fallback below (upsert1-120/130/300).
+    if {[regexp -nocase {ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint} $error_msg]} {
+        return "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"
+    }
+
     # Constraint violations - VibeSQL now outputs SQLite-compatible format directly
     # Format: "UNIQUE constraint failed: table.column" or "UNIQUE constraint failed: table.col1, table.col2"
     if {[regexp -nocase {UNIQUE constraint failed: (.+)$} $error_msg -> col_spec]} {
