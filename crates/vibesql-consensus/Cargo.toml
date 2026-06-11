@@ -9,15 +9,19 @@ description = "Consensus adapter layer for VibeSQL WAN replication (see ADR-0004
 keywords = ["sql", "database", "consensus", "raft", "replication"]
 categories = ["database"]
 
-# NOTE: `openraft` is deliberately NOT a dependency yet. ADR-0004 selects it,
-# but wiring it in is Raft Phase A2/A3 work. This crate is scaffolding only:
-# the engine-agnostic `ConsensusBackend` trait plus a single-node loopback
-# implementation for dev/test.
+# NOTE (ADR-0004): `openraft` is a dependency of THIS crate only. Consumer
+# crates depend on the engine-agnostic `ConsensusBackend` trait and must
+# never see openraft types, so the consensus engine stays swappable.
 
 [dependencies]
+# `storage-v2` unseals the RaftLogStorage/RaftStateMachine traits (the v2
+# storage API) so this crate can implement them; `serde` because our log
+# entry payloads and vote state will be serialized for durability in PR 2.
+openraft = { version = "0.9.24", features = ["serde", "storage-v2"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
+tokio = { version = "1.0", features = ["sync"] }
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["rt", "macros"] }
