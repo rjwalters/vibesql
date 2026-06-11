@@ -173,6 +173,37 @@ pub fn datetime(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         ));
     }
 
+    // Resolve the time value (base + modifiers); None means SQL NULL
+    let dt = match resolve_time_value(args, "DATETIME")? {
+        Some(dt) => dt,
+        None => return Ok(SqlValue::Null),
+    };
+
+    // Convert NaiveDateTime to SqlValue::Timestamp
+    naive_datetime_to_timestamp(dt)
+}
+
+/// Resolve a SQLite time-value argument list (timestring + modifiers) to a `NaiveDateTime`.
+///
+/// `args[0]` is the base time value; `args[1..]` are modifiers applied in sequence.
+/// If `args` is empty, the current local time is used (SQLite treats an omitted
+/// time-value as 'now').
+///
+/// Returns:
+/// - `Ok(None)` for NULL input, unparseable timestrings, or invalid modifiers
+///   (SQLite returns NULL in these cases)
+/// - `Err(...)` for argument types that are not supported at all
+///
+/// Shared by `datetime()` and `strftime()`; `func_name` is used in error messages.
+pub(super) fn resolve_time_value(
+    args: &[SqlValue],
+    func_name: &str,
+) -> Result<Option<NaiveDateTime>, ExecutorError> {
+    if args.is_empty() {
+        // SQLite: omitted time-value defaults to 'now'
+        return Ok(Some(Local::now().naive_local()));
+    }
+
     // Check if 'unixepoch' is the first modifier - affects how we parse the base value
     let has_unixepoch_first = args.len() > 1
         && matches!(&args[1], SqlValue::Varchar(s) | SqlValue::Character(s) if s.eq_ignore_ascii_case("unixepoch"));
@@ -180,26 +211,26 @@ pub fn datetime(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     // Parse the base datetime value
     let base_result = if has_unixepoch_first {
         // For unixepoch, parse numeric values as Unix timestamps instead of Julian Days
-        parse_base_datetime_for_unixepoch(&args[0])?
+        parse_base_datetime_for_unixepoch(&args[0], func_name)?
     } else {
-        parse_base_datetime(&args[0])?
+        parse_base_datetime(&args[0], func_name)?
     };
 
     // If base value is NULL, return NULL
     let mut dt = match base_result {
         Some(dt) => dt,
-        None => return Ok(SqlValue::Null),
+        None => return Ok(None),
     };
 
     // Apply each modifier in sequence
     for (idx, modifier_arg) in args.iter().enumerate().skip(1) {
         let modifier_str = match modifier_arg {
             SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
-            SqlValue::Null => return Ok(SqlValue::Null),
+            SqlValue::Null => return Ok(None),
             _ => {
                 return Err(ExecutorError::UnsupportedFeature(format!(
-                    "DATETIME modifier must be a string, got {:?}",
-                    modifier_arg
+                    "{} modifier must be a string, got {:?}",
+                    func_name, modifier_arg
                 )))
             }
         };
@@ -209,7 +240,7 @@ pub fn datetime(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         if modifier_str.eq_ignore_ascii_case("unixepoch") {
             if idx != 1 {
                 // unixepoch only valid as first modifier
-                return Ok(SqlValue::Null);
+                return Ok(None);
             }
             // Already handled during parsing, just continue
             continue;
@@ -218,16 +249,18 @@ pub fn datetime(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         // Apply the modifier
         match apply_datetime_modifier(dt, modifier_str) {
             Some(new_dt) => dt = new_dt,
-            None => return Ok(SqlValue::Null), // Invalid modifier returns NULL
+            None => return Ok(None), // Invalid modifier returns NULL
         }
     }
 
-    // Convert NaiveDateTime to SqlValue::Timestamp
-    naive_datetime_to_timestamp(dt)
+    Ok(Some(dt))
 }
 
-/// Parse the base datetime value (first argument to DATETIME)
-fn parse_base_datetime(value: &SqlValue) -> Result<Option<NaiveDateTime>, ExecutorError> {
+/// Parse the base datetime value (first argument to DATETIME/STRFTIME's time value)
+fn parse_base_datetime(
+    value: &SqlValue,
+    func_name: &str,
+) -> Result<Option<NaiveDateTime>, ExecutorError> {
     match value {
         SqlValue::Null => Ok(None),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
@@ -271,8 +304,8 @@ fn parse_base_datetime(value: &SqlValue) -> Result<Option<NaiveDateTime>, Execut
             Ok(julian_day_to_naive(*n))
         }
         _ => Err(ExecutorError::UnsupportedFeature(format!(
-            "DATETIME requires string, date, timestamp, or numeric argument, got {:?}",
-            value
+            "{} requires string, date, timestamp, or numeric argument, got {:?}",
+            func_name, value
         ))),
     }
 }
@@ -281,6 +314,7 @@ fn parse_base_datetime(value: &SqlValue) -> Result<Option<NaiveDateTime>, Execut
 /// Numeric values are interpreted as Unix timestamps instead of Julian Days
 fn parse_base_datetime_for_unixepoch(
     value: &SqlValue,
+    func_name: &str,
 ) -> Result<Option<NaiveDateTime>, ExecutorError> {
     match value {
         SqlValue::Null => Ok(None),
@@ -306,8 +340,8 @@ fn parse_base_datetime_for_unixepoch(
             Ok(unix_epoch_to_datetime(*n as i64))
         }
         _ => Err(ExecutorError::UnsupportedFeature(format!(
-            "DATETIME requires string, date, timestamp, or numeric argument, got {:?}",
-            value
+            "{} requires string, date, timestamp, or numeric argument, got {:?}",
+            func_name, value
         ))),
     }
 }

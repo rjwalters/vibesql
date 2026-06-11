@@ -16,10 +16,12 @@
 //!   DATETIME)
 //! - `extract` - Field extraction (YEAR, MONTH, DAY, HOUR, MINUTE, SECOND)
 //! - `arithmetic` - Date/time arithmetic (DATEDIFF, DATE_ADD, DATE_SUB, AGE, EXTRACT)
+//! - `strftime` - SQLite-compatible STRFTIME formatting
 
 mod arithmetic;
 mod current;
 mod extract;
+mod strftime;
 
 // Re-export all public functions
 // Re-export helper for use by arithmetic operators
@@ -27,3 +29,4 @@ pub(crate) use arithmetic::date_add_subtract;
 pub(super) use arithmetic::{age, date_add, date_sub, datediff, extract};
 pub(super) use current::{current_date, current_time, current_timestamp, datetime};
 pub(super) use extract::{day, hour, minute, month, second, year};
+pub(super) use strftime::strftime;
