@@ -392,8 +392,21 @@ impl<'arena> ArenaParser<'arena> {
         // The expression parser would parse "table.*" as Expression::Wildcard, losing the table
         // name.
         let saved_position = self.position;
-        if let Token::Identifier(qualifier) | Token::DelimitedIdentifier(qualifier) = self.peek() {
-            let qualifier = qualifier.clone();
+        let qualifier = match self.peek() {
+            Token::Identifier(qualifier) | Token::DelimitedIdentifier(qualifier) => {
+                Some(qualifier.clone())
+            }
+            // Allow contextual keywords (M, YEAR, WINDOW, ...) as wildcard qualifiers,
+            // matching the keyword-as-identifier handling in expression parsing. Without
+            // this, `m.*` would fall through to parse_expression and silently degrade to a
+            // bare Wildcard, losing the qualifier.
+            // SQL:1999 normalizes unquoted identifiers to lowercase.
+            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                Some(format!("{}", kw).to_lowercase())
+            }
+            _ => None,
+        };
+        if let Some(qualifier) = qualifier {
             self.advance();
 
             if matches!(self.peek(), Token::Symbol('.')) {
