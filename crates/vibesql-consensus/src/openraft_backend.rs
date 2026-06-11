@@ -6,8 +6,13 @@
 //! [`OpenraftBackend::with_data_dir`] persists the log and vote on disk via
 //! [`DurableLogStore`] and recovers them on restart (PR 2). The state machine
 //! is in-memory in both — applying entries to VibeSQL storage is Phase B1.
-//! Multi-node networking is Phase A3 — the network factory here is a no-op
-//! that is never exercised because a single-voter cluster sends no RPCs.
+//!
+//! Raft Phase A3 (PR 1 of #5197) adds `join_channel_cluster` (test-only):
+//! the same backend booted as one voter of an in-process multi-node cluster
+//! whose RPCs travel over the channel transport in `crate::network`. The
+//! TCP transport is PR 2. The single-node constructors keep the no-op
+//! network factory, which is never exercised because a single-voter cluster
+//! sends no RPCs.
 //!
 //! ## Log index mapping
 //!
@@ -83,12 +88,15 @@ struct LogStoreInner {
     vote: Option<Vote<u64>>,
 }
 
-/// In-memory [`RaftLogStorage`] for the single-node Phase A2 configuration.
+/// In-memory [`RaftLogStorage`] for the single-node Phase A2 configuration
+/// (and, via the shared handle, for the in-process cluster tests of Phase
+/// A3: a "restarted" node reopens the same store, which is how it keeps its
+/// log and vote across the restart).
 ///
 /// Cloning shares the underlying store (it is a handle), which is what
 /// openraft expects from `get_log_reader`.
 #[derive(Debug, Clone, Default)]
-struct InMemoryLogStore {
+pub(crate) struct InMemoryLogStore {
     inner: Arc<Mutex<LogStoreInner>>,
 }
 
@@ -330,8 +338,9 @@ impl RaftStateMachine<TypeConfig> for InMemoryStateMachine {
 ///
 /// A single-voter cluster never replicates to peers, so these methods are
 /// unreachable in practice; they return [`Unreachable`] (rather than
-/// panicking) for defense in depth. Phase A3 replaces this with a real
-/// transport.
+/// panicking) for defense in depth. Multi-node configurations use a real
+/// transport instead: the in-process channel network in `crate::network`
+/// (Phase A3, PR 1; test-only), with TCP following in PR 2.
 #[derive(Debug, Default)]
 struct NoopNetwork;
 
@@ -386,17 +395,20 @@ impl openraft::RaftNetworkFactory<TypeConfig> for NoopNetworkFactory {
 // The backend
 // ---------------------------------------------------------------------------
 
-/// How a starting backend obtains its single-voter membership.
+/// How a starting backend obtains its membership.
 #[derive(Debug, Clone, Copy)]
-enum Bootstrap {
-    /// Fresh log: form the cluster by writing the single-voter membership
-    /// entry ([`Raft::initialize`]).
+pub(crate) enum Bootstrap {
+    /// Fresh log: form the cluster by writing the membership entry
+    /// ([`Raft::initialize`]).
     Initialize,
-    /// Prior Raft state was recovered from disk: the membership entry (and
+    /// Prior Raft state was recovered (from disk, or from a kept-alive
+    /// [`InMemoryLogStore`] in cluster tests): the membership entry (and
     /// vote) are already in the log, so re-running `initialize` would be
     /// rejected by openraft. `last_log_index` is the raw index of the last
-    /// recovered entry; startup waits until the state machine has re-applied
-    /// up to it so reads reflect pre-restart state.
+    /// recovered entry; single-node startup waits until the state machine
+    /// has re-applied up to it so reads reflect pre-restart state (cluster
+    /// restarts pass `None` and let the test harness await convergence
+    /// instead).
     Recover { last_log_index: Option<u64> },
 }
 
@@ -509,16 +521,28 @@ impl<E> OpenraftBackend<E> {
         Self::start(log_store, restore.unwrap_or_default(), bootstrap).await
     }
 
-    async fn start<LS>(log_store: LS, entries: Vec<Vec<u8>>, bootstrap: Bootstrap) -> Result<Self>
+    /// Spawn the Raft core: storage + state machine + network, no membership
+    /// yet. Shared by the single-node constructors and the in-process
+    /// cluster constructor; the caller decides how membership is established
+    /// (initialize vs. recovered log) and what to wait for.
+    async fn boot<LS, NF>(
+        node_id: u64,
+        network: NF,
+        log_store: LS,
+        entries: Vec<Vec<u8>>,
+    ) -> Result<Self>
     where
         LS: RaftLogStorage<TypeConfig>,
+        NF: openraft::RaftNetworkFactory<TypeConfig>,
     {
-        // Short election timeouts keep single-node startup snappy; with one
-        // voter there is no contention to back off from.
+        // Short timeouts keep single-node startup and test elections snappy;
+        // the 4x gap between heartbeat and the minimum election timeout
+        // keeps healthy multi-node clusters from triggering spurious
+        // elections.
         let config = Config {
-            heartbeat_interval: 100,
-            election_timeout_min: 150,
-            election_timeout_max: 300,
+            heartbeat_interval: 50,
+            election_timeout_min: 200,
+            election_timeout_max: 400,
             ..Default::default()
         };
         let config =
@@ -530,14 +554,24 @@ impl<E> OpenraftBackend<E> {
         // continue numbering after them.
         state_machine.lock().entries = entries;
 
-        let raft = Raft::new(NODE_ID, config, NoopNetworkFactory, log_store, state_machine.clone())
+        let raft = Raft::new(node_id, config, network, log_store, state_machine.clone())
             .await
             .map_err(|e| ConsensusError::Backend(format!("failed to start raft core: {e}")))?;
+
+        let metrics = raft.metrics();
+        Ok(Self { raft, state_machine, metrics, _entry: PhantomData })
+    }
+
+    async fn start<LS>(log_store: LS, entries: Vec<Vec<u8>>, bootstrap: Bootstrap) -> Result<Self>
+    where
+        LS: RaftLogStorage<TypeConfig>,
+    {
+        let backend = Self::boot(NODE_ID, NoopNetworkFactory, log_store, entries).await?;
 
         if matches!(bootstrap, Bootstrap::Initialize) {
             let mut members = BTreeMap::new();
             members.insert(NODE_ID, BasicNode::default());
-            raft.initialize(members).await.map_err(|e| {
+            backend.raft.initialize(members).await.map_err(|e| {
                 ConsensusError::Backend(format!("failed to initialize cluster: {e}"))
             })?;
         }
@@ -548,7 +582,9 @@ impl<E> OpenraftBackend<E> {
 
         // A single voter elects itself; wait for leadership so `propose`
         // never races the initial election.
-        raft.wait(Some(Duration::from_secs(10)))
+        backend
+            .raft
+            .wait(Some(Duration::from_secs(10)))
             .state(ServerState::Leader, "single-node leader election")
             .await
             .map_err(|e| ConsensusError::Backend(format!("leader election did not settle: {e}")))?;
@@ -558,7 +594,9 @@ impl<E> OpenraftBackend<E> {
             // starts empty on every boot; wait for the recovered log to be
             // re-applied so `read_committed` and `last_index` reflect
             // pre-restart state before the constructor returns.
-            raft.wait(Some(Duration::from_secs(10)))
+            backend
+                .raft
+                .wait(Some(Duration::from_secs(10)))
                 .metrics(
                     move |m| m.last_applied.map_or(0, |id| id.index) >= last,
                     "recovered log entries re-applied",
@@ -569,8 +607,65 @@ impl<E> OpenraftBackend<E> {
                 })?;
         }
 
-        let metrics = raft.metrics();
-        Ok(Self { raft, state_machine, metrics, _entry: PhantomData })
+        Ok(backend)
+    }
+}
+
+#[cfg(test)]
+impl<E> OpenraftBackend<E> {
+    /// Boot one member of an **in-process multi-node cluster** whose RPCs
+    /// are routed through `router` (Raft Phase A3, PR 1 of #5197).
+    ///
+    /// `members` is the full static membership of the cluster (every node
+    /// passes the same map; dynamic add/remove is a later issue). With
+    /// [`Bootstrap::Initialize`] the node writes that membership into its
+    /// fresh log; with [`Bootstrap::Recover`] the membership is already in
+    /// the (kept-alive or on-disk) log being reopened.
+    ///
+    /// Unlike the single-node constructors this does **not** wait for an
+    /// election or for log replay: which node wins, and when a restarted
+    /// node has caught up, are cluster-level outcomes the test harness
+    /// awaits explicitly (with bounded timeouts).
+    pub(crate) async fn join_channel_cluster<LS>(
+        node_id: u64,
+        members: &BTreeMap<u64, BasicNode>,
+        router: &crate::network::ChannelRouter,
+        log_store: LS,
+        bootstrap: Bootstrap,
+    ) -> Result<Self>
+    where
+        LS: RaftLogStorage<TypeConfig>,
+    {
+        let network = crate::network::ChannelNetworkFactory::new(router.clone());
+        let backend = Self::boot(node_id, network, log_store, Vec::new()).await?;
+
+        // Register the inbound RPC loop *before* initializing, so peers that
+        // initialized first can already send this node vote/append RPCs.
+        router.register(node_id, backend.raft.clone());
+
+        if matches!(bootstrap, Bootstrap::Initialize) {
+            match backend.raft.initialize(members.clone()).await {
+                Ok(()) => {}
+                // openraft documents that multiple nodes initializing with
+                // the *same* membership is safe; a node that already voted
+                // for (or received the membership entry from) a faster peer
+                // rejects its own initialize with `NotAllowed`. Both paths
+                // converge on the same membership, so tolerate it.
+                Err(RaftError::APIError(openraft::error::InitializeError::NotAllowed(_))) => {}
+                Err(e) => {
+                    return Err(ConsensusError::Backend(format!(
+                        "failed to initialize cluster: {e}"
+                    )))
+                }
+            }
+        }
+
+        Ok(backend)
+    }
+
+    /// The node this backend currently believes is leader, per its metrics.
+    pub(crate) fn current_leader(&self) -> Option<u64> {
+        self.metrics.borrow().current_leader
     }
 }
 
