@@ -3262,6 +3262,205 @@ array set vibesql_skip_tests {
     fkey8-5.2 "UPDATE/DELETE PK affinity is fixed (#5145), but schema-reload drops DEFERRABLE INITIALLY DEFERRED so the deferred-INSERT on child fires immediately across CLI invocations — tracked separately in #5172"
 
     triggerupfrom-2.3 "Cascades from auto-skipped test 2.2. CREATE TEMP TRIGGER now parses (#5218), but 2.2 references aux.t3 and is auto-skipped by the ATTACH/aux regex (VibeSQL has no ATTACH/multi-database support), so the rows 2.2 inserts (10 y {}, 20 y {}) never exist and 2.3's expected output cannot match. The UPDATE…FROM trigger logic in 2.3 itself works correctly when run in isolation (verified during #5192 builder pass)."
+
+    expr-8.4 "time('now') parsed as TIME typed-literal keyword, not a function call (#5307)"
+    expr-8.5 "date('now') parsed as DATE typed-literal keyword, not a function call (#5307)"
+
+    date-2.3 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.4 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.5 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.6 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.7 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.8 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.9 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.10 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.11 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.16 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.40 "zero-argument datetime() rejected (SQLite treats it as 'now') (#5309)"
+    date-2.60 "invalid-date rollover normalization (2023-02-31 -> 2023-03-03) differs (#5309)"
+    date-2.4a "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.4b "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.4c "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.4d "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-2.4e "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-3.11.99 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.20 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.21 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.22 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.23 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.24 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.25 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.26 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.27 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.28 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.29 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.30 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.31 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.32 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.33 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.34 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.35 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.36 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-3.37 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
+    date-4.1 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-5.1 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
+    date-5.2 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
+    date-5.3 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
+    date-5.4 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
+    date-5.6 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
+    date-5.8 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
+    date-5.9 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
+    date-5.10 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
+    date-5.11 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
+    date-5.12 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
+    date-7.4 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-7.5 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-7.6 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-7.7 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-7.8 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-7.9 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-7.10 "julianday() not implemented (#5308)"
+    date-7.11 "julianday() not implemented (#5308)"
+    date-7.12 "julianday() not implemented (#5308)"
+    date-8.1 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.2 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.3 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.4 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.5 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.6 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.7 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.8 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.9 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.10 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.11 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.12 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.13 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.14 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.15 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.16 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.17 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.18 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-8.19 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
+    date-11.1 "+/-HH:MM:SS modifiers return NULL (#5309)"
+    date-11.2 "+/-HH:MM:SS modifiers return NULL (#5309)"
+    date-11.3 "+/-HH:MM:SS modifiers return NULL (#5309)"
+    date-11.4 "+/-HH:MM:SS modifiers return NULL (#5309)"
+    date-11.5 "+/-HH:MM:SS modifiers return NULL (#5309)"
+    date-11.6 "+/-HH:MM:SS modifiers return NULL (#5309)"
+    date-11.7 "+/-HH:MM:SS modifiers return NULL (#5309)"
+    date-11.8 "+/-HH:MM:SS modifiers return NULL (#5309)"
+    date-11.9 "+/-HH:MM:SS modifiers return NULL (#5309)"
+    date-13.1 "julianday() not implemented (#5308)"
+    date-13.11 "julianday() not implemented (#5308)"
+    date-13.12 "julianday() not implemented (#5308)"
+    date-13.13 "julianday() not implemented (#5308)"
+    date-13.14 "julianday() not implemented (#5308)"
+    date-13.15 "julianday() not implemented (#5308)"
+    date-13.16 "julianday() not implemented (#5308)"
+    date-13.17 "julianday() not implemented (#5308)"
+    date-13.18 "julianday() not implemented (#5308)"
+    date-13.19 "julianday() not implemented (#5308)"
+    date-13.20 "julianday() not implemented (#5308)"
+    date-13.21 "julianday() not implemented (#5308)"
+    date-13.22 "julianday() not implemented (#5308)"
+    date-13.23 "julianday() not implemented (#5308)"
+    date-13.24 "julianday() not implemented (#5308)"
+    date-13.30 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-13.31 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-13.32 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-13.33 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-13.34 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-13.35 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-13.36 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-13.37 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-15.2 "sleeper TCL UDF registered via db func is not visible to the VibeSQL CLI subprocess (harness limitation)"
+    date-16.1 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-16.3 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.4 "julianday() not implemented (#5308)"
+    date-16.5 "julianday() not implemented (#5308)"
+    date-16.7 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.9 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.11 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.13 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.15 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.17 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.20 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.21 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.22 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.23 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.24 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.25 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.27 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.28 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-16.30 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date-17.6 "julian-day range bounds not enforced for extreme date values (#5309)"
+    date2-100 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date2-110 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-120 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-130 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-140 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-200 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date2-210 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-220 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-300 "julianday() not implemented (#5308)"
+    date2-310 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-320 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-330 "cascades: table t3 + partial index built by skipped date2-300/date2-320 (julianday(), #5308) never exist once those tests are skipped"
+    date2-331 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-400 "julianday() not implemented (#5308)"
+    date2-410 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-420 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-430 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-500 "julianday() not implemented (#5308)"
+    date2-510 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-520 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-600 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-601 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-602 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-603 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-604 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-610 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-611 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date2-612 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    date3-2.1 "'auto' modifier not supported (#5308/#5309)"
+    date3-2.2 "'auto' modifier not supported (#5308/#5309)"
+    date3-2.3 "'auto' modifier not supported (#5308/#5309)"
+    date3-2.4 "'auto' modifier not supported (#5308/#5309)"
+    date3-2.5 "'auto' modifier not supported (#5308/#5309)"
+    date3-2.10 "'auto' modifier not supported (#5308/#5309)"
+    date3-2.11 "'auto' modifier not supported (#5308/#5309)"
+    date3-2.12 "'auto' modifier not supported (#5308/#5309)"
+    date3-2.13 "'auto' modifier not supported (#5308/#5309)"
+    date3-2.30 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date3-2.40 "'auto' modifier not supported (#5308/#5309)"
+    date3-4.1 "'julianday' modifier not supported (#5309)"
+    date3-5.0 "date arithmetic via julianday()/unixepoch() not available (#5308)"
+    date3-620 "cascades from date()/julianday() failures earlier in date2.test (#5307/#5308)"
+    timediff-1.1 "month-overflow date normalization (e.g. 2000-01-31 '+1 month' -> 2000-03-02) differs (#5309)"
+    timediff-1.4 "month-overflow date normalization (e.g. 2000-01-31 '+1 month' -> 2000-03-02) differs (#5309)"
+    timediff-1.5 "month-overflow date normalization (e.g. 2000-01-31 '+1 month' -> 2000-03-02) differs (#5309)"
+    timediff-1.8 "month-overflow date normalization (e.g. 2000-01-31 '+1 month' -> 2000-03-02) differs (#5309)"
+    timediff-1.10 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-1.11 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-1.12 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-1.13 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-2.1 "month-overflow date normalization (e.g. 2000-01-31 '+1 month' -> 2000-03-02) differs (#5309)"
+    timediff-2.2 "month-overflow date normalization (e.g. 2000-01-31 '+1 month' -> 2000-03-02) differs (#5309)"
+    timediff-2.4 "month-overflow date normalization (e.g. 2000-01-31 '+1 month' -> 2000-03-02) differs (#5309)"
+    timediff-2.5 "month-overflow date normalization (e.g. 2000-01-31 '+1 month' -> 2000-03-02) differs (#5309)"
+    timediff-2.6 "month-overflow date normalization (e.g. 2000-01-31 '+1 month' -> 2000-03-02) differs (#5309)"
+    timediff-2.10 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-2.11 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-2.12 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-2.13 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-5-1 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-5-3 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-5-5 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-5-11 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-5-14 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-5-16 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-5-17 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
+    timediff-5-18 "+/-YYYY-MM-DD HH:MM:SS modifiers not supported (#5309)"
 }
 
 # Pattern-based skip list for tests with many numbered variants
@@ -3322,6 +3521,28 @@ variable vibesql_skip_patterns {
     {window1-69. "total() as window function not implemented"}
     {window2-66. "json_group_array/json_group_object as window function not implemented"}
     {windowfault- "SQLite fault injection testing"}
+
+    {date-1. "julianday() not implemented (#5308)"}
+    {date-2.2c-1 "strftime('%f') with numeric 'unixepoch' input drops fractional seconds (#5309); date-2.2c-0 (.000) passes and is not skipped"}
+    {date-2.2c-2 "strftime('%f') with numeric 'unixepoch' input drops fractional seconds (#5309)"}
+    {date-2.2c-3 "strftime('%f') with numeric 'unixepoch' input drops fractional seconds (#5309)"}
+    {date-2.2c-4 "strftime('%f') with numeric 'unixepoch' input drops fractional seconds (#5309)"}
+    {date-2.2c-5 "strftime('%f') with numeric 'unixepoch' input drops fractional seconds (#5309)"}
+    {date-2.2c-6 "strftime('%f') with numeric 'unixepoch' input drops fractional seconds (#5309)"}
+    {date-2.2c-7 "strftime('%f') with numeric 'unixepoch' input drops fractional seconds (#5309)"}
+    {date-2.2c-8 "strftime('%f') with numeric 'unixepoch' input drops fractional seconds (#5309)"}
+    {date-2.2c-9 "strftime('%f') with numeric 'unixepoch' input drops fractional seconds (#5309)"}
+    {date-6. "localtime/utc DST boundary tests require the SQLITE_TESTCTRL_LOCALTIME_FAULT harness localtime_r override (#5309)"}
+    {date-9. "julianday() not implemented (#5308)"}
+    {date-10. "time-only input (HH:MM:SS) should default the date to 2000-01-01 (#5309); date() typed-literal parse (#5307)"}
+    {date-18. "unixepoch() and 'subsec' modifier not implemented (#5308)"}
+    {date-19. "date() parsed as DATE typed-literal keyword - ceiling/floor modifier tests cannot parse (#5307)"}
+    {date3-1. "unixepoch() not implemented (#5308)"}
+    {date4- "compares VibeSQL strftime against the C library strftime; shim only stubs the TCL strftime command via clock format, and strftime specifier gaps remain (#5309)"}
+    {date5- "julianday() not implemented (#5308) and date() typed-literal parse (#5307)"}
+    {timediff-3. "timediff() not implemented (#5308)"}
+    {timediff-4- "timediff() not implemented (#5308)"}
+    {timediff-6- "timediff() not implemented (#5308)"}
 }
 
 # Check if a test should be skipped based on VibeSQL-specific exclusions
@@ -4093,7 +4314,12 @@ proc match_regex_pattern {result expected} {
 # Returns 1 if supported, 0 if not
 proc check_single_capability {cap} {
     # Capabilities we don't support (unsupported_caps means NOT supported)
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 datetime datetime_time datetime_funcs trigger conflict hiddencolumns}
+    # NOTE: datetime/datetime_time/datetime_funcs were removed from this list
+    # (#5294) — VibeSQL implements date(), time(), datetime(), strftime().
+    # Remaining gaps are pattern-skipped: see #5307 (DATE/TIME typed-literal
+    # parse), #5308 (julianday/unixepoch/timediff), #5309 (strftime %f/%W/%j,
+    # TZ offsets, HH:MM:SS modifiers).
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 trigger conflict hiddencolumns}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0
@@ -4832,6 +5058,18 @@ proc do_not_use_codec {} {
 proc nonzero_reserved_bytes {} {
     # True only in codec builds (non-zero reserved bytes). VibeSQL has no codec.
     return 0
+}
+
+proc strftime {format seconds} {
+    # Minimal stand-in for the TCL-level [strftime] command provided by
+    # SQLite's testfixture binary (a thin wrapper over the C library
+    # strftime). date4.test calls it at file level to compute expected
+    # values, which aborts the whole file under plain tclsh (#5294).
+    # Implemented via [clock format] in UTC; close enough to keep the file
+    # loading. The date4- tests themselves are pattern-skipped (#5309)
+    # because VibeSQL's strftime does not yet cover all C-library
+    # specifiers, so this stub's output is never compared against results.
+    return [clock format [expr {int($seconds)}] -format $format -gmt 1]
 }
 
 proc sqlite_register_test_function {args} {
