@@ -113,8 +113,24 @@ fn test_floor_is_consumed_by_subsequent_modifiers() {
     // date('2000-01-31','floor','+1 day') -> 2000-02-01)
     assert_renders("date('2000-01-31','floor','+1 day')", "2000-02-01");
     assert_renders("date('2000-02-31','floor','+1 day')", "2000-03-01");
-    // A pure-duration shift does not disturb the pending overflow count
-    assert_renders("datetime('2000-02-31','+1 hour','floor')", "2000-02-29 01:00:00");
+    // A pure-duration shift CLEARS the pending overflow count (date.c resets
+    // nFloor before the aXformType loop), so a later 'floor' is a no-op
+    assert_renders("datetime('2000-02-31','+1 hour','floor')", "2000-03-02 01:00:00");
+}
+
+#[test]
+fn test_duration_shift_resets_pending_floor() {
+    // SQLite's parseModifier executes `p->nFloor = 0;` before the aXformType
+    // loop, so every '±N unit' shift clears the pending day-of-month overflow
+    // (month/year shifts then recompute it via computeFloor). Verified against
+    // sqlite3 3.51.0.
+    assert_renders("datetime('2000-02-31','+1 hour','floor')", "2000-03-02 01:00:00");
+    assert_renders("date('2024-01-31','+1 month','+0 seconds','floor')", "2024-03-02");
+    assert_renders("date('2024-01-31','+1 month','+1 day','floor')", "2024-03-03");
+    // Contrast: the colon-form ±HH:MM modifier does NOT touch nFloor ...
+    assert_renders("datetime('2024-01-31','+1 month','+02:00','floor')", "2024-02-29 02:00:00");
+    // ... and neither does 'start of X'
+    assert_renders("date('2024-01-31','+1 month','start of month','floor')", "2024-02-28");
 }
 
 #[test]

@@ -714,9 +714,11 @@ fn weekday_to_num(wd: Weekday) -> u32 {
 
 /// Parse and apply a time shift modifier like "+1 day", "-2 hours", "3 months"
 ///
-/// Pure-duration shifts (days/hours/minutes/seconds) preserve the incoming
-/// `n_floor`; month/year shifts recompute it (SQLite's `computeFloor` call in
-/// the month/year transform cases).
+/// SQLite's `parseModifier` executes `p->nFloor = 0;` before the `aXformType`
+/// loop, so every `±N unit` shift first clears the pending day-of-month
+/// overflow; month/year shifts then recompute it (the `computeFloor` call in
+/// the month/year transform cases). Day/hour/minute/second shifts therefore
+/// leave `n_floor` at 0.
 fn parse_and_apply_time_shift(rdt: ResolvedDateTime, modifier: &str) -> Option<ResolvedDateTime> {
     let modifier = modifier.trim();
     let dt = rdt.dt;
@@ -739,7 +741,9 @@ fn parse_and_apply_time_shift(rdt: ResolvedDateTime, modifier: &str) -> Option<R
     };
 
     let duration_shift = |ms: i64| -> Option<ResolvedDateTime> {
-        Some(ResolvedDateTime { dt: dt + Duration::milliseconds(ms), n_floor: rdt.n_floor })
+        // date.c line 1045: nFloor is reset before the aXformType loop, so a
+        // pure-duration shift clears any pending day-of-month overflow.
+        Some(ResolvedDateTime { dt: dt + Duration::milliseconds(ms), n_floor: 0 })
     };
 
     match unit_normalized {
