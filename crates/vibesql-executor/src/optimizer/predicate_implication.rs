@@ -5,8 +5,11 @@
 //! query is guaranteed to touch nothing outside that subset. The v1 check
 //! implemented here is **structural-equality implication**: the query's WHERE
 //! clause implies the index predicate when every top-level AND conjunct of the
-//! index predicate appears verbatim (by structural hash, via
-//! [`ExpressionHasher`]) among the query's top-level AND conjuncts.
+//! index predicate appears verbatim (by AST structural equality, `==`) among
+//! the query's top-level AND conjuncts. [`ExpressionHasher`] hashes are used
+//! only as a fast pre-filter; equality is always the decider, so the check is
+//! sound even where the hasher is lossy (e.g. it ignores the `escape` field of
+//! `LIKE`/`GLOB`) or in the face of u64 hash collisions.
 //!
 //! This intentionally does NOT attempt general implication (e.g. `x > 5`
 //! implies `x > 0`). It covers the common SQLite idiom where the query repeats
@@ -54,8 +57,14 @@ fn collect_conjuncts<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
     }
 }
 
-/// True when every conjunct of `index_where` appears (by structural hash)
-/// among the top-level AND conjuncts of `query_where`.
+/// True when every conjunct of `index_where` appears (by AST structural
+/// equality) among the top-level AND conjuncts of `query_where`.
+///
+/// Structural hashes are used only as a fast pre-filter; `==` on the AST is
+/// always the decider. This keeps the check sound even though
+/// [`ExpressionHasher`] is lossy in places (it does not hash the `escape`
+/// field of `LIKE`/`GLOB`, so `x LIKE p ESCAPE e` and `x LIKE p` hash equal
+/// while being semantically different), and it rules out u64 hash collisions.
 ///
 /// Conservative by construction: a top-level OR in the query WHERE is a
 /// single opaque conjunct, so it only matches an index predicate that is the
@@ -72,7 +81,13 @@ pub(crate) fn query_implies_index_predicate(
     let mut index_conjuncts = Vec::new();
     collect_conjuncts(index_where, &mut index_conjuncts);
 
-    index_conjuncts.iter().all(|conjunct| query_hashes.contains(&ExpressionHasher::hash(conjunct)))
+    index_conjuncts.iter().all(|conjunct| {
+        let conjunct_hash = ExpressionHasher::hash(conjunct);
+        query_conjuncts
+            .iter()
+            .zip(query_hashes.iter())
+            .any(|(q, q_hash)| *q_hash == conjunct_hash && *q == *conjunct)
+    })
 }
 
 /// Whether an index may be selected by the planner given the query's WHERE
@@ -141,6 +156,44 @@ mod tests {
         let a = parse_where("typeof(b)='real'");
         let b = parse_where("typeof(b)='real'");
         assert_eq!(ExpressionHasher::hash(&a), ExpressionHasher::hash(&b));
+    }
+
+    #[test]
+    fn like_escape_does_not_imply_escapeless_like() {
+        // Regression (PR #5331 review): `name LIKE 'x!%y' ESCAPE '!'` matches
+        // only the literal 'x%y', while `name LIKE 'x!%y'` matches 'x!…y'.
+        // ExpressionHasher does not hash the `escape` field, so these two
+        // expressions hash EQUAL — the implication check must still reject
+        // them via structural equality, in both directions.
+        let with_escape = parse_where("name LIKE 'x!%y' ESCAPE '!'");
+        let without_escape = parse_where("name LIKE 'x!%y'");
+        assert!(!query_implies_index_predicate(&with_escape, &without_escape));
+        assert!(!query_implies_index_predicate(&without_escape, &with_escape));
+
+        // Identical LIKE ... ESCAPE on both sides still implies.
+        let with_escape_2 = parse_where("name LIKE 'x!%y' ESCAPE '!'");
+        assert!(query_implies_index_predicate(&with_escape, &with_escape_2));
+    }
+
+    #[test]
+    fn hash_collision_does_not_imply() {
+        // Guard for the hash-collision shape: two semantically different
+        // expressions whose ExpressionHasher hashes collide (here, the lossy
+        // `escape` arm) must NOT imply each other. If the hasher is ever
+        // fixed to include `escape`, the assert_eq below will fail and this
+        // test can be downgraded to a plain non-implication check.
+        let with_escape = parse_where("name LIKE 'x!%y' ESCAPE '!'");
+        let without_escape = parse_where("name LIKE 'x!%y'");
+        assert_eq!(
+            ExpressionHasher::hash(&with_escape),
+            ExpressionHasher::hash(&without_escape),
+            "expected a hash collision (lossy escape arm); update this test if the hasher changed"
+        );
+        assert!(!query_implies_index_predicate(&with_escape, &without_escape));
+
+        let query = parse_where("name LIKE 'x!%y' AND name = 'x!zzy'");
+        let index = parse_where("name LIKE 'x!%y' ESCAPE '!'");
+        assert!(!query_implies_index_predicate(&query, &index));
     }
 
     #[test]

@@ -654,3 +654,43 @@ fn planner_selects_partial_non_expression_index_when_predicate_implied() {
     ids.sort_unstable();
     assert_eq!(ids, vec![3, 4]);
 }
+
+/// Regression (PR #5331 review): `LIKE 'x!%y' ESCAPE '!'` matches only the
+/// literal 'x%y', while `LIKE 'x!%y'` matches 'x!…y'. ExpressionHasher does
+/// not hash the `escape` field, so a hash-only implication check falsely
+/// claimed the escape-less query LIKE implied the index predicate, selected
+/// the partial index, and silently dropped row 2 (which is not in the index
+/// body). Structural equality must reject the implication and return the
+/// correct rows via a full scan.
+#[test]
+fn like_escape_predicate_is_not_implied_by_escapeless_like() {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT);
+        INSERT INTO t VALUES (1, 'x%y');
+        INSERT INTO t VALUES (2, 'x!zzy');
+        CREATE INDEX idx_name ON t(name) WHERE name LIKE 'x!%y' ESCAPE '!'
+        "#,
+    );
+
+    // Index body contains only row 1 ('x%y' is the sole escaped-LIKE match).
+    assert_eq!(index_row_indices(&db, "idx_name"), vec![0]);
+
+    // The escape-less LIKE matches both rows; the extra equality conjunct
+    // narrows it to row 2 — which is NOT in the partial index body.
+    let sql = "SELECT id FROM t WHERE name LIKE 'x!%y' AND name = 'x!zzy'";
+    let plan = explain_query_plan(&db, sql);
+    assert!(
+        !plan.contains("idx_name"),
+        "escape-less LIKE must not imply the LIKE ... ESCAPE index predicate, got:\n{}",
+        plan
+    );
+    assert_eq!(select_first_column_ints(&db, sql), vec![2]);
+
+    // Sanity: the structurally identical LIKE ... ESCAPE conjunct still
+    // implies the predicate, and returns the right row.
+    let implied_sql = "SELECT id FROM t WHERE name LIKE 'x!%y' ESCAPE '!' AND id = 1";
+    assert_eq!(select_first_column_ints(&db, implied_sql), vec![1]);
+}
