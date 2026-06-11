@@ -227,6 +227,41 @@ fn test_format_negative() {
     assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("-1,234,567.89")));
 }
 
+#[test]
+fn test_format_string_first_arg_routes_to_printf() {
+    // SQLite's format() is an alias for printf(): a string first argument is
+    // a format string (date3.test 5.0 uses format('%+d days', x))
+    let (evaluator, row) = create_test_evaluator();
+    let expr = vibesql_ast::Expression::Function {
+        name: vibesql_ast::FunctionIdentifier::new("FORMAT"),
+        args: vec![
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("%+d days"),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5)),
+        ],
+        character_unit: None,
+    };
+    let result = evaluator.eval(&expr, &row).unwrap();
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("+5 days")));
+}
+
+#[test]
+fn test_format_null_first_arg_returns_null() {
+    // SQLite: format(NULL, ...) is NULL (printf propagates a NULL format)
+    let (evaluator, row) = create_test_evaluator();
+    let expr = vibesql_ast::Expression::Function {
+        name: vibesql_ast::FunctionIdentifier::new("FORMAT"),
+        args: vec![
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
+        ],
+        character_unit: None,
+    };
+    let result = evaluator.eval(&expr, &row).unwrap();
+    assert_eq!(result, vibesql_types::SqlValue::Null);
+}
+
 // ============================================================================
 // VERSION Tests
 // ============================================================================

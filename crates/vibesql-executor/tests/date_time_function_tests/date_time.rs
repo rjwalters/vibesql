@@ -67,6 +67,90 @@ fn test_month_overflow_normalizes_like_sqlite() {
 }
 
 #[test]
+fn test_floor_ceiling_modifiers_base_parse() {
+    // SQLite date.test 19.1-19.32: 'floor' clamps a day-of-month overflow to
+    // the last day of the nominal month; 'ceiling' (the default) rolls forward
+    assert_renders("date('2000-01-31','floor')", "2000-01-31"); // 19.1: no overflow
+    assert_renders("date('2000-02-31','floor')", "2000-02-29"); // 19.2a: leap year
+    assert_renders("date('1999-02-31','floor')", "1999-02-28"); // 19.2b
+    assert_renders("date('1900-02-31','floor')", "1900-02-28"); // 19.2c: century non-leap
+    assert_renders("date('2000-04-31','floor')", "2000-04-30"); // 19.4
+    assert_renders("date('2000-01-31','ceiling')", "2000-01-31"); // 19.21
+    assert_renders("date('2000-02-31','ceiling')", "2000-03-02"); // 19.22a
+    assert_renders("date('1999-02-31','ceiling')", "1999-03-03"); // 19.22b
+    assert_renders("date('1900-02-31','ceiling')", "1900-03-03"); // 19.22c
+    assert_renders("date('2000-04-31','ceiling')", "2000-05-01"); // 19.24
+}
+
+#[test]
+fn test_floor_ceiling_modifiers_month_year_shift() {
+    // SQLite date.test 19.40-19.47: ±N months/years recompute the overflow count
+    assert_renders("date('2024-01-31','+1 month','ceiling')", "2024-03-02"); // 19.40
+    assert_renders("date('2024-01-31','+1 month','floor')", "2024-02-29"); // 19.41
+    assert_renders("date('2023-01-31','+1 month','ceiling')", "2023-03-03"); // 19.42
+    assert_renders("date('2023-01-31','+1 month','floor')", "2023-02-28"); // 19.43
+    assert_renders("date('2024-02-29','+1 year','ceiling')", "2025-03-01"); // 19.44
+    assert_renders("date('2024-02-29','+1 year','floor')", "2025-02-28"); // 19.45
+    assert_renders("date('2024-02-29','-110 years','ceiling')", "1914-03-01"); // 19.46
+    assert_renders("date('2024-02-29','-110 years','floor')", "1914-02-28"); // 19.47
+}
+
+#[test]
+fn test_floor_ceiling_modifiers_date_offset() {
+    // SQLite date.test 19.48-19.53: ±YYYY-MM-DD offsets recompute the overflow count
+    assert_renders("date('2024-02-29','-0110-00-00','floor')", "1914-02-28"); // 19.48
+    assert_renders("date('2024-02-29','-0110-00-00','ceiling')", "1914-03-01"); // 19.49
+    assert_renders("date('2000-08-31','+0023-06-00','floor')", "2024-02-29"); // 19.50
+    assert_renders("date('2000-08-31','+0022-06-00','floor')", "2023-02-28"); // 19.51
+    assert_renders("date('2000-08-31','+0023-06-00','ceiling')", "2024-03-02"); // 19.52
+    assert_renders("date('2000-08-31','+0022-06-00','ceiling')", "2023-03-03"); // 19.53
+}
+
+#[test]
+fn test_floor_is_consumed_by_subsequent_modifiers() {
+    // 'floor' resolves the pending overflow; later duration shifts apply to
+    // the clamped date (verified against SQLite 3.51:
+    // date('2000-01-31','floor','+1 day') -> 2000-02-01)
+    assert_renders("date('2000-01-31','floor','+1 day')", "2000-02-01");
+    assert_renders("date('2000-02-31','floor','+1 day')", "2000-03-01");
+    // A pure-duration shift CLEARS the pending overflow count (date.c resets
+    // nFloor before the aXformType loop), so a later 'floor' is a no-op
+    assert_renders("datetime('2000-02-31','+1 hour','floor')", "2000-03-02 01:00:00");
+}
+
+#[test]
+fn test_duration_shift_resets_pending_floor() {
+    // SQLite's parseModifier executes `p->nFloor = 0;` before the aXformType
+    // loop, so every '±N unit' shift clears the pending day-of-month overflow
+    // (month/year shifts then recompute it via computeFloor). Verified against
+    // sqlite3 3.51.0.
+    assert_renders("datetime('2000-02-31','+1 hour','floor')", "2000-03-02 01:00:00");
+    assert_renders("date('2024-01-31','+1 month','+0 seconds','floor')", "2024-03-02");
+    assert_renders("date('2024-01-31','+1 month','+1 day','floor')", "2024-03-03");
+    // Contrast: the colon-form ±HH:MM modifier does NOT touch nFloor ...
+    assert_renders("datetime('2024-01-31','+1 month','+02:00','floor')", "2024-02-29 02:00:00");
+    // ... and neither does 'start of X'
+    assert_renders("date('2024-01-31','+1 month','start of month','floor')", "2024-02-28");
+}
+
+#[test]
+fn test_zero_argument_datetime_is_now() {
+    // SQLite date.test 2.40: datetime() with no arguments means 'now'.
+    // The harness cannot pin the clock, so just assert a non-NULL current
+    // timestamp that matches datetime('now') to minute precision.
+    let value = eval_scalar("datetime()");
+    assert!(
+        matches!(value, SqlValue::Timestamp(_)),
+        "datetime() should return a timestamp, got {:?}",
+        value
+    );
+    let in_range = eval_scalar(
+        "datetime() BETWEEN datetime('now','-1 minute') AND datetime('now','+1 minute')",
+    );
+    assert_eq!(in_range, SqlValue::Boolean(true), "datetime() should be the current datetime");
+}
+
+#[test]
 fn test_timezone_offset_suffix() {
     // SQLite date.test 5.x: TZ-offset/Z suffix converts the timestamp to UTC
     assert_renders("datetime('1994-04-16 14:00:00 +05:00')", "1994-04-16 09:00:00");

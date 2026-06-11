@@ -241,14 +241,19 @@ fn test_datetime_with_timestamp_value() {
 }
 
 #[test]
-fn test_datetime_no_arguments_error() {
+fn test_datetime_no_arguments_is_now() {
+    // SQLite: an omitted time-value defaults to 'now', so datetime() is the
+    // current date and time (date.test 2.40)
     let (evaluator, row) = setup_test();
 
     let expr = create_datetime_function("DATETIME", vec![]);
-    let result = evaluator.eval(&expr, &row);
+    let result = evaluator.eval(&expr, &row).unwrap();
 
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("requires at least 1 argument"));
+    assert!(
+        matches!(result, vibesql_types::SqlValue::Timestamp(_)),
+        "datetime() should return the current timestamp, got {:?}",
+        result
+    );
 }
 
 #[test]

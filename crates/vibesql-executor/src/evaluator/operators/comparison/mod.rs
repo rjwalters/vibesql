@@ -194,6 +194,40 @@ where
             }
         },
 
+        // Timestamp compared to string - parse the string as a timestamp when
+        // possible; otherwise compare the TEXT renderings. SQLite's datetime()
+        // returns TEXT, so expressions like `datetime(x,'auto') == '2022-01-27
+        // 13:15:44'` are plain text comparisons there (date3.test 2.40); the
+        // Display rendering of Timestamp matches SQLite's 'YYYY-MM-DD
+        // HH:MM:SS' format, and an unparseable string (e.g. 'hello') compares
+        // as text instead of raising a type mismatch, like SQLite.
+        (Timestamp(ts), Varchar(s)) | (Timestamp(ts), Character(s)) => {
+            return Ok(Boolean(predicate(match vibesql_types::Timestamp::from_str(s) {
+                Ok(parsed) => ts.cmp(&parsed),
+                Err(_) => ts.to_string().as_str().cmp(s.as_str()),
+            })));
+        }
+        (Varchar(s), Timestamp(ts)) | (Character(s), Timestamp(ts)) => {
+            return Ok(Boolean(predicate(match vibesql_types::Timestamp::from_str(s) {
+                Ok(parsed) => parsed.cmp(ts),
+                Err(_) => s.as_str().cmp(ts.to_string().as_str()),
+            })));
+        }
+
+        // Time compared to string - same approach as Timestamp
+        (Time(t), Varchar(s)) | (Time(t), Character(s)) => {
+            return Ok(Boolean(predicate(match vibesql_types::Time::from_str(s) {
+                Ok(parsed) => t.cmp(&parsed),
+                Err(_) => t.to_string().as_str().cmp(s.as_str()),
+            })));
+        }
+        (Varchar(s), Time(t)) | (Character(s), Time(t)) => {
+            return Ok(Boolean(predicate(match vibesql_types::Time::from_str(s) {
+                Ok(parsed) => parsed.cmp(t),
+                Err(_) => s.as_str().cmp(t.to_string().as_str()),
+            })));
+        }
+
         _ => {} // Fall through to regular comparison logic
     }
 
