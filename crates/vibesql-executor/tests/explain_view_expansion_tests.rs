@@ -1,0 +1,217 @@
+//! Tests for EXPLAIN QUERY PLAN expansion of window-function views and
+//! subqueries (#5347, windowpushd.test)
+//!
+//! SQLite renders a view/subquery containing window functions as a
+//! `CO-ROUTINE <name>` block whose inner plan shows the real table access
+//! path — including index probes for predicates pushed down by the window
+//! WHERE push-down (#5292) and index scans chosen purely to deliver
+//! PARTITION BY order. Expected shapes below verified against sqlite3
+//! (modulo SQLite's extra nested `(subquery-N)` co-routine layers, which
+//! VibeSQL flattens into a single block).
+
+use vibesql_ast::Statement;
+use vibesql_executor::ExplainExecutor;
+use vibesql_parser::Parser;
+use vibesql_storage::Database;
+
+fn run_ddl(db: &mut Database, sql: &str) {
+    let stmt = Parser::parse_sql(sql).expect("parse failed");
+    match stmt {
+        Statement::CreateTable(s) => {
+            vibesql_executor::CreateTableExecutor::execute(&s, db).unwrap();
+        }
+        Statement::CreateIndex(s) => {
+            vibesql_executor::CreateIndexExecutor::execute(&s, db).unwrap();
+        }
+        Statement::CreateView(s) => {
+            vibesql_executor::advanced_objects::execute_create_view(&s, db).unwrap();
+        }
+        other => panic!("unsupported DDL in test: {:?}", other),
+    }
+}
+
+/// Run EXPLAIN QUERY PLAN and return the SQLite-style EQP output.
+fn eqp(db: &Database, sql: &str) -> String {
+    let explain_sql = format!("EXPLAIN QUERY PLAN {}", sql);
+    let stmt = Parser::parse_sql(&explain_sql).expect("Failed to parse SQL");
+
+    if let Statement::Explain(explain_stmt) = stmt {
+        let result = ExplainExecutor::execute(&explain_stmt, db).expect("EXPLAIN failed");
+        result.to_sqlite_eqp()
+    } else {
+        panic!("Expected EXPLAIN statement");
+    }
+}
+
+/// windowpushd.test section-1 schema: INTEGER PRIMARY KEY (rowid alias)
+/// plus an index on the partition column.
+fn setup_section1_db() -> Database {
+    let mut db = Database::new();
+    run_ddl(&mut db, "CREATE TABLE t1(id INTEGER PRIMARY KEY, grp_id INTEGER)");
+    run_ddl(&mut db, "CREATE INDEX i1 ON t1(grp_id)");
+    run_ddl(
+        &mut db,
+        "CREATE VIEW lll AS SELECT row_number() OVER (PARTITION BY grp_id), grp_id, id FROM t1",
+    );
+    db
+}
+
+/// windowpushd.test section-2 schema: plain rowid table, two single-column
+/// indexes, window views over each.
+fn setup_section2_db() -> Database {
+    let mut db = Database::new();
+    run_ddl(&mut db, "CREATE TABLE t2(a INTEGER, b INTEGER, c INTEGER, d INTEGER)");
+    run_ddl(&mut db, "CREATE INDEX i2a ON t2(a)");
+    run_ddl(&mut db, "CREATE INDEX i2b ON t2(b)");
+    run_ddl(
+        &mut db,
+        "CREATE VIEW v3 AS SELECT b, d, max(d) OVER (PARTITION BY b), \
+         row_number() OVER (PARTITION BY b) FROM t2",
+    );
+    db
+}
+
+// ---------------------------------------------------------------------------
+// View expansion
+// ---------------------------------------------------------------------------
+
+// windowpushd.test 1.4: the pushed equality predicate probes the index, and
+// the INTEGER PRIMARY KEY (rowid alias) does not disqualify the covering
+// index. SQLite: SEARCH t1 USING COVERING INDEX i1 (grp_id=?).
+#[test]
+fn test_view_expansion_with_pushed_predicate_covering_index() {
+    let db = setup_section1_db();
+    let output = eqp(&db, "SELECT * FROM lll WHERE grp_id = 2");
+
+    assert!(output.contains("CO-ROUTINE lll"), "missing CO-ROUTINE block:\n{}", output);
+    assert!(
+        output.contains("SEARCH t1 USING COVERING INDEX i1 (grp_id=?)"),
+        "missing inner index probe:\n{}",
+        output
+    );
+    assert!(output.contains("SCAN lll"), "missing outer scan of the co-routine:\n{}", output);
+    // The index delivers PARTITION BY grp_id order — no window sort.
+    assert!(!output.contains("USE TEMP B-TREE"), "unexpected temp B-tree:\n{}", output);
+}
+
+// windowpushd.test 2.1.3.3: equality push-down through a non-covering index
+// (d is not in i2b). SQLite: SEARCH t1 USING INDEX i2 (b=?).
+#[test]
+fn test_view_expansion_pushed_equality_non_covering() {
+    let db = setup_section2_db();
+    let output = eqp(&db, "SELECT * FROM v3 WHERE b = 5");
+
+    assert!(output.contains("CO-ROUTINE v3"), "missing CO-ROUTINE block:\n{}", output);
+    assert!(
+        output.contains("SEARCH t2 USING INDEX i2b (b=?)"),
+        "missing inner index probe:\n{}",
+        output
+    );
+}
+
+// windowpushd.test 2.1.3.4: range push-down. The range scan delivers index
+// order for PARTITION BY b — no temp B-tree (verified against sqlite3).
+#[test]
+fn test_view_expansion_pushed_range_no_window_sort() {
+    let db = setup_section2_db();
+    let output = eqp(&db, "SELECT * FROM v3 WHERE b > 3");
+
+    assert!(
+        output.contains("SEARCH t2 USING INDEX i2b (b>?)"),
+        "missing inner range probe:\n{}",
+        output
+    );
+    assert!(!output.contains("USE TEMP B-TREE"), "unexpected temp B-tree:\n{}", output);
+}
+
+// windowpushd.test 2.1.3.6: nothing is pushable (d is not a PARTITION BY
+// column), but the index is chosen because it delivers PARTITION BY b order
+// inside the expanded view. SQLite: SCAN t1 USING INDEX i2.
+#[test]
+fn test_view_expansion_index_for_partition_order_without_push() {
+    let db = setup_section2_db();
+    let output = eqp(&db, "SELECT * FROM v3 WHERE d < 0.55");
+
+    assert!(output.contains("CO-ROUTINE v3"), "missing CO-ROUTINE block:\n{}", output);
+    assert!(
+        output.contains("SCAN t2 USING INDEX i2b"),
+        "missing ordering index scan:\n{}",
+        output
+    );
+    assert!(
+        !output.contains("SEARCH t2"),
+        "no predicate was pushed; inner scan must not be a SEARCH:\n{}",
+        output
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Subquery expansion
+// ---------------------------------------------------------------------------
+
+// An inline window subquery renders the same CO-ROUTINE block as a view.
+#[test]
+fn test_window_subquery_renders_coroutine_with_pushed_predicate() {
+    let db = setup_section1_db();
+    let output = eqp(
+        &db,
+        "SELECT * FROM (SELECT grp_id, id, row_number() OVER (PARTITION BY grp_id) FROM t1) AS w \
+         WHERE grp_id = 2",
+    );
+
+    assert!(output.contains("CO-ROUTINE w"), "missing CO-ROUTINE block:\n{}", output);
+    assert!(
+        output.contains("SEARCH t1 USING COVERING INDEX i1 (grp_id=?)"),
+        "missing inner index probe:\n{}",
+        output
+    );
+    assert!(output.contains("SCAN w"), "missing outer scan of the co-routine:\n{}", output);
+}
+
+// ---------------------------------------------------------------------------
+// No expansion
+// ---------------------------------------------------------------------------
+
+// Plain (window-free) views keep the existing opaque rendering — general
+// view flattening is follow-on work.
+#[test]
+fn test_plain_view_not_expanded() {
+    let mut db = Database::new();
+    run_ddl(&mut db, "CREATE TABLE t3(x INTEGER, y INTEGER)");
+    run_ddl(&mut db, "CREATE VIEW pv AS SELECT x, y FROM t3");
+    let output = eqp(&db, "SELECT * FROM pv WHERE x = 1");
+
+    assert!(!output.contains("CO-ROUTINE"), "plain view must not expand:\n{}", output);
+    assert!(output.contains("SCAN pv"), "expected opaque view scan:\n{}", output);
+}
+
+// Plain derived tables keep the existing flat rendering (SQLite flattens
+// them — no CO-ROUTINE, no SCAN of the alias).
+#[test]
+fn test_plain_subquery_not_rendered_as_coroutine() {
+    let mut db = Database::new();
+    run_ddl(&mut db, "CREATE TABLE t3(x INTEGER, y INTEGER)");
+    let output = eqp(&db, "SELECT * FROM (SELECT x, y FROM t3) AS s WHERE x = 1");
+
+    assert!(!output.contains("CO-ROUTINE"), "plain subquery must not expand:\n{}", output);
+    assert!(output.contains("SCAN t3"), "expected flattened inner scan:\n{}", output);
+}
+
+// A WITH-clause CTE shadows a same-named window view: the CTE must NOT be
+// expanded as the view (CTE precedence, judge regression on PR #5349).
+#[test]
+fn test_cte_shadowing_window_view_not_expanded() {
+    let db = setup_section1_db();
+    let output = eqp(
+        &db,
+        "WITH lll AS (SELECT 99 AS rn, 2 AS grp_id, 100 AS id) \
+         SELECT * FROM lll WHERE grp_id = 2",
+    );
+
+    assert!(
+        !output.contains("CO-ROUTINE lll"),
+        "CTE shadows the view; no expansion allowed:\n{}",
+        output
+    );
+    assert!(!output.contains("SEARCH t1"), "view body must not be planned:\n{}", output);
+}

@@ -637,14 +637,55 @@ pub(crate) fn needs_temp_btree_for_order_by_eqp(
     };
     let _ = &table.schema; // table-only check (avoid unused warning on schema)
 
-    // First, defer to the existing index-selection path. If it returns sorted
-    // columns matching the full ORDER BY, no temp B-tree is needed.
-    let order_by_vec: Vec<vibesql_ast::OrderByItem> = order_by.to_vec();
-    if let Some((_, Some(cols))) =
-        cost_based_index_selection(table_name, where_clause, Some(&order_by_vec), database)
-    {
-        if cols.len() >= order_by.len() {
-            return false;
+    eqp_ordering_index(table_name, where_clause, order_by, database, false).is_none()
+}
+
+/// EQP-only: the index whose natural traversal delivers `order_by` for a
+/// scan of `table_name`, if any.
+///
+/// Checks, in order:
+/// 1. The planner's chosen index (`cost_based_index_selection`): when it
+///    returns full `sorted_columns` the order is satisfied outright; even
+///    when the runtime nullable-column guard withholds `sorted_columns`, a
+///    structural match means the scan still delivers index order (e.g.
+///    windowpushd.test 2.1.3.4: `SEARCH t1 USING INDEX i2 (b>?)` feeds
+///    PARTITION BY b — SQLite shows no temp B-tree).
+/// 2. Any other index with its leading columns pinned by equality/IN whose
+///    remaining columns structurally align with the ORDER BY.
+///
+/// With a WHERE clause, no leading pinned column, and a competing access
+/// path chosen by the planner, an unpinned structural match does NOT count
+/// (the planner scans a different index, so ordering is not delivered).
+/// `prefer_ordering_scan` relaxes that gate when the planner chose NO index:
+/// the scan is then free to traverse the ordering index — SQLite picks the
+/// index that delivers a window's PARTITION BY/ORDER BY order even without
+/// any usable predicate (windowpushd.test 2.1.1.5, 2.1.3.6).
+pub(crate) fn eqp_ordering_index(
+    table_name: &str,
+    where_clause: Option<&Expression>,
+    order_by: &[vibesql_ast::OrderByItem],
+    database: &Database,
+    prefer_ordering_scan: bool,
+) -> Option<String> {
+    if order_by.is_empty() {
+        return None;
+    }
+
+    let chosen = cost_based_index_selection(table_name, where_clause, Some(order_by), database);
+
+    // The planner's chosen index delivers index order when the ORDER BY
+    // structurally fits (pinned-prefix + trailing-index suffix), regardless
+    // of the runtime nullable-column guard.
+    if let Some((chosen_name, _)) = &chosen {
+        if let Some(index_metadata) = database.get_index(chosen_name) {
+            let pinned_columns = count_pinned_index_columns(where_clause, &index_metadata.columns);
+            if can_use_index_for_order_by_with_pinned(
+                order_by,
+                &index_metadata.columns,
+                pinned_columns,
+            ) {
+                return Some(chosen_name.clone());
+            }
         }
     }
 
@@ -677,7 +718,12 @@ pub(crate) fn needs_temp_btree_for_order_by_eqp(
         // (e.g. window1.test 23.1: index t5ab(a, b) serves key (a, b) with
         // no predicate), so SQLite's EQP shows no temp B-tree even when the
         // columns are nullable and a runtime stabilization sort still runs.
-        if pinned_columns == 0 && where_clause.is_some() {
+        // `prefer_ordering_scan` extends the no-competing-path exception to
+        // WHERE clauses the planner could not use any index for.
+        if pinned_columns == 0
+            && where_clause.is_some()
+            && !(prefer_ordering_scan && chosen.is_none())
+        {
             continue; // No leading pin → no EQP exception applies.
         }
 
@@ -687,11 +733,11 @@ pub(crate) fn needs_temp_btree_for_order_by_eqp(
             &index_metadata.columns,
             pinned_columns,
         ) {
-            return false; // EQP-level: index satisfies; no temp B-tree shown.
+            return Some(index_name.clone());
         }
     }
 
-    true
+    None
 }
 
 /// Check if an index can be used for ORDER BY, accounting for pinned prefix columns
