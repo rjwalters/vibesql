@@ -551,6 +551,22 @@ fn append_scan_entries(node: &PlanNode, entries: &mut Vec<EqpEntry>) {
     }
 }
 
+/// True when any node in `node`'s subtree needs a temp B-tree for ORDER BY.
+///
+/// Used by the view-flattening branch to hoist a body's sort flag onto the
+/// `Subquery` node it nests under, since [`collect_eqp_entries`] only checks
+/// a node and its DIRECT children. Co-routine subtrees are skipped: their
+/// inner entries (including temp B-tree lines) are re-collected inside the
+/// `CO-ROUTINE` block by [`append_scan_entries`], so counting them here
+/// would emit the line twice.
+fn subtree_needs_order_by_temp_btree(node: &PlanNode) -> bool {
+    if node.coroutine.is_some() {
+        return false;
+    }
+    node.needs_temp_btree_for_order_by
+        || node.children.iter().any(subtree_needs_order_by_temp_btree)
+}
+
 /// Collect all EQP entries from the plan tree, including TEMP B-TREE entries
 fn collect_eqp_entries(node: &PlanNode) -> Vec<EqpEntry> {
     let mut entries = Vec::new();
@@ -1269,6 +1285,18 @@ impl ExplainExecutor {
                             let child = Self::explain_select(&view.query, database, ctes)?;
                             let mut view_node = PlanNode::new("Subquery");
                             view_node.object = Some(format!("AS {}", source));
+                            // The body's ORDER BY genuinely sorts at runtime
+                            // (views are materialized), and SQLite's
+                            // flattened plan keeps the body's `USE TEMP
+                            // B-TREE FOR ORDER BY` line. collect_eqp_entries
+                            // only checks the root's DIRECT children for the
+                            // flag, but the body root sits one level deeper
+                            // (root -> Subquery -> body) — and deeper still
+                            // for nested ORDER BY views — so hoist the
+                            // subtree's flag onto this node to keep the line
+                            // rendered (verified against sqlite3 3.51.0).
+                            view_node.needs_temp_btree_for_order_by =
+                                subtree_needs_order_by_temp_btree(&child);
                             view_node.add_child(child);
                             return Ok(view_node);
                         }

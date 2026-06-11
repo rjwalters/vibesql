@@ -189,6 +189,9 @@ fn setup_plain_view_db() -> Database {
     run_ddl(&mut db, "CREATE VIEW dv AS SELECT DISTINCT x FROM t3");
     run_ddl(&mut db, "CREATE VIEW cv AS SELECT x FROM t3 UNION SELECT y FROM t3");
     run_ddl(&mut db, "CREATE VIEW pv2 AS SELECT x FROM pv");
+    run_ddl(&mut db, "CREATE VIEW ov AS SELECT x, y FROM t3 ORDER BY y");
+    run_ddl(&mut db, "CREATE VIEW ovx AS SELECT x, y FROM t3 ORDER BY x");
+    run_ddl(&mut db, "CREATE VIEW ov2 AS SELECT x, y FROM ov");
     db
 }
 
@@ -265,6 +268,75 @@ fn test_plain_join_view_flattened() {
     assert!(!output.contains("SCAN jv"), "view name must not appear:\n{}", output);
     assert!(output.contains("t3"), "expected left base table:\n{}", output);
     assert!(output.contains("t4"), "expected right base table:\n{}", output);
+}
+
+// An ORDER BY view body still flattens, and the body's sorting pass keeps
+// its temp B-tree line (the runtime genuinely sorts: views are
+// materialized). SQLite: `SCAN t3` + `USE TEMP B-TREE FOR ORDER BY` —
+// identical shape (verified against sqlite3 3.51.0).
+#[test]
+fn test_order_by_view_flattened_keeps_temp_btree() {
+    let db = setup_plain_view_db();
+    let output = eqp(&db, "SELECT * FROM ov");
+
+    assert!(!output.contains("SCAN ov"), "view name must not appear:\n{}", output);
+    assert!(output.contains("SCAN t3"), "expected flattened inner scan:\n{}", output);
+    assert!(
+        output.contains("USE TEMP B-TREE FOR ORDER BY"),
+        "body ORDER BY sorts at runtime; temp B-tree line must render:\n{}",
+        output
+    );
+}
+
+// An ORDER BY view whose sort is satisfied by an index flattens with NO
+// temp B-tree, and the flattened plan is identical to the bare body's plan.
+// SQLite annotates the ordering index (`SCAN t3 USING INDEX i3x`); VibeSQL's
+// pre-existing base-scan rendering shows `SCAN t3` for pure ordering indexes
+// (same for the bare body — unrelated to view flattening).
+#[test]
+fn test_order_by_view_flattened_index_satisfied_no_temp_btree() {
+    let db = setup_plain_view_db();
+    let output = eqp(&db, "SELECT * FROM ovx");
+    let bare = eqp(&db, "SELECT x, y FROM t3 ORDER BY x");
+
+    assert!(!output.contains("SCAN ovx"), "view name must not appear:\n{}", output);
+    assert!(output.contains("SCAN t3"), "expected flattened inner scan:\n{}", output);
+    assert!(!output.contains("USE TEMP B-TREE"), "index satisfies the sort:\n{}", output);
+    assert_eq!(output, bare, "flattened plan must match the bare body's plan");
+}
+
+// A nested plain view over an ORDER BY view: the inner body's sort flag must
+// survive the extra Subquery nesting level. SQLite: `SCAN t3` +
+// `USE TEMP B-TREE FOR ORDER BY` — identical shape.
+#[test]
+fn test_nested_order_by_view_flattened_keeps_temp_btree() {
+    let db = setup_plain_view_db();
+    let output = eqp(&db, "SELECT * FROM ov2");
+
+    assert!(!output.contains("SCAN ov"), "no view name may appear:\n{}", output);
+    assert!(output.contains("SCAN t3"), "expected flattened inner scan:\n{}", output);
+    assert!(
+        output.contains("USE TEMP B-TREE FOR ORDER BY"),
+        "inner body ORDER BY sorts at runtime; temp B-tree line must render:\n{}",
+        output
+    );
+}
+
+// Outer-query ORDER BY over a flattened plain view (no ORDER BY in the
+// body): the outer sort's temp B-tree line renders. SQLite: `SCAN t3` +
+// `USE TEMP B-TREE FOR ORDER BY` — identical shape.
+#[test]
+fn test_outer_order_by_over_flattened_view_keeps_temp_btree() {
+    let db = setup_plain_view_db();
+    let output = eqp(&db, "SELECT * FROM pv ORDER BY y");
+
+    assert!(!output.contains("SCAN pv"), "view name must not appear:\n{}", output);
+    assert!(output.contains("SCAN t3"), "expected flattened inner scan:\n{}", output);
+    assert!(
+        output.contains("USE TEMP B-TREE FOR ORDER BY"),
+        "outer ORDER BY needs a sorting pass:\n{}",
+        output
+    );
 }
 
 // ---------------------------------------------------------------------------
