@@ -243,11 +243,27 @@ fn legacy_cte_schema(
     vibesql_catalog::TableSchema::new(cte.name.clone(), columns)
 }
 
+/// A column of a FROM-clause source resolved for wildcard expansion.
+///
+/// `hidden_for_star` marks right-side NATURAL/USING join columns that are
+/// deduplicated out of plain-`*` expansion. Qualified wildcards (`t.*`) keep
+/// ALL of the source's columns, including hidden ones, matching SQLite
+/// (`SELECT b.* FROM a NATURAL JOIN b` returns the join column too).
+struct WildcardColumn {
+    name: String,
+    hidden_for_star: bool,
+}
+
 /// A FROM-clause source resolved for wildcard expansion: the effective
 /// qualifier (alias if present, else table name) and its column names.
 struct WildcardSource {
     qualifier: String,
-    columns: Vec<String>,
+    columns: Vec<WildcardColumn>,
+}
+
+/// Wrap plain column names as star-visible wildcard columns.
+fn visible_columns(names: Vec<String>) -> Vec<WildcardColumn> {
+    names.into_iter().map(|name| WildcardColumn { name, hidden_for_star: false }).collect()
 }
 
 /// Expand a wildcard SELECT item (`*` or `qualifier.*`) into column names
@@ -268,7 +284,14 @@ fn expand_wildcard_names(
                 return Some(alias_names.clone());
             }
             let sources = collect_from_sources(stmt.from.as_ref()?, database, prior_ctes)?;
-            Some(sources.into_iter().flat_map(|s| s.columns).collect())
+            Some(
+                sources
+                    .into_iter()
+                    .flat_map(|s| s.columns)
+                    .filter(|c| !c.hidden_for_star)
+                    .map(|c| c.name)
+                    .collect(),
+            )
         }
         vibesql_ast::SelectItem::QualifiedWildcard { qualifier, alias } => {
             if let Some(alias_names) = alias {
@@ -278,7 +301,9 @@ fn expand_wildcard_names(
             sources
                 .into_iter()
                 .find(|s| s.qualifier.eq_ignore_ascii_case(qualifier))
-                .map(|s| s.columns)
+                // Qualified wildcards keep ALL of the source's columns,
+                // including NATURAL/USING join columns hidden from plain `*`
+                .map(|s| s.columns.into_iter().map(|c| c.name).collect())
         }
         vibesql_ast::SelectItem::Expression { .. } => None,
     }
@@ -320,17 +345,61 @@ fn collect_from_sources(
             };
 
             let qualifier = alias.clone().unwrap_or_else(|| name.clone());
-            Some(vec![WildcardSource { qualifier, columns }])
+            Some(vec![WildcardSource { qualifier, columns: visible_columns(columns) }])
         }
-        vibesql_ast::FromClause::Join { left, right, natural, using_columns, .. } => {
-            // NATURAL and USING joins deduplicate common columns during
-            // wildcard expansion; a simple concatenation would produce wrong
-            // names, so fall back to legacy naming for those
-            if *natural || using_columns.is_some() {
+        vibesql_ast::FromClause::Join { left, right, natural, using_columns, alias, .. } => {
+            // Non-goal: aliased parenthesized NATURAL/USING joins
+            // (`(a JOIN b USING(k)) AS j`) hoist the USING columns to the
+            // front under SQLite semantics (#4916). Static expansion does not
+            // model that reordering, so fall back to legacy naming.
+            if alias.is_some() && (*natural || using_columns.is_some()) {
                 return None;
             }
+
             let mut sources = collect_from_sources(left, database, prior_ctes)?;
-            sources.extend(collect_from_sources(right, database, prior_ctes)?);
+            let mut right_sources = collect_from_sources(right, database, prior_ctes)?;
+
+            // NATURAL/USING joins deduplicate the shared columns out of
+            // plain-`*` expansion: ALL left columns stay in declaration order
+            // (join columns are NOT hoisted to the front), then the right
+            // columns minus the shared ones. This mirrors the runtime
+            // expansion in `select/projection.rs` (issue #4916 ordering).
+            if *natural || using_columns.is_some() {
+                let shared: Vec<String> = if let Some(using) = using_columns {
+                    using.clone()
+                } else {
+                    // NATURAL: case-insensitive intersection of the left
+                    // operand's star-visible names with the right operand's
+                    // star-visible names. Using star-visible (already
+                    // deduplicated) names makes chained NATURAL joins compute
+                    // each join's shared set against the accumulated output.
+                    let left_visible: Vec<&str> = sources
+                        .iter()
+                        .flat_map(|s| s.columns.iter())
+                        .filter(|c| !c.hidden_for_star)
+                        .map(|c| c.name.as_str())
+                        .collect();
+                    right_sources
+                        .iter()
+                        .flat_map(|s| s.columns.iter())
+                        .filter(|c| !c.hidden_for_star)
+                        .filter(|c| left_visible.iter().any(|l| l.eq_ignore_ascii_case(&c.name)))
+                        .map(|c| c.name.clone())
+                        .collect()
+                };
+
+                // Hide the shared columns on the right side only; they remain
+                // resolvable through qualified wildcards (`b.*`).
+                for source in &mut right_sources {
+                    for col in &mut source.columns {
+                        if shared.iter().any(|s| s.eq_ignore_ascii_case(&col.name)) {
+                            col.hidden_for_star = true;
+                        }
+                    }
+                }
+            }
+
+            sources.extend(right_sources);
             Some(sources)
         }
         vibesql_ast::FromClause::Subquery { query, alias, column_aliases } => {
@@ -339,7 +408,10 @@ fn collect_from_sources(
             } else {
                 collect_select_list_columns(query, database, prior_ctes)?
             };
-            Some(vec![WildcardSource { qualifier: alias.clone(), columns }])
+            Some(vec![WildcardSource {
+                qualifier: alias.clone(),
+                columns: visible_columns(columns),
+            }])
         }
         vibesql_ast::FromClause::Values { rows, alias, column_aliases } => {
             let columns = if let Some(aliases) = column_aliases {
@@ -348,7 +420,10 @@ fn collect_from_sources(
                 let first_row = rows.first()?;
                 (0..first_row.len()).map(|i| format!("col{}", i)).collect()
             };
-            Some(vec![WildcardSource { qualifier: alias.clone(), columns }])
+            Some(vec![WildcardSource {
+                qualifier: alias.clone(),
+                columns: visible_columns(columns),
+            }])
         }
     }
 }
