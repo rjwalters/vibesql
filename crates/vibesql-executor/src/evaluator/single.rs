@@ -212,6 +212,19 @@ impl<'a> ExpressionEvaluator<'a> {
         }
     }
 
+    /// Attach an outer CTE context to this evaluator (builder style).
+    ///
+    /// Ensures subqueries evaluated in expression position resolve names
+    /// bound by an enclosing WITH clause before falling back to catalog
+    /// tables/views (issue #5350).
+    pub fn with_cte_context(
+        mut self,
+        cte_context: &'a std::collections::HashMap<String, crate::select::cte::CteResult>,
+    ) -> Self {
+        self.cte_context = Some(cte_context);
+        self
+    }
+
     /// Set the row index for ROWID pseudo-column support
     ///
     /// When set, references to ROWID, _rowid_, or oid columns will return

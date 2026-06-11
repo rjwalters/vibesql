@@ -871,17 +871,25 @@ impl SelectExecutor<'_> {
                             set_operation: None,
                             values: None,
                         };
-                        let row_results = self.execute_select_without_from(&temp_stmt)?;
+                        let row_results =
+                            self.execute_select_without_from(&temp_stmt, cte_results)?;
                         all_rows.extend(row_results);
                     } else {
                         // No window functions - evaluate normally
                         let schema = crate::schema::CombinedSchema::empty();
                         let empty_row = vibesql_storage::Row::new(vec![]);
-                        let evaluator =
+                        let mut evaluator =
                             crate::evaluator::CombinedExpressionEvaluator::with_database(
                                 &schema,
                                 self.database,
                             );
+                        // Thread CTE context so subqueries in VALUES rows can
+                        // reference names bound by an enclosing WITH (#5350)
+                        if !cte_results.is_empty() {
+                            evaluator = evaluator.with_cte_context(cte_results);
+                        } else if let Some(cte_ctx) = self.cte_context {
+                            evaluator = evaluator.with_cte_context(cte_ctx);
+                        }
                         let mut values = Vec::with_capacity(row_exprs.len());
                         for expr in row_exprs {
                             let value = evaluator.eval(expr, &empty_row)?;
@@ -935,7 +943,7 @@ impl SelectExecutor<'_> {
             self.execute_with_aggregation(stmt, cte_results)
         } else {
             // Simple expression evaluation (e.g., SELECT 1 + 1)
-            self.execute_select_without_from(stmt)
+            self.execute_select_without_from(stmt, cte_results)
         }
     }
 
@@ -1397,7 +1405,7 @@ impl SelectExecutor<'_> {
             self.execute_without_aggregation(stmt, from_result, cte_results)
         } else {
             // SELECT without FROM - evaluate expressions as a single row
-            self.execute_select_without_from(stmt)
+            self.execute_select_without_from(stmt, cte_results)
         }
     }
 

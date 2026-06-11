@@ -3,10 +3,13 @@
 //! This module handles the special case of SELECT statements without a FROM clause,
 //! which evaluates expressions without any table context.
 
+use std::collections::HashMap;
+
 use super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
     evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator},
+    select::cte::CteResult,
     select::helpers::{apply_limit_offset, evaluate_limit, evaluate_offset},
     select::window::{evaluate_window_functions, has_window_functions},
 };
@@ -23,9 +26,15 @@ impl SelectExecutor<'_> {
     /// column references can be resolved from the outer scope. This enables queries like:
     /// `SELECT * FROM t2 WHERE x IN (SELECT x)` where the inner `SELECT x` has no FROM
     /// but `x` is resolved from the outer `t2`.
+    ///
+    /// Fix for #5350: `cte_results` carries the enclosing statement's CTE bindings
+    /// (already merged with any outer CTE context by `execute()`), so subqueries in
+    /// expression position (scalar, EXISTS, IN) resolve CTE names before falling
+    /// back to same-named catalog tables/views, matching SQLite precedence.
     pub(in crate::select::executor) fn execute_select_without_from(
         &self,
         stmt: &vibesql_ast::SelectStmt,
+        cte_results: &HashMap<String, CteResult>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         // Validate ORDER BY column positions early (SQLite compatibility)
         if let Some(order_by) = &stmt.order_by {
@@ -61,6 +70,12 @@ impl SelectExecutor<'_> {
             }
         }
 
+        // CTE context for expression-position subqueries (#5350).
+        // `cte_results` already merges local CTEs over the executor's outer CTE
+        // context (see execute()); fall back to the executor's context when the
+        // merged map is empty (same pattern as the materialized/iterator paths).
+        let cte_ctx = if !cte_results.is_empty() { Some(cte_results) } else { self.cte_context };
+
         // Check if we have outer context (for correlated subqueries)
         let has_outer_context = self.outer_row.is_some() && self.outer_schema.is_some();
 
@@ -74,7 +89,7 @@ impl SelectExecutor<'_> {
                 && !has_window_functions(&stmt.select_list)
                 && self.expression_references_column(where_clause)
             {
-                return self.execute_select_without_from_alias_where(stmt, where_clause);
+                return self.execute_select_without_from_alias_where(stmt, where_clause, cte_ctx);
             }
         }
 
@@ -85,16 +100,23 @@ impl SelectExecutor<'_> {
                 let outer_row = self.outer_row.unwrap();
                 let outer_schema = self.outer_schema.unwrap();
                 let empty_combined_schema = crate::schema::CombinedSchema::empty();
-                let evaluator = CombinedExpressionEvaluator::with_database_and_outer_context(
+                let mut evaluator = CombinedExpressionEvaluator::with_database_and_outer_context(
                     &empty_combined_schema,
                     self.database,
                     outer_row,
                     outer_schema,
                 );
+                if let Some(cte) = cte_ctx {
+                    evaluator = evaluator.with_cte_context(cte);
+                }
                 evaluator.eval(where_clause, outer_row)?
             } else {
                 let empty_schema = vibesql_catalog::TableSchema::new("".to_string(), vec![]);
-                let evaluator = ExpressionEvaluator::with_database(&empty_schema, self.database);
+                let mut evaluator =
+                    ExpressionEvaluator::with_database(&empty_schema, self.database);
+                if let Some(cte) = cte_ctx {
+                    evaluator = evaluator.with_cte_context(cte);
+                }
                 let empty_row = vibesql_storage::Row::new(vec![]);
                 evaluator.eval(where_clause, &empty_row)?
             };
@@ -123,7 +145,7 @@ impl SelectExecutor<'_> {
         // Window functions without FROM clause operate on a single implicit row (Issue #4747)
         // Example: SELECT min(1) OVER() returns 1 (the min of a single implicit row)
         if has_window_functions(&stmt.select_list) {
-            return self.execute_select_without_from_with_windows(stmt, has_outer_context);
+            return self.execute_select_without_from_with_windows(stmt, has_outer_context, cte_ctx);
         }
 
         // Evaluate each item in the SELECT list
@@ -154,20 +176,26 @@ impl SelectExecutor<'_> {
                         // Create an empty CombinedSchema for current level (no FROM clause)
                         let empty_combined_schema = crate::schema::CombinedSchema::empty();
                         // Create evaluator that can resolve columns from outer schema
-                        let evaluator =
+                        let mut evaluator =
                             CombinedExpressionEvaluator::with_database_and_outer_context(
                                 &empty_combined_schema,
                                 self.database,
                                 outer_row,
                                 outer_schema,
                             );
+                        if let Some(cte) = cte_ctx {
+                            evaluator = evaluator.with_cte_context(cte);
+                        }
                         evaluator.eval(expr, outer_row)?
                     } else {
                         // No outer context - use simple evaluation
                         let empty_schema =
                             vibesql_catalog::TableSchema::new("".to_string(), vec![]);
-                        let evaluator =
+                        let mut evaluator =
                             ExpressionEvaluator::with_database(&empty_schema, self.database);
+                        if let Some(cte) = cte_ctx {
+                            evaluator = evaluator.with_cte_context(cte);
+                        }
                         let empty_row = vibesql_storage::Row::new(vec![]);
                         evaluator.eval(expr, &empty_row)?
                     };
@@ -196,9 +224,13 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &vibesql_ast::SelectStmt,
         where_clause: &vibesql_ast::Expression,
+        cte_ctx: Option<&HashMap<String, CteResult>>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         let empty_schema = vibesql_catalog::TableSchema::new("".to_string(), vec![]);
-        let evaluator = ExpressionEvaluator::with_database(&empty_schema, self.database);
+        let mut evaluator = ExpressionEvaluator::with_database(&empty_schema, self.database);
+        if let Some(cte) = cte_ctx {
+            evaluator = evaluator.with_cte_context(cte);
+        }
         let empty_row = vibesql_storage::Row::new(vec![]);
 
         // Evaluate the select list and collect alias bindings
@@ -233,7 +265,10 @@ impl SelectExecutor<'_> {
 
         // Evaluate WHERE with the aliases bound as columns of a single row
         let alias_schema = vibesql_catalog::TableSchema::new("".to_string(), alias_columns);
-        let where_evaluator = ExpressionEvaluator::with_database(&alias_schema, self.database);
+        let mut where_evaluator = ExpressionEvaluator::with_database(&alias_schema, self.database);
+        if let Some(cte) = cte_ctx {
+            where_evaluator = where_evaluator.with_cte_context(cte);
+        }
         let result_row = vibesql_storage::Row::new(values);
         let where_result = where_evaluator.eval(where_clause, &result_row)?;
 
@@ -277,6 +312,7 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &vibesql_ast::SelectStmt,
         has_outer_context: bool,
+        cte_ctx: Option<&HashMap<String, CteResult>>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         // Create an implicit single empty row for window function processing
         // This represents the single implicit row that exists for SELECT without FROM
@@ -285,7 +321,7 @@ impl SelectExecutor<'_> {
 
         // Create evaluator for window function processing
         let empty_combined_schema = crate::schema::CombinedSchema::empty();
-        let evaluator = if has_outer_context {
+        let mut evaluator = if has_outer_context {
             let outer_row = self.outer_row.unwrap();
             let outer_schema = self.outer_schema.unwrap();
             CombinedExpressionEvaluator::with_database_and_outer_context(
@@ -297,6 +333,9 @@ impl SelectExecutor<'_> {
         } else {
             CombinedExpressionEvaluator::with_database(&empty_combined_schema, self.database)
         };
+        if let Some(cte) = cte_ctx {
+            evaluator = evaluator.with_cte_context(cte);
+        }
 
         // Process window functions - this adds computed values to each row
         // and returns a mapping from WindowFunctionKey to column index
@@ -321,7 +360,7 @@ impl SelectExecutor<'_> {
                 }
                 vibesql_ast::SelectItem::Expression { expr, .. } => {
                     // Create evaluator with window mapping for this expression
-                    let eval_with_windows = if has_outer_context {
+                    let mut eval_with_windows = if has_outer_context {
                         let outer_row = self.outer_row.unwrap();
                         let outer_schema = self.outer_schema.unwrap();
                         CombinedExpressionEvaluator::with_database_outer_and_windows(
@@ -338,6 +377,9 @@ impl SelectExecutor<'_> {
                             &window_mapping,
                         )
                     };
+                    if let Some(cte) = cte_ctx {
+                        eval_with_windows = eval_with_windows.with_cte_context(cte);
+                    }
                     // Use the row with window values appended
                     let row = &rows[0];
                     let value = eval_with_windows.eval(expr, row)?;

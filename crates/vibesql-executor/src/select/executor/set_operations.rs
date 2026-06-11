@@ -201,7 +201,7 @@ impl SelectExecutor<'_> {
             )?;
             from_result.into_rows()
         } else {
-            self.execute_select_without_from(right_stmt)?
+            self.execute_select_without_from(right_stmt, cte_results)?
         };
 
         // Track memory for right result before set operation

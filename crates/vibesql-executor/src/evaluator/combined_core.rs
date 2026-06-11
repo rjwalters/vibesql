@@ -367,6 +367,21 @@ impl<'a> CombinedExpressionEvaluator<'a> {
         }
     }
 
+    /// Attach an outer CTE context to this evaluator (builder style).
+    ///
+    /// Used by execution paths whose constructor combination has no
+    /// dedicated `*_and_cte` variant (e.g. outer context + window mapping),
+    /// so that subqueries evaluated in expression position resolve names
+    /// bound by an enclosing WITH clause before falling back to catalog
+    /// tables/views (issue #5350).
+    pub(crate) fn with_cte_context(
+        mut self,
+        cte_context: &'a HashMap<String, crate::select::cte::CteResult>,
+    ) -> Self {
+        self.cte_context = Some(cte_context);
+        self
+    }
+
     /// Clear the CSE cache
     /// Should be called before evaluating expressions for a new row in multi-row contexts
     pub(crate) fn clear_cse_cache(&self) {
