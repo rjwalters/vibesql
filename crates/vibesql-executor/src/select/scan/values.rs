@@ -21,11 +21,14 @@ use crate::{
 /// * `column_aliases` - Optional column name overrides
 /// * `database` - Optional database reference for expression evaluation (enables
 ///   function calls, subqueries, etc.)
+/// * `cte_results` - Optional CTE context so subqueries inside VALUES rows can
+///   reference names bound by an enclosing WITH clause (issue #5353)
 pub(crate) fn execute_values(
     rows: &[Vec<vibesql_ast::Expression>],
     alias: &str,
     column_aliases: Option<&Vec<String>>,
     database: Option<&vibesql_storage::Database>,
+    cte_results: Option<&std::collections::HashMap<String, crate::select::cte::CteResult>>,
 ) -> Result<super::FromResult, ExecutorError> {
     // Handle empty VALUES - return empty result with appropriate schema
     if rows.is_empty() {
@@ -48,11 +51,19 @@ pub(crate) fn execute_values(
     let empty_row = vibesql_storage::Row::new(vec![]);
 
     // Create evaluator - use database if available for function calls, subqueries, etc.
-    let evaluator = if let Some(db) = database {
+    let mut evaluator = if let Some(db) = database {
         CombinedExpressionEvaluator::with_database(&empty_schema, db)
     } else {
         CombinedExpressionEvaluator::new(&empty_schema)
     };
+
+    // Thread CTE context so subqueries in VALUES rows can reference names
+    // bound by an enclosing WITH clause (issue #5353)
+    if let Some(ctes) = cte_results {
+        if !ctes.is_empty() {
+            evaluator = evaluator.with_cte_context(ctes);
+        }
+    }
 
     // Evaluate all rows and collect results
     let mut result_rows = Vec::with_capacity(rows.len());
