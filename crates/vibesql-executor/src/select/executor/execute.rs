@@ -194,8 +194,21 @@ impl SelectExecutor<'_> {
         // whole partitions before the window functions run (and enabling
         // index scans inside the subquery). Mirrors SQLite's
         // pushDownWhereTerms() gate for window queries.
-        let optimized_stmt =
-            crate::optimizer::push_where_into_window_subqueries(optimized_stmt, self.database);
+        //
+        // CTE names already in scope (from enclosing queries) are threaded
+        // in so the pass can decline view expansion for shadowed names: at
+        // execution time CTEs take precedence over catalog views, and this
+        // pass runs before CTE resolution. Empty set when there is no outer
+        // CTE context (the common case; HashSet::new() does not allocate).
+        let outer_cte_names: std::collections::HashSet<String> = self
+            .cte_context
+            .map(|ctx| ctx.keys().map(|name| name.to_ascii_lowercase()).collect())
+            .unwrap_or_default();
+        let optimized_stmt = crate::optimizer::push_where_into_window_subqueries(
+            optimized_stmt,
+            self.database,
+            &outer_cte_names,
+        );
 
         // Apply scalar subquery decorrelation (#4760)
         // Transforms correlated scalar subqueries with aggregates (e.g., AVG, SUM, MIN)

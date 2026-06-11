@@ -38,9 +38,9 @@
 //! remain shim warnings until plan rendering learns to expand
 //! views/subqueries. See the follow-on issue referenced in #5292.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use vibesql_ast::{Expression, FromClause, SelectItem, SelectStmt};
+use vibesql_ast::{CommonTableExpr, Expression, FromClause, SelectItem, SelectStmt};
 use vibesql_storage::Database;
 
 use super::where_pushdown::flatten_conjuncts;
@@ -49,11 +49,23 @@ use super::where_pushdown::flatten_conjuncts;
 /// `stmt`. Returns the (possibly) rewritten statement; when the pass does
 /// not fire the input is returned unchanged (no AST clone).
 ///
+/// `outer_cte_names` holds the lowercased names of CTEs already in scope
+/// from enclosing queries (the executor's `cte_context`). At execution time
+/// CTEs take precedence over catalog objects (`select/scan/table.rs` checks
+/// `cte_results` first), so the view-expansion branch must NOT fire for a
+/// name that is bound as a CTE — either by this statement's own WITH clause
+/// or by an enclosing query — or the rewrite would silently redirect the
+/// CTE reference to a same-named view.
+///
 /// Nested subqueries are handled when they are themselves executed: the
 /// SELECT executor invokes this pass for every statement it runs, so a
 /// derived table's own FROM subquery is rewritten during the derived table's
 /// execution.
-pub fn push_where_into_window_subqueries(mut stmt: SelectStmt, database: &Database) -> SelectStmt {
+pub fn push_where_into_window_subqueries(
+    mut stmt: SelectStmt,
+    database: &Database,
+    outer_cte_names: &HashSet<String>,
+) -> SelectStmt {
     let Some(where_clause) = stmt.where_clause.as_ref() else {
         return stmt;
     };
@@ -77,31 +89,42 @@ pub fn push_where_into_window_subqueries(mut stmt: SelectStmt, database: &Databa
         // scan performs; if the check would fail here we skip the rewrite
         // and let the scan raise the error).
         Some(FromClause::Table { name, alias, column_aliases, .. }) => {
-            database.catalog.get_view(name).and_then(|view| {
-                if crate::privilege_checker::PrivilegeChecker::check_select(database, name).is_err()
-                {
-                    return None;
-                }
-                // Effective correlation name: explicit alias wins, else the
-                // view name as written in the query.
-                let source = alias.as_deref().unwrap_or(name.as_str());
-                // Effective output column names: FROM-clause column aliases
-                // override the view's explicit column list.
-                let effective_aliases: Option<Vec<String>> =
-                    column_aliases.clone().or_else(|| view.columns.clone());
+            // CTE shadowing gate: a CTE bound to this name (in this
+            // statement's WITH clause or in an enclosing query's scope)
+            // takes precedence over a catalog view at execution time, so
+            // expanding the view here would change which object the query
+            // reads. SQLite identifiers compare case-insensitively (ASCII),
+            // matching the executor's `cte_results` lookup.
+            if is_shadowed_by_cte(name, stmt.with_clause.as_deref(), outer_cte_names) {
+                None
+            } else {
+                database.catalog.get_view(name).and_then(|view| {
+                    if crate::privilege_checker::PrivilegeChecker::check_select(database, name)
+                        .is_err()
+                    {
+                        return None;
+                    }
+                    // Effective correlation name: explicit alias wins, else the
+                    // view name as written in the query.
+                    let source = alias.as_deref().unwrap_or(name.as_str());
+                    // Effective output column names: FROM-clause column aliases
+                    // override the view's explicit column list.
+                    let effective_aliases: Option<Vec<String>> =
+                        column_aliases.clone().or_else(|| view.columns.clone());
 
-                try_push_into_subquery(
-                    where_clause,
-                    &view.query,
-                    source,
-                    effective_aliases.as_deref(),
-                )
-                .map(|new_query| FromClause::Subquery {
-                    query: Box::new(new_query),
-                    alias: source.to_string(),
-                    column_aliases: effective_aliases,
+                    try_push_into_subquery(
+                        where_clause,
+                        &view.query,
+                        source,
+                        effective_aliases.as_deref(),
+                    )
+                    .map(|new_query| FromClause::Subquery {
+                        query: Box::new(new_query),
+                        alias: source.to_string(),
+                        column_aliases: effective_aliases,
+                    })
                 })
-            })
+            }
         }
 
         _ => None,
@@ -111,6 +134,20 @@ pub fn push_where_into_window_subqueries(mut stmt: SelectStmt, database: &Databa
         stmt.from = Some(from);
     }
     stmt
+}
+
+/// True when `name` is bound as a CTE in scope — by the statement's own
+/// WITH clause or by an enclosing query (`outer_cte_names`, lowercased).
+/// Comparison is ASCII case-insensitive, matching the executor's CTE lookup
+/// in `select/scan/table.rs`.
+fn is_shadowed_by_cte(
+    name: &str,
+    with_clause: Option<&[CommonTableExpr]>,
+    outer_cte_names: &HashSet<String>,
+) -> bool {
+    outer_cte_names.contains(&name.to_ascii_lowercase())
+        || with_clause
+            .is_some_and(|ctes| ctes.iter().any(|cte| cte.name.eq_ignore_ascii_case(name)))
 }
 
 /// Attempt to push conjuncts of `where_clause` into `subquery`.
@@ -515,8 +552,12 @@ mod tests {
         }
     }
 
+    fn no_outer_ctes() -> HashSet<String> {
+        HashSet::new()
+    }
+
     fn rewrite(db: &Database, sql: &str) -> SelectStmt {
-        push_where_into_window_subqueries(parse_select(sql), db)
+        push_where_into_window_subqueries(parse_select(sql), db, &no_outer_ctes())
     }
 
     // ----------------------------------------------------------------
@@ -607,7 +648,7 @@ mod tests {
 
     fn assert_unchanged(db: &Database, sql: &str) {
         let stmt = parse_select(sql);
-        let out = push_where_into_window_subqueries(stmt.clone(), db);
+        let out = push_where_into_window_subqueries(stmt.clone(), db, &no_outer_ctes());
         assert_eq!(stmt, out, "statement should be unchanged");
     }
 
@@ -690,6 +731,35 @@ mod tests {
         );
     }
 
+    #[test]
+    fn does_not_expand_view_shadowed_by_with_clause_cte() {
+        let db = setup_db();
+        // The statement's own WITH clause binds `lll`, which shadows the
+        // view of the same name; expanding the view would redirect the
+        // query (judge regression case 1 on PR #5349).
+        assert_unchanged(
+            &db,
+            "WITH lll AS (SELECT 99 AS rn, 2 AS grp_id, 100 AS id) \
+             SELECT * FROM lll WHERE grp_id = 2",
+        );
+    }
+
+    #[test]
+    fn does_not_expand_view_shadowed_by_outer_cte() {
+        let db = setup_db();
+        // An enclosing query's CTE context binds `lll` (e.g. the view name
+        // referenced inside a derived table whose outer statement declares
+        // the CTE — judge regression case 2 on PR #5349). Names are
+        // compared ASCII case-insensitively, matching the executor's CTE
+        // lookup.
+        let outer: HashSet<String> = ["lll".to_string()].into_iter().collect();
+        for sql in ["SELECT * FROM lll WHERE grp_id = 2", "SELECT * FROM LLL WHERE grp_id = 2"] {
+            let stmt = parse_select(sql);
+            let out = push_where_into_window_subqueries(stmt.clone(), &db, &outer);
+            assert_eq!(stmt, out, "statement should be unchanged for: {}", sql);
+        }
+    }
+
     // ----------------------------------------------------------------
     // Correctness parity — results identical with and without the rewrite
     // ----------------------------------------------------------------
@@ -746,6 +816,52 @@ mod tests {
         }
     }
 
+    /// Convert executed rows to i64 matrices for compact assertions.
+    fn rows_as_i64(rows: &[Vec<vibesql_types::SqlValue>]) -> Vec<Vec<i64>> {
+        rows.iter()
+            .map(|row| {
+                row.iter()
+                    .map(|v| match v {
+                        vibesql_types::SqlValue::Integer(i) => *i,
+                        vibesql_types::SqlValue::Bigint(i) => *i,
+                        other => panic!("unexpected value {:?}", other),
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Judge regression case 1 (PR #5349): a same-statement CTE shadowing a
+    /// window view must win over the view. sqlite3 returns the CTE row.
+    #[test]
+    fn execute_cte_shadowing_view_returns_cte_rows() {
+        let mut db = setup_db();
+        run_ddl(&mut db, "INSERT INTO t1 VALUES (1, 2), (2, 3), (3, 2)");
+
+        let stmt = parse_select(
+            "WITH lll AS (SELECT 99 AS rn, 2 AS grp_id, 100 AS id) \
+             SELECT * FROM lll WHERE grp_id = 2",
+        );
+        let executed = execute_rows(&db, &stmt);
+        assert_eq!(rows_as_i64(&executed), vec![vec![99, 2, 100]], "CTE row expected, not view");
+    }
+
+    /// Judge regression case 2 (PR #5349): the shadowing CTE referenced via
+    /// a derived table. The inner SELECT is executed recursively with the
+    /// outer CTE context set, so the pass must also see outer CTE names.
+    #[test]
+    fn execute_outer_cte_shadowing_view_in_derived_table_returns_cte_rows() {
+        let mut db = setup_db();
+        run_ddl(&mut db, "INSERT INTO t1 VALUES (1, 2), (2, 3), (3, 2)");
+
+        let stmt = parse_select(
+            "WITH lll AS (SELECT 99 AS rn, 2 AS grp_id, 100 AS id) \
+             SELECT * FROM (SELECT * FROM lll WHERE grp_id = 2) v",
+        );
+        let executed = execute_rows(&db, &stmt);
+        assert_eq!(rows_as_i64(&executed), vec![vec![99, 2, 100]], "CTE row expected, not view");
+    }
+
     #[test]
     fn parity_rewritten_vs_unrewritten_ast() {
         let mut db = setup_db();
@@ -758,7 +874,7 @@ mod tests {
              WHERE grp_id > 1",
         ] {
             let stmt = parse_select(sql);
-            let rewritten = push_where_into_window_subqueries(stmt.clone(), &db);
+            let rewritten = push_where_into_window_subqueries(stmt.clone(), &db, &no_outer_ctes());
             assert_ne!(stmt, rewritten, "rewrite should fire for: {}", sql);
 
             // Execute the REWRITTEN statement (executor will not rewrite the
