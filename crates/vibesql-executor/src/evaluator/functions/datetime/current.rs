@@ -218,16 +218,23 @@ pub(super) fn resolve_time_value(
         return Ok(Some(Local::now().naive_local()));
     }
 
-    // Check if 'unixepoch' is the first modifier - affects how we parse the base value
-    let has_unixepoch_first = args.len() > 1
-        && matches!(&args[1], SqlValue::Varchar(s) | SqlValue::Character(s) if s.eq_ignore_ascii_case("unixepoch"));
+    // The first modifier may change how the base value is interpreted:
+    // 'unixepoch' (Unix timestamp), 'julianday' (forced Julian Day number),
+    // 'auto' (Julian Day or Unix timestamp depending on magnitude).
+    let first_modifier = match args.get(1) {
+        Some(SqlValue::Varchar(s)) | Some(SqlValue::Character(s)) => Some(s.as_str()),
+        _ => None,
+    };
 
     // Parse the base datetime value
-    let base_result = if has_unixepoch_first {
-        // For unixepoch, parse numeric values as Unix timestamps instead of Julian Days
-        parse_base_datetime_for_unixepoch(&args[0], func_name)?
-    } else {
-        parse_base_datetime(&args[0], func_name)?
+    let base_result = match first_modifier {
+        Some(m) if m.eq_ignore_ascii_case("unixepoch") => {
+            // For unixepoch, parse numeric values as Unix timestamps instead of Julian Days
+            parse_base_datetime_for_unixepoch(&args[0], func_name)?
+        }
+        Some(m) if m.eq_ignore_ascii_case("auto") => parse_base_datetime_auto(&args[0], func_name)?,
+        Some(m) if m.eq_ignore_ascii_case("julianday") => parse_base_datetime_julianday(&args[0]),
+        _ => parse_base_datetime(&args[0], func_name)?,
     };
 
     // If base value is NULL, return NULL
@@ -249,11 +256,15 @@ pub(super) fn resolve_time_value(
             }
         };
 
-        // Special case: 'unixepoch' must be the first modifier
-        // We've already handled it above by parsing as unix timestamp
-        if modifier_str.eq_ignore_ascii_case("unixepoch") {
+        // Special case: 'unixepoch', 'auto', and 'julianday' must immediately
+        // follow the time value (i.e. be the first modifier). They were already
+        // handled above when parsing the base value.
+        if modifier_str.eq_ignore_ascii_case("unixepoch")
+            || modifier_str.eq_ignore_ascii_case("auto")
+            || modifier_str.eq_ignore_ascii_case("julianday")
+        {
             if idx != 1 {
-                // unixepoch only valid as first modifier
+                // Only valid as the first modifier (SQLite returns NULL otherwise)
                 return Ok(None);
             }
             // Already handled during parsing, just continue
@@ -265,6 +276,13 @@ pub(super) fn resolve_time_value(
             Some(new_dt) => dt = new_dt,
             None => return Ok(None), // Invalid modifier returns NULL
         }
+    }
+
+    // SQLite validates the final result against the valid Julian Day range
+    // (`isDate` -> `validJulianDay`): modifiers that push the date outside
+    // -4713-11-24 12:00:00 .. 9999-12-31 23:59:59.999 yield NULL.
+    if !(0..=MAX_IJD_MS).contains(&naive_to_ijd_ms(&dt)) {
+        return Ok(None);
     }
 
     Ok(Some(dt))
@@ -362,6 +380,57 @@ fn parse_base_datetime_for_unixepoch(
     }
 }
 
+/// Extract the numeric interpretation of a time value, if it has one.
+///
+/// Mirrors SQLite's "raw number" classification (`setRawDateNumber` /
+/// `sqlite3AtoF` fallback in `parseDateOrTime`): SQL numerics and strings that
+/// are plain numeric literals qualify; everything else does not.
+fn numeric_time_value(value: &SqlValue) -> Option<f64> {
+    match value {
+        SqlValue::Integer(n) => Some(*n as f64),
+        SqlValue::Bigint(n) => Some(*n as f64),
+        SqlValue::Smallint(n) => Some(*n as f64),
+        SqlValue::Float(n) => Some(*n as f64),
+        SqlValue::Double(n) | SqlValue::Real(n) | SqlValue::Numeric(n) => Some(*n),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+/// Parse the base datetime value when 'auto' is the first modifier.
+///
+/// SQLite semantics (date.c, 'auto' case): numeric values in `[0.0, 5373484.5)`
+/// are Julian Day numbers; other numerics within `[-210866760000, 253402300799]`
+/// are Unix timestamps; numerics outside both ranges yield NULL. 'auto' is a
+/// no-op for text (non-numeric) time values.
+fn parse_base_datetime_auto(
+    value: &SqlValue,
+    func_name: &str,
+) -> Result<Option<NaiveDateTime>, ExecutorError> {
+    if matches!(value, SqlValue::Null) {
+        return Ok(None);
+    }
+    match numeric_time_value(value) {
+        Some(n) if (0.0..5_373_484.5).contains(&n) => Ok(julian_day_to_naive(n)),
+        Some(n) if (-210_866_760_000.0..=253_402_300_799.0).contains(&n) => {
+            Ok(unix_epoch_seconds_f64_to_datetime(n))
+        }
+        Some(_) => Ok(None), // Out of range for both interpretations
+        None => parse_base_datetime(value, func_name), // No-op for text values
+    }
+}
+
+/// Parse the base datetime value when 'julianday' is the first modifier.
+///
+/// SQLite semantics: only valid when the time value is numeric (the DDDDDDDDDD
+/// format) and within the valid Julian Day range; all other uses return NULL.
+fn parse_base_datetime_julianday(value: &SqlValue) -> Option<NaiveDateTime> {
+    match numeric_time_value(value) {
+        Some(n) if (0.0..5_373_484.5).contains(&n) => julian_day_to_naive(n),
+        _ => None,
+    }
+}
+
 /// Apply a single modifier to a NaiveDateTime
 /// Returns None if the modifier is invalid (SQLite returns NULL for invalid modifiers)
 fn apply_datetime_modifier(dt: NaiveDateTime, modifier: &str) -> Option<NaiveDateTime> {
@@ -420,8 +489,37 @@ fn apply_datetime_modifier(dt: NaiveDateTime, modifier: &str) -> Option<NaiveDat
         return result;
     }
 
+    // Handle (+|-)HH:MM[:SS[.FFF]] modifiers (no sign means plus). Must be
+    // checked before generic time shifts.
+    if let Some(result) = try_apply_hh_mm_modifier(dt, modifier) {
+        return result;
+    }
+
     // Handle time shift modifiers: +N unit, -N unit, N unit
     parse_and_apply_time_shift(dt, modifier)
+}
+
+/// Detect and apply a `[+-]HH:MM[:SS[.FFF]]` modifier (SQLite date.c
+/// `parseModifier`, '+'/'-'/digit case with a ':' after the leading number).
+/// A missing sign means plus (e.g. `'12:30'` adds 12 hours 30 minutes).
+///
+/// Returns:
+/// - `None` if the modifier is not of this form (caller should fall through)
+/// - `Some(None)` if it is of this form but invalid (SQLite returns NULL,
+///   e.g. `'12:60'`)
+/// - `Some(Some(dt))` on success
+fn try_apply_hh_mm_modifier(dt: NaiveDateTime, modifier: &str) -> Option<Option<NaiveDateTime>> {
+    let (sign, rest) = match modifier.as_bytes().first() {
+        Some(b'+') => (1i64, &modifier[1..]),
+        Some(b'-') => (-1i64, &modifier[1..]),
+        Some(b) if b.is_ascii_digit() => (1i64, modifier),
+        _ => return None,
+    };
+    let b = rest.as_bytes();
+    if !(b.len() >= 5 && b[0].is_ascii_digit() && b[1].is_ascii_digit() && b[2] == b':') {
+        return None; // Not the HH:MM form; fall through to other modifiers
+    }
+    Some(parse_hh_mm_ss_ms(rest).map(|ms| dt + Duration::milliseconds(sign * ms)))
 }
 
 /// Detect and apply a `(+|-)YYYY-MM-DD[ HH:MM[:SS[.FFF]]]` modifier.
@@ -619,39 +717,20 @@ fn split_amount_and_unit(s: &str) -> Option<(&str, &str)> {
     Some((amount, unit))
 }
 
-/// Add months to a NaiveDateTime, handling edge cases like Jan 31 + 1 month
+/// Add months to a NaiveDateTime.
+///
+/// Matches SQLite's `computeJD` normalization: when the day-of-month overflows
+/// the target month (e.g. Jan 31 + 1 month), the date rolls into the following
+/// month (2000-01-31 '+1 month' -> 2000-03-02) rather than clamping.
 fn add_months(dt: NaiveDateTime, months: i32) -> Option<NaiveDateTime> {
     let total_months = dt.year() as i64 * 12 + dt.month() as i64 - 1 + months as i64;
-    let new_year = (total_months / 12) as i32;
-    let new_month = (total_months % 12 + 1) as u32;
+    let new_year = i32::try_from(total_months.div_euclid(12)).ok()?;
+    let new_month = total_months.rem_euclid(12) as u32 + 1;
 
-    // Handle month overflow for the day (e.g., Jan 31 -> Feb 28)
-    let max_day = days_in_month(new_year, new_month);
-    let new_day = dt.day().min(max_day);
-
-    let new_date = chrono::NaiveDate::from_ymd_opt(new_year, new_month, new_day)?;
+    // Day-of-month overflow rolls into the next month (SQLite normalization)
+    let new_date = chrono::NaiveDate::from_ymd_opt(new_year, new_month, 1)?
+        + Duration::days(dt.day() as i64 - 1);
     Some(NaiveDateTime::new(new_date, dt.time()))
-}
-
-/// Get the number of days in a month
-fn days_in_month(year: i32, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => {
-            if is_leap_year(year) {
-                29
-            } else {
-                28
-            }
-        }
-        _ => 30,
-    }
-}
-
-/// Check if a year is a leap year
-fn is_leap_year(year: i32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 }
 
 /// Convert Unix epoch timestamp to NaiveDateTime
@@ -701,12 +780,14 @@ fn naive_datetime_to_timestamp(dt: NaiveDateTime) -> Result<SqlValue, ExecutorEr
 /// Helper to parse SQLite datetime strings to NaiveDateTime
 ///
 /// Follows SQLite's `parseYyyyMmDd` grammar strictly:
-/// `[-]YYYY-MM-DD[<space|T>HH:MM[:SS[.FFF...]]]` where every field is exactly
-/// the documented number of digits. An out-of-range day-of-month (e.g.
-/// `2003-02-31`) normalizes into the following month, matching SQLite's
-/// `computeJD`. A time-only value `HH:MM[:SS[.FFF...]]` defaults the date to
-/// 2000-01-01 (SQLite `parseTimeOnly`). A plain numeric string is interpreted
-/// as a Julian Day number.
+/// `[-]YYYY-MM-DD[<space|T>HH:MM[:SS[.FFF...]][TZ]]` where every field is
+/// exactly the documented number of digits and `TZ` is an optional timezone
+/// suffix (`Z`/`z` or `[+-]HH:MM`) that converts the timestamp to UTC. An
+/// out-of-range day-of-month (e.g. `2003-02-31`) normalizes into the following
+/// month, matching SQLite's `computeJD`. A time-only value
+/// `HH:MM[:SS[.FFF...]]` defaults the date to 2000-01-01 (SQLite
+/// `parseTimeOnly`). A plain numeric string is interpreted as a Julian Day
+/// number.
 fn parse_datetime_string_to_naive(s: &str) -> Option<NaiveDateTime> {
     let s = s.trim();
 
@@ -716,7 +797,7 @@ fn parse_datetime_string_to_naive(s: &str) -> Option<NaiveDateTime> {
 
     // SQLite: time-only values `HH:MM[:SS[.FFF...]]` default the date to
     // 2000-01-01 (parseTimeOnly in date.c)
-    if let Some(time_ms) = parse_hh_mm_ss_ms(s) {
+    if let Some(time_ms) = parse_hh_mm_ss_tz_ms(s) {
         let midnight = chrono::NaiveDate::from_ymd_opt(2000, 1, 1)?.and_hms_opt(0, 0, 0)?;
         return Some(midnight + Duration::milliseconds(time_ms));
     }
@@ -769,16 +850,15 @@ fn parse_yyyy_mm_dd(s: &str) -> Option<NaiveDateTime> {
         return date.and_hms_opt(0, 0, 0);
     }
 
-    let time_ms = parse_hh_mm_ss_ms(tail)?;
+    let time_ms = parse_hh_mm_ss_tz_ms(tail)?;
     Some(date.and_hms_opt(0, 0, 0)? + Duration::milliseconds(time_ms))
 }
 
-/// Strict `HH:MM[:SS[.FFF...]]` parser returning milliseconds since midnight.
-/// Mirrors SQLite's parseHhMmSs limits: HH <= 24, MM/SS <= 59, the fraction
-/// needs at least one digit, sub-millisecond fractions round like SQLite.
-/// Trailing content other than whitespace is an error (timezone suffixes are
-/// not supported and yield NULL).
-fn parse_hh_mm_ss_ms(t: &str) -> Option<i64> {
+/// Strict `HH:MM[:SS[.FFF...]]` parser returning milliseconds since midnight
+/// plus the unconsumed tail. Mirrors SQLite's parseHhMmSs limits: HH <= 24,
+/// MM/SS <= 59, the fraction needs at least one digit, sub-millisecond
+/// fractions round like SQLite.
+fn parse_hh_mm_ss_core(t: &str) -> Option<(i64, &str)> {
     let b = t.as_bytes();
     if b.len() < 5
         || !b[0].is_ascii_digit()
@@ -821,9 +901,68 @@ fn parse_hh_mm_ss_ms(t: &str) -> Option<i64> {
         }
     }
 
+    Some((total_ms, rest))
+}
+
+/// Strict `HH:MM[:SS[.FFF...]]` parser returning milliseconds since midnight.
+/// Used for modifiers, where a timezone suffix is not allowed: trailing
+/// content other than whitespace is an error.
+fn parse_hh_mm_ss_ms(t: &str) -> Option<i64> {
+    let (total_ms, rest) = parse_hh_mm_ss_core(t)?;
     // Only trailing whitespace is allowed
     if rest.chars().all(|c| c.is_ascii_whitespace()) {
         Some(total_ms)
+    } else {
+        None
+    }
+}
+
+/// `HH:MM[:SS[.FFF...]]` parser for timestrings, with an optional timezone
+/// suffix (`Z`/`z` or `[+-]HH:MM`, SQLite date.c `parseTimezone`). Returns the
+/// UTC-adjusted milliseconds offset from midnight (the timezone offset is
+/// subtracted, converting the timestamp to UTC).
+fn parse_hh_mm_ss_tz_ms(t: &str) -> Option<i64> {
+    let (total_ms, rest) = parse_hh_mm_ss_core(t)?;
+    let tz_minutes = parse_timezone_suffix(rest)?;
+    Some(total_ms - tz_minutes * 60_000)
+}
+
+/// Parse an optional timezone suffix following the time component, mirroring
+/// SQLite's `parseTimezone`: optional whitespace, then either `Z`/`z` or
+/// `[+-]HH:MM` (HH <= 14, MM <= 59), then optional trailing whitespace.
+/// Returns the offset in minutes (0 for Zulu or no suffix); `None` for
+/// malformed suffixes or trailing junk.
+fn parse_timezone_suffix(s: &str) -> Option<i64> {
+    let s = s.trim_start_matches(|c: char| c.is_ascii_whitespace());
+    if s.is_empty() {
+        return Some(0);
+    }
+    let (offset_minutes, rest) = match s.as_bytes()[0] {
+        b'Z' | b'z' => (0, &s[1..]),
+        sign @ (b'+' | b'-') => {
+            let b = s.as_bytes();
+            if b.len() < 6
+                || !b[1].is_ascii_digit()
+                || !b[2].is_ascii_digit()
+                || b[3] != b':'
+                || !b[4].is_ascii_digit()
+                || !b[5].is_ascii_digit()
+            {
+                return None;
+            }
+            let hours: i64 = s[1..3].parse().ok()?;
+            let minutes: i64 = s[4..6].parse().ok()?;
+            if hours > 14 || minutes > 59 {
+                return None;
+            }
+            let total = hours * 60 + minutes;
+            (if sign == b'-' { -total } else { total }, &s[6..])
+        }
+        _ => return None,
+    };
+    // Only trailing whitespace is allowed after the timezone
+    if rest.chars().all(|c| c.is_ascii_whitespace()) {
+        Some(offset_minutes)
     } else {
         None
     }
