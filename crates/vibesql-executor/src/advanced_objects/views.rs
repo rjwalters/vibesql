@@ -23,13 +23,22 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
     // Use simple column names (without table prefix) for view schema compatibility
     let columns = if stmt.columns.is_none() {
         // Execute the query once to derive column names.
-        // SQLite-compatible: errors surfaced while compiling a view's query are
-        // prefixed with the view name (e.g. "error in view a: 1st ORDER BY term
-        // does not match any column in the result set").
+        //
+        // SQLite-compatible error prefixing: in SQLite the "error in view <name>: "
+        // prefix is exclusively an ALTER-time schema-reparse phenomenon (alter.c);
+        // query-time view expansion errors are bare. VibeSQL compiles views eagerly,
+        // so both error classes surface here at CREATE VIEW time. We allow-list the
+        // prefix to OrderByTermNotInResultSet only — the sole class the TCL suite
+        // expects prefixed (window1.test 32.10, altertab.test). All other variants
+        // (notably SetOperationColumnMismatch, see select7.test 8.2) pass through
+        // bare, matching SQLite's query-time messages.
         use crate::select::SelectExecutor;
         let executor = SelectExecutor::new(db);
-        let result = executor.execute_with_simple_columns(&stmt.query).map_err(|e| {
-            ExecutorError::SqliteCompatError(format!("error in view {}: {}", stmt.view_name, e))
+        let result = executor.execute_with_simple_columns(&stmt.query).map_err(|e| match e {
+            e @ ExecutorError::OrderByTermNotInResultSet { .. } => {
+                ExecutorError::SqliteCompatError(format!("error in view {}: {}", stmt.view_name, e))
+            }
+            other => other,
         })?;
         Some(result.columns)
     } else {
