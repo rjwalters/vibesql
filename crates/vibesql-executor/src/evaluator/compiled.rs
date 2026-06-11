@@ -201,6 +201,9 @@ impl CompiledPredicate {
         if let (Expression::ColumnRef(col_id), Expression::Literal(value)) = (left, right) {
             let col_idx =
                 schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
+            if !Self::literal_supported_for_column(schema, col_idx, value) {
+                return None;
+            }
             return Self::compile_comparison_with_idx(col_idx, op, value.clone(), false);
         }
 
@@ -208,10 +211,74 @@ impl CompiledPredicate {
         if let (Expression::Literal(value), Expression::ColumnRef(col_id)) = (left, right) {
             let col_idx =
                 schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
+            if !Self::literal_supported_for_column(schema, col_idx, value) {
+                return None;
+            }
             return Self::compile_comparison_with_idx(col_idx, op, value.clone(), true);
         }
 
         None
+    }
+
+    /// Issue #5335: decide whether `values_equal` / `compare_range` can
+    /// evaluate this column/literal pairing with the same semantics as the
+    /// full expression evaluator. Returns false to decline compilation (the
+    /// predicate becomes `Complex` and the full evaluator runs instead).
+    fn literal_supported_for_column(
+        schema: &CombinedSchema,
+        col_idx: usize,
+        value: &SqlValue,
+    ) -> bool {
+        use std::str::FromStr;
+
+        use vibesql_types::DataType;
+
+        let col_type = schema.get_column_type_by_index(col_idx);
+        let is_string_col = |t: &DataType| {
+            matches!(
+                t,
+                DataType::Character { .. }
+                    | DataType::Varchar { .. }
+                    | DataType::CharacterLargeObject
+                    | DataType::Name
+            )
+        };
+
+        match value {
+            // Strings against a DATE column compare parse-first; an
+            // unparseable string must raise the evaluator's type-mismatch
+            // error, which the compiled fast path cannot do (its evaluate()
+            // has no error channel and callers treat None as exclude).
+            // Strings against TIMESTAMP/TIME columns compare TEXT renderings
+            // (#5329) - but numeric-parseable strings are coerced to numbers
+            // by the evaluator's NUMERIC-affinity rules first (temporal vs
+            // numeric is then always false), so decline those for parity.
+            SqlValue::Varchar(s) | SqlValue::Character(s) => match col_type {
+                Some(DataType::Date) => vibesql_types::Date::from_str(s).is_ok(),
+                Some(DataType::Timestamp { .. }) | Some(DataType::Time { .. }) => {
+                    let trimmed = s.trim();
+                    trimmed.parse::<i64>().is_err() && trimmed.parse::<f64>().is_err()
+                }
+                _ => true,
+            },
+            // Temporal literals are supported against the matching temporal
+            // column type and against string columns (TEXT-rendering /
+            // parse-first arms). Other known column types have no compiled
+            // arm with evaluator-equivalent semantics.
+            SqlValue::Timestamp(_) => match col_type {
+                Some(DataType::Timestamp { .. }) | None => true,
+                Some(t) => is_string_col(t),
+            },
+            SqlValue::Time(_) => match col_type {
+                Some(DataType::Time { .. }) | None => true,
+                Some(t) => is_string_col(t),
+            },
+            SqlValue::Date(_) => match col_type {
+                Some(DataType::Date) | None => true,
+                Some(t) => is_string_col(t),
+            },
+            _ => true,
+        }
     }
 
     /// Compile a comparison with a known column index
@@ -535,6 +602,33 @@ impl CompiledPredicate {
                 s.trim().parse::<f64>().map(|x| x == *y).unwrap_or(false)
             }
 
+            // Timestamp/Time <-> String: TEXT-rendering equality, matching
+            // the expression evaluator's #5329 semantics (issue #5335: the
+            // PartialEq fallback was always false, so `ts = '<rendering>'`
+            // missed rows and `ts != 'junk'` matched nothing)
+            (SqlValue::Timestamp(x), SqlValue::Varchar(s))
+            | (SqlValue::Timestamp(x), SqlValue::Character(s)) => x.to_string() == s.as_str(),
+            (SqlValue::Varchar(s), SqlValue::Timestamp(y))
+            | (SqlValue::Character(s), SqlValue::Timestamp(y)) => y.to_string() == s.as_str(),
+            (SqlValue::Time(x), SqlValue::Varchar(s))
+            | (SqlValue::Time(x), SqlValue::Character(s)) => x.to_string() == s.as_str(),
+            (SqlValue::Varchar(s), SqlValue::Time(y))
+            | (SqlValue::Character(s), SqlValue::Time(y)) => y.to_string() == s.as_str(),
+
+            // Date <-> String: parse-first (#5329). Unparseable strings are
+            // declined at compile time (the evaluator raises a type-mismatch
+            // error); defensively report not-equal if one slips through.
+            (SqlValue::Date(x), SqlValue::Varchar(s))
+            | (SqlValue::Date(x), SqlValue::Character(s)) => {
+                use std::str::FromStr;
+                vibesql_types::Date::from_str(s).map(|d| *x == d).unwrap_or(false)
+            }
+            (SqlValue::Varchar(s), SqlValue::Date(y))
+            | (SqlValue::Character(s), SqlValue::Date(y)) => {
+                use std::str::FromStr;
+                vibesql_types::Date::from_str(s).map(|d| d == *y).unwrap_or(false)
+            }
+
             // Fallback to PartialEq
             _ => a == b,
         }
@@ -740,6 +834,48 @@ impl CompiledPredicate {
             (SqlValue::Varchar(s), SqlValue::Real(y))
             | (SqlValue::Character(s), SqlValue::Real(y)) => {
                 s.trim().parse::<f64>().map(|x| Self::apply_range_op(x, op, *y)).ok()
+            }
+
+            // Same-type temporal comparisons (issue #5335: previously fell
+            // through to the None fallback, which callers treat as exclude)
+            (SqlValue::Date(x), SqlValue::Date(y)) => Some(Self::apply_range_op(x, op, y)),
+            (SqlValue::Time(x), SqlValue::Time(y)) => Some(Self::apply_range_op(x, op, y)),
+            (SqlValue::Timestamp(x), SqlValue::Timestamp(y)) => {
+                Some(Self::apply_range_op(x, op, y))
+            }
+
+            // Timestamp/Time <-> String: compare TEXT renderings
+            // lexicographically, matching the expression evaluator's #5329
+            // semantics (e.g. `ts < 'hello'` is true for every timestamp
+            // because renderings start with a digit)
+            (SqlValue::Timestamp(x), SqlValue::Varchar(s))
+            | (SqlValue::Timestamp(x), SqlValue::Character(s)) => {
+                Some(Self::apply_range_op(x.to_string().as_str(), op, s.as_str()))
+            }
+            (SqlValue::Varchar(s), SqlValue::Timestamp(y))
+            | (SqlValue::Character(s), SqlValue::Timestamp(y)) => {
+                Some(Self::apply_range_op(s.as_str(), op, y.to_string().as_str()))
+            }
+            (SqlValue::Time(x), SqlValue::Varchar(s))
+            | (SqlValue::Time(x), SqlValue::Character(s)) => {
+                Some(Self::apply_range_op(x.to_string().as_str(), op, s.as_str()))
+            }
+            (SqlValue::Varchar(s), SqlValue::Time(y))
+            | (SqlValue::Character(s), SqlValue::Time(y)) => {
+                Some(Self::apply_range_op(s.as_str(), op, y.to_string().as_str()))
+            }
+
+            // Date <-> String: parse-first (#5329). Unparseable strings are
+            // declined at compile time; None (exclude) if one slips through.
+            (SqlValue::Date(x), SqlValue::Varchar(s))
+            | (SqlValue::Date(x), SqlValue::Character(s)) => {
+                use std::str::FromStr;
+                vibesql_types::Date::from_str(s).ok().map(|d| Self::apply_range_op(*x, op, d))
+            }
+            (SqlValue::Varchar(s), SqlValue::Date(y))
+            | (SqlValue::Character(s), SqlValue::Date(y)) => {
+                use std::str::FromStr;
+                vibesql_types::Date::from_str(s).ok().map(|d| Self::apply_range_op(d, op, *y))
             }
 
             // BLOB vs BLOB - bytewise comparison (SQLite memcmp semantics)
@@ -966,14 +1102,8 @@ mod tests {
             CompiledPredicate::compare_range(&abc, RangeOp::GreaterThanOrEqual, &ab),
             Some(true)
         );
-        assert_eq!(
-            CompiledPredicate::compare_range(&ab, RangeOp::LessThan, &abc),
-            Some(true)
-        );
-        assert_eq!(
-            CompiledPredicate::compare_range(&abc, RangeOp::LessThan, &ab),
-            Some(false)
-        );
+        assert_eq!(CompiledPredicate::compare_range(&ab, RangeOp::LessThan, &abc), Some(true));
+        assert_eq!(CompiledPredicate::compare_range(&abc, RangeOp::LessThan, &ab), Some(false));
     }
 
     #[test]
@@ -992,15 +1122,9 @@ mod tests {
             CompiledPredicate::compare_range(&blob, RangeOp::GreaterThanOrEqual, &text),
             Some(true)
         );
-        assert_eq!(
-            CompiledPredicate::compare_range(&blob, RangeOp::LessThan, &text),
-            Some(false)
-        );
+        assert_eq!(CompiledPredicate::compare_range(&blob, RangeOp::LessThan, &text), Some(false));
         // TEXT < BLOB
-        assert_eq!(
-            CompiledPredicate::compare_range(&text, RangeOp::LessThan, &blob),
-            Some(true)
-        );
+        assert_eq!(CompiledPredicate::compare_range(&text, RangeOp::LessThan, &blob), Some(true));
         assert_eq!(
             CompiledPredicate::compare_range(&text, RangeOp::GreaterThanOrEqual, &blob),
             Some(false)

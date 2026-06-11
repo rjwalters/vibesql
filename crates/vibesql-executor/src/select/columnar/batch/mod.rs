@@ -27,4 +27,5 @@ mod storage;
 mod types;
 
 // Re-export public types
+pub(crate) use operations::microseconds_to_timestamp;
 pub use types::{ColumnArray, ColumnarBatch};

@@ -396,7 +396,9 @@ fn evaluate_predicate_for_range(
         ColumnArray::Timestamp(values, nulls) => {
             let values_slice = &values[start..end];
             let nulls_slice = nulls.as_ref().map(|n| &n[start..end] as &[bool]);
-            comparison::evaluate_predicate_i64_simd(predicate, values_slice, nulls_slice)
+            // Issue #5335: Timestamp columns need temporal semantics, not the
+            // INTEGER-affinity semantics of the i64 kernel
+            comparison::evaluate_predicate_timestamp_simd(predicate, values_slice, nulls_slice)
         }
         ColumnArray::String(values, nulls) => {
             let values_slice = &values[start..end];
@@ -654,10 +656,13 @@ fn evaluate_predicate_simd_packed(
             evaluate_predicate_i32_packed(predicate, values, nulls.as_ref().map(|n| n.as_slice()))
         }
 
-        // Packed path for Timestamp columns (i64)
-        ColumnArray::Timestamp(values, nulls) => {
-            evaluate_predicate_i64_packed(predicate, values, nulls.as_ref().map(|n| n.as_slice()))
-        }
+        // Packed path for Timestamp columns (i64 microseconds; issue #5335:
+        // temporal semantics, not the INTEGER-affinity i64 kernel)
+        ColumnArray::Timestamp(values, nulls) => comparison::evaluate_predicate_timestamp_packed(
+            predicate,
+            values,
+            nulls.as_ref().map(|n| n.as_slice()),
+        ),
 
         // For other types, fall back to Vec<bool> and convert
         _ => {
@@ -717,10 +722,13 @@ fn evaluate_predicate_simd(
             evaluate_predicate_i32_simd(predicate, values, nulls.as_ref().map(|n| n.as_slice()))
         }
 
-        // SIMD path for Timestamp columns (i64 - microseconds since epoch)
-        ColumnArray::Timestamp(values, nulls) => {
-            evaluate_predicate_i64_simd(predicate, values, nulls.as_ref().map(|n| n.as_slice()))
-        }
+        // SIMD path for Timestamp columns (i64 microseconds; issue #5335:
+        // temporal semantics, not the INTEGER-affinity i64 kernel)
+        ColumnArray::Timestamp(values, nulls) => comparison::evaluate_predicate_timestamp_simd(
+            predicate,
+            values,
+            nulls.as_ref().map(|n| n.as_slice()),
+        ),
 
         // Batch string operations for String columns
         ColumnArray::String(values, nulls) => {

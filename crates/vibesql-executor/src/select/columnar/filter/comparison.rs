@@ -7,24 +7,35 @@ pub(super) enum CompareResult {
     Ordering(std::cmp::Ordering),
     /// At least one value is NULL - comparison is UNKNOWN
     Unknown,
+    /// The two values have no defined ordering in this comparator (issue
+    /// #5335). The old behavior returned `Ordering::Equal` here, which turned
+    /// `=`, `<=`, `>=`, and BETWEEN into tautologies (every row passed) and
+    /// `<`, `>`, `!=` into contradictions. Incomparable pairs now
+    /// conservatively fail every predicate instead of lying about equality.
+    /// Predicate extraction (`predicates.rs`) declines columnar pushdown for
+    /// the type combinations known to land here, so the expression evaluator
+    /// (with its full coercion/error semantics) handles them instead.
+    Incomparable,
 }
 
 impl CompareResult {
     /// Check if comparison result equals a specific ordering
     /// Returns false for Unknown (NULL comparisons always fail in WHERE)
+    /// and for Incomparable (no defined ordering - conservatively exclude)
     pub fn equals(&self, expected: std::cmp::Ordering) -> bool {
         match self {
             CompareResult::Ordering(ord) => *ord == expected,
-            CompareResult::Unknown => false,
+            CompareResult::Unknown | CompareResult::Incomparable => false,
         }
     }
 
     /// Check if comparison result matches any of the given orderings
     /// Returns false for Unknown (NULL comparisons always fail in WHERE)
+    /// and for Incomparable (no defined ordering - conservatively exclude)
     pub fn matches(&self, orderings: &[std::cmp::Ordering]) -> bool {
         match self {
             CompareResult::Ordering(ord) => orderings.contains(ord),
-            CompareResult::Unknown => false,
+            CompareResult::Unknown | CompareResult::Incomparable => false,
         }
     }
 }
@@ -47,10 +58,13 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
             SqlValue::Integer(n) => Some(*n as f64),
             SqlValue::Bigint(n) => Some(*n as f64),
             SqlValue::Smallint(n) => Some(*n as f64),
+            SqlValue::Unsigned(n) => Some(*n as f64),
             SqlValue::Float(n) => Some(*n as f64),
             SqlValue::Double(n) => Some(*n),
             SqlValue::Numeric(n) => n.to_string().parse().ok(),
             SqlValue::Real(n) => Some(*n as f64),
+            // Booleans are integers (0/1) in SQLite storage semantics
+            SqlValue::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
             _ => None,
         }
     }
@@ -124,6 +138,40 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
             }
         }
 
+        // Same-type temporal comparisons (issue #5335: these previously fell
+        // through to the incomparable-types catch-all, which reported Equal
+        // for every pair and made e.g. `ts = TIMESTAMP '...'` match all rows)
+        (SqlValue::Timestamp(a), SqlValue::Timestamp(b)) => a.cmp(b),
+        (SqlValue::Time(a), SqlValue::Time(b)) => a.cmp(b),
+
+        // Timestamp vs string: compare the TEXT renderings lexicographically,
+        // matching the expression evaluator semantics from #5329
+        // (evaluator/operators/comparison/mod.rs). The Display rendering is
+        // 'YYYY-MM-DD HH:MM:SS[.fff]', so for full canonical timestamp
+        // strings lexicographic ordering equals temporal ordering; date-only
+        // strings compare as text prefixes ('2017-07-08 00:00:00' >
+        // '2017-07-08'); unparseable strings compare as text instead of
+        // raising a type mismatch, like SQLite.
+        (SqlValue::Timestamp(ts), SqlValue::Varchar(s))
+        | (SqlValue::Timestamp(ts), SqlValue::Character(s)) => {
+            ts.to_string().as_str().cmp(s.as_str())
+        }
+        (SqlValue::Varchar(s), SqlValue::Timestamp(ts))
+        | (SqlValue::Character(s), SqlValue::Timestamp(ts)) => {
+            s.as_str().cmp(ts.to_string().as_str())
+        }
+
+        // Time vs string: same TEXT-rendering approach as Timestamp
+        (SqlValue::Time(t), SqlValue::Varchar(s)) | (SqlValue::Time(t), SqlValue::Character(s)) => {
+            t.to_string().as_str().cmp(s.as_str())
+        }
+        (SqlValue::Varchar(s), SqlValue::Time(t)) | (SqlValue::Character(s), SqlValue::Time(t)) => {
+            s.as_str().cmp(t.to_string().as_str())
+        }
+
+        // Blob vs Blob: bytewise comparison (SQLite memcmp semantics)
+        (SqlValue::Blob(a), SqlValue::Blob(b)) => a.cmp(b),
+
         // Mixed numeric types: coerce to f64 with epsilon comparison for floats
         _ => {
             // First try direct numeric comparison
@@ -173,9 +221,13 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
                 return CompareResult::Ordering(Ordering::Greater);
             }
 
-            // Non-comparable types: use SQLite type ordering (INTEGER < REAL < TEXT < BLOB)
-            // For equality checks, this will correctly fail (different types)
-            Ordering::Equal
+            // Non-comparable types: no defined ordering in this comparator.
+            // Issue #5335: this used to return Ordering::Equal, which made
+            // every equality/range predicate on such pairs a tautology or a
+            // contradiction. Report Incomparable so all predicates
+            // conservatively fail; predicate extraction declines pushdown for
+            // these combinations so the expression evaluator handles them.
+            return CompareResult::Incomparable;
         }
     })
 }
@@ -333,6 +385,105 @@ mod tests {
             result_abc,
             CompareResult::Ordering(std::cmp::Ordering::Greater),
             "'abc' (TEXT) should be > Integer in SQLite type ordering"
+        );
+    }
+
+    fn ts(s: &str) -> SqlValue {
+        use std::str::FromStr;
+        SqlValue::Timestamp(vibesql_types::Timestamp::from_str(s).unwrap())
+    }
+
+    fn varchar(s: &str) -> SqlValue {
+        SqlValue::Varchar(arcstr::ArcStr::from(s))
+    }
+
+    /// Issue #5335: Timestamp vs Timestamp must compare temporally, not fall
+    /// through to the catch-all (which used to report Equal for every pair).
+    #[test]
+    fn test_timestamp_vs_timestamp_comparison() {
+        use std::cmp::Ordering;
+        let a = ts("2017-07-20 15:30:00");
+        let b = ts("2017-07-22 08:00:00");
+
+        assert_eq!(compare_values(&a, &b), CompareResult::Ordering(Ordering::Less));
+        assert_eq!(compare_values(&b, &a), CompareResult::Ordering(Ordering::Greater));
+        assert_eq!(compare_values(&a, &a), CompareResult::Ordering(Ordering::Equal));
+    }
+
+    /// Issue #5335: Timestamp vs string uses TEXT-rendering lexicographic
+    /// comparison (#5329 semantics), never the catch-all.
+    #[test]
+    fn test_timestamp_vs_string_text_rendering() {
+        use std::cmp::Ordering;
+        let a = ts("2017-07-20 15:30:00");
+
+        // Canonical full rendering: equality
+        assert_eq!(
+            compare_values(&a, &varchar("2017-07-20 15:30:00")),
+            CompareResult::Ordering(Ordering::Equal)
+        );
+        // Unparseable string: text ordering ('2...' < 'zzz')
+        assert_eq!(compare_values(&a, &varchar("zzz")), CompareResult::Ordering(Ordering::Less));
+        assert_eq!(compare_values(&varchar("zzz"), &a), CompareResult::Ordering(Ordering::Greater));
+        // Date-only string: rendering is longer with equal prefix, so greater
+        assert_eq!(
+            compare_values(&a, &varchar("2017-07-20")),
+            CompareResult::Ordering(Ordering::Greater)
+        );
+        // Later date-only string: rendering sorts below it
+        assert_eq!(
+            compare_values(&a, &varchar("2017-07-21")),
+            CompareResult::Ordering(Ordering::Less)
+        );
+    }
+
+    /// Issue #5335: Time vs Time and Time vs string semantics.
+    #[test]
+    fn test_time_comparisons() {
+        use std::{cmp::Ordering, str::FromStr};
+        let t1 = SqlValue::Time(vibesql_types::Time::from_str("08:00:00").unwrap());
+        let t2 = SqlValue::Time(vibesql_types::Time::from_str("15:30:00").unwrap());
+
+        assert_eq!(compare_values(&t1, &t2), CompareResult::Ordering(Ordering::Less));
+        assert_eq!(
+            compare_values(&t1, &varchar("08:00:00")),
+            CompareResult::Ordering(Ordering::Equal)
+        );
+        assert_eq!(compare_values(&t1, &varchar("zzz")), CompareResult::Ordering(Ordering::Less));
+    }
+
+    /// Issue #5335: the catch-all must no longer report incomparable pairs as
+    /// Equal (which made `=`/`<=`/`>=`/BETWEEN tautologies).
+    #[test]
+    fn test_incomparable_types_not_equal() {
+        use std::cmp::Ordering;
+        let a = ts("2017-07-20 15:30:00");
+        let date = SqlValue::Date(vibesql_types::Date::new(2017, 7, 20).unwrap());
+
+        // Timestamp vs Date has no defined ordering in this comparator
+        let result = compare_values(&a, &date);
+        assert_eq!(result, CompareResult::Incomparable);
+        assert!(!result.equals(Ordering::Equal));
+        assert!(!result.matches(&[Ordering::Less, Ordering::Greater]));
+        assert!(!result.matches(&[Ordering::Less, Ordering::Equal]));
+    }
+
+    /// Issue #5335: Boolean and Blob same-type pairs used to hit the Equal
+    /// catch-all too; verify they now compare properly.
+    #[test]
+    fn test_boolean_and_blob_comparisons() {
+        use std::cmp::Ordering;
+        assert_eq!(
+            compare_values(&SqlValue::Boolean(false), &SqlValue::Boolean(true)),
+            CompareResult::Ordering(Ordering::Less)
+        );
+        assert_eq!(
+            compare_values(&SqlValue::Boolean(true), &SqlValue::Boolean(true)),
+            CompareResult::Ordering(Ordering::Equal)
+        );
+        assert_eq!(
+            compare_values(&SqlValue::Blob(vec![0x61, 0x62]), &SqlValue::Blob(vec![0x61, 0x63])),
+            CompareResult::Ordering(Ordering::Less)
         );
     }
 

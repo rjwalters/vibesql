@@ -589,6 +589,27 @@ impl CombinedSchema {
         None
     }
 
+    /// Get the declared data type for a column by its combined (absolute) index
+    ///
+    /// Returns `None` if the index does not fall inside any table at this
+    /// schema level (e.g. it resolves into an outer scope, or belongs to an
+    /// alias table). Used by columnar predicate extraction to decide whether
+    /// a predicate can be pushed down to the columnar comparators (issue
+    /// #5335: temporal columns need type-aware pushdown decisions).
+    pub fn get_column_type_by_index(&self, idx: usize) -> Option<&vibesql_types::DataType> {
+        for (table_id, (start_index, schema)) in &self.table_schemas {
+            // Alias tables share start_index 0 with non-contiguous columns;
+            // skip them so we only match real, contiguous column ranges.
+            if self.alias_tables.contains(table_id) {
+                continue;
+            }
+            if idx >= *start_index && idx < start_index + schema.columns.len() {
+                return Some(&schema.columns[idx - start_index].data_type);
+            }
+        }
+        None
+    }
+
     /// Get the type affinity for a column by name
     ///
     /// Returns the SQLite type affinity for the column, which determines how

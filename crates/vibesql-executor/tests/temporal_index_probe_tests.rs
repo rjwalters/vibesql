@@ -301,14 +301,14 @@ fn expression_index_date_unparseable_bound_matches_full_scan_error() {
 // ---------------------------------------------------------------------------
 // Plain TIMESTAMP column index (t4 repro from the issue)
 //
-// NOTE: these assert literal expected values (executor semantics) for the
-// INDEXED queries instead of diffing against DROP INDEX, because the
-// full-scan WHERE path has its own pre-existing temporal-vs-string bug (the
-// columnar SIMD filter and CompiledPredicate lack the #5329 semantics and
-// over-return — `WHERE ts = 'zzz'` returns every row via a full scan). That
-// is tracked separately in issue #5335; once fixed, these can be upgraded to
-// indexed-vs-full-scan comparisons like the expression-index tests above.
+// Issue #5335 fixed the full-scan WHERE path (the columnar comparators and
+// CompiledPredicate now implement the #5329 temporal semantics), so these
+// tests assert the same indexed-vs-DROP-INDEX invariant as the
+// expression-index tests above, in addition to the literal expected values.
 // ---------------------------------------------------------------------------
+
+const T4_CREATE_INDEX: &str = "CREATE INDEX t4ts ON t4(ts)";
+const T4_DROP_INDEX: &str = "DROP INDEX t4ts";
 
 fn timestamp_column_db() -> Database {
     let mut db = Database::new();
@@ -317,24 +317,23 @@ fn timestamp_column_db() -> Database {
         "CREATE TABLE t4 (id INTEGER PRIMARY KEY, ts TIMESTAMP);
          INSERT INTO t4 VALUES (1, TIMESTAMP '2017-07-20 15:30:00');
          INSERT INTO t4 VALUES (2, TIMESTAMP '2017-07-22 08:00:00');
-         INSERT INTO t4 VALUES (3, TIMESTAMP '2017-07-25 23:59:59');
-         CREATE INDEX t4ts ON t4(ts)",
+         INSERT INTO t4 VALUES (3, TIMESTAMP '2017-07-25 23:59:59')",
     );
+    execute_sql(&mut db, T4_CREATE_INDEX);
     db
 }
 
-fn check_t4(db: &Database, sql: &str, expected: &[i64]) {
-    let rows = select_ints(db, sql).unwrap_or_else(|e| panic!("query failed: {e}\n  sql: {sql}"));
-    assert_eq!(rows, expected, "wrong rows for indexed query: {sql}");
+fn check_t4(db: &mut Database, sql: &str, expected: &[i64]) {
+    assert_index_matches_full_scan(db, T4_CREATE_INDEX, T4_DROP_INDEX, sql, expected);
 }
 
 #[test]
 fn column_index_timestamp_equality_string() {
     // Was 0 rows before the fix (row loss).
-    let db = timestamp_column_db();
-    check_t4(&db, "SELECT id FROM t4 WHERE ts = '2017-07-20 15:30:00'", &[1]);
+    let mut db = timestamp_column_db();
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts = '2017-07-20 15:30:00'", &[1]);
     // TEXT-rendering semantics: a date-only string equals no timestamp.
-    check_t4(&db, "SELECT id FROM t4 WHERE ts = '2017-07-20'", &[]);
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts = '2017-07-20'", &[]);
 }
 
 #[test]
@@ -342,40 +341,44 @@ fn column_index_timestamp_no_over_return_on_lower_bound() {
     // The t4 repro: `ts >= '2017-07-21'` returned the 2017-07-20 row before
     // the fix because the probe over-returned and the planner skipped the
     // residual filter.
-    let db = timestamp_column_db();
-    check_t4(&db, "SELECT id FROM t4 WHERE ts >= '2017-07-21'", &[2, 3]);
-    check_t4(&db, "SELECT id FROM t4 WHERE ts > '2017-07-21'", &[2, 3]);
+    let mut db = timestamp_column_db();
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts >= '2017-07-21'", &[2, 3]);
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts > '2017-07-21'", &[2, 3]);
 }
 
 #[test]
 fn column_index_timestamp_between_and_upper_bounds() {
-    let db = timestamp_column_db();
-    check_t4(&db, "SELECT id FROM t4 WHERE ts BETWEEN '2017-07-21' AND '2017-07-23'", &[2]);
-    check_t4(&db, "SELECT id FROM t4 WHERE ts < '2017-07-22'", &[1]);
-    check_t4(&db, "SELECT id FROM t4 WHERE ts <= '2017-07-22 08:00:00'", &[1, 2]);
-    check_t4(&db, "SELECT id FROM t4 WHERE ts < '2017-07-22 08:00:00'", &[1]);
+    let mut db = timestamp_column_db();
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts BETWEEN '2017-07-21' AND '2017-07-23'", &[2]);
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts < '2017-07-22'", &[1]);
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts <= '2017-07-22 08:00:00'", &[1, 2]);
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts < '2017-07-22 08:00:00'", &[1]);
 }
 
 #[test]
 fn column_index_timestamp_in_list_and_typed_literals() {
-    let db = timestamp_column_db();
+    let mut db = timestamp_column_db();
     check_t4(
-        &db,
+        &mut db,
         "SELECT id FROM t4 WHERE ts IN ('2017-07-20 15:30:00', '2017-07-25 23:59:59')",
         &[1, 3],
     );
-    // Typed literals were already correct; pin that they stay correct.
-    check_t4(&db, "SELECT id FROM t4 WHERE ts = TIMESTAMP '2017-07-22 08:00:00'", &[2]);
-    check_t4(&db, "SELECT id FROM t4 WHERE ts >= TIMESTAMP '2017-07-22 08:00:00'", &[2, 3]);
+    // Typed literals: previously correct via the index but tautological on a
+    // full scan (issue #5335); both paths must agree now.
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts = TIMESTAMP '2017-07-22 08:00:00'", &[2]);
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts >= TIMESTAMP '2017-07-22 08:00:00'", &[2, 3]);
 }
 
 #[test]
 fn column_index_timestamp_unparseable_equality_is_empty() {
     // Junk strings never equal a timestamp rendering — no panic, no rows.
-    // (Range operators with junk bounds are governed by the residual-filter
-    // semantics tracked in #5335 and are not asserted here.)
-    let db = timestamp_column_db();
-    check_t4(&db, "SELECT id FROM t4 WHERE ts = 'hello'", &[]);
+    let mut db = timestamp_column_db();
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts = 'hello'", &[]);
+    // Junk-string range bounds follow TEXT-rendering semantics on both paths
+    // (every timestamp rendering starts with a digit, so ts < 'hello' is
+    // always true).
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts < 'hello'", &[1, 2, 3]);
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts > 'hello'", &[]);
 }
 
 #[test]
@@ -384,8 +387,8 @@ fn column_index_timestamp_null_keys_excluded_from_ranges() {
     // (SQL semantics: NULL < x is NULL, not true).
     let mut db = timestamp_column_db();
     execute_sql(&mut db, "INSERT INTO t4 VALUES (4, NULL)");
-    check_t4(&db, "SELECT id FROM t4 WHERE ts < '2017-07-23'", &[1, 2]);
-    check_t4(&db, "SELECT id FROM t4 WHERE ts >= '2017-07-21'", &[2, 3]);
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts < '2017-07-23'", &[1, 2]);
+    check_t4(&mut db, "SELECT id FROM t4 WHERE ts >= '2017-07-21'", &[2, 3]);
 }
 
 // ---------------------------------------------------------------------------

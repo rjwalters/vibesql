@@ -1,6 +1,7 @@
 use vibesql_ast::{BinaryOperator, Expression, UnaryOperator};
-use vibesql_types::{SqlMode, SqlValue, TypeAffinity};
+use vibesql_types::{DataType, SqlMode, SqlValue, TypeAffinity};
 
+use super::comparison::parse_date_string;
 use crate::{evaluator::ExpressionEvaluator, schema::CombinedSchema};
 
 /// Comparison operator for column-to-column predicates
@@ -247,7 +248,169 @@ pub fn extract_predicate_tree(
     schema: &CombinedSchema,
     case_sensitive_like: bool,
 ) -> Option<PredicateTree> {
-    extract_tree_recursive(expr, schema, case_sensitive_like)
+    let tree = extract_tree_recursive(expr, schema, case_sensitive_like)?;
+    // Issue #5335: decline pushdown entirely when any extracted predicate
+    // pairs a column with a literal the columnar comparators cannot evaluate
+    // faithfully (e.g. DATE vs unparseable string must raise the evaluator's
+    // type-mismatch error; temporal vs numeric has no columnar ordering).
+    // Declining must be all-or-nothing: callers mark the WHERE clause as
+    // consumed after columnar filtering, so a silently skipped predicate
+    // would over-return rows.
+    if !tree_supported_by_columnar(&tree, schema) {
+        return None;
+    }
+    Some(tree)
+}
+
+/// Check whether every leaf of a predicate tree can be evaluated faithfully
+/// by the columnar comparators (see `predicate_supported_by_columnar`).
+fn tree_supported_by_columnar(tree: &PredicateTree, schema: &CombinedSchema) -> bool {
+    match tree {
+        PredicateTree::And(children) | PredicateTree::Or(children) => {
+            children.iter().all(|child| tree_supported_by_columnar(child, schema))
+        }
+        PredicateTree::Leaf(predicate) => predicate_supported_by_columnar(predicate, schema),
+    }
+}
+
+/// Check whether a single column predicate can be evaluated faithfully by the
+/// columnar comparators (`filter::comparison::compare_values` and the SIMD
+/// kernels), given the column's declared data type.
+///
+/// Issue #5335: the columnar comparators implement the #5329 semantics for
+/// temporal columns versus matching temporal literals and strings, but they
+/// have no error channel (DATE vs unparseable string must raise a
+/// type-mismatch error in the expression evaluator) and no defined ordering
+/// for mixed temporal/non-temporal pairs. Those combinations must fall back
+/// to the full expression evaluator, so extraction declines them here.
+fn predicate_supported_by_columnar(predicate: &ColumnPredicate, schema: &CombinedSchema) -> bool {
+    match predicate {
+        ColumnPredicate::LessThan { column_idx, value }
+        | ColumnPredicate::GreaterThan { column_idx, value }
+        | ColumnPredicate::GreaterThanOrEqual { column_idx, value }
+        | ColumnPredicate::LessThanOrEqual { column_idx, value }
+        | ColumnPredicate::Equal { column_idx, value }
+        | ColumnPredicate::NotEqual { column_idx, value } => {
+            value_supported_for_column(schema.get_column_type_by_index(*column_idx), value)
+        }
+        ColumnPredicate::Between { column_idx, low, high } => {
+            let col_type = schema.get_column_type_by_index(*column_idx);
+            value_supported_for_column(col_type, low) && value_supported_for_column(col_type, high)
+        }
+        ColumnPredicate::InList { column_idx, values, .. } => {
+            let col_type = schema.get_column_type_by_index(*column_idx);
+            values.iter().all(|v| value_supported_for_column(col_type, v))
+        }
+        // LIKE patterns are strings; existing comparator behavior applies
+        ColumnPredicate::Like { .. } => true,
+        ColumnPredicate::ColumnCompare { left_column_idx, right_column_idx, .. } => {
+            column_compare_supported(
+                schema.get_column_type_by_index(*left_column_idx),
+                schema.get_column_type_by_index(*right_column_idx),
+            )
+        }
+    }
+}
+
+/// Whether a column's declared type is a temporal type
+fn is_temporal_type(t: &DataType) -> bool {
+    matches!(t, DataType::Date | DataType::Time { .. } | DataType::Timestamp { .. })
+}
+
+/// Whether a column's declared type is a character string type
+fn is_string_type(t: &DataType) -> bool {
+    matches!(
+        t,
+        DataType::Character { .. }
+            | DataType::Varchar { .. }
+            | DataType::CharacterLargeObject
+            | DataType::Name
+    )
+}
+
+/// Whether a string would be coerced to a number by the expression
+/// evaluator's NUMERIC-affinity rules (`try_coerce_string_to_numeric`).
+/// Temporal columns have NUMERIC affinity, so numeric-parseable string
+/// literals against them become Timestamp/Date/Time-vs-number comparisons in
+/// the evaluator (which yield false), not TEXT-rendering comparisons.
+fn string_coerces_to_numeric(s: &str) -> bool {
+    let trimmed = s.trim();
+    trimmed.parse::<i64>().is_ok() || trimmed.parse::<f64>().is_ok()
+}
+
+/// Check whether a literal operand can be compared faithfully against a
+/// column of the given declared type by the columnar comparators.
+fn value_supported_for_column(col_type: Option<&DataType>, value: &SqlValue) -> bool {
+    // NULL literals are handled uniformly (comparison is UNKNOWN)
+    if matches!(value, SqlValue::Null) {
+        return true;
+    }
+
+    match col_type {
+        Some(DataType::Date) => match value {
+            SqlValue::Date(_) => true,
+            // Date vs parseable string compares parse-first (hot path for
+            // TPC-H date range predicates); unparseable strings must raise
+            // the evaluator's type-mismatch error, so decline pushdown.
+            // (Numeric-looking strings fail YYYY-MM-DD parsing and are
+            // declined too, matching the evaluator's affinity coercion.)
+            SqlValue::Varchar(s) | SqlValue::Character(s) => parse_date_string(s).is_some(),
+            _ => false,
+        },
+        Some(DataType::Timestamp { .. }) => match value {
+            // Timestamp vs Timestamp compares temporally; Timestamp vs a
+            // non-numeric string compares TEXT renderings (#5329).
+            // Numeric-parseable strings are coerced to numbers by the
+            // evaluator's NUMERIC-affinity rules first (temporal vs numeric
+            // is then always false), so decline those to preserve parity.
+            SqlValue::Timestamp(_) => true,
+            SqlValue::Varchar(s) | SqlValue::Character(s) => !string_coerces_to_numeric(s),
+            _ => false,
+        },
+        Some(DataType::Time { .. }) => match value {
+            SqlValue::Time(_) => true,
+            SqlValue::Varchar(s) | SqlValue::Character(s) => !string_coerces_to_numeric(s),
+            _ => false,
+        },
+        Some(other) => match value {
+            // Temporal literal against a non-temporal column: only string
+            // columns have comparator support (parse-first for Date, TEXT
+            // rendering for Timestamp/Time).
+            SqlValue::Date(_) | SqlValue::Timestamp(_) | SqlValue::Time(_) => is_string_type(other),
+            _ => true,
+        },
+        // Unknown column type (e.g. outer-scope reference): allow existing
+        // behavior except for temporal literals, where we cannot prove the
+        // comparators have a faithful arm.
+        None => !matches!(value, SqlValue::Date(_) | SqlValue::Timestamp(_) | SqlValue::Time(_)),
+    }
+}
+
+/// Check whether a column-to-column comparison is supported by the columnar
+/// comparators given both columns' declared types.
+fn column_compare_supported(left: Option<&DataType>, right: Option<&DataType>) -> bool {
+    match (left, right) {
+        (Some(l), Some(r)) => {
+            let l_temporal = is_temporal_type(l);
+            let r_temporal = is_temporal_type(r);
+            if l_temporal && r_temporal {
+                // Same temporal kind compares natively; mixed kinds (e.g.
+                // Date vs Timestamp) have no columnar ordering.
+                std::mem::discriminant(l) == std::mem::discriminant(r)
+            } else if l_temporal || r_temporal {
+                // Temporal vs non-temporal column: the evaluator applies
+                // per-row affinity coercion (numeric-looking strings in a
+                // TEXT column coerce to numbers against a NUMERIC-affinity
+                // temporal column), which the columnar comparator cannot
+                // replicate. Decline so the evaluator runs.
+                false
+            } else {
+                true
+            }
+        }
+        // Unknown types: keep existing behavior
+        _ => true,
+    }
 }
 
 /// Extract simple column predicates from a WHERE clause expression (legacy)
@@ -279,10 +442,17 @@ pub fn extract_column_predicates(
     // Return None if no predicates were extracted (all were cross-table or unsupported)
     // This allows fallback to generic predicate evaluation
     if predicates.is_empty() {
-        None
-    } else {
-        Some(predicates)
+        return None;
     }
+    // Issue #5335: decline pushdown entirely when any extracted predicate
+    // pairs a column with a literal the columnar comparators cannot evaluate
+    // faithfully. Must be all-or-nothing: callers mark the WHERE clause as
+    // consumed after columnar filtering, so skipping one predicate here
+    // would over-return rows.
+    if !predicates.iter().all(|p| predicate_supported_by_columnar(p, schema)) {
+        return None;
+    }
+    Some(predicates)
 }
 
 /// Try to fold a constant expression to a literal value
@@ -836,6 +1006,116 @@ mod tests {
             ],
         );
         CombinedSchema::from_table("test".to_string(), schema)
+    }
+
+    fn create_temporal_schema() -> CombinedSchema {
+        let schema = TableSchema::new(
+            "t".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new(
+                    "ts".to_string(),
+                    DataType::Timestamp { with_timezone: false },
+                    true,
+                ),
+                ColumnSchema::new("d".to_string(), DataType::Date, true),
+            ],
+        );
+        CombinedSchema::from_table("t".to_string(), schema)
+    }
+
+    fn comparison_expr(column: &str, op: BinaryOperator, value: SqlValue) -> Expression {
+        Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                column, false,
+            ))),
+            op,
+            right: Box::new(Expression::Literal(value)),
+        }
+    }
+
+    /// Issue #5335: extraction supports Timestamp columns vs Timestamp
+    /// literals and non-numeric strings (the comparators implement #5329
+    /// semantics for those).
+    #[test]
+    fn test_timestamp_column_supported_literals_extracted() {
+        use std::str::FromStr;
+        let schema = create_temporal_schema();
+
+        let ts_literal = SqlValue::Timestamp(
+            vibesql_types::Timestamp::from_str("2017-07-20 15:30:00").unwrap(),
+        );
+        for value in [ts_literal, SqlValue::Varchar(arcstr::ArcStr::from("2017-07-21"))] {
+            let expr = comparison_expr("ts", BinaryOperator::GreaterThanOrEqual, value.clone());
+            assert!(
+                extract_column_predicates(&expr, &schema, false).is_some(),
+                "expected pushdown for ts >= {value:?}"
+            );
+            assert!(extract_predicate_tree(&expr, &schema, false).is_some());
+        }
+    }
+
+    /// Issue #5335: extraction declines combinations the columnar comparators
+    /// cannot evaluate faithfully (must be all-or-nothing so the WHERE clause
+    /// is not marked consumed with predicates silently dropped).
+    #[test]
+    fn test_unsupported_temporal_literals_decline_extraction() {
+        let schema = create_temporal_schema();
+
+        // Numeric-parseable string vs Timestamp column: the evaluator's
+        // NUMERIC-affinity rules coerce it to a number first.
+        let expr = comparison_expr(
+            "ts",
+            BinaryOperator::LessThan,
+            SqlValue::Varchar(arcstr::ArcStr::from("1999")),
+        );
+        assert!(extract_column_predicates(&expr, &schema, false).is_none());
+        assert!(extract_predicate_tree(&expr, &schema, false).is_none());
+
+        // Numeric literal vs Timestamp column: no columnar ordering.
+        let expr = comparison_expr("ts", BinaryOperator::Equal, SqlValue::Integer(1999));
+        assert!(extract_column_predicates(&expr, &schema, false).is_none());
+
+        // Unparseable string vs Date column: the evaluator raises a
+        // type-mismatch error, which the comparators cannot.
+        let expr = comparison_expr(
+            "d",
+            BinaryOperator::Equal,
+            SqlValue::Varchar(arcstr::ArcStr::from("not-a-date")),
+        );
+        assert!(extract_column_predicates(&expr, &schema, false).is_none());
+        assert!(extract_predicate_tree(&expr, &schema, false).is_none());
+
+        // AND with one unsupported predicate declines the whole extraction.
+        let expr = Expression::BinaryOp {
+            left: Box::new(comparison_expr(
+                "id",
+                BinaryOperator::GreaterThan,
+                SqlValue::Integer(0),
+            )),
+            op: BinaryOperator::And,
+            right: Box::new(comparison_expr(
+                "ts",
+                BinaryOperator::LessThan,
+                SqlValue::Varchar(arcstr::ArcStr::from("1999")),
+            )),
+        };
+        assert!(extract_column_predicates(&expr, &schema, false).is_none());
+        assert!(extract_predicate_tree(&expr, &schema, false).is_none());
+    }
+
+    /// Issue #5335 perf guard: Date columns vs parseable strings stay on the
+    /// columnar fast path (TPC-H date range predicates).
+    #[test]
+    fn test_date_column_parseable_string_still_extracted() {
+        let schema = create_temporal_schema();
+        let expr = comparison_expr(
+            "d",
+            BinaryOperator::GreaterThanOrEqual,
+            SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
+        );
+        assert!(extract_column_predicates(&expr, &schema, false).is_some());
+        assert!(extract_predicate_tree(&expr, &schema, false).is_some());
     }
 
     #[test]

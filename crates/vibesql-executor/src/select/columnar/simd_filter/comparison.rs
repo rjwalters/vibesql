@@ -7,6 +7,7 @@ use vibesql_types::SqlValue;
 
 use super::{
     super::{
+        batch::microseconds_to_timestamp,
         filter::ColumnPredicate,
         simd_ops::{self, PackedMask},
     },
@@ -47,8 +48,6 @@ pub fn evaluate_predicate_i64_simd(
                 simd_ops::lt_i64(values, *threshold)
             } else if let SqlValue::Bigint(threshold) = value {
                 simd_ops::lt_i64(values, *threshold)
-            } else if let Some(threshold) = value_to_timestamp_i64(value) {
-                simd_ops::lt_i64(values, threshold)
             } else {
                 let threshold =
                     value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
@@ -301,6 +300,173 @@ pub fn evaluate_predicate_i64_simd(
     }
 
     Ok(result)
+}
+
+/// Comparison operator for the Timestamp kernel
+#[derive(Clone, Copy)]
+enum TimestampCmpOp {
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+}
+
+/// Build a boolean mask comparing a Timestamp column (i64 microseconds since
+/// epoch) against a single literal operand.
+///
+/// Issue #5335 semantics (matching the scalar comparator and the expression
+/// evaluator's #5329 rules):
+/// - `SqlValue::Timestamp` literal: ordinary temporal comparison via the
+///   microsecond encoding (SIMD i64 fast path)
+/// - string literal: compare the TEXT rendering of each timestamp against
+///   the string lexicographically (per-row scalar; strings on timestamp
+///   columns are rare and correctness across the scalar/SIMD threshold is
+///   required)
+/// - anything else: type mismatch error (predicate extraction declines these
+///   combinations, so this is defense in depth)
+fn timestamp_cmp_mask(
+    values: &[i64],
+    value: &SqlValue,
+    op: TimestampCmpOp,
+) -> Result<Vec<bool>, ExecutorError> {
+    use std::cmp::Ordering;
+
+    if let Some(threshold) = value_to_timestamp_i64(value) {
+        return Ok(match op {
+            TimestampCmpOp::Lt => simd_ops::lt_i64(values, threshold),
+            TimestampCmpOp::Le => simd_ops::le_i64(values, threshold),
+            TimestampCmpOp::Gt => simd_ops::gt_i64(values, threshold),
+            TimestampCmpOp::Ge => simd_ops::ge_i64(values, threshold),
+            TimestampCmpOp::Eq => simd_ops::eq_i64(values, threshold),
+            TimestampCmpOp::Ne => simd_ops::ne_i64(values, threshold),
+        });
+    }
+
+    if let SqlValue::Varchar(s) | SqlValue::Character(s) = value {
+        let s = s.as_str();
+        return Ok(values
+            .iter()
+            .map(|&v| {
+                let rendering = microseconds_to_timestamp(v).to_string();
+                let cmp = rendering.as_str().cmp(s);
+                match op {
+                    TimestampCmpOp::Lt => cmp == Ordering::Less,
+                    TimestampCmpOp::Le => cmp != Ordering::Greater,
+                    TimestampCmpOp::Gt => cmp == Ordering::Greater,
+                    TimestampCmpOp::Ge => cmp != Ordering::Less,
+                    TimestampCmpOp::Eq => cmp == Ordering::Equal,
+                    TimestampCmpOp::Ne => cmp != Ordering::Equal,
+                }
+            })
+            .collect());
+    }
+
+    Err(ExecutorError::ColumnarTypeMismatch {
+        operation: "comparison".to_string(),
+        left_type: "Timestamp".to_string(),
+        right_type: Some(format!("{:?}", value)),
+    })
+}
+
+/// Evaluate predicate on a Timestamp column (i64 microseconds since epoch)
+///
+/// Issue #5335: Timestamp columns previously dispatched to
+/// `evaluate_predicate_i64_simd`, which applies INTEGER-affinity semantics to
+/// string operands (parsing them as numbers and comparing against raw
+/// microseconds) and only handled genuine Timestamp literals for `<`. This
+/// kernel implements the #5329 temporal semantics for every operator.
+pub fn evaluate_predicate_timestamp_simd(
+    predicate: &ColumnPredicate,
+    values: &[i64],
+    nulls: Option<&[bool]>,
+) -> Result<Vec<bool>, ExecutorError> {
+    let mut result = match predicate {
+        ColumnPredicate::LessThan { value, .. } => {
+            timestamp_cmp_mask(values, value, TimestampCmpOp::Lt)?
+        }
+        ColumnPredicate::LessThanOrEqual { value, .. } => {
+            timestamp_cmp_mask(values, value, TimestampCmpOp::Le)?
+        }
+        ColumnPredicate::GreaterThan { value, .. } => {
+            timestamp_cmp_mask(values, value, TimestampCmpOp::Gt)?
+        }
+        ColumnPredicate::GreaterThanOrEqual { value, .. } => {
+            timestamp_cmp_mask(values, value, TimestampCmpOp::Ge)?
+        }
+        ColumnPredicate::Equal { value, .. } => {
+            timestamp_cmp_mask(values, value, TimestampCmpOp::Eq)?
+        }
+        ColumnPredicate::NotEqual { value, .. } => {
+            timestamp_cmp_mask(values, value, TimestampCmpOp::Ne)?
+        }
+        ColumnPredicate::Between { low, high, .. } => {
+            let low_mask = timestamp_cmp_mask(values, low, TimestampCmpOp::Ge)?;
+            let high_mask = timestamp_cmp_mask(values, high, TimestampCmpOp::Le)?;
+            low_mask.iter().zip(high_mask.iter()).map(|(&l, &h)| l && h).collect()
+        }
+        ColumnPredicate::InList { values: list_values, negated, .. } => {
+            let mut result = vec![false; values.len()];
+            for list_val in list_values {
+                // NULL list elements match nothing
+                if matches!(list_val, SqlValue::Null) {
+                    continue;
+                }
+                // Non-temporal, non-string list elements match nothing
+                // (consistent with the scalar comparator's Incomparable)
+                if value_to_timestamp_i64(list_val).is_none() && !is_string_value(list_val) {
+                    continue;
+                }
+                let matches = timestamp_cmp_mask(values, list_val, TimestampCmpOp::Eq)?;
+                for (i, &m) in matches.iter().enumerate() {
+                    result[i] = result[i] || m;
+                }
+            }
+            if *negated {
+                result.iter_mut().for_each(|v| *v = !*v);
+            }
+            result
+        }
+        ColumnPredicate::Like { .. } => {
+            return Err(ExecutorError::ColumnarTypeMismatch {
+                operation: "LIKE".to_string(),
+                left_type: "Timestamp".to_string(),
+                right_type: Some("String pattern".to_string()),
+            });
+        }
+        // ColumnCompare is handled at higher level in simd_filter/mod.rs
+        ColumnPredicate::ColumnCompare { .. } => {
+            return Err(ExecutorError::ColumnarTypeMismatch {
+                operation: "column-to-column comparison".to_string(),
+                left_type: "Timestamp".to_string(),
+                right_type: Some("Should be handled in simd_filter/mod.rs".to_string()),
+            });
+        }
+    };
+
+    // Apply NULL mask: NULLs always fail predicates
+    if let Some(null_mask) = nulls {
+        for (i, is_null) in null_mask.iter().enumerate() {
+            if *is_null {
+                result[i] = false;
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Evaluate predicate on a Timestamp column returning a packed mask
+///
+/// Packed-mask counterpart of `evaluate_predicate_timestamp_simd`.
+pub fn evaluate_predicate_timestamp_packed(
+    predicate: &ColumnPredicate,
+    values: &[i64],
+    nulls: Option<&[bool]>,
+) -> Result<PackedMask, ExecutorError> {
+    let bool_mask = evaluate_predicate_timestamp_simd(predicate, values, nulls)?;
+    Ok(PackedMask::from_bool_slice(&bool_mask))
 }
 
 /// Evaluate predicate on i32 column using SIMD (for dates)
@@ -677,8 +843,6 @@ pub fn evaluate_predicate_i64_packed(
                 simd_ops::lt_i64_packed(values, *threshold)
             } else if let SqlValue::Bigint(threshold) = value {
                 simd_ops::lt_i64_packed(values, *threshold)
-            } else if let Some(threshold) = value_to_timestamp_i64(value) {
-                simd_ops::lt_i64_packed(values, threshold)
             } else {
                 let threshold =
                     value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
