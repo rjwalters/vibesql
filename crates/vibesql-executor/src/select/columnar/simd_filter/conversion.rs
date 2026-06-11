@@ -34,6 +34,10 @@ pub fn value_to_f64(value: &SqlValue) -> Option<f64> {
         // without lossy string round-trip (fixes #2857)
         SqlValue::Numeric(n) => Some(*n),
         SqlValue::Real(n) => Some(*n as f64),
+        // Booleans are integers (0/1) in SQLite storage semantics, matching
+        // the scalar columnar comparator (`filter/comparison.rs::to_f64`) and
+        // the expression evaluator's boolean coercion (issue #5345).
+        SqlValue::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
         _ => None,
     }
 }

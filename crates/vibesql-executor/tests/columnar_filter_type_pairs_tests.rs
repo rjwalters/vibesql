@@ -266,6 +266,89 @@ fn boolean_column_supported_pairs_still_filter() {
 }
 
 // ---------------------------------------------------------------------------
+// Issue #5345: Boolean literal vs numeric column on the SIMD kernels.
+// Booleans are integers (0/1) in SQLite storage semantics, so `v = TRUE`
+// matches rows where v = 1. The SIMD path's `value_to_f64` had no Boolean
+// arm and raised ColumnarTypeMismatch at/above SIMD_COLUMNAR_THRESHOLD while
+// the scalar path (below threshold) filtered correctly.
+// ---------------------------------------------------------------------------
+
+/// Integer + double columns; `v` = id % 2 (the issue's repro shape) and
+/// `f` = v as a float, so TRUE/FALSE literals partition the rows in half.
+fn numeric_db(rows: usize) -> Database {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        "CREATE TABLE ti (id INTEGER PRIMARY KEY, v INTEGER, f DOUBLE PRECISION)",
+    );
+    let mut inserts = String::new();
+    for id in 1..=rows {
+        let v = id % 2;
+        inserts.push_str(&format!("INSERT INTO ti VALUES ({id}, {v}, {v}.0);"));
+        if id % 100 == 0 {
+            execute_sql(&mut db, &inserts);
+            inserts.clear();
+        }
+    }
+    execute_sql(&mut db, &inserts);
+    db
+}
+
+/// Boolean literals against INTEGER and DOUBLE columns must coerce to 0/1
+/// on both sides of SIMD_COLUMNAR_THRESHOLD. sqlite3-verified: `v = TRUE`
+/// returns the v = 1 rows, `v != FALSE` the v <> 0 rows, etc.
+#[test]
+fn boolean_literal_vs_numeric_column_across_threshold() {
+    for rows in [2usize, 600] {
+        let db = numeric_db(rows);
+        let odd: Vec<i64> = (1..=rows as i64).filter(|id| id % 2 == 1).collect();
+        let even: Vec<i64> = (1..=rows as i64).filter(|id| id % 2 == 0).collect();
+        let all: Vec<i64> = (1..=rows as i64).collect();
+
+        // Equal / NotEqual kernels (the issue's repro)
+        let cases: Vec<(&str, &Vec<i64>)> = vec![
+            ("v = TRUE", &odd),
+            ("v = FALSE", &even),
+            ("v != FALSE", &odd),
+            ("v != TRUE", &even),
+            // LessThan / GreaterThan / Less-or-eq / Greater-or-eq kernels
+            ("v > FALSE", &odd),
+            ("v < TRUE", &even),
+            ("v >= TRUE", &odd),
+            ("v <= FALSE", &even),
+            ("v >= FALSE", &all),
+            // f64 kernels (same value_to_f64 conversion)
+            ("f = TRUE", &odd),
+            ("f != FALSE", &odd),
+            ("f < TRUE", &even),
+        ];
+        for (pred, expected) in cases {
+            let ids = assert_where_matches_projection(&db, "ti", pred);
+            assert_eq!(
+                &ids, expected,
+                "wrong rows for boolean-literal predicate ({rows} rows): {pred}"
+            );
+        }
+    }
+}
+
+/// NULL numeric values stay excluded when compared against Boolean literals.
+#[test]
+fn boolean_literal_vs_numeric_column_null_rows_excluded() {
+    for rows in [2usize, 600] {
+        let mut db = numeric_db(rows);
+        execute_sql(&mut db, "INSERT INTO ti VALUES (100001, NULL, NULL)");
+        for pred in ["v = TRUE", "v != FALSE", "f != TRUE"] {
+            let ids = assert_where_matches_projection(&db, "ti", pred);
+            assert!(
+                !ids.contains(&100001),
+                "NULL row must not match boolean-literal predicate ({rows} rows): {pred}"
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Issue #5341: IN / NOT IN with NULL list elements (three-valued logic)
 // `x NOT IN (a, NULL)` is never TRUE; `x IN (a, NULL)` is TRUE only on match.
 // ---------------------------------------------------------------------------
