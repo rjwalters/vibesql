@@ -272,4 +272,49 @@ mod tests {
         assert_eq!(equal(&a, &c).unwrap(), SqlValue::Boolean(false));
         assert_eq!(not_equal(&a, &c).unwrap(), SqlValue::Boolean(true));
     }
+
+    fn ts(s: &str) -> SqlValue {
+        use std::str::FromStr;
+        SqlValue::Timestamp(vibesql_types::Timestamp::from_str(s).unwrap())
+    }
+
+    #[test]
+    fn test_timestamp_vs_string_equality() {
+        // SQLite date3.test 2.40: datetime(x,'auto') == '<text>' must evaluate
+        // to a boolean, not raise a type mismatch (SQLite's datetime() returns
+        // TEXT, so the comparison is valid there)
+        let timestamp = ts("2022-01-27 13:15:44");
+        let matching = SqlValue::Varchar(arcstr::ArcStr::from("2022-01-27 13:15:44"));
+        let differing = SqlValue::Varchar(arcstr::ArcStr::from("2022-01-27 13:15:45"));
+
+        assert_eq!(equal(&timestamp, &matching).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(equal(&matching, &timestamp).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(equal(&timestamp, &differing).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(not_equal(&timestamp, &differing).unwrap(), SqlValue::Boolean(true));
+
+        // Character storage class behaves like Varchar
+        let matching_char = SqlValue::Character(arcstr::ArcStr::from("2022-01-27 13:15:44"));
+        assert_eq!(equal(&timestamp, &matching_char).unwrap(), SqlValue::Boolean(true));
+    }
+
+    #[test]
+    fn test_timestamp_vs_unparseable_string_is_false_not_error() {
+        // SQLite: SELECT datetime('2022-01-27') == 'hello' → 0 (text
+        // comparison of the renderings), never an error
+        let timestamp = ts("2022-01-27 00:00:00");
+        let junk = SqlValue::Varchar(arcstr::ArcStr::from("hello"));
+        assert_eq!(equal(&timestamp, &junk).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(equal(&junk, &timestamp).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(not_equal(&timestamp, &junk).unwrap(), SqlValue::Boolean(true));
+    }
+
+    #[test]
+    fn test_time_vs_string_equality() {
+        let time = SqlValue::Time(vibesql_types::Time::new(13, 15, 44, 0).unwrap());
+        let matching = SqlValue::Varchar(arcstr::ArcStr::from("13:15:44"));
+        let differing = SqlValue::Varchar(arcstr::ArcStr::from("13:15:45"));
+        assert_eq!(equal(&time, &matching).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(equal(&matching, &time).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(equal(&time, &differing).unwrap(), SqlValue::Boolean(false));
+    }
 }

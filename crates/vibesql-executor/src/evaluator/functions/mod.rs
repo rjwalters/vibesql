@@ -97,7 +97,19 @@ pub(super) fn eval_scalar_function(
         // These return NULL if any argument is NULL, unlike LEAST/GREATEST
         "MIN" => numeric::scalar_min(args),
         "MAX" => numeric::scalar_max(args),
-        "FORMAT" => numeric::format(args),
+        // FORMAT is overloaded: SQLite's format() is an alias for printf()
+        // (format-string first argument), while MySQL's FORMAT(number,
+        // decimals) formats a number with thousand separators. Route by the
+        // type of the first argument: strings (and NULL, which printf
+        // propagates) go to printf, numerics keep the MySQL behavior.
+        "FORMAT" => match args.first() {
+            Some(
+                vibesql_types::SqlValue::Varchar(_)
+                | vibesql_types::SqlValue::Character(_)
+                | vibesql_types::SqlValue::Null,
+            ) => sqlite_compat::printf(args),
+            _ => numeric::format(args),
+        },
 
         // Vector functions
         "COSINE_DISTANCE" => vector::cosine_distance(args),

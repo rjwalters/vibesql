@@ -176,17 +176,15 @@ fn format_time_with_precision(time: chrono::NaiveTime, precision: u32) -> String
 /// Modifiers supported:
 /// - Time shifts: +N days, -N hours, +N minutes, +N seconds, +N months, +N years
 /// - Special: 'start of month', 'start of year', 'start of day', 'weekday N'
+/// - Overflow: 'floor', 'ceiling' (day-of-month overflow handling)
 /// - Timezone: 'localtime', 'utc'
 /// - Unix: 'unixepoch' (interprets numeric input as Unix timestamp)
 ///
+/// An omitted time-value defaults to 'now' (SQLite: `datetime()` is the
+/// current date and time).
+///
 /// SQLite Reference: https://www.sqlite.org/lang_datefunc.html
 pub fn datetime(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
-    if args.is_empty() {
-        return Err(ExecutorError::UnsupportedFeature(
-            "DATETIME requires at least 1 argument".to_string(),
-        ));
-    }
-
     // Resolve the time value (base + modifiers); None means SQL NULL
     let dt = match resolve_time_value(args, "DATETIME")? {
         Some(dt) => dt,
@@ -195,6 +193,47 @@ pub fn datetime(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     // Convert NaiveDateTime to SqlValue::Timestamp
     naive_datetime_to_timestamp(dt)
+}
+
+/// A resolved datetime plus the day-of-month overflow count needed by the
+/// 'floor'/'ceiling' modifiers (SQLite date.c `nFloor`).
+///
+/// `n_floor` is the number of days the *nominal* Y-M-D overflowed past the end
+/// of its month before rolling into the following month (rolling is the
+/// default / 'ceiling' behavior). It is (re)computed at exactly three sites,
+/// matching SQLite's `computeFloor` call sites: the base `YYYY-MM-DD` parse,
+/// the `±N months`/`±N years` shifts, and the `±YYYY-MM-DD[ HH:MM:SS]`
+/// date-offset modifier. The 'floor' modifier subtracts it; 'ceiling' clears
+/// it; pure-duration shifts leave it untouched.
+#[derive(Clone, Copy)]
+struct ResolvedDateTime {
+    dt: NaiveDateTime,
+    n_floor: i64,
+}
+
+impl ResolvedDateTime {
+    /// Wrap a datetime whose nominal Y-M-D did not overflow (n_floor = 0)
+    fn exact(dt: NaiveDateTime) -> Self {
+        ResolvedDateTime { dt, n_floor: 0 }
+    }
+}
+
+/// Compute the day-of-month overflow count for a *nominal* (pre-roll) Y/M/D,
+/// mirroring SQLite date.c `computeFloor`:
+/// - `D <= 28` -> 0
+/// - months with 31 days (Jan/Mar/May/Jul/Aug/Oct/Dec) -> 0
+/// - non-February months -> 1 if `D == 31`, else 0
+/// - February -> `D - 28` (non-leap year) or `D - 29` (leap year)
+fn compute_floor(year: i32, month: u32, day: i64) -> i64 {
+    if day <= 28 || matches!(month, 1 | 3 | 5 | 7 | 8 | 10 | 12) {
+        0
+    } else if month != 2 {
+        i64::from(day == 31)
+    } else if year % 4 != 0 || (year % 100 == 0 && year % 400 != 0) {
+        day - 28
+    } else {
+        day - 29
+    }
 }
 
 /// Resolve a SQLite time-value argument list (timestring + modifiers) to a `NaiveDateTime`.
@@ -238,8 +277,8 @@ pub(super) fn resolve_time_value(
     };
 
     // If base value is NULL, return NULL
-    let mut dt = match base_result {
-        Some(dt) => dt,
+    let mut rdt = match base_result {
+        Some(rdt) => rdt,
         None => return Ok(None),
     };
 
@@ -272,8 +311,8 @@ pub(super) fn resolve_time_value(
         }
 
         // Apply the modifier
-        match apply_datetime_modifier(dt, modifier_str) {
-            Some(new_dt) => dt = new_dt,
+        match apply_datetime_modifier(rdt, modifier_str) {
+            Some(new_rdt) => rdt = new_rdt,
             None => return Ok(None), // Invalid modifier returns NULL
         }
     }
@@ -281,34 +320,35 @@ pub(super) fn resolve_time_value(
     // SQLite validates the final result against the valid Julian Day range
     // (`isDate` -> `validJulianDay`): modifiers that push the date outside
     // -4713-11-24 12:00:00 .. 9999-12-31 23:59:59.999 yield NULL.
-    if !(0..=MAX_IJD_MS).contains(&naive_to_ijd_ms(&dt)) {
+    if !(0..=MAX_IJD_MS).contains(&naive_to_ijd_ms(&rdt.dt)) {
         return Ok(None);
     }
 
-    Ok(Some(dt))
+    Ok(Some(rdt.dt))
 }
 
 /// Parse the base datetime value (first argument to DATETIME/STRFTIME's time value)
 fn parse_base_datetime(
     value: &SqlValue,
     func_name: &str,
-) -> Result<Option<NaiveDateTime>, ExecutorError> {
+) -> Result<Option<ResolvedDateTime>, ExecutorError> {
     match value {
         SqlValue::Null => Ok(None),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             // Handle 'now' special case
             if s.eq_ignore_ascii_case("now") {
                 let now = Local::now();
-                Ok(Some(now.naive_local()))
+                Ok(Some(ResolvedDateTime::exact(now.naive_local())))
             } else {
-                // Parse the timestring
+                // Parse the timestring (the only base form whose nominal
+                // day-of-month can overflow, e.g. '2000-02-31')
                 Ok(parse_datetime_string_to_naive(s))
             }
         }
         SqlValue::Date(d) => {
             // Convert Date to NaiveDateTime with time 00:00:00
             let naive_date = chrono::NaiveDate::from_ymd_opt(d.year, d.month as u32, d.day as u32);
-            Ok(naive_date.map(|date| date.and_hms_opt(0, 0, 0).unwrap()))
+            Ok(naive_date.map(|date| ResolvedDateTime::exact(date.and_hms_opt(0, 0, 0).unwrap())))
         }
         SqlValue::Timestamp(ts) => {
             // Convert Timestamp to NaiveDateTime
@@ -323,17 +363,19 @@ fn parse_base_datetime(
                 ts.time.second as u32,
             );
             match (naive_date, naive_time) {
-                (Some(date), Some(time)) => Ok(Some(NaiveDateTime::new(date, time))),
+                (Some(date), Some(time)) => {
+                    Ok(Some(ResolvedDateTime::exact(NaiveDateTime::new(date, time))))
+                }
                 _ => Ok(None),
             }
         }
         // Integer or float: treat as Julian Day number by default
-        SqlValue::Integer(n) => Ok(julian_day_to_naive(*n as f64)),
-        SqlValue::Bigint(n) => Ok(julian_day_to_naive(*n as f64)),
-        SqlValue::Smallint(n) => Ok(julian_day_to_naive(*n as f64)),
-        SqlValue::Float(n) => Ok(julian_day_to_naive(*n as f64)),
+        SqlValue::Integer(n) => Ok(julian_day_to_naive(*n as f64).map(ResolvedDateTime::exact)),
+        SqlValue::Bigint(n) => Ok(julian_day_to_naive(*n as f64).map(ResolvedDateTime::exact)),
+        SqlValue::Smallint(n) => Ok(julian_day_to_naive(*n as f64).map(ResolvedDateTime::exact)),
+        SqlValue::Float(n) => Ok(julian_day_to_naive(*n as f64).map(ResolvedDateTime::exact)),
         SqlValue::Double(n) | SqlValue::Real(n) | SqlValue::Numeric(n) => {
-            Ok(julian_day_to_naive(*n))
+            Ok(julian_day_to_naive(*n).map(ResolvedDateTime::exact))
         }
         _ => Err(ExecutorError::UnsupportedFeature(format!(
             "{} requires string, date, timestamp, or numeric argument, got {:?}",
@@ -347,37 +389,40 @@ fn parse_base_datetime(
 fn parse_base_datetime_for_unixepoch(
     value: &SqlValue,
     func_name: &str,
-) -> Result<Option<NaiveDateTime>, ExecutorError> {
-    match value {
-        SqlValue::Null => Ok(None),
+) -> Result<Option<ResolvedDateTime>, ExecutorError> {
+    let dt = match value {
+        SqlValue::Null => None,
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             // Try to parse string as number for unixepoch
             if let Ok(n) = s.trim().parse::<i64>() {
-                Ok(unix_epoch_to_datetime(n))
+                unix_epoch_to_datetime(n)
             } else if let Ok(n) = s.trim().parse::<f64>() {
-                Ok(unix_epoch_seconds_f64_to_datetime(n))
+                unix_epoch_seconds_f64_to_datetime(n)
             } else {
                 // String that's not a valid number + unixepoch = NULL
-                Ok(None)
+                None
             }
         }
         SqlValue::Date(_) | SqlValue::Timestamp(_) => {
             // Date/Timestamp with unixepoch doesn't make sense - return NULL
-            Ok(None)
+            None
         }
         // Integer or float: treat as Unix timestamp (floats keep ms precision)
-        SqlValue::Integer(n) => Ok(unix_epoch_to_datetime(*n as i64)),
-        SqlValue::Bigint(n) => Ok(unix_epoch_to_datetime(*n)),
-        SqlValue::Smallint(n) => Ok(unix_epoch_to_datetime(*n as i64)),
-        SqlValue::Float(n) => Ok(unix_epoch_seconds_f64_to_datetime(*n as f64)),
+        SqlValue::Integer(n) => unix_epoch_to_datetime(*n as i64),
+        SqlValue::Bigint(n) => unix_epoch_to_datetime(*n),
+        SqlValue::Smallint(n) => unix_epoch_to_datetime(*n as i64),
+        SqlValue::Float(n) => unix_epoch_seconds_f64_to_datetime(*n as f64),
         SqlValue::Double(n) | SqlValue::Real(n) | SqlValue::Numeric(n) => {
-            Ok(unix_epoch_seconds_f64_to_datetime(*n))
+            unix_epoch_seconds_f64_to_datetime(*n)
         }
-        _ => Err(ExecutorError::UnsupportedFeature(format!(
-            "{} requires string, date, timestamp, or numeric argument, got {:?}",
-            func_name, value
-        ))),
-    }
+        _ => {
+            return Err(ExecutorError::UnsupportedFeature(format!(
+                "{} requires string, date, timestamp, or numeric argument, got {:?}",
+                func_name, value
+            )))
+        }
+    };
+    Ok(dt.map(ResolvedDateTime::exact))
 }
 
 /// Extract the numeric interpretation of a time value, if it has one.
@@ -406,14 +451,16 @@ fn numeric_time_value(value: &SqlValue) -> Option<f64> {
 fn parse_base_datetime_auto(
     value: &SqlValue,
     func_name: &str,
-) -> Result<Option<NaiveDateTime>, ExecutorError> {
+) -> Result<Option<ResolvedDateTime>, ExecutorError> {
     if matches!(value, SqlValue::Null) {
         return Ok(None);
     }
     match numeric_time_value(value) {
-        Some(n) if (0.0..5_373_484.5).contains(&n) => Ok(julian_day_to_naive(n)),
+        Some(n) if (0.0..5_373_484.5).contains(&n) => {
+            Ok(julian_day_to_naive(n).map(ResolvedDateTime::exact))
+        }
         Some(n) if (-210_866_760_000.0..=253_402_300_799.0).contains(&n) => {
-            Ok(unix_epoch_seconds_f64_to_datetime(n))
+            Ok(unix_epoch_seconds_f64_to_datetime(n).map(ResolvedDateTime::exact))
         }
         Some(_) => Ok(None), // Out of range for both interpretations
         None => parse_base_datetime(value, func_name), // No-op for text values
@@ -424,37 +471,49 @@ fn parse_base_datetime_auto(
 ///
 /// SQLite semantics: only valid when the time value is numeric (the DDDDDDDDDD
 /// format) and within the valid Julian Day range; all other uses return NULL.
-fn parse_base_datetime_julianday(value: &SqlValue) -> Option<NaiveDateTime> {
+fn parse_base_datetime_julianday(value: &SqlValue) -> Option<ResolvedDateTime> {
     match numeric_time_value(value) {
-        Some(n) if (0.0..5_373_484.5).contains(&n) => julian_day_to_naive(n),
+        Some(n) if (0.0..5_373_484.5).contains(&n) => {
+            julian_day_to_naive(n).map(ResolvedDateTime::exact)
+        }
         _ => None,
     }
 }
 
-/// Apply a single modifier to a NaiveDateTime
+/// Apply a single modifier to a resolved datetime
 /// Returns None if the modifier is invalid (SQLite returns NULL for invalid modifiers)
-fn apply_datetime_modifier(dt: NaiveDateTime, modifier: &str) -> Option<NaiveDateTime> {
+fn apply_datetime_modifier(rdt: ResolvedDateTime, modifier: &str) -> Option<ResolvedDateTime> {
     let modifier = modifier.trim();
     let lower = modifier.to_lowercase();
+    let dt = rdt.dt;
+
+    // Handle 'floor' / 'ceiling' (SQLite 3.46+): resolve a pending
+    // day-of-month overflow. Rolling forward is the default, so 'ceiling'
+    // just clears the pending count; 'floor' rolls back to the last day of
+    // the nominal month by subtracting the overflow days.
+    if lower == "floor" {
+        return Some(ResolvedDateTime::exact(dt - Duration::days(rdt.n_floor)));
+    }
+    if lower == "ceiling" {
+        return Some(ResolvedDateTime::exact(dt));
+    }
 
     // Handle "start of" modifiers
     if lower.starts_with("start of ") {
         let unit = &lower[9..].trim();
-        return match *unit {
+        let new_dt = match *unit {
             "month" => {
                 let date = chrono::NaiveDate::from_ymd_opt(dt.year(), dt.month(), 1)?;
-                Some(date.and_hms_opt(0, 0, 0)?)
+                date.and_hms_opt(0, 0, 0)?
             }
             "year" => {
                 let date = chrono::NaiveDate::from_ymd_opt(dt.year(), 1, 1)?;
-                Some(date.and_hms_opt(0, 0, 0)?)
+                date.and_hms_opt(0, 0, 0)?
             }
-            "day" => {
-                let date = dt.date();
-                Some(date.and_hms_opt(0, 0, 0)?)
-            }
-            _ => None, // Invalid "start of" unit
+            "day" => dt.date().and_hms_opt(0, 0, 0)?,
+            _ => return None, // Invalid "start of" unit
         };
+        return Some(ResolvedDateTime { dt: new_dt, n_floor: rdt.n_floor });
     }
 
     // Handle incomplete "start of" (returns NULL)
@@ -469,7 +528,8 @@ fn apply_datetime_modifier(dt: NaiveDateTime, modifier: &str) -> Option<NaiveDat
         if rest.len() == 1 {
             if let Ok(weekday_num) = rest.parse::<u32>() {
                 if weekday_num <= 6 {
-                    return apply_weekday_modifier(dt, weekday_num);
+                    return apply_weekday_modifier(dt, weekday_num)
+                        .map(|new_dt| ResolvedDateTime { dt: new_dt, n_floor: rdt.n_floor });
                 }
             }
         }
@@ -480,23 +540,25 @@ fn apply_datetime_modifier(dt: NaiveDateTime, modifier: &str) -> Option<NaiveDat
     if lower == "localtime" || lower == "utc" {
         // For now, these are no-ops since we work with naive datetimes
         // A full implementation would need timezone-aware handling
-        return Some(dt);
+        return Some(rdt);
     }
 
     // Handle (+|-)YYYY-MM-DD[ HH:MM[:SS[.FFF]]] modifiers (the inverse of
     // timediff(); SQLite 3.43+). Must be checked before generic time shifts.
+    // This is one of the sites that recomputes n_floor.
     if let Some(result) = try_apply_date_offset_modifier(dt, modifier) {
         return result;
     }
 
     // Handle (+|-)HH:MM[:SS[.FFF]] modifiers (no sign means plus). Must be
-    // checked before generic time shifts.
+    // checked before generic time shifts. Pure-duration shift: n_floor is
+    // preserved.
     if let Some(result) = try_apply_hh_mm_modifier(dt, modifier) {
-        return result;
+        return result.map(|new_dt| ResolvedDateTime { dt: new_dt, n_floor: rdt.n_floor });
     }
 
     // Handle time shift modifiers: +N unit, -N unit, N unit
-    parse_and_apply_time_shift(dt, modifier)
+    parse_and_apply_time_shift(rdt, modifier)
 }
 
 /// Detect and apply a `[+-]HH:MM[:SS[.FFF]]` modifier (SQLite date.c
@@ -537,7 +599,7 @@ fn try_apply_hh_mm_modifier(dt: NaiveDateTime, modifier: &str) -> Option<Option<
 fn try_apply_date_offset_modifier(
     dt: NaiveDateTime,
     modifier: &str,
-) -> Option<Option<NaiveDateTime>> {
+) -> Option<Option<ResolvedDateTime>> {
     let sign: i64 = match modifier.as_bytes().first() {
         Some(b'+') => 1,
         Some(b'-') => -1,
@@ -554,12 +616,16 @@ fn try_apply_date_offset_modifier(
 
 /// Apply a validated-prefix `YYYY-MM-DD[ HH:MM[:SS[.FFF]]]` offset to `dt`.
 /// Any malformation makes the whole modifier invalid (returns None -> NULL).
+///
+/// Recomputes `n_floor` from the nominal year/month/day after the year+month
+/// shift but before the day/time offsets are added (matching SQLite's
+/// `computeFloor` call in the date-offset modifier).
 fn apply_date_offset_modifier(
     dt: NaiveDateTime,
     sign: i64,
     rest: &str,
     year_digits: usize,
-) -> Option<NaiveDateTime> {
+) -> Option<ResolvedDateTime> {
     let years: i64 = rest[..year_digits].parse().ok()?;
     let after = &rest[year_digits + 1..];
     let ab = after.as_bytes();
@@ -597,10 +663,14 @@ fn apply_date_offset_modifier(
         dt.year() as i64 * 12 + (dt.month() as i64 - 1) + sign * (years * 12 + months);
     let new_year = i32::try_from(total_months.div_euclid(12)).ok()?;
     let new_month = total_months.rem_euclid(12) as u32 + 1;
+    let n_floor = compute_floor(new_year, new_month, dt.day() as i64);
     let base = chrono::NaiveDate::from_ymd_opt(new_year, new_month, 1)?.and_time(dt.time())
         + Duration::days(dt.day() as i64 - 1);
 
-    Some(base + Duration::days(sign * days) + Duration::milliseconds(sign * time_offset_ms))
+    Some(ResolvedDateTime {
+        dt: base + Duration::days(sign * days) + Duration::milliseconds(sign * time_offset_ms),
+        n_floor,
+    })
 }
 
 /// Apply weekday modifier - advances to the next occurrence of the specified weekday
@@ -643,8 +713,13 @@ fn weekday_to_num(wd: Weekday) -> u32 {
 }
 
 /// Parse and apply a time shift modifier like "+1 day", "-2 hours", "3 months"
-fn parse_and_apply_time_shift(dt: NaiveDateTime, modifier: &str) -> Option<NaiveDateTime> {
+///
+/// Pure-duration shifts (days/hours/minutes/seconds) preserve the incoming
+/// `n_floor`; month/year shifts recompute it (SQLite's `computeFloor` call in
+/// the month/year transform cases).
+fn parse_and_apply_time_shift(rdt: ResolvedDateTime, modifier: &str) -> Option<ResolvedDateTime> {
     let modifier = modifier.trim();
+    let dt = rdt.dt;
 
     // Parse the amount and unit
     // Format: [+/-]N[.N] unit[s]
@@ -663,24 +738,34 @@ fn parse_and_apply_time_shift(dt: NaiveDateTime, modifier: &str) -> Option<Naive
         (value + rounder) as i64
     };
 
+    let duration_shift = |ms: i64| -> Option<ResolvedDateTime> {
+        Some(ResolvedDateTime { dt: dt + Duration::milliseconds(ms), n_floor: rdt.n_floor })
+    };
+
     match unit_normalized {
-        "day" => Some(dt + Duration::milliseconds(to_ms(amount * 86_400_000.0))),
-        "hour" => Some(dt + Duration::milliseconds(to_ms(amount * 3_600_000.0))),
-        "minute" => Some(dt + Duration::milliseconds(to_ms(amount * 60_000.0))),
-        "second" => Some(dt + Duration::milliseconds(to_ms(amount * 1000.0))),
+        "day" => duration_shift(to_ms(amount * 86_400_000.0)),
+        "hour" => duration_shift(to_ms(amount * 3_600_000.0)),
+        "minute" => duration_shift(to_ms(amount * 60_000.0)),
+        "second" => duration_shift(to_ms(amount * 1000.0)),
         "month" => {
             // Whole months shift the calendar; the fractional residue is added
             // as 30-day months in milliseconds (SQLite aXformType rXform)
             let whole_months = amount.trunc() as i32;
-            let new_dt = add_months(dt, whole_months)?;
-            Some(new_dt + Duration::milliseconds(to_ms(amount.fract() * 2_592_000_000.0)))
+            let new_rdt = add_months(dt, whole_months)?;
+            Some(ResolvedDateTime {
+                dt: new_rdt.dt + Duration::milliseconds(to_ms(amount.fract() * 2_592_000_000.0)),
+                n_floor: new_rdt.n_floor,
+            })
         }
         "year" => {
             // Whole years shift the calendar; the fractional residue is added
             // as 365-day years in milliseconds (SQLite aXformType rXform)
             let whole_years = amount.trunc() as i32;
-            let new_dt = add_months(dt, whole_years * 12)?;
-            Some(new_dt + Duration::milliseconds(to_ms(amount.fract() * 31_536_000_000.0)))
+            let new_rdt = add_months(dt, whole_years * 12)?;
+            Some(ResolvedDateTime {
+                dt: new_rdt.dt + Duration::milliseconds(to_ms(amount.fract() * 31_536_000_000.0)),
+                n_floor: new_rdt.n_floor,
+            })
         }
         _ => None, // Unknown unit
     }
@@ -721,16 +806,19 @@ fn split_amount_and_unit(s: &str) -> Option<(&str, &str)> {
 ///
 /// Matches SQLite's `computeJD` normalization: when the day-of-month overflows
 /// the target month (e.g. Jan 31 + 1 month), the date rolls into the following
-/// month (2000-01-31 '+1 month' -> 2000-03-02) rather than clamping.
-fn add_months(dt: NaiveDateTime, months: i32) -> Option<NaiveDateTime> {
+/// month (2000-01-31 '+1 month' -> 2000-03-02) rather than clamping. The
+/// overflow-day count is recorded in `n_floor` so a subsequent 'floor'
+/// modifier can clamp to the last day of the nominal month instead.
+fn add_months(dt: NaiveDateTime, months: i32) -> Option<ResolvedDateTime> {
     let total_months = dt.year() as i64 * 12 + dt.month() as i64 - 1 + months as i64;
     let new_year = i32::try_from(total_months.div_euclid(12)).ok()?;
     let new_month = total_months.rem_euclid(12) as u32 + 1;
+    let n_floor = compute_floor(new_year, new_month, dt.day() as i64);
 
     // Day-of-month overflow rolls into the next month (SQLite normalization)
     let new_date = chrono::NaiveDate::from_ymd_opt(new_year, new_month, 1)?
         + Duration::days(dt.day() as i64 - 1);
-    Some(NaiveDateTime::new(new_date, dt.time()))
+    Some(ResolvedDateTime { dt: NaiveDateTime::new(new_date, dt.time()), n_floor })
 }
 
 /// Convert Unix epoch timestamp to NaiveDateTime
@@ -788,31 +876,34 @@ fn naive_datetime_to_timestamp(dt: NaiveDateTime) -> Result<SqlValue, ExecutorEr
 /// `HH:MM[:SS[.FFF...]]` defaults the date to 2000-01-01 (SQLite
 /// `parseTimeOnly`). A plain numeric string is interpreted as a Julian Day
 /// number.
-fn parse_datetime_string_to_naive(s: &str) -> Option<NaiveDateTime> {
+fn parse_datetime_string_to_naive(s: &str) -> Option<ResolvedDateTime> {
     let s = s.trim();
 
-    if let Some(dt) = parse_yyyy_mm_dd(s) {
-        return Some(dt);
+    if let Some(rdt) = parse_yyyy_mm_dd(s) {
+        return Some(rdt);
     }
 
     // SQLite: time-only values `HH:MM[:SS[.FFF...]]` default the date to
     // 2000-01-01 (parseTimeOnly in date.c)
     if let Some(time_ms) = parse_hh_mm_ss_tz_ms(s) {
         let midnight = chrono::NaiveDate::from_ymd_opt(2000, 1, 1)?.and_hms_opt(0, 0, 0)?;
-        return Some(midnight + Duration::milliseconds(time_ms));
+        return Some(ResolvedDateTime::exact(midnight + Duration::milliseconds(time_ms)));
     }
 
     // SQLite: a string that is a plain numeric literal is interpreted as a
     // Julian Day number, e.g. datetime('2451545.0') = '2000-01-01 12:00:00'
     if let Ok(jd) = s.parse::<f64>() {
-        return julian_day_to_naive(jd);
+        return julian_day_to_naive(jd).map(ResolvedDateTime::exact);
     }
 
     None
 }
 
 /// Strict `[-]YYYY-MM-DD[<sep>HH:MM[:SS[.FFF...]]]` parser (SQLite parseYyyyMmDd).
-fn parse_yyyy_mm_dd(s: &str) -> Option<NaiveDateTime> {
+///
+/// Records the day-of-month overflow count in `n_floor` (e.g. '2000-02-31'
+/// rolls to 2000-03-02 with `n_floor` = 2) for the 'floor'/'ceiling' modifiers.
+fn parse_yyyy_mm_dd(s: &str) -> Option<ResolvedDateTime> {
     // Optional leading '-' for negative (astronomical) years
     let (negative_year, rest) = match s.strip_prefix('-') {
         Some(r) => (true, r),
@@ -840,18 +931,23 @@ fn parse_yyyy_mm_dd(s: &str) -> Option<NaiveDateTime> {
         return None;
     }
     // Day-of-month overflow rolls into the next month (SQLite computeJD
-    // normalization, e.g. 2003-02-31 -> 2003-03-03)
+    // normalization, e.g. 2003-02-31 -> 2003-03-03); the overflow count is
+    // tracked so the 'floor' modifier can clamp instead
+    let n_floor = compute_floor(year, month, day);
     let date = chrono::NaiveDate::from_ymd_opt(year, month, 1)? + Duration::days(day - 1);
 
     // Optional time part. SQLite skips any run of whitespace and/or 'T'
     // characters between the date and the time (including none at all).
     let tail = rest[10..].trim_start_matches(|c: char| c.is_ascii_whitespace() || c == 'T');
     if tail.is_empty() {
-        return date.and_hms_opt(0, 0, 0);
+        return Some(ResolvedDateTime { dt: date.and_hms_opt(0, 0, 0)?, n_floor });
     }
 
     let time_ms = parse_hh_mm_ss_tz_ms(tail)?;
-    Some(date.and_hms_opt(0, 0, 0)? + Duration::milliseconds(time_ms))
+    Some(ResolvedDateTime {
+        dt: date.and_hms_opt(0, 0, 0)? + Duration::milliseconds(time_ms),
+        n_floor,
+    })
 }
 
 /// Strict `HH:MM[:SS[.FFF...]]` parser returning milliseconds since midnight

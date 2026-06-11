@@ -60,6 +60,20 @@ mod tests {
     }
 
     #[test]
+    fn test_timestamp_vs_string_ordering() {
+        // Timestamp-vs-string ordering parses the string as a timestamp
+        // (date-only strings get midnight, matching Timestamp::from_str)
+        let timestamp = SqlValue::Timestamp("2022-01-27 13:15:44".parse().unwrap());
+        let later = SqlValue::Varchar(arcstr::ArcStr::from("2022-01-27 13:15:45"));
+        let earlier = SqlValue::Varchar(arcstr::ArcStr::from("2022-01-27"));
+
+        assert_eq!(less_than(&timestamp, &later).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(greater_than(&timestamp, &earlier).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(less_than(&earlier, &timestamp).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(greater_than_or_equal(&later, &timestamp).unwrap(), SqlValue::Boolean(true));
+    }
+
+    #[test]
     fn test_boolean_less_than_integer() {
         // FALSE (0) < 5 = true
         assert_eq!(
