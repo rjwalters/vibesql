@@ -453,7 +453,11 @@ where
                     applied_conditions.insert(idx);
                 } else if column_to_table.is_empty()
                     && joined_tables.len() == 1
-                    && referenced_tables.is_empty()
+                    // Marker-only sets are treated like empty sets: when
+                    // column_to_table is empty (CTE results), unqualified columns
+                    // insert OUTER_REF_MARKER instead of being silently skipped,
+                    // but the CTE fallback should still apply.
+                    && referenced_tables.iter().all(|t| t == graph::OUTER_REF_MARKER)
                 {
                     // CTE fallback: When column_to_table is empty (CTE results), include condition
                     // for 2-table joins since it was already extracted as a WHERE equijoin.

@@ -108,10 +108,19 @@ pub(super) fn extract_conditions_with_types(
     }
 }
 
+/// Marker inserted into the referenced-tables set when an unqualified column
+/// cannot be resolved to any local FROM table. Such columns are correlated
+/// references to an outer query (or unknown columns that will error later);
+/// the marker prevents the containing predicate from being classified as
+/// table-local and pushed down to a single-table scan, where the outer-query
+/// context needed to resolve the column is unavailable (fix for select1-18.1).
+pub(super) const OUTER_REF_MARKER: &str = "__outer_ref__";
+
 /// Extract all table names referenced in an expression using schema-based column resolution
 ///
 /// This method uses actual database schema to resolve unqualified columns.
-/// No heuristic fallbacks are used - unresolved columns are simply skipped.
+/// Unqualified columns that cannot be resolved insert [`OUTER_REF_MARKER`]
+/// instead of a table name (see its documentation).
 ///
 /// # Parameters
 /// - `expr`: The expression to analyze
@@ -139,6 +148,11 @@ pub(super) fn extract_referenced_tables_with_schema(
                 column_to_table,
             ) {
                 output.insert(table.to_lowercase());
+            } else {
+                // Correlated outer reference: not resolvable from local tables,
+                // so the predicate must be evaluated post-join where the merged
+                // outer context is available.
+                output.insert(OUTER_REF_MARKER.to_string());
             }
         }
         Expression::BinaryOp { left, right, .. } => {
@@ -216,7 +230,17 @@ pub(super) fn extract_referenced_tables_with_schema(
         }
         Expression::In { expr, .. } => {
             extract_referenced_tables_with_schema(expr, output, available_tables, column_to_table);
-            // Note: We don't traverse into subqueries as they reference different tables
+            // The IN subquery may be correlated with outer tables (e.g.
+            // `x IN (SELECT x FROM t2 WHERE x > c)` where `c` belongs to another
+            // table in the same FROM). If the predicate is pushed down to a
+            // single-table scan, those correlated references go out of scope and
+            // column resolution fails. Insert the same post-join marker used for
+            // ScalarSubquery/Exists so predicates containing IN subqueries are
+            // treated as complex and evaluated after the join (fix for
+            // select1-18.1). Uncorrelated IN subqueries that can be converted to
+            // semi-joins are rewritten earlier by optimizer/subquery_to_join and
+            // never reach this point as Expression::In.
+            output.insert("__subquery__".to_string());
         }
         Expression::Position { substring, string, .. } => {
             extract_referenced_tables_with_schema(

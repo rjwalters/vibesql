@@ -90,6 +90,19 @@ pub(super) fn try_convert_exists_to_join(
             )
         }
         Some(from_clause @ FromClause::Join { .. }) => {
+            // Bail out if the subquery's FROM clause itself contains correlated
+            // derived tables (e.g. `... FROM (SELECT x IN (c)), t1 ...` where x/c
+            // reference the outer query). The complex transform hoists the FROM
+            // into a standalone derived table executed without outer context,
+            // which would sever that correlation (fix for select1-18.1). Fall
+            // back to row-by-row EXISTS evaluation, which propagates the outer
+            // context correctly.
+            if crate::optimizer::subquery_rewrite::correlation::from_clause_has_external_refs(
+                from_clause,
+                subquery,
+            ) {
+                return None;
+            }
             // Multi-table subquery (explicit or implicit joins): wrap as derived table
             try_convert_complex_exists_to_join(from, subquery, negated, from_clause, where_clause)
         }

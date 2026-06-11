@@ -77,6 +77,11 @@ fn derive_column_name_from_expr(expr: &vibesql_ast::Expression) -> String {
             vibesql_types::SqlValue::Null => "NULL".to_string(),
         },
         vibesql_ast::Expression::Wildcard => "*".to_string(),
+        // COLLATE is a transparent wrapper for naming purposes: SQLite's
+        // sqlite3ColumnsFromExprList() skips TK_COLLATE when deriving result-column
+        // names, so `SELECT x COLLATE rtrim` in a derived table yields a column
+        // named `x`. Recurse to handle nested COLLATE wrappers too.
+        vibesql_ast::Expression::Collate { expr, .. } => derive_column_name_from_expr(expr),
         _ => "?column?".to_string(),
     }
 }

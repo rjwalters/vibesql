@@ -10,6 +10,51 @@ use super::{
     transformations::{add_distinct_to_in_subquery, rewrite_exists_to_in, rewrite_in_to_exists},
 };
 
+/// Check whether an expression contains any unqualified column references.
+///
+/// Used to decide whether the IN → EXISTS rewrite can safely qualify the
+/// left-hand expression: with multiple outer tables, unqualified refs cannot
+/// be attributed to the right table without schema information.
+fn has_unqualified_column_refs(expr: &Expression) -> bool {
+    match expr {
+        Expression::ColumnRef(col_id) => col_id.table_canonical().is_none(),
+        Expression::BinaryOp { left, right, .. } => {
+            has_unqualified_column_refs(left) || has_unqualified_column_refs(right)
+        }
+        Expression::UnaryOp { expr: inner, .. }
+        | Expression::IsNull { expr: inner, .. }
+        | Expression::Cast { expr: inner, .. }
+        | Expression::Collate { expr: inner, .. } => has_unqualified_column_refs(inner),
+        Expression::Between { expr: inner, low, high, .. } => {
+            has_unqualified_column_refs(inner)
+                || has_unqualified_column_refs(low)
+                || has_unqualified_column_refs(high)
+        }
+        Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
+            args.iter().any(has_unqualified_column_refs)
+        }
+        Expression::RowValueConstructor(children) => {
+            children.iter().any(has_unqualified_column_refs)
+        }
+        Expression::InList { expr: inner, values, .. } => {
+            has_unqualified_column_refs(inner) || values.iter().any(has_unqualified_column_refs)
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|e| has_unqualified_column_refs(e))
+                || when_clauses.iter().any(|clause| {
+                    clause.conditions.iter().any(has_unqualified_column_refs)
+                        || has_unqualified_column_refs(&clause.result)
+                })
+                || else_result.as_ref().is_some_and(|e| has_unqualified_column_refs(e))
+        }
+        // Subqueries resolve their own scopes; literals and other leaf
+        // expressions contain no column refs. Conservatively report `true`
+        // only for the traversed forms above; qualify_outer_column_refs leaves
+        // other forms unchanged anyway.
+        _ => false,
+    }
+}
+
 /// Rewrite an expression to optimize IN subqueries
 ///
 /// This function recursively traverses the expression tree and applies
@@ -52,12 +97,27 @@ pub(super) fn rewrite_expression_with_context(
                 Some(SelectItem::Expression { expr: Expression::ColumnRef(_), .. })
             );
 
+            // The IN → EXISTS rewrite moves the left-hand expression into the
+            // EXISTS subquery's WHERE clause, so unqualified column refs in it
+            // must be qualified with the outer table they belong to (issue
+            // #4880). rewrite_in_to_exists qualifies them with the FIRST outer
+            // table, which is only correct when there is exactly one outer
+            // table. With multiple outer tables (e.g. `SELECT ... FROM t1, t2
+            // WHERE x IN (...)` where x belongs to t2), blind qualification
+            // fabricates a non-existent column like t1.x. Without schema
+            // information we cannot pick the right table, so skip the rewrite
+            // and let row-by-row IN evaluation handle correlation (fix for
+            // select1-18.1). Note: an aliased single table contributes two
+            // entries (alias + name) and is treated conservatively; the
+            // DISTINCT fallback below remains correct, just less optimized.
+            let can_qualify_lhs = outer_tables.len() <= 1 || !has_unqualified_column_refs(in_expr);
+
             // Check if subquery is correlated
-            if is_correlated(subquery) && is_simple_column {
+            if is_correlated(subquery) && is_simple_column && can_qualify_lhs {
                 // Correlated subquery with simple column: Rewrite IN → EXISTS
                 // This allows database to stop after first match and better leverage indexes
                 rewrite_in_to_exists(in_expr, subquery, *negated, outer_tables)
-            } else if is_correlated(subquery) && !is_simple_column {
+            } else if is_correlated(subquery) {
                 // Correlated subquery with complex expression: skip IN → EXISTS
                 // Complex expressions can't be safely used in correlation predicates
                 // Fall back to DISTINCT optimization only
