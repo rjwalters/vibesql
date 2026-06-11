@@ -61,11 +61,14 @@ impl Partition {
 ///
 /// Partitions are ordered by their key values (using BTreeMap with SqlValue keys
 /// for proper numeric/string ordering), matching SQLite's behavior.
+///
+/// Returns an error if evaluating any PARTITION BY expression fails. Expressions
+/// that legitimately evaluate to NULL still group together under the NULL key.
 pub fn partition_rows<F>(
     rows: Vec<Row>,
     partition_by: &Option<Vec<Expression>>,
     eval_fn: F,
-) -> Vec<Partition>
+) -> Result<Vec<Partition>, String>
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
 {
@@ -76,22 +79,25 @@ where
 ///
 /// `collations` maps each PARTITION BY expression index to its resolved collation.
 /// For NOCASE collation, partition keys are compared case-insensitively.
+///
+/// Returns an error if evaluating any PARTITION BY expression fails. Expressions
+/// that legitimately evaluate to NULL still group together under the NULL key.
 pub fn partition_rows_with_collations<F>(
     rows: Vec<Row>,
     partition_by: &Option<Vec<Expression>>,
     collations: &[Option<String>],
     eval_fn: F,
-) -> Vec<Partition>
+) -> Result<Vec<Partition>, String>
 where
     F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
 {
     // If no PARTITION BY, return all rows in single partition
     let Some(partition_exprs) = partition_by else {
-        return vec![Partition::new(rows)];
+        return Ok(vec![Partition::new(rows)]);
     };
 
     if partition_exprs.is_empty() {
-        return vec![Partition::new(rows)];
+        return Ok(vec![Partition::new(rows)]);
     }
 
     // Group rows by partition key values
@@ -105,7 +111,10 @@ where
         let mut partition_key = Vec::new();
 
         for (i, expr) in partition_exprs.iter().enumerate() {
-            let value = eval_fn(expr, &row).unwrap_or(SqlValue::Null);
+            // Propagate evaluation errors instead of collapsing them into a NULL
+            // partition key, which would silently merge all affected rows into
+            // one partition and produce wrong window results.
+            let value = eval_fn(expr, &row)?;
             // Apply collation to partition key for case-insensitive grouping
             let collation = collations.get(i).and_then(|c| c.as_deref());
             if let Some(coll) = collation {
@@ -130,11 +139,11 @@ where
     }
 
     // Convert BTreeMap to Vec<Partition>, preserving sorted partition key order
-    partitions_map
+    Ok(partitions_map
         .into_values()
         .map(|rows_with_indices| {
             let (indices, rows): (Vec<_>, Vec<_>) = rows_with_indices.into_iter().unzip();
             Partition::with_indices(rows, indices)
         })
-        .collect()
+        .collect())
 }

@@ -590,7 +590,8 @@ pub(super) fn apply_window_functions_to_aggregates(
             evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
         };
 
-        let mut partitions = partition_rows(rows.clone(), &partition_exprs, eval_fn);
+        let mut partitions = partition_rows(rows.clone(), &partition_exprs, eval_fn)
+            .map_err(ExecutorError::SqliteCompatError)?;
 
         // Sort each partition
         let order_by_items: Option<Vec<vibesql_ast::OrderByItem>> =

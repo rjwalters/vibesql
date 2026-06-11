@@ -91,7 +91,8 @@ pub(super) fn evaluate_single_window_function(
         &win_func.window_spec.partition_by,
         &partition_collations,
         eval_fn,
-    );
+    )
+    .map_err(ExecutorError::SqliteCompatError)?;
 
     // Build column name map for frame calculations (RANGE/GROUPS need to resolve named columns)
     let column_map = evaluator.get_schema().build_column_name_map();

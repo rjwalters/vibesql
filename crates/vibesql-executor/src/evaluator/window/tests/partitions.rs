@@ -10,7 +10,7 @@ fn make_test_rows(values: Vec<i64>) -> Vec<Row> {
 #[test]
 fn test_partition_rows_no_partition_by() {
     let rows = make_test_rows(vec![1, 2, 3]);
-    let partitions = partition_rows(rows, &None, evaluate_expression);
+    let partitions = partition_rows(rows, &None, evaluate_expression).unwrap();
 
     assert_eq!(partitions.len(), 1);
     assert_eq!(partitions[0].len(), 3);
@@ -19,10 +19,59 @@ fn test_partition_rows_no_partition_by() {
 #[test]
 fn test_partition_rows_empty_partition_by() {
     let rows = make_test_rows(vec![1, 2, 3]);
-    let partitions = partition_rows(rows, &Some(vec![]), evaluate_expression);
+    let partitions = partition_rows(rows, &Some(vec![]), evaluate_expression).unwrap();
 
     assert_eq!(partitions.len(), 1);
     assert_eq!(partitions[0].len(), 3);
+}
+
+// ===== Error propagation from PARTITION BY evaluation (#5301) =====
+
+fn partition_by_column(index: &str) -> Option<Vec<vibesql_ast::Expression>> {
+    Some(vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+        index, false,
+    ))])
+}
+
+/// An evaluation error in a PARTITION BY expression must surface as Err,
+/// not silently become a NULL partition key (which would collapse all
+/// affected rows into one partition and produce wrong window results).
+#[test]
+fn test_partition_rows_propagates_eval_errors() {
+    let rows = make_test_rows(vec![1, 2, 3]);
+    let failing_eval = |_expr: &vibesql_ast::Expression, row: &Row| -> Result<SqlValue, String> {
+        match row.values[0] {
+            SqlValue::Integer(2) => Err("ColumnNotFound: simulated failure".to_string()),
+            ref v => Ok(v.clone()),
+        }
+    };
+
+    let result = partition_rows(rows, &partition_by_column("0"), failing_eval);
+
+    let err = result.expect_err("evaluation error must propagate, not become a NULL key");
+    assert!(err.contains("ColumnNotFound"), "error message should be preserved, got: {err}");
+}
+
+/// Partition expressions that legitimately evaluate to NULL (Ok(Null), not Err)
+/// must keep their previous behavior: all NULL-keyed rows group together.
+#[test]
+fn test_partition_rows_null_keys_still_group_together() {
+    let rows = vec![
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Null]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(10)]),
+        Row::new(vec![SqlValue::Integer(4), SqlValue::Null]),
+    ];
+
+    let partitions = partition_rows(rows, &partition_by_column("1"), evaluate_expression).unwrap();
+
+    assert_eq!(partitions.len(), 2, "expected one NULL partition and one Integer(10) partition");
+    for partition in &partitions {
+        assert_eq!(partition.len(), 2);
+        // All rows within a partition share the same key value
+        let first_key = partition.rows[0].values[1].clone();
+        assert!(partition.rows.iter().all(|r| r.values[1] == first_key));
+    }
 }
 
 // ===== ORDER BY NULLS FIRST/LAST in partition sort (#5191) =====
