@@ -704,12 +704,21 @@ fn naive_datetime_to_timestamp(dt: NaiveDateTime) -> Result<SqlValue, ExecutorEr
 /// `[-]YYYY-MM-DD[<space|T>HH:MM[:SS[.FFF...]]]` where every field is exactly
 /// the documented number of digits. An out-of-range day-of-month (e.g.
 /// `2003-02-31`) normalizes into the following month, matching SQLite's
-/// `computeJD`. A plain numeric string is interpreted as a Julian Day number.
+/// `computeJD`. A time-only value `HH:MM[:SS[.FFF...]]` defaults the date to
+/// 2000-01-01 (SQLite `parseTimeOnly`). A plain numeric string is interpreted
+/// as a Julian Day number.
 fn parse_datetime_string_to_naive(s: &str) -> Option<NaiveDateTime> {
     let s = s.trim();
 
     if let Some(dt) = parse_yyyy_mm_dd(s) {
         return Some(dt);
+    }
+
+    // SQLite: time-only values `HH:MM[:SS[.FFF...]]` default the date to
+    // 2000-01-01 (parseTimeOnly in date.c)
+    if let Some(time_ms) = parse_hh_mm_ss_ms(s) {
+        let midnight = chrono::NaiveDate::from_ymd_opt(2000, 1, 1)?.and_hms_opt(0, 0, 0)?;
+        return Some(midnight + Duration::milliseconds(time_ms));
     }
 
     // SQLite: a string that is a plain numeric literal is interpreted as a

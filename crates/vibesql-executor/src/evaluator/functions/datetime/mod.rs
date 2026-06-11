@@ -20,6 +20,7 @@
 
 mod arithmetic;
 mod current;
+mod date_time;
 mod extract;
 mod sqlite_datefuncs;
 mod strftime;
@@ -29,6 +30,7 @@ mod strftime;
 pub(crate) use arithmetic::date_add_subtract;
 pub(super) use arithmetic::{age, date_add, date_sub, datediff, extract};
 pub(super) use current::{current_date, current_time, current_timestamp, datetime};
+pub(super) use date_time::{date, time};
 pub(super) use extract::{day, hour, minute, month, second, year};
 pub(super) use sqlite_datefuncs::{julianday, timediff, unixepoch};
 pub(super) use strftime::strftime;

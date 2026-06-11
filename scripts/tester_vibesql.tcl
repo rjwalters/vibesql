@@ -3263,26 +3263,8 @@ array set vibesql_skip_tests {
 
     triggerupfrom-2.3 "Cascades from auto-skipped test 2.2. CREATE TEMP TRIGGER now parses (#5218), but 2.2 references aux.t3 and is auto-skipped by the ATTACH/aux regex (VibeSQL has no ATTACH/multi-database support), so the rows 2.2 inserts (10 y {}, 20 y {}) never exist and 2.3's expected output cannot match. The UPDATE…FROM trigger logic in 2.3 itself works correctly when run in isolation (verified during #5192 builder pass)."
 
-    expr-8.4 "time('now') parsed as TIME typed-literal keyword, not a function call (#5307)"
-    expr-8.5 "date('now') parsed as DATE typed-literal keyword, not a function call (#5307)"
-
-    date-2.3 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-2.4 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-2.5 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-2.6 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-2.7 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-2.8 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-2.9 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-2.10 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-2.11 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-2.16 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
     date-2.40 "zero-argument datetime() rejected (SQLite treats it as 'now') (#5309)"
     date-2.60 "invalid-date rollover normalization (2023-02-31 -> 2023-03-03) differs (#5309)"
-    date-2.4a "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-2.4b "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-2.4c "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-2.4d "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-2.4e "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
     date-3.11.99 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
     date-3.20 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
     date-3.21 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
@@ -3302,7 +3284,7 @@ array set vibesql_skip_tests {
     date-3.35 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
     date-3.36 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
     date-3.37 "strftime specifier gaps (%e/%F/%T/%k/%P/%U/%V/%G/%g, string julian-day input) (#5309)"
-    date-4.1 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date-4.1 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
     date-5.1 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
     date-5.2 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
     date-5.3 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
@@ -3313,12 +3295,6 @@ array set vibesql_skip_tests {
     date-5.10 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
     date-5.11 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
     date-5.12 "TZ-offset/Z suffix in datetime input strings returns NULL (#5309)"
-    date-7.4 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-7.5 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-7.6 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-7.7 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-7.8 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-7.9 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
     date-8.1 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
     date-8.2 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
     date-8.3 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
@@ -3347,16 +3323,7 @@ array set vibesql_skip_tests {
     date-11.7 "+/-HH:MM:SS modifiers return NULL (#5309)"
     date-11.8 "+/-HH:MM:SS modifiers return NULL (#5309)"
     date-11.9 "+/-HH:MM:SS modifiers return NULL (#5309)"
-    date-13.30 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-13.31 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-13.32 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-13.33 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-13.34 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-13.35 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-13.36 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
-    date-13.37 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
     date-15.2 "sleeper TCL UDF registered via db func is not visible to the VibeSQL CLI subprocess (harness limitation)"
-    date-16.1 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
     date-16.3 "julian-day range bounds not enforced for extreme date values (#5309)"
     date-16.7 "julian-day range bounds not enforced for extreme date values (#5309)"
     date-16.9 "julian-day range bounds not enforced for extreme date values (#5309)"
@@ -3374,13 +3341,10 @@ array set vibesql_skip_tests {
     date-16.28 "julian-day range bounds not enforced for extreme date values (#5309)"
     date-16.30 "julian-day range bounds not enforced for extreme date values (#5309)"
     date-17.6 "julian-day range bounds not enforced for extreme date values (#5309)"
-    date-1.5 "time-only input (HH:MM:SS) should default the date to 2000-01-01 (#5309)"
-    date2-100 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
     date2-110 "non-deterministic use of date/time functions in CHECK constraints is not rejected"
     date2-120 "non-deterministic use of date/time functions in CHECK constraints is not rejected"
     date2-130 "non-deterministic use of date/time functions in CHECK constraints is not rejected"
     date2-140 "non-deterministic use of date/time functions in generated columns is not rejected"
-    date2-200 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
     date2-210 "non-deterministic use of date/time functions in indexes is not rejected"
     date2-220 "non-deterministic use of date/time functions in indexes is not rejected"
     date2-310 "non-deterministic use of date/time functions in indexes is not rejected"
@@ -3408,7 +3372,7 @@ array set vibesql_skip_tests {
     date3-2.11 "'auto' modifier not supported (#5309)"
     date3-2.12 "'auto' modifier not supported (#5309)"
     date3-2.13 "'auto' modifier not supported (#5309)"
-    date3-2.30 "date()/time() parsed as DATE/TIME typed-literal keyword, not a function call (#5307)"
+    date3-2.30 "'auto' modifier not supported (#5309)"
     date3-2.40 "'auto' modifier not supported (#5309)"
     date3-4.1 "'julianday' modifier not supported (#5309)"
     date3-5.0 "'auto' modifier not supported (#5309)"
@@ -3492,10 +3456,8 @@ variable vibesql_skip_patterns {
     {date-2.2c-8 "strftime('%f') with numeric 'unixepoch' input drops fractional seconds (#5309)"}
     {date-2.2c-9 "strftime('%f') with numeric 'unixepoch' input drops fractional seconds (#5309)"}
     {date-6. "localtime/utc DST boundary tests require the SQLITE_TESTCTRL_LOCALTIME_FAULT harness localtime_r override (#5309)"}
-    {date-10. "time-only input (HH:MM:SS) should default the date to 2000-01-01 (#5309); date() typed-literal parse (#5307)"}
-    {date-19. "date() parsed as DATE typed-literal keyword - ceiling/floor modifier tests cannot parse (#5307)"}
+    {date-19. "date() now parses (#5307) but the 'ceiling'/'floor' modifiers are not supported and return NULL (#5309)"}
     {date4- "compares VibeSQL strftime against the C library strftime; shim only stubs the TCL strftime command via clock format, and strftime specifier gaps remain (#5309)"}
-    {date5-jd "date() parsed as DATE typed-literal keyword, not a function call (#5307); the julianday() halves (date5-cal/*) pass"}
 }
 
 # Check if a test should be skipped based on VibeSQL-specific exclusions
@@ -4269,9 +4231,9 @@ proc check_single_capability {cap} {
     # Capabilities we don't support (unsupported_caps means NOT supported)
     # NOTE: datetime/datetime_time/datetime_funcs were removed from this list
     # (#5294) — VibeSQL implements date(), time(), datetime(), strftime().
-    # Remaining gaps are pattern-skipped: see #5307 (DATE/TIME typed-literal
-    # parse), #5309 (strftime %f/%W/%j, TZ offsets, HH:MM:SS modifiers).
-    # julianday()/unixepoch()/timediff() were implemented in #5308.
+    # Remaining gaps are pattern-skipped: see #5309 (strftime %f/%W/%j,
+    # TZ offsets, HH:MM:SS modifiers). date()/time() function calls were
+    # implemented in #5307; julianday()/unixepoch()/timediff() in #5308.
     set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 trigger conflict hiddencolumns}
 
     # Handle negated capability (e.g., !autovacuum)

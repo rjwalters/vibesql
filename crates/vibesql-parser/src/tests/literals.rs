@@ -516,3 +516,140 @@ fn test_parse_large_positive_as_numeric() {
         _ => panic!("Expected SELECT statement"),
     }
 }
+
+// ========================================================================
+// DATE/TIME as Function Calls (issue #5307)
+//
+// SQLite supports date('now', ...) and time('now', ...) as scalar
+// functions. The DATE/TIME keywords must only be treated as typed-literal
+// introducers when followed by a string literal, not by '('.
+// ========================================================================
+
+/// Extract the expression of the first select item.
+fn first_select_expr(stmt: &vibesql_ast::Statement) -> &vibesql_ast::Expression {
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => expr,
+            other => panic!("Expected expression select item, got {:?}", other),
+        },
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_parse_date_function_call() {
+    // Recursive-descent parser path
+    let result = Parser::parse_sql("SELECT date('now');");
+    assert!(result.is_ok(), "date('now') should parse as a function call: {:?}", result);
+
+    match first_select_expr(&result.unwrap()) {
+        vibesql_ast::Expression::Function { name, args, .. } => {
+            assert_eq!(name, "date");
+            assert_eq!(args.len(), 1);
+        }
+        other => panic!("Expected function call, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_time_function_call() {
+    // Recursive-descent parser path
+    let result = Parser::parse_sql("SELECT time('12:00:00');");
+    assert!(result.is_ok(), "time('12:00:00') should parse as a function call: {:?}", result);
+
+    match first_select_expr(&result.unwrap()) {
+        vibesql_ast::Expression::Function { name, args, .. } => {
+            assert_eq!(name, "time");
+            assert_eq!(args.len(), 1);
+        }
+        other => panic!("Expected function call, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_date_function_call_with_modifiers() {
+    let result = Parser::parse_sql("SELECT date('2024-01-01', '+1 day');");
+    assert!(result.is_ok(), "date() with modifiers should parse: {:?}", result);
+
+    match first_select_expr(&result.unwrap()) {
+        vibesql_ast::Expression::Function { name, args, .. } => {
+            assert_eq!(name, "date");
+            assert_eq!(args.len(), 2);
+        }
+        other => panic!("Expected function call, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_date_time_function_call_arena() {
+    // Arena parser path (no silent fallback to the recursive-descent parser)
+    let result = crate::arena_parser::parse_select_to_owned(
+        "SELECT date('now', 'start of month'), time('now', '+1 hour')",
+    );
+    assert!(result.is_ok(), "arena parser should accept date()/time() calls: {:?}", result);
+
+    let select = result.unwrap();
+    assert_eq!(select.select_list.len(), 2);
+    for (item, expected) in select.select_list.iter().zip(["date", "time"]) {
+        match item {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::Function { name, args, .. } => {
+                    assert_eq!(name, expected);
+                    assert_eq!(args.len(), 2);
+                }
+                other => panic!("Expected {} function call, got {:?}", expected, other),
+            },
+            other => panic!("Expected expression select item, got {:?}", other),
+        }
+    }
+}
+
+#[test]
+fn test_parse_typed_literals_arena() {
+    // Regression: typed literals must still parse in the arena parser
+    let result =
+        crate::arena_parser::parse_select_to_owned("SELECT DATE '2024-01-01', TIME '12:00:00'");
+    assert!(result.is_ok(), "arena parser should accept typed literals: {:?}", result);
+
+    let select = result.unwrap();
+    match &select.select_list[0] {
+        vibesql_ast::SelectItem::Expression { expr, .. } => {
+            assert!(
+                matches!(expr, vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(_))),
+                "Expected DATE literal, got {:?}",
+                expr
+            );
+        }
+        other => panic!("Expected expression select item, got {:?}", other),
+    }
+    match &select.select_list[1] {
+        vibesql_ast::SelectItem::Expression { expr, .. } => {
+            assert!(
+                matches!(expr, vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Time(_))),
+                "Expected TIME literal, got {:?}",
+                expr
+            );
+        }
+        other => panic!("Expected expression select item, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_date_time_function_call_in_insert_and_update() {
+    // INSERT/UPDATE always use the recursive-descent parser
+    let insert = Parser::parse_sql("INSERT INTO t VALUES (date('now'), time('now'));");
+    assert!(insert.is_ok(), "date()/time() should parse inside INSERT: {:?}", insert);
+
+    let update = Parser::parse_sql("UPDATE t SET x = date('now', '+1 day');");
+    assert!(update.is_ok(), "date() should parse inside UPDATE: {:?}", update);
+}
+
+#[test]
+fn test_parse_date_time_as_bare_identifiers() {
+    // Regression: bare DATE/TIME (no '(' and no string) remain column references
+    let result = Parser::parse_sql("SELECT date, time FROM t;");
+    assert!(result.is_ok(), "bare date/time should parse as column refs: {:?}", result);
+
+    let result = crate::arena_parser::parse_select_to_owned("SELECT date, time FROM t");
+    assert!(result.is_ok(), "arena: bare date/time should parse as column refs: {:?}", result);
+}

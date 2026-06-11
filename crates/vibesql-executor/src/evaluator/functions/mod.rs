@@ -111,6 +111,8 @@ pub(super) fn eval_scalar_function(
         "CURRENT_TIME" | "CURTIME" => datetime::current_time(args),
         "CURRENT_TIMESTAMP" | "NOW" => datetime::current_timestamp(args),
         "DATETIME" => datetime::datetime(args),
+        "DATE" => datetime::date(args),
+        "TIME" => datetime::time(args),
         "STRFTIME" => datetime::strftime(args),
         "JULIANDAY" => datetime::julianday(args),
         "UNIXEPOCH" => datetime::unixepoch(args),
