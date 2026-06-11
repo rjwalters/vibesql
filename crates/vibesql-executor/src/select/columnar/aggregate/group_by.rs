@@ -688,7 +688,31 @@ pub fn columnar_group_by(
         }
     }
 
+    // Sort by group key for deterministic ordering (SQLite compatibility).
+    // AHashMap iteration order is randomized per process; the row-based path
+    // (select/grouping/hash.rs) already sorts by the GROUP BY columns, so the
+    // columnar path must match (issue #5291, windowpushd.test 2.x.4.1).
+    sort_rows_by_group_key_prefix(&mut result_rows, group_cols.len());
+
     Ok(result_rows)
+}
+
+/// Sort GROUP BY result rows by their leading group-key columns.
+///
+/// SQLite returns GROUP BY results sorted by the GROUP BY columns (in the
+/// absence of an explicit ORDER BY). Result rows are laid out as
+/// (group_key_cols..., aggregate_cols...), so comparing the first
+/// `group_key_len` values matches the comparator used by the row-based
+/// grouping path in `select/grouping/hash.rs`.
+fn sort_rows_by_group_key_prefix(rows: &mut [Row], group_key_len: usize) {
+    if group_key_len == 0 {
+        return;
+    }
+    rows.sort_by(|a, b| {
+        let a_key = &a.values[..group_key_len.min(a.values.len())];
+        let b_key = &b.values[..group_key_len.min(b.values.len())];
+        a_key.cmp(b_key)
+    });
 }
 
 /// Compute aggregates with GROUP BY using SIMD-accelerated columnar execution
@@ -770,6 +794,10 @@ pub fn columnar_group_by_batch(
 
         result_rows.push(Row::new(result_values));
     }
+
+    // Sort by group key for deterministic ordering (SQLite compatibility).
+    // See sort_rows_by_group_key_prefix and issue #5291.
+    sort_rows_by_group_key_prefix(&mut result_rows, group_cols.len());
 
     Ok(result_rows)
 }
@@ -889,5 +917,136 @@ mod batch_tests {
 
         let result = columnar_group_by_batch(&batch, &group_cols, &agg_cols).unwrap();
         assert_eq!(result.len(), 0);
+    }
+
+    /// Rows with enough distinct group keys to expose hash-iteration-order
+    /// nondeterminism (issue #5291). Keys inserted in non-sorted order.
+    fn make_unsorted_key_rows() -> Vec<Row> {
+        let keys = ["W", "Z", "Q", "A", "M", "X", "B", "Y", "K", "C"];
+        let mut rows = Vec::new();
+        for (i, key) in keys.iter().enumerate() {
+            // Two rows per group
+            rows.push(Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from(*key)),
+                SqlValue::Integer(i as i64),
+            ]));
+            rows.push(Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from(*key)),
+                SqlValue::Integer((i * 10) as i64),
+            ]));
+        }
+        rows
+    }
+
+    fn assert_sorted_by_first_col(result: &[Row]) {
+        for pair in result.windows(2) {
+            assert!(
+                pair[0].values[0] <= pair[1].values[0],
+                "result not sorted by group key: {:?} > {:?}",
+                pair[0].values[0],
+                pair[1].values[0]
+            );
+        }
+    }
+
+    /// Issue #5291: columnar_group_by must emit rows sorted by group key,
+    /// deterministically across repeated invocations (AHashMap iteration
+    /// order is randomized per map instance).
+    #[test]
+    fn test_columnar_group_by_deterministic_key_order() {
+        let rows = make_unsorted_key_rows();
+        let group_cols = vec![0];
+        let agg_cols = vec![(1, AggregateOp::Sum)];
+
+        let first = columnar_group_by(&rows, &group_cols, &agg_cols, None).unwrap();
+        assert_eq!(first.len(), 10);
+        assert_sorted_by_first_col(&first);
+
+        for run in 0..10 {
+            let again = columnar_group_by(&rows, &group_cols, &agg_cols, None).unwrap();
+            assert_eq!(
+                again.iter().map(|r| r.values.to_vec()).collect::<Vec<_>>(),
+                first.iter().map(|r| r.values.to_vec()).collect::<Vec<_>>(),
+                "run {} produced different row order",
+                run
+            );
+        }
+    }
+
+    /// Issue #5291: same determinism guarantee for the SIMD batch path.
+    #[test]
+    fn test_columnar_group_by_batch_deterministic_key_order() {
+        let rows = make_unsorted_key_rows();
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+        let group_cols = vec![0];
+        let agg_cols = vec![(1, AggregateOp::Sum)];
+
+        let first = columnar_group_by_batch(&batch, &group_cols, &agg_cols).unwrap();
+        assert_eq!(first.len(), 10);
+        assert_sorted_by_first_col(&first);
+
+        for run in 0..10 {
+            let again = columnar_group_by_batch(&batch, &group_cols, &agg_cols).unwrap();
+            assert_eq!(
+                again.iter().map(|r| r.values.to_vec()).collect::<Vec<_>>(),
+                first.iter().map(|r| r.values.to_vec()).collect::<Vec<_>>(),
+                "run {} produced different row order",
+                run
+            );
+        }
+    }
+
+    /// Multi-column group keys sort lexicographically by the full key prefix.
+    #[test]
+    fn test_columnar_group_by_multi_key_order() {
+        let rows = vec![
+            Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("B")),
+                SqlValue::Integer(2),
+                SqlValue::Integer(1),
+            ]),
+            Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("A")),
+                SqlValue::Integer(2),
+                SqlValue::Integer(2),
+            ]),
+            Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("B")),
+                SqlValue::Integer(1),
+                SqlValue::Integer(3),
+            ]),
+            Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("A")),
+                SqlValue::Integer(1),
+                SqlValue::Integer(4),
+            ]),
+        ];
+        let group_cols = vec![0, 1];
+        let agg_cols = vec![(2, AggregateOp::Sum)];
+
+        let result = columnar_group_by(&rows, &group_cols, &agg_cols, None).unwrap();
+        let keys: Vec<(String, i64)> = result
+            .iter()
+            .map(|r| {
+                let s = match &r.values[0] {
+                    SqlValue::Varchar(s) => s.to_string(),
+                    other => panic!("unexpected key type: {:?}", other),
+                };
+                let n = match &r.values[1] {
+                    SqlValue::Integer(n) => *n,
+                    other => panic!("unexpected key type: {:?}", other),
+                };
+                (s, n)
+            })
+            .collect();
+        assert_eq!(
+            keys,
+            vec![
+                ("A".to_string(), 1),
+                ("A".to_string(), 2),
+                ("B".to_string(), 1),
+                ("B".to_string(), 2),
+            ]
+        );
     }
 }

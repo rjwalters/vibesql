@@ -558,6 +558,14 @@ pub(super) fn apply_window_functions_to_aggregates(
     );
     let evaluator = CombinedExpressionEvaluator::with_database(&result_schema, database);
 
+    // Track row reordering from the last window function with PARTITION BY/ORDER BY.
+    // SQLite leaves rows in the order of the last window sort pass when there is
+    // no statement-level ORDER BY; mirror the non-aggregate path in
+    // select/window/mod.rs (issue #5291, windowpushd.test 2.x.4.1).
+    // Indices refer to positions in `rows`, which stay stable across the loop
+    // below (values are updated in place; rows are never reordered mid-loop).
+    let mut row_reordering: Option<Vec<usize>> = None;
+
     // Process each window function
     for win_func in &window_funcs {
         // Validate frame specification (checks for non-negative offsets, etc.)
@@ -626,6 +634,18 @@ pub(super) fn apply_window_functions_to_aggregates(
                 evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
             };
             sort_partition(partition, &order_by_ref, sort_eval_fn);
+        }
+
+        // Capture the window order (partition order, then ORDER BY within each
+        // partition) of the last window function that has PARTITION BY or
+        // ORDER BY. `partition_rows` orders partitions by key (BTreeMap), so
+        // concatenating original_indices yields SQLite's last-pass row order.
+        let has_partition_by =
+            win_func.window_spec.partition_by.as_ref().is_some_and(|p| !p.is_empty());
+        let has_order_by = win_func.window_spec.order_by.as_ref().is_some_and(|o| !o.is_empty());
+        if has_partition_by || has_order_by {
+            row_reordering =
+                Some(partitions.iter().flat_map(|p| p.original_indices.iter().copied()).collect());
         }
 
         // Compute window function values for each partition
@@ -993,6 +1013,13 @@ pub(super) fn apply_window_functions_to_aggregates(
             let value = evaluator.eval(&rewrite.residual, row)?;
             row.values[rewrite.select_index] = value;
         }
+    }
+
+    // Reorder output rows into the last window pass's order (see comment at
+    // `row_reordering` above). A statement-level ORDER BY, if present, is
+    // applied downstream and overrides this order.
+    if let Some(order) = row_reordering {
+        rows = order.into_iter().map(|idx| rows[idx].clone()).collect();
     }
 
     Ok(rows)
