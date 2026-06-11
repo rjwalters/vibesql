@@ -161,6 +161,12 @@ fn has_exists_subqueries(stmt: &SelectStmt) -> bool {
 }
 
 /// Extract table names from a FROM clause
+///
+/// Shared by this module and `scalar_decorrelation`. Each unaliased table
+/// contributes exactly one entry; an aliased table contributes two (alias
+/// then original name). Callers that count entries to detect multi-relation
+/// FROM clauses (e.g., `rewrite_expression_with_context`) rely on these
+/// dedup semantics — do not reintroduce duplicate pushes.
 fn extract_table_names(from: &Option<vibesql_ast::FromClause>) -> Vec<String> {
     fn collect_tables(from: &vibesql_ast::FromClause, tables: &mut Vec<String>) {
         match from {
@@ -231,6 +237,40 @@ mod tests {
             set_operation: None,
             values: None,
         }
+    }
+
+    #[test]
+    fn test_extract_table_names_unaliased_table_single_entry() {
+        // Unaliased tables must contribute exactly one entry:
+        // rewrite_expression_with_context uses the entry count to detect
+        // multi-relation FROM clauses (outer_tables.len() <= 1).
+        let stmt = simple_select("orders", "order_id");
+        assert_eq!(extract_table_names(&stmt.from), vec!["orders".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_table_names_aliased_table_includes_alias_and_name() {
+        let mut stmt = simple_select("orders", "order_id");
+        if let Some(vibesql_ast::FromClause::Table { alias, .. }) = &mut stmt.from {
+            *alias = Some("o".to_string());
+        }
+        assert_eq!(extract_table_names(&stmt.from), vec!["o".to_string(), "orders".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_table_names_join_collects_both_sides() {
+        let left = simple_select("orders", "order_id").from.unwrap();
+        let right = simple_select("customers", "customer_id").from.unwrap();
+        let from = Some(vibesql_ast::FromClause::Join {
+            join_type: vibesql_ast::JoinType::Inner,
+            left: Box::new(left),
+            right: Box::new(right),
+            condition: None,
+            using_columns: None,
+            natural: false,
+            alias: None,
+        });
+        assert_eq!(extract_table_names(&from), vec!["orders".to_string(), "customers".to_string()]);
     }
 
     #[test]

@@ -51,6 +51,8 @@ use vibesql_ast::{
     GroupByClause, JoinType, SelectItem, SelectStmt,
 };
 
+use super::extract_table_names;
+
 /// Global counter for generating unique CTE aliases
 static CTE_COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -613,34 +615,6 @@ fn extract_scalar_subquery_with_multiplier(
     }
 }
 
-/// Extract table names from a FROM clause
-fn extract_table_names(from: &Option<FromClause>) -> Vec<String> {
-    fn collect_tables(from: &FromClause, tables: &mut Vec<String>) {
-        match from {
-            FromClause::Table { name, alias, .. } => {
-                tables.push(alias.clone().unwrap_or_else(|| name.clone()));
-                tables.push(name.clone());
-            }
-            FromClause::Join { left, right, .. } => {
-                collect_tables(left, tables);
-                collect_tables(right, tables);
-            }
-            FromClause::Subquery { alias, .. } => {
-                tables.push(alias.clone());
-            }
-            FromClause::Values { alias, .. } => {
-                tables.push(alias.clone());
-            }
-        }
-    }
-
-    let mut tables = Vec::new();
-    if let Some(from_clause) = from {
-        collect_tables(from_clause, &mut tables);
-    }
-    tables
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -650,5 +624,99 @@ mod tests {
         assert!(is_constant(&Expression::Literal(vibesql_types::SqlValue::Integer(42))));
         assert!(is_constant(&Expression::Literal(vibesql_types::SqlValue::Float(1.2))));
         assert!(!is_constant(&Expression::ColumnRef(ColumnIdentifier::simple("x", false))));
+    }
+
+    /// Helper to create a bare SELECT statement for testing
+    fn select_stmt(from: Option<FromClause>) -> SelectStmt {
+        SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Expression {
+                expr: Expression::ColumnRef(ColumnIdentifier::simple("total", false)),
+                alias: None,
+                source_text: None,
+            }],
+            into_table: None,
+            into_variables: None,
+            from,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: None,
+        }
+    }
+
+    /// SELECT AVG(l.amount) FROM lineitem AS l WHERE l.order_id = orders.order_id
+    fn correlated_avg_subquery() -> SelectStmt {
+        let mut subq = select_stmt(Some(FromClause::Table {
+            index_hint: None,
+            name: "lineitem".to_string(),
+            alias: Some("l".to_string()),
+            column_aliases: None,
+            quoted: false,
+        }));
+        subq.select_list = vec![SelectItem::Expression {
+            expr: Expression::AggregateFunction {
+                name: vibesql_ast::FunctionIdentifier::new("AVG"),
+                distinct: false,
+                args: vec![Expression::ColumnRef(ColumnIdentifier::qualified(
+                    "l", false, "amount", false,
+                ))],
+                order_by: None,
+                filter: None,
+            },
+            alias: None,
+            source_text: None,
+        }];
+        subq.where_clause = Some(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef(ColumnIdentifier::qualified(
+                "l", false, "order_id", false,
+            ))),
+            right: Box::new(Expression::ColumnRef(ColumnIdentifier::qualified(
+                "orders", false, "order_id", false,
+            ))),
+        });
+        subq
+    }
+
+    /// Regression test for the consolidated `extract_table_names` helper:
+    /// with the shared (dedup) semantics an unaliased outer table produces a
+    /// single entry ("orders") instead of the old duplicated pair. The
+    /// membership-based correlation detection in this module must still
+    /// decorrelate correctly.
+    #[test]
+    fn test_decorrelation_with_unaliased_outer_table() {
+        // SELECT total FROM orders
+        // WHERE orders.total > (SELECT AVG(l.amount) FROM lineitem l
+        //                       WHERE l.order_id = orders.order_id)
+        let mut stmt = select_stmt(Some(FromClause::Table {
+            index_hint: None,
+            name: "orders".to_string(),
+            alias: None,
+            column_aliases: None,
+            quoted: false,
+        }));
+        stmt.where_clause = Some(Expression::BinaryOp {
+            op: BinaryOperator::GreaterThan,
+            left: Box::new(Expression::ColumnRef(ColumnIdentifier::qualified(
+                "orders", false, "total", false,
+            ))),
+            right: Box::new(Expression::ScalarSubquery(Box::new(correlated_avg_subquery()))),
+        });
+
+        let result = apply_scalar_decorrelation(&stmt);
+
+        let ctes = result.with_clause.as_ref().expect("decorrelation should add a CTE");
+        assert_eq!(ctes.len(), 1, "expected exactly one decorrelation CTE");
+        assert!(
+            matches!(result.from, Some(FromClause::Join { .. })),
+            "decorrelation should rewrite FROM into a JOIN with the CTE"
+        );
     }
 }
