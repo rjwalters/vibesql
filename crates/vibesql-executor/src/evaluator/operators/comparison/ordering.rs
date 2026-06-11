@@ -61,8 +61,11 @@ mod tests {
 
     #[test]
     fn test_timestamp_vs_string_ordering() {
-        // Timestamp-vs-string ordering parses the string as a timestamp
-        // (date-only strings get midnight, matching Timestamp::from_str)
+        // Timestamp-vs-string ordering compares TEXT renderings
+        // lexicographically (SQLite's datetime() returns TEXT, so these are
+        // plain text comparisons there). For full canonical timestamp strings
+        // lexicographic ordering equals semantic ordering; a date-only string
+        // sorts before the rendered timestamp by the prefix rule.
         let timestamp = SqlValue::Timestamp("2022-01-27 13:15:44".parse().unwrap());
         let later = SqlValue::Varchar(arcstr::ArcStr::from("2022-01-27 13:15:45"));
         let earlier = SqlValue::Varchar(arcstr::ArcStr::from("2022-01-27"));
@@ -71,6 +74,30 @@ mod tests {
         assert_eq!(greater_than(&timestamp, &earlier).unwrap(), SqlValue::Boolean(true));
         assert_eq!(less_than(&earlier, &timestamp).unwrap(), SqlValue::Boolean(true));
         assert_eq!(greater_than_or_equal(&later, &timestamp).unwrap(), SqlValue::Boolean(true));
+    }
+
+    #[test]
+    fn test_timestamp_vs_date_only_string_is_lexicographic() {
+        // SQLite date2-331 regression: datetime(b) BETWEEN '2017-07-04' AND
+        // '2017-07-08' must EXCLUDE midnight of the upper bound, because
+        // SQLite compares TEXT lexicographically:
+        // '2017-07-08 00:00:00' > '2017-07-08' (longer string, equal prefix).
+        let midnight = SqlValue::Timestamp("2017-07-08 00:00:00".parse().unwrap());
+        let date_only = SqlValue::Varchar(arcstr::ArcStr::from("2017-07-08"));
+
+        assert_eq!(greater_than(&midnight, &date_only).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(less_than_or_equal(&midnight, &date_only).unwrap(), SqlValue::Boolean(false));
+        // Symmetric arm: string < timestamp
+        assert_eq!(less_than(&date_only, &midnight).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(greater_than_or_equal(&date_only, &midnight).unwrap(), SqlValue::Boolean(false));
+        // Character storage class behaves like Varchar
+        let date_only_char = SqlValue::Character(arcstr::ArcStr::from("2017-07-08"));
+        assert_eq!(greater_than(&midnight, &date_only_char).unwrap(), SqlValue::Boolean(true));
+        // T-separator strings are also plain text in SQLite's model:
+        // '2022-01-27 ...' < '2022-01-27T...' because ' ' < 'T'
+        let t_separated = SqlValue::Varchar(arcstr::ArcStr::from("2022-01-27T13:15:44"));
+        let ts = SqlValue::Timestamp("2022-01-27 13:15:44".parse().unwrap());
+        assert_eq!(less_than(&ts, &t_separated).unwrap(), SqlValue::Boolean(true));
     }
 
     #[test]
