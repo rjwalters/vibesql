@@ -23,11 +23,16 @@
 //!   canonical "does not match" error like a non-unique target.
 //! - UPDATE triggers do not fire on the upsert update arm (parity with the
 //!   MySQL-style `ON DUPLICATE KEY UPDATE` path).
+//!
+//! Subqueries in SET/WHERE execute with full scope resolution (issue #5279):
+//! names bound by a subquery's own FROM clause win over the upsert scope, and
+//! a FROM item named/aliased `excluded` shadows the pseudo-table. See
+//! `UpsertColumnSubstituter` for one documented edge involving `IN`.
 
 use crate::errors::ExecutorError;
 use vibesql_ast::{
-    visitor::{transform_expression, ExpressionMutVisitor},
-    Assignment, Expression,
+    visitor::{transform_expression, ExpressionMutVisitor, VisitResult},
+    Assignment, Expression, FromClause, SelectStmt,
 };
 use vibesql_types::SqlValue;
 
@@ -213,38 +218,42 @@ pub fn handle_on_conflict_update(
             .ok_or_else(|| ExecutorError::UnsupportedExpression("Row not found".to_string()))?
     };
 
-    let evaluator = crate::evaluator::ExpressionEvaluator::new(schema);
+    // Evaluate the WHERE predicate and SET assignments in a scope that only
+    // borrows `db` immutably: the evaluator needs a database reference so
+    // subqueries in the update arm can execute (issue #5279), and the borrow
+    // must end before `get_table_mut` below.
+    //
+    // Scope resolution mirrors the regular UPDATE path (update/executor.rs):
+    // the existing (conflicting) row is the evaluation row, so unqualified
+    // and target-table-qualified references resolve to the existing row at
+    // the top level and correlate into subqueries, while names bound by a
+    // subquery's own FROM clause win inside that subquery (innermost scope
+    // first — SQLite semantics). Only `excluded.` references need rewriting,
+    // since `excluded` is not a real table.
+    let new_values = {
+        let evaluator = crate::evaluator::ExpressionEvaluator::with_database(schema, db);
 
-    // DO UPDATE ... WHERE: when false or NULL, drop the row silently.
-    if let Some(where_expr) = where_clause {
-        let substituted = substitute_upsert_columns(
-            where_expr.clone(),
-            schema,
-            table_name,
-            &existing_row.values,
-            row_values,
-        )?;
-        let value = evaluator.eval(&substituted, &existing_row)?;
-        if !crate::evaluator::operators::is_truthy(&value) {
-            return Ok(UpsertAction::Skipped);
+        // DO UPDATE ... WHERE: when false or NULL, drop the row silently.
+        if let Some(where_expr) = where_clause {
+            let substituted = substitute_excluded_refs(where_expr.clone(), schema, row_values)?;
+            let value = evaluator.eval(&substituted, &existing_row)?;
+            if !crate::evaluator::operators::is_truthy(&value) {
+                return Ok(UpsertAction::Skipped);
+            }
         }
-    }
 
-    // Apply SET assignments against a copy of the existing row.
-    let mut new_values = existing_row.values.clone();
-    for assignment in assignments {
-        let col_idx = schema.get_column_index(&assignment.column).ok_or_else(|| {
-            ExecutorError::SqliteCompatError(format!("no such column: {}", assignment.column))
-        })?;
-        let substituted = substitute_upsert_columns(
-            assignment.value.clone(),
-            schema,
-            table_name,
-            &existing_row.values,
-            row_values,
-        )?;
-        new_values[col_idx] = evaluator.eval(&substituted, &existing_row)?;
-    }
+        // Apply SET assignments against a copy of the existing row.
+        let mut new_values = existing_row.values.clone();
+        for assignment in assignments {
+            let col_idx = schema.get_column_index(&assignment.column).ok_or_else(|| {
+                ExecutorError::SqliteCompatError(format!("no such column: {}", assignment.column))
+            })?;
+            let substituted =
+                substitute_excluded_refs(assignment.value.clone(), schema, row_values)?;
+            new_values[col_idx] = evaluator.eval(&substituted, &existing_row)?;
+        }
+        new_values
+    };
 
     let table_mut = db
         .get_table_mut(table_name)
@@ -267,21 +276,86 @@ pub fn handle_on_conflict_update(
     Ok(UpsertAction::Updated(row_id))
 }
 
-/// Rewrites column references in upsert SET/WHERE expressions to literals:
-/// - `excluded.col` resolves to the would-be-inserted row,
-/// - unqualified or target-table-qualified refs resolve to the existing row.
+/// Rewrites `excluded.col` references in upsert SET/WHERE expressions to
+/// literal values from the would-be-inserted row.
 ///
-/// Other qualifiers and unresolvable unqualified names are left untouched for
-/// the standard evaluator to handle (e.g. ROWID pseudo-columns).
+/// `excluded` is the only name in the update arm that does not correspond to
+/// a real table, so it is the only one substituted here. Unqualified and
+/// target-table-qualified references are left for the standard evaluator,
+/// which resolves them against the existing (conflicting) row at the top
+/// level and applies innermost-scope-first resolution plus outer-row
+/// correlation inside subqueries — matching the regular UPDATE path.
+///
+/// Shadowing: a subquery whose FROM clause binds the name `excluded` (a table
+/// named `excluded` or any item aliased `excluded`) shadows the upsert
+/// pseudo-table in SQLite. Such subqueries are skipped entirely — every
+/// `excluded.` reference inside them belongs to the FROM binding, so nothing
+/// in that subtree needs substitution.
+///
+/// Known limitation: for `IN (SELECT ...)` and quantified comparisons whose
+/// subquery shadows `excluded`, the left-hand expression (which is in the
+/// outer scope) is skipped along with the subquery, so an `excluded.` ref
+/// there surfaces as an unresolvable-column error instead of being
+/// substituted. SQLite resolves it to the pseudo-table; the failure mode here
+/// is an error, never wrong data.
 struct UpsertColumnSubstituter<'a> {
     schema: &'a vibesql_catalog::TableSchema,
-    table_name: &'a str,
-    existing: &'a [SqlValue],
     inserted: &'a [SqlValue],
     error: Option<ExecutorError>,
 }
 
+/// Does this FROM clause bind the name `excluded` (case-insensitive)?
+///
+/// A base table named `excluded` (without an alias overriding it), or any
+/// table / join / derived-table / VALUES item aliased `excluded`, shadows the
+/// upsert pseudo-table for the subquery's scope. Only the immediate FROM
+/// items are inspected: bindings inside a derived table's own query belong to
+/// a deeper scope and do not shadow names at this level (and the derived
+/// table cannot see the pseudo-table anyway).
+fn from_binds_excluded(from: &FromClause) -> bool {
+    match from {
+        FromClause::Table { name, alias, .. } => match alias {
+            Some(a) => a.eq_ignore_ascii_case("excluded"),
+            None => name.eq_ignore_ascii_case("excluded"),
+        },
+        FromClause::Join { left, right, alias, .. } => {
+            alias.as_ref().is_some_and(|a| a.eq_ignore_ascii_case("excluded"))
+                || from_binds_excluded(left)
+                || from_binds_excluded(right)
+        }
+        FromClause::Subquery { alias, .. } | FromClause::Values { alias, .. } => {
+            alias.eq_ignore_ascii_case("excluded")
+        }
+    }
+}
+
+/// Does this subquery's immediate FROM clause shadow the `excluded`
+/// pseudo-table?
+fn select_binds_excluded(select: &SelectStmt) -> bool {
+    select.from.as_ref().is_some_and(from_binds_excluded)
+}
+
 impl ExpressionMutVisitor for UpsertColumnSubstituter<'_> {
+    fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        if self.error.is_some() {
+            return VisitResult::Skip;
+        }
+        // Skip subqueries that rebind `excluded` in their FROM clause: every
+        // `excluded.` reference inside belongs to that binding (SQLite scope
+        // shadowing), so no substitution applies in the subtree.
+        let subquery = match expr {
+            Expression::ScalarSubquery(select) => Some(select.as_ref()),
+            Expression::Exists { subquery, .. } => Some(subquery.as_ref()),
+            Expression::In { subquery, .. } => Some(subquery.as_ref()),
+            Expression::QuantifiedComparison { subquery, .. } => Some(subquery.as_ref()),
+            _ => None,
+        };
+        match subquery {
+            Some(select) if select_binds_excluded(select) => VisitResult::Skip,
+            _ => VisitResult::Continue,
+        }
+    }
+
     fn post_visit_expression(&mut self, expr: Expression) -> Expression {
         if self.error.is_some() {
             return expr;
@@ -291,23 +365,18 @@ impl ExpressionMutVisitor for UpsertColumnSubstituter<'_> {
                 .table_canonical()
                 .map(|q| q.eq_ignore_ascii_case("excluded"))
                 .unwrap_or(false);
-            let source = match id.table_canonical() {
-                Some(_) if is_excluded => self.inserted,
-                Some(q) if q.eq_ignore_ascii_case(self.table_name) => self.existing,
-                // Unknown qualifier: leave for the evaluator to report.
-                Some(_) => return expr,
-                None => self.existing,
-            };
+            if !is_excluded {
+                // Real-table or unqualified ref: the evaluator resolves it
+                // (existing row at top level, subquery scoping inside).
+                return expr;
+            }
             match self.schema.get_column_index(id.column_canonical()) {
-                Some(idx) => return Expression::Literal(source[idx].clone()),
+                Some(idx) => return Expression::Literal(self.inserted[idx].clone()),
                 None => {
-                    if is_excluded {
-                        self.error = Some(ExecutorError::SqliteCompatError(format!(
-                            "no such column: excluded.{}",
-                            id.column_canonical()
-                        )));
-                    }
-                    // Unqualified non-column (e.g. rowid): defer to evaluator.
+                    self.error = Some(ExecutorError::SqliteCompatError(format!(
+                        "no such column: excluded.{}",
+                        id.column_canonical()
+                    )));
                     return expr;
                 }
             }
@@ -316,22 +385,15 @@ impl ExpressionMutVisitor for UpsertColumnSubstituter<'_> {
     }
 }
 
-/// Substitute `excluded.` / existing-row column references with literal
-/// values so the expression can be evaluated by the standard evaluator.
-fn substitute_upsert_columns(
+/// Substitute `excluded.` column references with literal values from the
+/// would-be-inserted row so the expression can be evaluated by the standard
+/// evaluator against the existing (conflicting) row.
+fn substitute_excluded_refs(
     expr: Expression,
     schema: &vibesql_catalog::TableSchema,
-    table_name: &str,
-    existing: &[SqlValue],
     inserted: &[SqlValue],
 ) -> Result<Expression, ExecutorError> {
-    let mut substituter = UpsertColumnSubstituter {
-        schema,
-        table_name,
-        existing,
-        inserted,
-        error: None,
-    };
+    let mut substituter = UpsertColumnSubstituter { schema, inserted, error: None };
     let result = transform_expression(&mut substituter, expr);
     if let Some(err) = substituter.error {
         return Err(err);
