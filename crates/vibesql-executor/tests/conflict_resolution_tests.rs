@@ -579,7 +579,8 @@ fn test_insert_on_conflict_do_nothing_primary_key() {
         ]]),
         conflict_clause: None,
         on_conflict: Some(OnConflictClause {
-            conflict_target: Some(vec!["id".to_string()]),
+            conflict_target: Some(vec![vibesql_ast::ConflictTargetItem::Column("id".to_string())]),
+            target_where: None,
             target_inexact: false,
             action: OnConflictAction::DoNothing,
         }),
@@ -624,6 +625,7 @@ fn test_insert_on_conflict_do_nothing_without_target() {
         conflict_clause: None,
         on_conflict: Some(OnConflictClause {
             conflict_target: None, // No specific conflict target
+            target_where: None,
             target_inexact: false,
             action: OnConflictAction::DoNothing,
         }),
@@ -661,7 +663,8 @@ fn test_insert_on_conflict_do_nothing_no_conflict() {
         ]]),
         conflict_clause: None,
         on_conflict: Some(OnConflictClause {
-            conflict_target: Some(vec!["id".to_string()]),
+            conflict_target: Some(vec![vibesql_ast::ConflictTargetItem::Column("id".to_string())]),
+            target_where: None,
             target_inexact: false,
             action: OnConflictAction::DoNothing,
         }),

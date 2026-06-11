@@ -490,3 +490,180 @@ fn test_do_update_in_subquery_in_set() {
     .unwrap();
     assert_eq!(rows(&db, "t"), vec![vec![int(1), int(77)]]);
 }
+
+// ============================================================================
+// Expression-index and partial-index conflict targets (issue #5278,
+// upsert1-200/201/210/300/310/320)
+// ============================================================================
+
+#[test]
+fn test_expression_index_target_do_nothing() {
+    // upsert1-200: ON CONFLICT(a+b) matches CREATE UNIQUE INDEX t1x1 ON t1(a+b)
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b INT, c DEFAULT 0)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1x1 ON t1(a+b)").unwrap();
+    let n = exec(&mut db, "INSERT INTO t1(a,b) VALUES(7,8) ON CONFLICT(a+b) DO NOTHING").unwrap();
+    assert_eq!(n, 1);
+    // Both rows conflict on a+b=15 with the existing (7,8) row.
+    let n =
+        exec(&mut db, "INSERT INTO t1(a,b) VALUES(8,7),(9,6) ON CONFLICT(a+b) DO NOTHING").unwrap();
+    assert_eq!(n, 0, "conflicting rows must be silently skipped");
+    assert_eq!(rows(&db, "t1"), vec![vec![int(7), int(8), int(0)]]);
+}
+
+#[test]
+fn test_expression_index_violation_error_format() {
+    // upsert1-201: a conflict on a NON-targeted unique expression index must
+    // raise SQLite's index-name error format, not be silently skipped.
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b INT, c DEFAULT 0)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1x1 ON t1(a+b)").unwrap();
+    exec(&mut db, "INSERT INTO t1(a,b) VALUES(7,8)").unwrap();
+    let err = exec(&mut db, "INSERT INTO t1(a,b) VALUES(8,7),(9,6) ON CONFLICT(a) DO NOTHING")
+        .expect_err("conflict on non-targeted expression index must error");
+    assert!(format!("{err:?}").contains("UNIQUE constraint failed: index 't1x1'"), "got: {err:?}");
+}
+
+#[test]
+fn test_insert_or_ignore_with_unique_expression_index_no_panic() {
+    // Regression test for the pre-existing panic: check_would_violate_constraints
+    // called expect_column_name() on expression-index components
+    // ("Expression indexes are not supported in this context").
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b INT, c DEFAULT 0)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1x1 ON t1(a+b)").unwrap();
+    exec(&mut db, "INSERT INTO t1(a,b) VALUES(7,8)").unwrap();
+    let stmt =
+        vibesql_parser::Parser::parse_sql("INSERT OR IGNORE INTO t1(a,b) VALUES(8,7)").unwrap();
+    let vibesql_ast::Statement::Insert(insert) = stmt else { panic!("expected INSERT") };
+    let n = InsertExecutor::execute(&mut db, &insert).expect("OR IGNORE must not panic or error");
+    assert_eq!(n, 0, "conflicting row must be ignored");
+    assert_eq!(rows(&db, "t1"), vec![vec![int(7), int(8), int(0)]]);
+}
+
+#[test]
+fn test_plain_insert_unique_expression_index_enforced() {
+    // A plain INSERT violating a unique expression index must error with
+    // SQLite's index-name format (previously the violation was not enforced).
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b INT)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1x1 ON t1(a+b)").unwrap();
+    exec(&mut db, "INSERT INTO t1(a,b) VALUES(7,8)").unwrap();
+    let err = exec(&mut db, "INSERT INTO t1(a,b) VALUES(8,7)")
+        .expect_err("duplicate expression-index key must error");
+    assert!(format!("{err:?}").contains("UNIQUE constraint failed: index 't1x1'"), "got: {err:?}");
+}
+
+#[test]
+fn test_null_expression_index_key_never_conflicts() {
+    // NULL expression keys never conflict under UNIQUE semantics.
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b INT)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1x1 ON t1(a+b)").unwrap();
+    exec(&mut db, "INSERT INTO t1(a,b) VALUES(1,NULL)").unwrap();
+    let n = exec(&mut db, "INSERT INTO t1(a,b) VALUES(2,NULL)").unwrap();
+    assert_eq!(n, 1, "NULL keys must not conflict");
+    assert_eq!(rows(&db, "t1").len(), 2);
+}
+
+#[test]
+fn test_expression_target_structural_mismatch_errors() {
+    // upsert1-210: a+(+b) must NOT match the index on a+b.
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b INT)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1x1 ON t1(a+b)").unwrap();
+    let err = exec(&mut db, "INSERT INTO t1(a,b) VALUES(9,10) ON CONFLICT(a+(+b)) DO NOTHING")
+        .expect_err("structurally different expression target must not match");
+    assert!(
+        format!("{err:?}")
+            .contains("ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"),
+        "got: {err:?}"
+    );
+}
+
+#[test]
+fn test_partial_index_target_do_nothing() {
+    // upsert1-320: ON CONFLICT(b) WHERE b>10 matches the partial unique
+    // index, including conflicts with earlier rows of the same batch.
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b INT, c DEFAULT 0)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1x1 ON t1(b) WHERE b>10").unwrap();
+    let n = exec(
+        &mut db,
+        "INSERT INTO t1(a,b) VALUES(1,2),(3,2),(4,20),(5,20) \
+         ON CONFLICT(b) WHERE b>10 DO NOTHING",
+    )
+    .unwrap();
+    // (5,20) conflicts with (4,20) through the partial index; the duplicate
+    // b=2 rows are outside the index and both insert.
+    assert_eq!(n, 3);
+    assert_eq!(
+        rows(&db, "t1"),
+        vec![
+            vec![int(1), int(2), int(0)],
+            vec![int(3), int(2), int(0)],
+            vec![int(4), int(20), int(0)],
+        ]
+    );
+}
+
+#[test]
+fn test_bare_column_target_does_not_match_partial_index() {
+    // upsert1-300: ON CONFLICT(b) without WHERE must not match a partial index.
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b INT)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1x1 ON t1(b) WHERE b>10").unwrap();
+    let err = exec(&mut db, "INSERT INTO t1(a,b) VALUES(1,2),(3,2) ON CONFLICT(b) DO NOTHING")
+        .expect_err("bare column target must not match a partial index");
+    assert!(
+        format!("{err:?}")
+            .contains("ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"),
+        "got: {err:?}"
+    );
+}
+
+#[test]
+fn test_mismatched_target_where_does_not_match_partial_index() {
+    // upsert1-310: WHERE b!=10 must not match the index predicate WHERE b>10.
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b INT)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1x1 ON t1(b) WHERE b>10").unwrap();
+    let err = exec(
+        &mut db,
+        "INSERT INTO t1(a,b) VALUES(1,2),(3,2) ON CONFLICT(b) WHERE b!=10 DO NOTHING",
+    )
+    .expect_err("mismatched target WHERE must not match the index predicate");
+    assert!(
+        format!("{err:?}")
+            .contains("ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"),
+        "got: {err:?}"
+    );
+}
+
+#[test]
+fn test_expression_index_target_do_update() {
+    // The DO UPDATE arm must also match expression-index targets.
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b INT, c DEFAULT 0)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1x1 ON t1(a+b)").unwrap();
+    exec(&mut db, "INSERT INTO t1(a,b) VALUES(7,8)").unwrap();
+    let n = exec(
+        &mut db,
+        "INSERT INTO t1(a,b) VALUES(8,7) ON CONFLICT(a+b) DO UPDATE SET c=excluded.a",
+    )
+    .unwrap();
+    assert_eq!(n, 1, "update arm counts toward affected rows");
+    assert_eq!(rows(&db, "t1"), vec![vec![int(7), int(8), int(8)]]);
+}
+
+#[test]
+fn test_targeted_do_nothing_other_plain_constraint_still_errors() {
+    // A targeted DO NOTHING must not suppress conflicts on other plain
+    // unique constraints (SQLite semantics; companion to upsert1-201).
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b INT UNIQUE)").unwrap();
+    exec(&mut db, "INSERT INTO t1(a,b) VALUES(1,5)").unwrap();
+    let err = exec(&mut db, "INSERT INTO t1(a,b) VALUES(2,5) ON CONFLICT(a) DO NOTHING")
+        .expect_err("conflict on the non-targeted UNIQUE column must error");
+    assert!(format!("{err:?}").contains("UNIQUE constraint failed"), "got: {err:?}");
+}

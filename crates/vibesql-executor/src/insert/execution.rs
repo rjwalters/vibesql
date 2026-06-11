@@ -130,9 +130,8 @@ fn execute_insert_internal(
     // PRIMARY KEY / UNIQUE constraint / unique index raise the canonical
     // "ON CONFLICT clause does not match..." error (upsert1-110/120/300).
     if let Some(ref on_conflict) = stmt.on_conflict {
-        // Targets the parser could not represent as a plain column list
-        // (expressions, non-BINARY COLLATE, target WHERE) never match in v1
-        // (upsert1-130/210/310/1210; see issue #5269).
+        // Targets the AST cannot represent exactly (currently non-BINARY
+        // COLLATE) never match (upsert1-130; see issue #5269).
         if on_conflict.target_inexact {
             return Err(ExecutorError::SqliteCompatError(
                 "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"
@@ -140,7 +139,13 @@ fn execute_insert_internal(
             ));
         }
         if let Some(ref target) = on_conflict.conflict_target {
-            super::on_conflict_update::validate_conflict_target(db, table_name, &schema, target)?;
+            super::on_conflict_update::validate_conflict_target(
+                db,
+                table_name,
+                &schema,
+                target,
+                on_conflict.target_where.as_ref(),
+            )?;
         }
     }
 
@@ -284,7 +289,8 @@ fn execute_insert_internal(
 
     // Check if IGNORE conflict clause is set - if so, skip rows with constraint violations
     // Also treat ON CONFLICT ... DO NOTHING as equivalent to IGNORE
-    let use_ignore = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore))
+    let or_ignore = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore));
+    let use_ignore = or_ignore
         || matches!(
             &stmt.on_conflict,
             Some(vibesql_ast::OnConflictClause {
@@ -292,6 +298,24 @@ fn execute_insert_internal(
                 ..
             })
         );
+
+    // `ON CONFLICT (cols) [WHERE ...] DO NOTHING` with an explicit target
+    // (and without INSERT OR IGNORE) only suppresses conflicts on the
+    // *targeted* constraint; conflicts on other constraints surface as
+    // normal UNIQUE errors (upsert1-201). Untargeted DO NOTHING and
+    // INSERT OR IGNORE keep the suppress-everything behavior.
+    let do_nothing_target: Option<(
+        &[vibesql_ast::ConflictTargetItem],
+        Option<&vibesql_ast::Expression>,
+    )> = match &stmt.on_conflict {
+        Some(vibesql_ast::OnConflictClause {
+            conflict_target: Some(items),
+            target_where,
+            action: vibesql_ast::OnConflictAction::DoNothing,
+            ..
+        }) if !or_ignore => Some((items.as_slice(), target_where.as_ref())),
+        _ => None,
+    };
 
     // Track the first auto-generated ID for LAST_INSERT_ROWID() support
     // Per MySQL semantics, for multi-row inserts, LAST_INSERT_ID() returns
@@ -624,11 +648,17 @@ fn execute_insert_internal(
         // Skip PK/UNIQUE duplicate checks if using REPLACE conflict clause, ON DUPLICATE KEY
         // UPDATE, or ON CONFLICT clause. Also skip for IGNORE since we'll handle violations
         // by skipping the row.
+        //
+        // Exception: a *targeted* DO NOTHING (without OR IGNORE) must NOT
+        // skip duplicate checks — rows that conflict on the targeted
+        // constraint are skipped before validation (below), so any remaining
+        // duplicate is on a non-targeted constraint and must raise a normal
+        // UNIQUE error (SQLite semantics, upsert1-201).
         let skip_duplicate_checks =
             matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace))
                 || matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore))
                 || stmt.on_duplicate_key_update.is_some()
-                || stmt.on_conflict.is_some();
+                || (stmt.on_conflict.is_some() && do_nothing_target.is_none());
         let validator = super::row_validator::RowValidator::new(
             db,
             &schema,
@@ -642,15 +672,31 @@ fn execute_insert_internal(
         // For IGNORE, we need to check for constraint violations before adding to validated_rows
         // If there's a violation, skip this row instead of returning an error
         if use_ignore {
-            // Check if this row would violate any constraints
-            let would_violate = check_would_violate_constraints(
-                db,
-                &schema,
-                &storage_table_name,
-                &full_row_values,
-                &primary_key_values,
-                &unique_constraint_values,
-            );
+            let would_violate = if let Some((target, target_where)) = do_nothing_target {
+                // Targeted DO NOTHING: only conflicts on the targeted
+                // constraint are suppressed (expression- and partial-index
+                // aware; checks earlier batch rows too — upsert1-320).
+                super::on_conflict_update::row_conflicts_on_target(
+                    db,
+                    table_name,
+                    &schema,
+                    &full_row_values,
+                    target,
+                    target_where,
+                    &batch_full_rows,
+                )?
+            } else {
+                // OR IGNORE / untargeted DO NOTHING: skip the row on any
+                // constraint violation.
+                check_would_violate_constraints(
+                    db,
+                    &schema,
+                    &storage_table_name,
+                    &full_row_values,
+                    &primary_key_values,
+                    &unique_constraint_values,
+                )
+            };
             if would_violate {
                 // Skip this row - don't add to validated_rows
                 continue;
@@ -875,7 +921,9 @@ fn execute_insert_internal(
                 // No conflict, fall through to insert
             } else if let Some(vibesql_ast::OnConflictClause {
                 ref conflict_target,
-                action: vibesql_ast::OnConflictAction::DoUpdate { ref assignments, ref where_clause },
+                ref target_where,
+                action:
+                    vibesql_ast::OnConflictAction::DoUpdate { ref assignments, ref where_clause },
                 ..
             }) = stmt.on_conflict
             {
@@ -885,7 +933,8 @@ fn execute_insert_internal(
                     table_name,
                     &schema,
                     &full_row_values,
-                    conflict_target.as_ref(),
+                    conflict_target.as_deref(),
+                    target_where.as_ref(),
                     assignments,
                     where_clause.as_ref(),
                 )? {
@@ -1284,17 +1333,45 @@ fn check_would_violate_constraints(
 
     // Check user-defined UNIQUE indexes
     if let Some(table) = db.get_table(table_name) {
+        // Lazily-built evaluator context for expression-index components and
+        // partial-index predicates (issue #5278: expect_column_name() on an
+        // expression component used to panic here).
+        let candidate_row = vibesql_storage::Row::new(row_values.to_vec());
+        let evaluator = crate::evaluator::ExpressionEvaluator::new(schema);
+
         for index_name in db.list_indexes_for_table(table_name) {
             if let Some(index_metadata) = db.get_index(&index_name) {
                 if !index_metadata.unique {
                     continue;
                 }
 
-                // Build key values for this index
+                // Partial index: a row that doesn't satisfy the predicate is
+                // never added to the index, so it cannot conflict through it.
+                if let Some(predicate) = index_metadata.where_clause.as_deref() {
+                    let satisfied = evaluator
+                        .eval(predicate, &candidate_row)
+                        .map(|v| crate::partial_index_maintenance::is_predicate_truthy(&v))
+                        .unwrap_or(false);
+                    if !satisfied {
+                        continue;
+                    }
+                }
+
+                // Build key values for this index (evaluating expression
+                // components against the candidate row; evaluation failures
+                // become NULL, matching expression-index maintenance).
                 let mut key_values = Vec::new();
                 for index_col in &index_metadata.columns {
-                    if let Some(col_idx) = schema.get_column_index(index_col.expect_column_name()) {
-                        key_values.push(row_values[col_idx].clone());
+                    if let Some(name) = index_col.column_name() {
+                        if let Some(col_idx) = schema.get_column_index(name) {
+                            key_values.push(row_values[col_idx].clone());
+                        }
+                    } else if let Some(expr) = index_col.get_expression() {
+                        key_values.push(
+                            evaluator
+                                .eval(expr, &candidate_row)
+                                .unwrap_or(vibesql_types::SqlValue::Null),
+                        );
                     }
                 }
 
