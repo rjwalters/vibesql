@@ -141,7 +141,7 @@ pub(super) fn execute_internal(
 
     // Execute CTEs if present (WITH clause support)
     let cte_results = if let Some(ref cte_list) = stmt.with_clause {
-        Some(crate::select::cte::execute_ctes(cte_list, |cte_query, prior_ctes| {
+        Some(crate::select::cte::execute_ctes(cte_list, database, |cte_query, prior_ctes| {
             let cte_executor = crate::SelectExecutor::new_with_cte(database, prior_ctes);
             cte_executor.execute(cte_query)
         })?)
