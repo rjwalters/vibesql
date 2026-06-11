@@ -21,7 +21,8 @@ use vibesql_ast::{ExplainFormat, ExplainStmt, Expression, SelectItem, SelectStmt
 use vibesql_storage::Database;
 
 use crate::{
-    errors::ExecutorError, optimizer::index_planner::IndexPlanner,
+    errors::ExecutorError,
+    optimizer::index_planner::IndexPlanner,
     select::scan::index_scan::{cost_based_index_selection, needs_temp_btree_for_order_by_eqp},
 };
 
@@ -905,9 +906,18 @@ impl ExplainExecutor {
     ///   satisfied by an index (e.g. key `(a, b)` with index `t5ab(a, b)`).
     ///   SQLite's nested co-routine rewrite emits passes in reverse
     ///   SELECT-list order, so the innermost pass corresponds to the LAST
-    ///   distinct key (by first occurrence). All outer passes read
-    ///   co-routine output and always need a temp B-tree, even if their key
-    ///   matches an index.
+    ///   distinct key (by first occurrence).
+    /// - When the innermost pass IS satisfied by an index, sortedness
+    ///   propagates outward: each outer pass whose key is a structural
+    ///   prefix of the order delivered by the pass below it needs no sort
+    ///   either, because the rows flow through in an order that already
+    ///   satisfies it (window9.test 5.1.1: index `i1(a,b,c,d,e)` satisfies
+    ///   keys `(a,b,c,d)`, `(a,b,c)`, `(a,b)` and `(a)` — zero sorts).
+    ///   The chain breaks at the first outer key that is not such a prefix;
+    ///   that key and all keys outside it need temp B-trees (the temp
+    ///   B-tree sort is not guaranteed to preserve residual ordering, so no
+    ///   further propagation is attempted — matching the conservative
+    ///   pre-existing behavior validated by window1.test section 23).
     fn count_window_sorts(stmt: &SelectStmt, database: &Database) -> usize {
         let Ok(specs) = crate::select::window::collect_resolved_window_specs(
             &stmt.select_list,
@@ -933,22 +943,49 @@ impl ExplainExecutor {
         }
 
         // Only the innermost pass — the last distinct key — scans the base
-        // table; it alone is eligible for index suppression. Outer passes
-        // read co-routine output, so their keys always count.
-        let last_index = distinct_keys.len().wrapping_sub(1);
-        distinct_keys
-            .iter()
-            .enumerate()
-            .filter(|(i, key)| {
-                *i != last_index
-                    || Self::needs_temp_btree_for_order_by(
-                        stmt.from.as_ref(),
-                        stmt.where_clause.as_ref(),
-                        key,
-                        database,
-                    )
-            })
-            .count()
+        // table; it alone is eligible for direct index suppression. When it
+        // is satisfied by the index, sortedness propagates outward to every
+        // consecutive outer key that is a structural prefix of the order
+        // delivered by the pass below it. Once a pass needs a temp B-tree,
+        // all passes outside it count as well.
+        let Some((innermost, outer)) = distinct_keys.split_last() else {
+            return 0;
+        };
+
+        let mut count = 0;
+        // The order delivered to outer passes while the suppression chain
+        // is unbroken. `None` once any pass has required a temp B-tree.
+        let mut delivered: Option<&[vibesql_ast::OrderByItem]> =
+            if Self::needs_temp_btree_for_order_by(
+                stmt.from.as_ref(),
+                stmt.where_clause.as_ref(),
+                innermost,
+                database,
+            ) {
+                count += 1;
+                None
+            } else {
+                Some(innermost.as_slice())
+            };
+
+        // Walk outward (last-but-one key back to the first).
+        for key in outer.iter().rev() {
+            match delivered {
+                Some(order)
+                    if key.len() <= order.len() && key.as_slice() == &order[..key.len()] =>
+                {
+                    // Structural prefix of the incoming order — rows flow
+                    // through already sorted; no temp B-tree needed. The
+                    // delivered order is unchanged.
+                }
+                _ => {
+                    count += 1;
+                    delivered = None;
+                }
+            }
+        }
+
+        count
     }
 
     /// Build the combined sort key for a window spec: PARTITION BY
