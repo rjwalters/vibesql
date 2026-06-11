@@ -342,3 +342,79 @@ fn test_pragma_set_and_get() {
     db.set_short_column_names(true);
     assert!(db.short_column_names());
 }
+
+// ---------------------------------------------------------------------------
+// COLLATE wrapper naming in derived tables (issue #5314, select1-18.1 Bug A)
+//
+// SQLite's sqlite3ColumnsFromExprList() skips TK_COLLATE wrappers when deriving
+// result-column names, so `SELECT x COLLATE rtrim` in a derived table produces
+// a column named `x` that the outer query can resolve.
+// ---------------------------------------------------------------------------
+
+fn create_collate_test_database() -> vibesql_storage::Database {
+    let mut db = vibesql_storage::Database::new();
+
+    let create_stmt =
+        vibesql_parser::Parser::parse_sql("CREATE TABLE t2 (x INTEGER, y INTEGER)").unwrap();
+    if let vibesql_ast::Statement::CreateTable(create_table) = create_stmt {
+        vibesql_executor::CreateTableExecutor::execute(&create_table, &mut db).unwrap();
+    }
+
+    let insert_stmt = vibesql_parser::Parser::parse_sql("INSERT INTO t2 (x) VALUES (123)").unwrap();
+    if let vibesql_ast::Statement::Insert(insert) = insert_stmt {
+        vibesql_executor::InsertExecutor::execute(&mut db, &insert).unwrap();
+    }
+
+    db
+}
+
+fn run_select(
+    db: &vibesql_storage::Database,
+    sql: &str,
+) -> Result<vibesql_executor::SelectResult, vibesql_executor::ExecutorError> {
+    let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        SelectExecutor::new(db).execute_with_columns(&select_stmt)
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+#[test]
+fn test_derived_table_collate_column_named_after_inner_expr() {
+    let db = create_collate_test_database();
+
+    // The derived column must be named `x`, not `?column?`
+    let result = run_select(&db, "SELECT * FROM (SELECT x COLLATE rtrim FROM t2)").unwrap();
+    assert_eq!(result.columns, vec!["x"]);
+    assert_eq!(result.rows.len(), 1);
+
+    // The outer query can therefore resolve `x`
+    let result = run_select(&db, "SELECT x FROM (SELECT x COLLATE rtrim FROM t2)").unwrap();
+    assert_eq!(result.columns, vec!["x"]);
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].values[0], vibesql_types::SqlValue::Integer(123));
+}
+
+#[test]
+fn test_derived_table_nested_collate_column_name() {
+    let db = create_collate_test_database();
+
+    // Nested COLLATE wrappers are peeled recursively
+    let result =
+        run_select(&db, "SELECT x FROM (SELECT x COLLATE binary COLLATE rtrim FROM t2)").unwrap();
+    assert_eq!(result.columns, vec!["x"]);
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].values[0], vibesql_types::SqlValue::Integer(123));
+}
+
+#[test]
+fn test_derived_table_collate_alias_takes_precedence() {
+    let db = create_collate_test_database();
+
+    // An explicit alias wins over the derived name
+    let result = run_select(&db, "SELECT y FROM (SELECT x COLLATE rtrim AS y FROM t2)").unwrap();
+    assert_eq!(result.columns, vec!["y"]);
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].values[0], vibesql_types::SqlValue::Integer(123));
+}

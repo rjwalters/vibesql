@@ -294,7 +294,10 @@ fn extract_table_prefixes(from: &vibesql_ast::FromClause) -> Vec<char> {
 ///   SELECT x+1 FROM (SELECT f/(a*a) AS x FROM t3)  -- 'a' is from outer t1
 /// )
 /// ```
-fn from_clause_has_external_refs(from: &vibesql_ast::FromClause, subquery: &SelectStmt) -> bool {
+pub(crate) fn from_clause_has_external_refs(
+    from: &vibesql_ast::FromClause,
+    subquery: &SelectStmt,
+) -> bool {
     match from {
         vibesql_ast::FromClause::Table { .. } => false,
         vibesql_ast::FromClause::Subquery { query, .. } => {

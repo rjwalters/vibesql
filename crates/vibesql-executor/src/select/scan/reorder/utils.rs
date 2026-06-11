@@ -49,6 +49,13 @@ fn extract_column_name_from_expr(expr: &Expression) -> String {
         Expression::Function { name, .. } => name.to_string(),
         Expression::BinaryOp { left, .. } => extract_column_name_from_expr(left),
         Expression::Wildcard => "*".to_string(),
+        // COLLATE is a transparent wrapper for naming purposes (matches
+        // sqlite3ColumnsFromExprList, which skips TK_COLLATE). Must stay in sync
+        // with derive_column_name_from_expr in select/scan/derived.rs, otherwise
+        // join reordering infers a different column name ("?column?") for derived
+        // tables than the one actually produced ("x"), and predicates referencing
+        // that column get pushed to the wrong scan (fix for select1-18.1).
+        Expression::Collate { expr, .. } => extract_column_name_from_expr(expr),
         _ => "?column?".to_string(),
     }
 }

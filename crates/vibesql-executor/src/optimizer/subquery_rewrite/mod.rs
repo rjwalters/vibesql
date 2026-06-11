@@ -167,7 +167,13 @@ fn extract_table_names(from: &Option<vibesql_ast::FromClause>) -> Vec<String> {
             vibesql_ast::FromClause::Table { name, alias, .. } => {
                 // Use alias if present, otherwise use table name
                 tables.push(alias.clone().unwrap_or_else(|| name.clone()));
-                tables.push(name.clone()); // Also add original name
+                // Also add the original name when aliased, so qualified refs
+                // using either form match. Avoid pushing duplicates for
+                // unaliased tables: rewrite_expression_with_context uses the
+                // entry count to detect multi-relation FROM clauses.
+                if alias.is_some() {
+                    tables.push(name.clone());
+                }
             }
             vibesql_ast::FromClause::Join { left, right, .. } => {
                 collect_tables(left, tables);
