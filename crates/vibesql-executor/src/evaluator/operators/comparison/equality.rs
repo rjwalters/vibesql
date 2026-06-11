@@ -281,8 +281,9 @@ mod tests {
     #[test]
     fn test_timestamp_vs_string_equality() {
         // SQLite date3.test 2.40: datetime(x,'auto') == '<text>' must evaluate
-        // to a boolean, not raise a type mismatch (SQLite's datetime() returns
-        // TEXT, so the comparison is valid there)
+        // to a boolean, not raise a type mismatch. SQLite's datetime() returns
+        // TEXT, so this is a plain text comparison of the renderings there;
+        // Timestamp's Display matches SQLite's 'YYYY-MM-DD HH:MM:SS' output.
         let timestamp = ts("2022-01-27 13:15:44");
         let matching = SqlValue::Varchar(arcstr::ArcStr::from("2022-01-27 13:15:44"));
         let differing = SqlValue::Varchar(arcstr::ArcStr::from("2022-01-27 13:15:45"));
@@ -306,6 +307,19 @@ mod tests {
         assert_eq!(equal(&timestamp, &junk).unwrap(), SqlValue::Boolean(false));
         assert_eq!(equal(&junk, &timestamp).unwrap(), SqlValue::Boolean(false));
         assert_eq!(not_equal(&timestamp, &junk).unwrap(), SqlValue::Boolean(true));
+    }
+
+    #[test]
+    fn test_timestamp_vs_date_only_string_is_not_equal() {
+        // SQLite date2-331 regression: a midnight timestamp is NOT equal to
+        // its date-only string. SQLite compares the TEXT renderings:
+        // '2017-07-08 00:00:00' != '2017-07-08'. (The old parse-first
+        // behavior treated the string as midnight and returned true.)
+        let midnight = ts("2017-07-08 00:00:00");
+        let date_only = SqlValue::Varchar(arcstr::ArcStr::from("2017-07-08"));
+        assert_eq!(equal(&midnight, &date_only).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(equal(&date_only, &midnight).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(not_equal(&midnight, &date_only).unwrap(), SqlValue::Boolean(true));
     }
 
     #[test]
