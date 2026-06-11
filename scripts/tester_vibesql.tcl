@@ -3245,13 +3245,6 @@ array set vibesql_skip_tests {
     window1-11.3 "Expression indexes with window functions not supported"
     window1-11.4 "Expression indexes with window functions not supported"
 
-    windowpushd-1.4 "EQP cosmetics: runtime WHERE push-down into window views landed with #5292, but EXPLAIN QUERY PLAN still renders views opaquely (SCAN lll) instead of expanding to SEARCH t1 USING COVERING INDEX i1 (grp_id=?). Value tests 1.2/1.3 pass. EQP view/subquery expansion tracked in #5347"
-    windowpushd-2.1.1.4 "EQP cosmetics: IN-list push-down executes (#5292) but EQP renders the view opaquely (SCAN v1) instead of USING INDEX i1 (a=?). Value test 2.1.1.2 passes. Tracked in #5347"
-    windowpushd-2.1.1.5 "EQP cosmetics: COLLATE-mismatch push-down executes (#5292) but EQP renders the view opaquely (SCAN v1) instead of USING INDEX i1. Value tests pass. Tracked in #5347"
-    windowpushd-2.1.3.3 "EQP cosmetics: equality push-down executes (#5292) but EQP renders the view opaquely (SCAN v3) instead of SEARCH t1 USING INDEX i2 (b=?). Value test 2.1.3.1 passes. Tracked in #5347"
-    windowpushd-2.1.3.4 "EQP cosmetics: range push-down executes (#5292) but EQP renders the view opaquely (SCAN v3) instead of SEARCH t1 USING INDEX i2 (b>?). Value test 2.1.3.2 passes. Tracked in #5347"
-    windowpushd-2.1.3.6 "EQP cosmetics: no predicate is pushable here (d is not a PARTITION BY column); SQLite picks SCAN t1 USING INDEX i2 because the index delivers PARTITION BY b order inside the expanded view, but VibeSQL EQP renders the view opaquely (SCAN v3). Value test 2.1.3.5 passes. Tracked in #5347"
-
     windowC-2.0 "Requires PRAGMA encoding=UTF16le: SQLite reinterprets the blob group_concat separator bytes as text in the database encoding; VibeSQL has no UTF-16 database encoding support (dbsqlfuzz regression test, #5191)"
     windowC-2.1 "Requires PRAGMA encoding=UTF16be: SQLite reinterprets the blob group_concat separator bytes as text in the database encoding; VibeSQL has no UTF-16 database encoding support (dbsqlfuzz regression test, #5191)"
 
@@ -3998,8 +3991,18 @@ proc do_eqp_test {name sql expected} {
     regsub -all {\s+} $result " " result_norm
     set result_norm [string trim $result_norm]
 
+    # SQLite's tester.tcl matches non-tree patterns ANYWHERE in the EQP
+    # output (it wraps them as /*pattern*/ glob patterns). Mirror that:
+    # patterns that don't start with "QUERY PLAN" are substring globs, while
+    # full-tree patterns still compare against the entire normalized output.
+    if {[string match "QUERY PLAN*" $expected_norm]} {
+        set expected_glob $expected_norm
+    } else {
+        set expected_glob "*$expected_norm*"
+    }
+
     # Perform glob matching on the normalized full result
-    if {[string match $expected_norm $result_norm]} {
+    if {[string match $expected_glob $result_norm]} {
         incr test_results(passed)
         return
     }

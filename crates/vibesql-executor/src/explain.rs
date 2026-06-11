@@ -23,7 +23,9 @@ use vibesql_storage::Database;
 use crate::{
     errors::ExecutorError,
     optimizer::index_planner::IndexPlanner,
-    select::scan::index_scan::{cost_based_index_selection, needs_temp_btree_for_order_by_eqp},
+    select::scan::index_scan::{
+        cost_based_index_selection, eqp_ordering_index, needs_temp_btree_for_order_by_eqp,
+    },
 };
 
 /// SQLite-style scan type for EQP output
@@ -77,6 +79,11 @@ pub struct PlanNode {
     pub set_operation_type: Option<String>,
     /// Whether this is a compound query root
     pub is_compound_query: bool,
+    /// When set, this node is a window-function subquery/view rendered as a
+    /// SQLite-style `CO-ROUTINE <name>` block in EQP output: the inner plan
+    /// is nested under the CO-ROUTINE entry and the outer query reads it via
+    /// a trailing `SCAN <name>` entry (windowpushd.test, #5347).
+    pub coroutine: Option<String>,
 }
 
 impl PlanNode {
@@ -94,6 +101,7 @@ impl PlanNode {
             window_sort_count: 0,
             set_operation_type: None,
             is_compound_query: false,
+            coroutine: None,
         }
     }
 
@@ -188,14 +196,10 @@ impl ExplainResult {
         if self.plan.is_compound_query {
             format_compound_query_eqp(&self.plan, "", true, &mut output);
         } else {
-            // Collect all EQP entries (scan nodes + temp b-tree if needed)
+            // Collect all EQP entries (scan nodes, CO-ROUTINE blocks, temp
+            // b-tree entries) and render the tree.
             let entries = collect_eqp_entries(&self.plan);
-
-            for (i, entry) in entries.iter().enumerate() {
-                let is_last = i == entries.len() - 1;
-                let prefix = if is_last { "`--" } else { "|--" };
-                writeln!(output, "{}{}", prefix, entry).unwrap();
-            }
+            write_eqp_entries(&entries, "", &mut output);
         }
 
         output
@@ -494,33 +498,83 @@ fn collect_scan_nodes(node: &PlanNode) -> Vec<&PlanNode> {
     nodes
 }
 
+/// A single EQP output entry with nested children (used for SQLite-style
+/// `CO-ROUTINE <name>` blocks whose inner plan renders indented).
+struct EqpEntry {
+    text: String,
+    children: Vec<EqpEntry>,
+}
+
+impl EqpEntry {
+    fn leaf(text: String) -> Self {
+        EqpEntry { text, children: Vec::new() }
+    }
+}
+
+/// Render a list of EQP entries as SQLite's tree format with `|--`/`` `-- ``
+/// connectors and `|  `/three-space child indentation.
+fn write_eqp_entries(entries: &[EqpEntry], indent: &str, output: &mut String) {
+    for (i, entry) in entries.iter().enumerate() {
+        let is_last = i == entries.len() - 1;
+        let connector = if is_last { "`--" } else { "|--" };
+        writeln!(output, "{}{}{}", indent, connector, entry.text).unwrap();
+        if !entry.children.is_empty() {
+            let child_indent = format!("{}{}", indent, if is_last { "   " } else { "|  " });
+            write_eqp_entries(&entry.children, &child_indent, output);
+        }
+    }
+}
+
+/// Collect scan entries from the plan tree. Window-subquery/view nodes
+/// marked as co-routines render as a `CO-ROUTINE <name>` block containing
+/// the inner plan's entries (including the inner query's window-sort temp
+/// B-tree entries), followed by the outer query's `SCAN <name>` of the
+/// co-routine output — matching SQLite's EQP shape for window views
+/// (windowpushd.test, #5347).
+fn append_scan_entries(node: &PlanNode, entries: &mut Vec<EqpEntry>) {
+    if let Some(ref name) = node.coroutine {
+        let mut children = Vec::new();
+        for child in &node.children {
+            children.extend(collect_eqp_entries(child));
+        }
+        entries.push(EqpEntry { text: format!("CO-ROUTINE {}", name), children });
+        entries.push(EqpEntry::leaf(format!("SCAN {}", name)));
+        return;
+    }
+
+    if node.scan_type.is_some() {
+        entries.push(EqpEntry::leaf(format_sqlite_eqp_node(node)));
+    }
+
+    for child in &node.children {
+        append_scan_entries(child, entries);
+    }
+}
+
 /// Collect all EQP entries from the plan tree, including TEMP B-TREE entries
-fn collect_eqp_entries(node: &PlanNode) -> Vec<String> {
+fn collect_eqp_entries(node: &PlanNode) -> Vec<EqpEntry> {
     let mut entries = Vec::new();
 
-    // Collect scan nodes first
-    let scan_nodes = collect_scan_nodes(node);
-    for scan_node in &scan_nodes {
-        entries.push(format_sqlite_eqp_node(scan_node));
-    }
+    // Collect scan entries first (co-routine blocks nest their inner plan)
+    append_scan_entries(node, &mut entries);
 
     // Add one TEMP B-TREE entry per distinct window sort key not satisfied
     // by an index. Window sorting passes run before the statement-level
     // ORDER BY, and SQLite never dedups them against it — they are
     // separate passes.
     for _ in 0..node.window_sort_count {
-        entries.push("USE TEMP B-TREE FOR ORDER BY".to_string());
+        entries.push(EqpEntry::leaf("USE TEMP B-TREE FOR ORDER BY".to_string()));
     }
 
     // Add TEMP B-TREE entry if needed for ORDER BY
     if node.needs_temp_btree_for_order_by {
-        entries.push("USE TEMP B-TREE FOR ORDER BY".to_string());
+        entries.push(EqpEntry::leaf("USE TEMP B-TREE FOR ORDER BY".to_string()));
     }
 
     // Check children for temp b-tree needs as well
     for child in &node.children {
         if child.needs_temp_btree_for_order_by && !node.needs_temp_btree_for_order_by {
-            entries.push("USE TEMP B-TREE FOR ORDER BY".to_string());
+            entries.push(EqpEntry::leaf("USE TEMP B-TREE FOR ORDER BY".to_string()));
             break;
         }
     }
@@ -714,7 +768,9 @@ impl ExplainExecutor {
         database: &Database,
     ) -> Result<ExplainResult, ExecutorError> {
         let plan = match stmt.statement.as_ref() {
-            Statement::Select(select_stmt) => Self::explain_select(select_stmt, database)?,
+            Statement::Select(select_stmt) => {
+                Self::explain_select(select_stmt, database, &HashSet::new())?
+            }
             Statement::Insert(_) => {
                 PlanNode::new("Insert").with_detail("Inserts rows into target table".to_string())
             }
@@ -733,10 +789,36 @@ impl ExplainExecutor {
     }
 
     /// Generate execution plan for a SELECT statement
-    fn explain_select(stmt: &SelectStmt, database: &Database) -> Result<PlanNode, ExecutorError> {
+    ///
+    /// `outer_ctes` holds the lowercased names of CTEs in scope from
+    /// enclosing queries; CTE names shadow same-named catalog views, so the
+    /// window push-down rewrite and view expansion must not fire for them.
+    fn explain_select(
+        stmt: &SelectStmt,
+        database: &Database,
+        outer_ctes: &HashSet<String>,
+    ) -> Result<PlanNode, ExecutorError> {
+        // Mirror the runtime optimizer (#5292): WHERE conjuncts on a
+        // PARTITION BY prefix of every window are pushed into window-function
+        // views/subqueries before planning, so EQP reflects the inner access
+        // path (windowpushd.test 1.4, 2.1.*, #5347). When the pass does not
+        // fire the statement is returned unchanged.
+        let stmt =
+            crate::optimizer::push_where_into_window_subqueries(stmt.clone(), database, outer_ctes);
+        let stmt = &stmt;
+
+        // Extend the CTE scope with this statement's own WITH clause for
+        // nested FROM-clause analysis.
+        let mut ctes = outer_ctes.clone();
+        if let Some(ref with) = stmt.with_clause {
+            for cte in with.iter() {
+                ctes.insert(cte.name.to_ascii_lowercase());
+            }
+        }
+
         // Check if this is a compound query (UNION, INTERSECT, EXCEPT)
         if stmt.set_operation.is_some() {
-            return Self::explain_compound_select(stmt, database);
+            return Self::explain_compound_select(stmt, database, &ctes);
         }
 
         let mut root = PlanNode::new("Select");
@@ -744,14 +826,25 @@ impl ExplainExecutor {
         // Extract columns needed by the SELECT list for covering index detection
         let needed_columns = extract_select_columns(&stmt.select_list);
 
-        // Analyze FROM clause
+        // Analyze FROM clause. When the SELECT list contains window
+        // functions, the base-table scan feeds the INNERMOST window sorting
+        // pass (SQLite's co-routine rewrite, see count_window_sorts), so the
+        // scan's effective ordering requirement is the last distinct window
+        // key — SQLite picks an index that delivers PARTITION BY/ORDER BY
+        // order even without any predicate (windowpushd.test 2.1.3.6).
+        let window_scan_key = Self::distinct_window_keys(stmt).pop();
+        let order_from_window = window_scan_key.is_some();
+        let scan_order_by: Option<Vec<vibesql_ast::OrderByItem>> =
+            window_scan_key.or_else(|| stmt.order_by.clone());
         if let Some(ref from_clause) = stmt.from {
             let scan_node = Self::explain_from_clause(
                 from_clause,
                 &stmt.where_clause,
-                &stmt.order_by,
+                &scan_order_by,
+                order_from_window,
                 &needed_columns,
                 database,
+                &ctes,
             )?;
             root.add_child(scan_node);
         } else {
@@ -824,6 +917,7 @@ impl ExplainExecutor {
     fn explain_compound_select(
         stmt: &SelectStmt,
         database: &Database,
+        ctes: &HashSet<String>,
     ) -> Result<PlanNode, ExecutorError> {
         let mut root = PlanNode::new("CompoundQuery");
         root.is_compound_query = true;
@@ -846,7 +940,7 @@ impl ExplainExecutor {
             set_operation: None,
             values: stmt.values.clone(),
         };
-        let left_plan = Self::explain_select(&left_stmt, database)?;
+        let left_plan = Self::explain_select(&left_stmt, database, ctes)?;
         root.add_child(left_plan);
 
         // Add subsequent set operations
@@ -879,7 +973,7 @@ impl ExplainExecutor {
                 set_operation: None,
                 values: set_op.right.values.clone(),
             };
-            let mut right_plan = Self::explain_select(&right_stmt, database)?;
+            let mut right_plan = Self::explain_select(&right_stmt, database, ctes)?;
             right_plan.set_operation_type = Some(op_label.to_string());
             root.add_child(right_plan);
 
@@ -919,28 +1013,7 @@ impl ExplainExecutor {
     ///   further propagation is attempted — matching the conservative
     ///   pre-existing behavior validated by window1.test section 23).
     fn count_window_sorts(stmt: &SelectStmt, database: &Database) -> usize {
-        let Ok(specs) = crate::select::window::collect_resolved_window_specs(
-            &stmt.select_list,
-            stmt.window_definitions.as_ref(),
-        ) else {
-            // Resolution errors (e.g. unknown named window) surface during
-            // execution; EXPLAIN just shows no window sorts.
-            return 0;
-        };
-
-        let mut distinct_keys: Vec<Vec<vibesql_ast::OrderByItem>> = Vec::new();
-        for spec in &specs {
-            let key = Self::window_combined_key(spec);
-
-            // OVER () — no partitioning or ordering — needs no sort pass.
-            if key.is_empty() {
-                continue;
-            }
-
-            if !distinct_keys.contains(&key) {
-                distinct_keys.push(key);
-            }
-        }
+        let distinct_keys = Self::distinct_window_keys(stmt);
 
         // Only the innermost pass — the last distinct key — scans the base
         // table; it alone is eligible for direct index suppression. When it
@@ -956,16 +1029,16 @@ impl ExplainExecutor {
         // The order delivered to outer passes while the suppression chain
         // is unbroken. `None` once any pass has required a temp B-tree.
         let mut delivered: Option<&[vibesql_ast::OrderByItem]> =
-            if Self::needs_temp_btree_for_order_by(
+            if Self::window_key_satisfied_by_index(
                 stmt.from.as_ref(),
                 stmt.where_clause.as_ref(),
                 innermost,
                 database,
             ) {
+                Some(innermost.as_slice())
+            } else {
                 count += 1;
                 None
-            } else {
-                Some(innermost.as_slice())
             };
 
         // Walk outward (last-but-one key back to the first).
@@ -986,6 +1059,37 @@ impl ExplainExecutor {
         }
 
         count
+    }
+
+    /// The distinct window sort keys of the SELECT list, in first-occurrence
+    /// order. Each key is PARTITION BY exprs (as ASC) + window ORDER BY
+    /// items; empty keys (`OVER ()`) are skipped. SQLite's nested co-routine
+    /// rewrite emits sorting passes in reverse order, so the LAST key is the
+    /// innermost pass — the one that scans the base table. Resolution errors
+    /// (e.g. unknown named window) surface during execution; EXPLAIN just
+    /// sees no window keys.
+    fn distinct_window_keys(stmt: &SelectStmt) -> Vec<Vec<vibesql_ast::OrderByItem>> {
+        let Ok(specs) = crate::select::window::collect_resolved_window_specs(
+            &stmt.select_list,
+            stmt.window_definitions.as_ref(),
+        ) else {
+            return Vec::new();
+        };
+
+        let mut distinct_keys: Vec<Vec<vibesql_ast::OrderByItem>> = Vec::new();
+        for spec in &specs {
+            let key = Self::window_combined_key(spec);
+
+            // OVER () — no partitioning or ordering — needs no sort pass.
+            if key.is_empty() {
+                continue;
+            }
+
+            if !distinct_keys.contains(&key) {
+                distinct_keys.push(key);
+            }
+        }
+        distinct_keys
     }
 
     /// Build the combined sort key for a window spec: PARTITION BY
@@ -1022,6 +1126,27 @@ impl ExplainExecutor {
         specs.first().map(Self::window_combined_key)
     }
 
+    /// EQP-level check: can the base-table scan deliver `key` order for the
+    /// INNERMOST window sorting pass? Unlike the statement-level ORDER BY
+    /// check, the window pass is fed directly by the FROM scan, and SQLite
+    /// picks an index that delivers PARTITION BY/ORDER BY order even when no
+    /// predicate can use it (windowpushd.test 2.1.1.5, 2.1.3.6) — hence
+    /// `prefer_ordering_scan = true`.
+    fn window_key_satisfied_by_index(
+        from: Option<&vibesql_ast::FromClause>,
+        where_clause: Option<&vibesql_ast::Expression>,
+        key: &[vibesql_ast::OrderByItem],
+        database: &Database,
+    ) -> bool {
+        let Some(from_clause) = from else {
+            return true; // No FROM — single constant row, no sort needed.
+        };
+        let vibesql_ast::FromClause::Table { name, .. } = from_clause else {
+            return false; // Joins/subqueries always need a sorting pass.
+        };
+        eqp_ordering_index(name, where_clause, key, database, true).is_some()
+    }
+
     /// Check if ORDER BY requires a temp B-tree (sorting pass) for EQP rendering.
     ///
     /// Delegates to [`needs_temp_btree_for_order_by_eqp`] in the index-scan
@@ -1053,23 +1178,65 @@ impl ExplainExecutor {
         needs_temp_btree_for_order_by_eqp(table_name, where_clause, order_by, database)
     }
 
+    /// True when the SELECT list (or named WINDOW clause) of `stmt` contains
+    /// window functions — such subqueries/views render as CO-ROUTINE blocks
+    /// in EQP output because SQLite cannot flatten them.
+    fn select_has_window_functions(stmt: &SelectStmt) -> bool {
+        crate::select::window::collect_resolved_window_specs(
+            &stmt.select_list,
+            stmt.window_definitions.as_ref(),
+        )
+        .map(|specs| !specs.is_empty())
+        .unwrap_or(false)
+    }
+
     /// Generate plan node for FROM clause
+    ///
+    /// `order_from_window` is true when `order_by` is a window sort key
+    /// rather than the statement-level ORDER BY; the base scan then prefers
+    /// an index that delivers the window order even without predicates.
     fn explain_from_clause(
         from: &vibesql_ast::FromClause,
         where_clause: &Option<vibesql_ast::Expression>,
         order_by: &Option<Vec<vibesql_ast::OrderByItem>>,
+        order_from_window: bool,
         needed_columns: &HashSet<String>,
         database: &Database,
+        ctes: &HashSet<String>,
     ) -> Result<PlanNode, ExecutorError> {
         match from {
-            vibesql_ast::FromClause::Table { name, alias, .. } => Self::explain_table_scan(
-                name,
-                alias.as_deref(),
-                where_clause,
-                order_by,
-                needed_columns,
-                database,
-            ),
+            vibesql_ast::FromClause::Table { name, alias, .. } => {
+                // Expand window-function views (#5347): SQLite's EQP shows
+                // the view body's plan as a CO-ROUTINE block instead of an
+                // opaque `SCAN <view>` (windowpushd.test 2.1.3.6). Only
+                // window views are expanded — plain views keep the existing
+                // opaque rendering (flattening them faithfully would also
+                // require pushing the outer WHERE; follow-on work). CTE
+                // names shadow same-named views and are never expanded.
+                if !ctes.contains(&name.to_ascii_lowercase()) {
+                    if let Some(view) = database.catalog.get_view(name) {
+                        if Self::select_has_window_functions(&view.query) {
+                            let source = alias.as_deref().unwrap_or(name.as_str());
+                            let child = Self::explain_select(&view.query, database, ctes)?;
+                            let mut view_node = PlanNode::new("Subquery");
+                            view_node.object = Some(format!("AS {}", source));
+                            view_node.coroutine = Some(source.to_string());
+                            view_node.add_child(child);
+                            return Ok(view_node);
+                        }
+                    }
+                }
+
+                Self::explain_table_scan(
+                    name,
+                    alias.as_deref(),
+                    where_clause,
+                    order_by,
+                    order_from_window,
+                    needed_columns,
+                    database,
+                )
+            }
             vibesql_ast::FromClause::Join {
                 left,
                 right,
@@ -1108,15 +1275,24 @@ impl ExplainExecutor {
                     left,
                     where_clause,
                     order_by,
+                    order_from_window,
                     needed_columns,
                     database,
+                    ctes,
                 )?;
                 join_node.add_child(left_child);
 
                 // Add right child (no WHERE pushdown for right side in simple case)
                 let empty_cols = HashSet::new();
-                let right_child =
-                    Self::explain_from_clause(right, &None, &None, &empty_cols, database)?;
+                let right_child = Self::explain_from_clause(
+                    right,
+                    &None,
+                    &None,
+                    false,
+                    &empty_cols,
+                    database,
+                    ctes,
+                )?;
                 join_node.add_child(right_child);
 
                 Ok(join_node)
@@ -1125,7 +1301,16 @@ impl ExplainExecutor {
                 let mut subquery_node = PlanNode::new("Subquery");
                 subquery_node.object = Some(format!("AS {}", alias));
 
-                let child = Self::explain_select(query, database)?;
+                // Window-function subqueries cannot be flattened; SQLite
+                // runs them as co-routines and EQP nests the inner plan
+                // under a `CO-ROUTINE <alias>` entry (#5347). Plain derived
+                // tables keep the existing flat rendering, matching
+                // SQLite's query flattening.
+                if Self::select_has_window_functions(query) {
+                    subquery_node.coroutine = Some(alias.clone());
+                }
+
+                let child = Self::explain_select(query, database, ctes)?;
                 subquery_node.add_child(child);
 
                 Ok(subquery_node)
@@ -1151,6 +1336,7 @@ impl ExplainExecutor {
         alias: Option<&str>,
         where_clause: &Option<vibesql_ast::Expression>,
         order_by: &Option<Vec<vibesql_ast::OrderByItem>>,
+        order_from_window: bool,
         needed_columns: &HashSet<String>,
         database: &Database,
     ) -> Result<PlanNode, ExecutorError> {
@@ -1215,6 +1401,17 @@ impl ExplainExecutor {
                 if let Some(where_expr) = where_clause {
                     collect_column_refs(where_expr, &mut all_needed_columns);
                 }
+                // SQLite indexes implicitly carry the rowid, so an INTEGER
+                // PRIMARY KEY column (rowid alias) never disqualifies a
+                // covering index (windowpushd.test 1.4: index i1(grp_id)
+                // covers `SELECT grp_id, id` when id is the rowid alias).
+                if let Some(table) = database.get_table(table_name) {
+                    if let Some(rowid_idx) = table.schema.rowid_alias_column {
+                        if let Some(col) = table.schema.columns.get(rowid_idx) {
+                            all_needed_columns.remove(&col.name.to_lowercase());
+                        }
+                    }
+                }
                 is_covering_index(&index_name, &all_needed_columns, database)
             };
 
@@ -1274,6 +1471,21 @@ impl ExplainExecutor {
             }
 
             idx_node
+        } else if let Some(ordering_index) = order_by
+            .as_deref()
+            .filter(|_| order_from_window)
+            .and_then(|items| {
+                eqp_ordering_index(table_name, where_clause.as_ref(), items, database, true)
+            })
+        {
+            // No filtering index, but the scan feeds a window sorting pass
+            // whose key an index delivers: SQLite scans that index instead
+            // of sorting (windowpushd.test 2.1.3.6: `SCAN t1 USING INDEX
+            // i2` — i2 is chosen purely for PARTITION BY order).
+            PlanNode::new("Index Scan")
+                .with_object(table_name)
+                .with_scan_type(ScanType::Scan)
+                .with_index_name(&ordering_index)
         } else {
             PlanNode::new("Seq Scan").with_object(table_name).with_scan_type(ScanType::Scan)
         };
