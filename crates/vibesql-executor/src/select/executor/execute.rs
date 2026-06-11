@@ -188,6 +188,15 @@ impl SelectExecutor<'_> {
 
         let optimized_stmt = crate::optimizer::rewrite_subquery_optimizations(stmt);
 
+        // Push WHERE conjuncts into window-function subqueries/views (#5292)
+        // Predicates over a PARTITION BY prefix of every window in a derived
+        // table or view are copied into the inner WHERE clause, filtering
+        // whole partitions before the window functions run (and enabling
+        // index scans inside the subquery). Mirrors SQLite's
+        // pushDownWhereTerms() gate for window queries.
+        let optimized_stmt =
+            crate::optimizer::push_where_into_window_subqueries(&optimized_stmt, self.database);
+
         // Apply scalar subquery decorrelation (#4760)
         // Transforms correlated scalar subqueries with aggregates (e.g., AVG, SUM, MIN)
         // into CTE + JOIN patterns for O(n) instead of O(n²) execution.

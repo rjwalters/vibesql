@@ -28,6 +28,7 @@ pub mod table_elimination;
 #[cfg(test)]
 mod tests;
 pub mod where_pushdown;
+pub mod window_pushdown;
 
 pub use column_pruning::{
     collect_columns_from_expr, collect_required_columns, compute_projection_indices, project_rows,
@@ -41,3 +42,4 @@ pub use subquery_rewrite::scalar_decorrelation::apply_scalar_decorrelation;
 pub use subquery_to_join::transform_subqueries_to_joins;
 pub use table_elimination::eliminate_unused_tables;
 pub use where_pushdown::combine_with_and;
+pub use window_pushdown::push_where_into_window_subqueries;
