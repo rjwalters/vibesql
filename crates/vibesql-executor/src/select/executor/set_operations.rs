@@ -193,11 +193,17 @@ impl SelectExecutor<'_> {
             self.execute_without_aggregation(right_stmt, from_result, cte_results)?
         } else if let Some(values_rows) = &right_stmt.values {
             // Handle standalone VALUES in set operation right side (Issue #4546)
+            // Thread CTE context so subqueries in VALUES rows can reference
+            // names bound by an enclosing WITH clause (#5353); fall back to
+            // the outer context when no local CTEs were materialized.
+            let cte_ctx =
+                if !cte_results.is_empty() { Some(cte_results) } else { self.cte_context };
             let from_result = crate::select::scan::values::execute_values(
                 values_rows,
                 "_values_",
                 None,
                 Some(self.database),
+                cte_ctx,
             )?;
             from_result.into_rows()
         } else {

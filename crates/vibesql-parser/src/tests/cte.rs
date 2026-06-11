@@ -297,3 +297,86 @@ fn test_parse_cte_materialized_with_column_list() {
     let result = Parser::parse_sql("WITH t(a, b) AS MATERIALIZED (SELECT 1, 2) SELECT * FROM t;");
     assert!(result.is_ok(), "CTE with column list and MATERIALIZED should parse: {:?}", result);
 }
+
+// ========================================================================
+// WITH ... VALUES Tests (issue #5353)
+//
+// SQLite treats a standalone VALUES as a SELECT form, so a WITH clause may
+// precede a bare VALUES statement.
+// ========================================================================
+
+#[test]
+fn test_parse_with_values_basic() {
+    let stmt = Parser::parse_sql("WITH c AS (SELECT 1) VALUES((SELECT * FROM c));").unwrap();
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert!(select.with_clause.is_some(), "WITH clause should be attached");
+            assert_eq!(select.with_clause.as_ref().unwrap()[0].name, "c");
+            let values = select.values.as_ref().expect("VALUES body should be set");
+            assert_eq!(values.len(), 1);
+            assert_eq!(values[0].len(), 1);
+            assert!(select.select_list.is_empty(), "VALUES form has no select list");
+        }
+        other => panic!("Expected SELECT statement with VALUES body, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_with_values_multi_row() {
+    let stmt =
+        Parser::parse_sql("WITH x AS (SELECT 5) VALUES(1),(2),((SELECT * FROM x));").unwrap();
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert!(select.with_clause.is_some());
+            assert_eq!(select.values.as_ref().unwrap().len(), 3);
+        }
+        other => panic!("Expected SELECT statement with VALUES body, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_with_recursive_values() {
+    let result = Parser::parse_sql(
+        "WITH RECURSIVE cnt(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM cnt WHERE x<3) \
+         VALUES((SELECT max(x) FROM cnt));",
+    );
+    assert!(result.is_ok(), "WITH RECURSIVE before VALUES should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_with_values_union() {
+    let stmt = Parser::parse_sql("WITH c AS (SELECT 9) VALUES((SELECT * FROM c)) UNION VALUES(2);")
+        .unwrap();
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert!(select.with_clause.is_some());
+            assert!(select.values.is_some());
+            assert!(select.set_operation.is_some(), "UNION should be attached");
+        }
+        other => panic!("Expected SELECT statement with VALUES body, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_with_multiple_ctes_then_values() {
+    let result = Parser::parse_sql(
+        "WITH a AS (SELECT 1), b AS (SELECT * FROM a) VALUES((SELECT * FROM b));",
+    );
+    assert!(result.is_ok(), "WITH multiple CTEs before VALUES should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_with_followed_by_invalid_statement_still_errors() {
+    // WITH may only precede SELECT, VALUES, INSERT, UPDATE, or DELETE
+    let result = Parser::parse_sql("WITH c AS (SELECT 1) CREATE TABLE t(a INTEGER);");
+    assert!(result.is_err(), "WITH before CREATE should not parse");
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("after WITH clause"), "Unexpected error message: {}", msg);
+}
+
+#[test]
+fn test_parse_with_values_missing_rows_errors() {
+    // VALUES keyword with no row list is still invalid
+    let result = Parser::parse_sql("WITH c AS (SELECT 1) VALUES;");
+    assert!(result.is_err(), "WITH ... VALUES without rows should not parse");
+}

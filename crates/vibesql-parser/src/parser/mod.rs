@@ -729,7 +729,7 @@ impl Parser {
 
     /// Parse statement starting with WITH clause (CTEs)
     ///
-    /// WITH can precede SELECT, INSERT, UPDATE, or DELETE statements.
+    /// WITH can precede SELECT, VALUES, INSERT, UPDATE, or DELETE statements.
     /// This method parses the CTE list first, then dispatches to the appropriate
     /// statement parser based on the following keyword.
     fn parse_with_statement(&mut self) -> Result<vibesql_ast::Statement, ParseError> {
@@ -756,6 +756,15 @@ impl Parser {
                 select_stmt.with_clause = Some(cte_list);
                 Ok(vibesql_ast::Statement::Select(Box::new(select_stmt)))
             }
+            Token::Keyword { keyword: Keyword::Values, .. } => {
+                // SQLite treats a standalone VALUES as a SELECT form, so a WITH
+                // clause may precede a bare VALUES statement (issue #5353).
+                // parse_values_statement already returns a SelectStmt with the
+                // `values` body set; attach the CTEs to it.
+                let mut select_stmt = self.parse_values_statement()?;
+                select_stmt.with_clause = Some(cte_list);
+                Ok(vibesql_ast::Statement::Select(Box::new(select_stmt)))
+            }
             Token::Keyword { keyword: Keyword::Insert, .. } => {
                 // Parse INSERT with pre-parsed CTEs
                 let insert_stmt = self.parse_insert_statement_with_cte(cte_list)?;
@@ -773,7 +782,7 @@ impl Parser {
             }
             _ => Err(ParseError {
                 message: format!(
-                    "Expected SELECT, INSERT, UPDATE, or DELETE after WITH clause, found {}",
+                    "Expected SELECT, VALUES, INSERT, UPDATE, or DELETE after WITH clause, found {}",
                     self.peek().syntax_error()
                 ),
             }),
