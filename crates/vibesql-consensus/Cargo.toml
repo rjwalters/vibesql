@@ -1,0 +1,23 @@
+[package]
+name = "vibesql-consensus"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Consensus adapter layer for VibeSQL WAN replication (see ADR-0004)"
+keywords = ["sql", "database", "consensus", "raft", "replication"]
+categories = ["database"]
+
+# NOTE: `openraft` is deliberately NOT a dependency yet. ADR-0004 selects it,
+# but wiring it in is Raft Phase A2/A3 work. This crate is scaffolding only:
+# the engine-agnostic `ConsensusBackend` trait plus a single-node loopback
+# implementation for dev/test.
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["rt", "macros"] }

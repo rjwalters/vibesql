@@ -22,12 +22,16 @@ See `docs/templates/ADR_TEMPLATE.md` for the full template.
 |----|-------|--------|------|---------|
 | 0001 | **Language Choice: Rust** | ✅ **Accepted** | 2025-10-25 | **Rust chosen** for type safety, pattern matching, compiler feedback, and correctness focus |
 | 0002 | **Parser Strategy: Hand-Written** | ✅ **Accepted** | 2025-10-25 | **Hand-written recursive descent + Pratt parser** chosen for full control, TDD alignment, and SQL:1999 flexibility |
+| 0004 | **Consensus Library: openraft** | ✅ **Accepted** | 2026-06-11 | **openraft, single Raft group replicating the whole database** behind an engine-agnostic `ConsensusBackend` trait; sharding/HLC/distributed txns explicitly deferred |
 
 ## Decisions by Category
 
 ### Core Technology Stack
 - [ADR-0001](docs/decisions/0001-language-choice.md) - **Language Choice: Rust** ✅ (Accepted 2025-10-25)
 - [ADR-0002](docs/decisions/0002-parser-strategy.md) - **Parser Strategy: Hand-Written** ✅ (Accepted 2025-10-25)
+
+### Replication and Distribution
+- [ADR-0004](docs/decisions/0004-consensus-library.md) - **Consensus Library: openraft (single-group topology)** ✅ (Accepted 2026-06-11)
 
 ## Decision Process
 
@@ -58,6 +62,7 @@ Create an ADR when:
 ## Quick Reference
 
 ### Recently Accepted
+- **ADR-0004**: Consensus Library - openraft, single Raft group (2026-06-11)
 - **ADR-0001**: Language Choice - Rust (2025-10-25)
 - **ADR-0002**: Parser Strategy - Hand-Written Recursive Descent (2025-10-25)
 
@@ -85,6 +90,6 @@ When making architectural decisions:
 
 ---
 
-**Last Updated**: 2025-10-26
-**Total ADRs**: 2 accepted, 0 pending
-**Status**: Foundation established - language and parser strategy implemented!
+**Last Updated**: 2026-06-11
+**Total ADRs**: 3 accepted, 0 pending
+**Status**: Foundation established; consensus library selected for the WAN replication track (Raft Phase A1)
