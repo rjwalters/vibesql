@@ -3285,6 +3285,7 @@ array set vibesql_skip_tests {
     date-8.18 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
     date-8.19 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
     date-15.2 "sleeper TCL UDF registered via db func is not visible to the VibeSQL CLI subprocess (harness limitation)"
+    date2-330 "EXPLAIN QUERY PLAN expects USING INDEX t3b1, but partial EXPRESSION indexes are excluded from planner selection until the expression-index equality/BETWEEN probe bug is fixed (#5333: Timestamp keys vs string bounds return 0 rows, silently losing rows). date2-331 verifies the query returns correct rows via full scan."
 }
 
 # Pattern-based skip list for tests with many numbered variants

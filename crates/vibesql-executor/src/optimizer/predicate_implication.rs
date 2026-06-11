@@ -13,14 +13,18 @@
 //!
 //! This intentionally does NOT attempt general implication (e.g. `x > 5`
 //! implies `x > 0`). It covers the common SQLite idiom where the query repeats
-//! the index predicate as a conjunct, e.g. date2-330:
+//! the index predicate as a conjunct, e.g.:
 //!
 //! ```sql
-//! CREATE INDEX t3b1 ON t3(datetime(b)) WHERE typeof(b)='real';
-//! SELECT a FROM t3
-//!  WHERE typeof(b)='real'
-//!    AND datetime(b) BETWEEN '2017-07-04' AND '2017-07-08';
+//! CREATE INDEX idx_open_sku ON orders(sku) WHERE status = 1;
+//! SELECT id FROM orders WHERE status = 1 AND sku = 300;
 //! ```
+//!
+//! v1 additionally restricts selection to NON-EXPRESSION partial indexes:
+//! partial indexes with expression columns (e.g. the date2-330/331 index
+//! `CREATE INDEX t3b1 ON t3(datetime(b)) WHERE typeof(b)='real'`) are excluded
+//! until the expression-index equality/BETWEEN probe bug (#5333) is fixed —
+//! see [`partial_index_usable`].
 //!
 //! Correctness:
 //! - **Extra rows are harmless** — the full WHERE clause is always re-applied
@@ -94,9 +98,22 @@ pub(crate) fn query_implies_index_predicate(
 /// clause, considering partial-index predicates.
 ///
 /// - Non-partial indexes are always usable (returns `true`).
-/// - Partial indexes are usable only when `query_where` structurally implies
-///   the index predicate (see [`query_implies_index_predicate`]).
+/// - Partial indexes containing **expression columns** are never usable (v1
+///   exclusion, see below).
+/// - Other partial indexes are usable only when `query_where` structurally
+///   implies the index predicate (see [`query_implies_index_predicate`]).
 /// - A partial index with no query WHERE clause is never usable.
+///
+/// v1 exclusion of partial EXPRESSION indexes (issue #5333): the
+/// expression-index probe machinery compares `Timestamp` keys against string
+/// bounds incorrectly for equality and BETWEEN probes (both return 0 rows;
+/// one-sided ranges are fine). Selecting a partial expression index such as
+/// `CREATE INDEX t3b1 ON t3(datetime(b)) WHERE typeof(b)='real'` (date2-331)
+/// therefore silently loses rows — an empty probe result can only be narrowed
+/// by the WHERE post-filter, never widened. Until #5333 fixes the probes,
+/// partial expression indexes stay excluded from planner selection, matching
+/// the pre-#5331 behavior for them. (Non-partial expression indexes keep
+/// their existing selection behavior — also tracked by #5333.)
 ///
 /// The partial predicate lives on the catalog-side `IndexMetadata`
 /// (`where_clause`); the storage-side metadata does not yet carry it.
@@ -105,12 +122,21 @@ pub(crate) fn partial_index_usable(
     index_name: &str,
     query_where: Option<&Expression>,
 ) -> bool {
-    let Some(index_where) =
-        database.catalog.find_index_by_name(index_name).and_then(|m| m.where_clause.as_deref())
-    else {
-        // Not a partial index (or unknown to the catalog): no predicate gate.
+    let Some(metadata) = database.catalog.find_index_by_name(index_name) else {
+        // Unknown to the catalog: no predicate gate.
         return true;
     };
+
+    let Some(index_where) = metadata.where_clause.as_deref() else {
+        // Not a partial index: no predicate gate.
+        return true;
+    };
+
+    // v1: partial expression indexes are excluded until the expression-index
+    // equality/BETWEEN probe bug (#5333) is fixed.
+    if metadata.has_expression_columns() {
+        return false;
+    }
 
     match query_where {
         Some(query_where) => query_implies_index_predicate(query_where, index_where),
@@ -274,6 +300,39 @@ mod tests {
 
         let mut db = Database::new();
         let create_table =
+            vibesql_parser::Parser::parse_sql("CREATE TABLE t (a INTEGER, b INTEGER)").unwrap();
+        if let Statement::CreateTable(stmt) = create_table {
+            crate::CreateTableExecutor::execute(&stmt, &mut db).unwrap();
+        }
+        let create_index =
+            vibesql_parser::Parser::parse_sql("CREATE INDEX tb1 ON t(a) WHERE b = 1").unwrap();
+        if let Statement::CreateIndex(stmt) = create_index {
+            crate::CreateIndexExecutor::execute(&stmt, &mut db).unwrap();
+        }
+
+        // No WHERE clause: partial index unusable.
+        assert!(!partial_index_usable(&db, "tb1", None));
+
+        // Implying WHERE clause: usable.
+        let implying = parse_where("b = 1 AND a > 5");
+        assert!(partial_index_usable(&db, "tb1", Some(&implying)));
+
+        // Non-implying WHERE clause: unusable.
+        let non_implying = parse_where("a > 5");
+        assert!(!partial_index_usable(&db, "tb1", Some(&non_implying)));
+    }
+
+    #[test]
+    fn partial_expression_index_excluded_even_when_implied() {
+        // v1 exclusion (#5333): the expression-index equality/BETWEEN probe
+        // machinery loses rows (Timestamp keys vs string bounds), so a
+        // partial EXPRESSION index must never be planner-usable — even when
+        // the query WHERE implies the index predicate verbatim (date2-331
+        // shape). Remove this exclusion when #5333 is fixed.
+        use vibesql_storage::Database;
+
+        let mut db = Database::new();
+        let create_table =
             vibesql_parser::Parser::parse_sql("CREATE TABLE t3 (a INTEGER, b REAL)").unwrap();
         if let Statement::CreateTable(stmt) = create_table {
             crate::CreateTableExecutor::execute(&stmt, &mut db).unwrap();
@@ -286,17 +345,11 @@ mod tests {
             crate::CreateIndexExecutor::execute(&stmt, &mut db).unwrap();
         }
 
-        // No WHERE clause: partial index unusable.
-        assert!(!partial_index_usable(&db, "t3b1", None));
-
-        // Implying WHERE clause: usable.
+        // Even a verbatim-implying WHERE clause must not make it usable.
         let implying =
             parse_where("typeof(b)='real' AND datetime(b) BETWEEN '2017-07-04' AND '2017-07-08'");
-        assert!(partial_index_usable(&db, "t3b1", Some(&implying)));
-
-        // Non-implying WHERE clause: unusable.
-        let non_implying = parse_where("datetime(b) BETWEEN '2017-07-04' AND '2017-07-08'");
-        assert!(!partial_index_usable(&db, "t3b1", Some(&non_implying)));
+        assert!(!partial_index_usable(&db, "t3b1", Some(&implying)));
+        assert!(!partial_index_usable(&db, "t3b1", None));
     }
 
     #[test]

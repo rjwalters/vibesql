@@ -517,7 +517,8 @@ fn partial_index_body_empty_after_compaction_removes_all_truthy_rows() {
 
 // ---------------------------------------------------------------------------
 // Planner selection of partial indexes via structural predicate implication
-// (issue #5325, date2-330)
+// (issue #5325; v1 covers non-expression partial indexes only — expression
+// ones are excluded until the probe bug #5333 is fixed)
 // ---------------------------------------------------------------------------
 
 /// Run EXPLAIN QUERY PLAN and return the text output.
@@ -550,10 +551,18 @@ fn select_first_column_ints(db: &Database, sql: &str) -> Vec<i64> {
     }
 }
 
-/// date2-330 shape: the partial expression index is selected when the query
-/// WHERE clause contains the index predicate verbatim as a conjunct.
+/// date2-330/331 shape: partial EXPRESSION indexes are excluded from planner
+/// selection (v1, issue #5333) even when the query WHERE contains the index
+/// predicate verbatim as a conjunct. The expression-index equality/BETWEEN
+/// probe machinery compares Timestamp keys against string bounds incorrectly
+/// and returns 0 rows — with `t3b1` selected this exact query returns `{}`
+/// instead of `{1, 2}` (silent row loss; the WHERE post-filter can only
+/// narrow an empty probe result, never widen it). So the plan must be a full
+/// scan AND the rows must be correct. When #5333 fixes the probes, flip the
+/// plan assertion back to expecting `USING INDEX t3b1` and keep the row
+/// assertion — the rows are the real guard.
 #[test]
-fn planner_selects_partial_expression_index_when_predicate_implied() {
+fn planner_excludes_partial_expression_index_from_selection() {
     let mut db = Database::new();
     execute_sql(
         &mut db,
@@ -566,16 +575,21 @@ fn planner_selects_partial_expression_index_when_predicate_implied() {
         "#,
     );
 
-    let plan = explain_query_plan(
-        &db,
-        "SELECT a FROM t3 WHERE typeof(b)='real' \
-         AND datetime(b) BETWEEN '2017-07-04' AND '2017-07-08'",
-    );
+    let sql = "SELECT a FROM t3 WHERE typeof(b)='real' \
+               AND datetime(b) BETWEEN '2017-07-04' AND '2017-07-08'";
+
+    let plan = explain_query_plan(&db, sql);
     assert!(
-        plan.contains("USING INDEX t3b1"),
-        "EXPLAIN QUERY PLAN must report USING INDEX t3b1, got:\n{}",
+        !plan.contains("t3b1"),
+        "partial expression index must be excluded from selection until #5333, got:\n{}",
         plan
     );
+
+    // Row correctness is the point: 2457939.5 = 2017-07-05, 2457940.5 =
+    // 2017-07-06 (in range); 2457950.5 = 2017-07-16 (out of range).
+    let mut rows = select_first_column_ints(&db, sql);
+    rows.sort_unstable();
+    assert_eq!(rows, vec![1, 2], "query must return correct rows via full scan");
 }
 
 /// Without the typeof(b)='real' conjunct the implication fails and the
