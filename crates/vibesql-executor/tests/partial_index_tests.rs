@@ -514,3 +514,143 @@ fn partial_index_body_empty_after_compaction_removes_all_truthy_rows() {
     let table = db.get_table("orders").expect("table missing");
     assert_eq!(table.row_count(), 4);
 }
+
+// ---------------------------------------------------------------------------
+// Planner selection of partial indexes via structural predicate implication
+// (issue #5325, date2-330)
+// ---------------------------------------------------------------------------
+
+/// Run EXPLAIN QUERY PLAN and return the text output.
+fn explain_query_plan(db: &Database, sql: &str) -> String {
+    let explain_sql = format!("EXPLAIN QUERY PLAN {}", sql);
+    let stmt = Parser::parse_sql(&explain_sql).expect("Failed to parse EXPLAIN QUERY PLAN");
+    if let vibesql_ast::Statement::Explain(explain_stmt) = stmt {
+        vibesql_executor::ExplainExecutor::execute(&explain_stmt, db)
+            .expect("EXPLAIN QUERY PLAN failed")
+            .to_text()
+    } else {
+        panic!("Expected EXPLAIN statement");
+    }
+}
+
+/// Execute a SELECT and return the first column of each row as integers.
+fn select_first_column_ints(db: &Database, sql: &str) -> Vec<i64> {
+    let stmt = Parser::parse_sql(sql).expect("Failed to parse SELECT");
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let executor = vibesql_executor::SelectExecutor::new(db);
+        let rows = executor.execute(&select_stmt).expect("SELECT failed");
+        rows.iter()
+            .map(|row| match &row.values[0] {
+                SqlValue::Integer(i) => *i,
+                other => panic!("expected integer, got {:?}", other),
+            })
+            .collect()
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+/// date2-330 shape: the partial expression index is selected when the query
+/// WHERE clause contains the index predicate verbatim as a conjunct.
+#[test]
+fn planner_selects_partial_expression_index_when_predicate_implied() {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE t3 (a INTEGER PRIMARY KEY, b REAL);
+        INSERT INTO t3 VALUES (1, 2457939.5);
+        INSERT INTO t3 VALUES (2, 2457940.5);
+        INSERT INTO t3 VALUES (3, 2457950.5);
+        CREATE INDEX t3b1 ON t3(datetime(b)) WHERE typeof(b)='real'
+        "#,
+    );
+
+    let plan = explain_query_plan(
+        &db,
+        "SELECT a FROM t3 WHERE typeof(b)='real' \
+         AND datetime(b) BETWEEN '2017-07-04' AND '2017-07-08'",
+    );
+    assert!(
+        plan.contains("USING INDEX t3b1"),
+        "EXPLAIN QUERY PLAN must report USING INDEX t3b1, got:\n{}",
+        plan
+    );
+}
+
+/// Without the typeof(b)='real' conjunct the implication fails and the
+/// partial index must NOT be selected.
+#[test]
+fn planner_skips_partial_expression_index_when_predicate_not_implied() {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE t3 (a INTEGER PRIMARY KEY, b REAL);
+        INSERT INTO t3 VALUES (1, 2457939.5);
+        CREATE INDEX t3b1 ON t3(datetime(b)) WHERE typeof(b)='real'
+        "#,
+    );
+
+    let plan = explain_query_plan(
+        &db,
+        "SELECT a FROM t3 WHERE datetime(b) BETWEEN '2017-07-04' AND '2017-07-08'",
+    );
+    assert!(
+        !plan.contains("t3b1"),
+        "partial index must not be selected without an implying WHERE conjunct, got:\n{}",
+        plan
+    );
+
+    // OR at top level must not imply either.
+    let plan_or = explain_query_plan(
+        &db,
+        "SELECT a FROM t3 WHERE typeof(b)='real' OR datetime(b) > '2017-07-04'",
+    );
+    assert!(
+        !plan_or.contains("t3b1"),
+        "top-level OR must not imply the index predicate, got:\n{}",
+        plan_or
+    );
+}
+
+/// Partial NON-expression indexes get the same treatment: selected when the
+/// query repeats the predicate conjunct, skipped otherwise. Results must be
+/// identical either way (full WHERE is re-applied as a post-filter).
+#[test]
+fn planner_selects_partial_non_expression_index_when_predicate_implied() {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        r#"
+        CREATE TABLE orders (id INTEGER PRIMARY KEY, status INTEGER, sku INTEGER);
+        INSERT INTO orders VALUES (1, 0, 100);
+        INSERT INTO orders VALUES (2, 1, 200);
+        INSERT INTO orders VALUES (3, 1, 300);
+        INSERT INTO orders VALUES (4, 0, 300);
+        CREATE INDEX idx_open_sku ON orders(sku) WHERE status = 1
+        "#,
+    );
+
+    // Implied: predicate conjunct repeated in the query WHERE.
+    let implied_sql = "SELECT id FROM orders WHERE status = 1 AND sku = 300";
+    let plan = explain_query_plan(&db, implied_sql);
+    assert!(
+        plan.contains("USING INDEX idx_open_sku"),
+        "partial non-expression index must be selected when implied, got:\n{}",
+        plan
+    );
+    assert_eq!(select_first_column_ints(&db, implied_sql), vec![3]);
+
+    // Not implied: same filter column but no status conjunct.
+    let not_implied_sql = "SELECT id FROM orders WHERE sku = 300";
+    let plan = explain_query_plan(&db, not_implied_sql);
+    assert!(
+        !plan.contains("idx_open_sku"),
+        "partial index must not be selected without the status conjunct, got:\n{}",
+        plan
+    );
+    let mut ids = select_first_column_ints(&db, not_implied_sql);
+    ids.sort_unstable();
+    assert_eq!(ids, vec![3, 4]);
+}

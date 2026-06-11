@@ -753,9 +753,11 @@ fn can_use_index_for_in_subquery(
             // WHERE predicate, so they cannot answer an unrestricted IN
             // subquery. (See follow-up: partial-index bodies still index every
             // row today, but this preserves correctness once that is fixed.)
-            // The `is_partial` flag lives on the catalog-side `IndexMetadata`,
-            // mirroring the conservative exclusion in `index_planner` and
-            // `index_scan::selection`.
+            // The `is_partial` flag lives on the catalog-side `IndexMetadata`.
+            // Intentionally stays conservative even though the planner now
+            // has `optimizer::predicate_implication`: an IN-subquery probe
+            // relies on index *completeness* over the subquery's rows, which
+            // structural implication does not establish (future work).
             if database
                 .catalog
                 .find_index_by_name(index_name)

@@ -104,12 +104,12 @@ pub fn can_eliminate_distinct(stmt: &SelectStmt, database: &Database) -> bool {
         // Skip partial UNIQUE indexes: they only enforce uniqueness over the
         // subset of rows matching the WHERE predicate, so they do not prove
         // distinctness of the full table. The `is_partial` flag lives on the
-        // catalog-side `IndexMetadata` (mirroring the conservative exclusion
-        // in `index_planner` and `index_scan::selection`).
+        // catalog-side `IndexMetadata`.
         //
-        // Follow-up: partial-index bodies still index every row today, so
-        // this is correctness-preserving once the build path is fixed to
-        // honour the predicate.
+        // Intentionally stays conservative even though the planner now has
+        // `optimizer::predicate_implication`: DISTINCT elimination needs a
+        // uniqueness guarantee over every row the query can return, which
+        // structural implication alone does not establish here (future work).
         if database.catalog.find_index_by_name(&index_name).map(|m| m.is_partial()).unwrap_or(false)
         {
             continue;

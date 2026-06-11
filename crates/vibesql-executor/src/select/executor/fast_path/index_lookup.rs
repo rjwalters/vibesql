@@ -105,6 +105,19 @@ impl SelectExecutor<'_> {
                 continue;
             }
 
+            // Partial indexes (CREATE INDEX ... WHERE expr) are usable only
+            // when the query WHERE clause structurally implies the index
+            // predicate: since PR #5323 the index body excludes
+            // predicate-false rows, so an ungated probe would silently drop
+            // matching rows (issue #5325).
+            if !crate::optimizer::predicate_implication::partial_index_usable(
+                self.database,
+                index_name,
+                Some(where_clause),
+            ) {
+                continue;
+            }
+
             // Get index column names in order
             let index_columns: Vec<&str> =
                 metadata.columns.iter().map(|c| c.expect_column_name()).collect();
@@ -276,6 +289,19 @@ impl SelectExecutor<'_> {
 
             // Skip expression indexes - they require expression evaluation, not column lookup
             if metadata.columns.iter().any(|c| c.is_expression()) {
+                continue;
+            }
+
+            // Partial indexes (CREATE INDEX ... WHERE expr) are usable only
+            // when the query WHERE clause structurally implies the index
+            // predicate: since PR #5323 the index body excludes
+            // predicate-false rows, so an ungated probe would silently drop
+            // matching rows (issue #5325).
+            if !crate::optimizer::predicate_implication::partial_index_usable(
+                self.database,
+                index_name,
+                Some(where_clause),
+            ) {
                 continue;
             }
 

@@ -1,0 +1,268 @@
+//! Structural predicate implication for partial-index planning (v1).
+//!
+//! Partial indexes (`CREATE INDEX ... WHERE predicate`) only contain rows for
+//! which the predicate is TRUE, so the planner may only select one when the
+//! query is guaranteed to touch nothing outside that subset. The v1 check
+//! implemented here is **structural-equality implication**: the query's WHERE
+//! clause implies the index predicate when every top-level AND conjunct of the
+//! index predicate appears verbatim (by structural hash, via
+//! [`ExpressionHasher`]) among the query's top-level AND conjuncts.
+//!
+//! This intentionally does NOT attempt general implication (e.g. `x > 5`
+//! implies `x > 0`). It covers the common SQLite idiom where the query repeats
+//! the index predicate as a conjunct, e.g. date2-330:
+//!
+//! ```sql
+//! CREATE INDEX t3b1 ON t3(datetime(b)) WHERE typeof(b)='real';
+//! SELECT a FROM t3
+//!  WHERE typeof(b)='real'
+//!    AND datetime(b) BETWEEN '2017-07-04' AND '2017-07-08';
+//! ```
+//!
+//! Correctness:
+//! - **Extra rows are harmless** — the full WHERE clause is always re-applied
+//!   as a post-filter in `execute_index_scan()`.
+//! - **Missing rows cannot happen** — implication guarantees every row that
+//!   satisfies the query WHERE also satisfies the index predicate, and the
+//!   index body is a superset of predicate-matching rows (build-time filtering
+//!   excludes only predicate-false rows; DML maintenance for expression
+//!   indexes is predicate-unaware and over-inclusive).
+
+use vibesql_ast::Expression;
+use vibesql_storage::Database;
+
+use crate::evaluator::expression_hash::ExpressionHasher;
+
+/// Collect the top-level AND conjuncts of an expression.
+///
+/// Handles BOTH conjunction forms used in this codebase: nested
+/// `Expression::BinaryOp { op: And, .. }` chains and flat
+/// `Expression::Conjunction(Vec<_>)`. Any other node (including OR /
+/// `Disjunction`) is treated as a single opaque conjunct.
+fn collect_conjuncts<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
+    match expr {
+        Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::And, right } => {
+            collect_conjuncts(left, out);
+            collect_conjuncts(right, out);
+        }
+        Expression::Conjunction(exprs) => {
+            for e in exprs {
+                collect_conjuncts(e, out);
+            }
+        }
+        other => out.push(other),
+    }
+}
+
+/// True when every conjunct of `index_where` appears (by structural hash)
+/// among the top-level AND conjuncts of `query_where`.
+///
+/// Conservative by construction: a top-level OR in the query WHERE is a
+/// single opaque conjunct, so it only matches an index predicate that is the
+/// structurally identical OR.
+pub(crate) fn query_implies_index_predicate(
+    query_where: &Expression,
+    index_where: &Expression,
+) -> bool {
+    let mut query_conjuncts = Vec::new();
+    collect_conjuncts(query_where, &mut query_conjuncts);
+    let query_hashes: Vec<u64> =
+        query_conjuncts.iter().map(|e| ExpressionHasher::hash(e)).collect();
+
+    let mut index_conjuncts = Vec::new();
+    collect_conjuncts(index_where, &mut index_conjuncts);
+
+    index_conjuncts.iter().all(|conjunct| query_hashes.contains(&ExpressionHasher::hash(conjunct)))
+}
+
+/// Whether an index may be selected by the planner given the query's WHERE
+/// clause, considering partial-index predicates.
+///
+/// - Non-partial indexes are always usable (returns `true`).
+/// - Partial indexes are usable only when `query_where` structurally implies
+///   the index predicate (see [`query_implies_index_predicate`]).
+/// - A partial index with no query WHERE clause is never usable.
+///
+/// The partial predicate lives on the catalog-side `IndexMetadata`
+/// (`where_clause`); the storage-side metadata does not yet carry it.
+pub(crate) fn partial_index_usable(
+    database: &Database,
+    index_name: &str,
+    query_where: Option<&Expression>,
+) -> bool {
+    let Some(index_where) =
+        database.catalog.find_index_by_name(index_name).and_then(|m| m.where_clause.as_deref())
+    else {
+        // Not a partial index (or unknown to the catalog): no predicate gate.
+        return true;
+    };
+
+    match query_where {
+        Some(query_where) => query_implies_index_predicate(query_where, index_where),
+        None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibesql_ast::Statement;
+
+    /// Parse the WHERE clause of `SELECT 1 FROM t WHERE <expr>`.
+    fn parse_where(expr_sql: &str) -> Expression {
+        let sql = format!("SELECT 1 FROM t WHERE {}", expr_sql);
+        let stmt = vibesql_parser::Parser::parse_sql(&sql).expect("parse failed");
+        match stmt {
+            Statement::Select(select) => select.where_clause.expect("expected WHERE clause"),
+            other => panic!("expected SELECT, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn exact_conjunct_match_implies() {
+        let query =
+            parse_where("typeof(b)='real' AND datetime(b) BETWEEN '2017-07-04' AND '2017-07-08'");
+        let index = parse_where("typeof(b)='real'");
+        assert!(query_implies_index_predicate(&query, &index));
+    }
+
+    #[test]
+    fn identical_predicate_implies_itself() {
+        let query = parse_where("typeof(b)='real'");
+        let index = parse_where("typeof(b)='real'");
+        assert!(query_implies_index_predicate(&query, &index));
+    }
+
+    #[test]
+    fn hash_equality_for_predicate_parsed_twice() {
+        // Gotcha check: the catalog-stored predicate (parsed at CREATE INDEX
+        // time) and the query conjunct (parsed at query time) must normalize
+        // to the same structural hash.
+        let a = parse_where("typeof(b)='real'");
+        let b = parse_where("typeof(b)='real'");
+        assert_eq!(ExpressionHasher::hash(&a), ExpressionHasher::hash(&b));
+    }
+
+    #[test]
+    fn missing_conjunct_does_not_imply() {
+        let query = parse_where("datetime(b) BETWEEN '2017-07-04' AND '2017-07-08'");
+        let index = parse_where("typeof(b)='real'");
+        assert!(!query_implies_index_predicate(&query, &index));
+    }
+
+    #[test]
+    fn different_literal_does_not_imply() {
+        let query = parse_where("typeof(b)='text' AND a = 1");
+        let index = parse_where("typeof(b)='real'");
+        assert!(!query_implies_index_predicate(&query, &index));
+    }
+
+    #[test]
+    fn top_level_or_does_not_imply() {
+        // OR is one opaque conjunct: satisfying the query does not require
+        // satisfying the index predicate.
+        let query = parse_where("typeof(b)='real' OR a = 1");
+        let index = parse_where("typeof(b)='real'");
+        assert!(!query_implies_index_predicate(&query, &index));
+    }
+
+    #[test]
+    fn structurally_identical_or_implies() {
+        let query = parse_where("(a = 1 OR a = 2) AND b > 0");
+        let index = parse_where("a = 1 OR a = 2");
+        assert!(query_implies_index_predicate(&query, &index));
+    }
+
+    #[test]
+    fn index_predicate_with_and_requires_all_conjuncts() {
+        let query = parse_where("a = 1 AND b > 0 AND c < 5");
+        let index_ok = parse_where("a = 1 AND c < 5");
+        let index_missing = parse_where("a = 1 AND d = 9");
+        assert!(query_implies_index_predicate(&query, &index_ok));
+        assert!(!query_implies_index_predicate(&query, &index_missing));
+    }
+
+    #[test]
+    fn nested_binary_and_conjuncts_are_split() {
+        // Build a nested BinaryOp::And chain explicitly to cover the
+        // non-Conjunction representation.
+        let a = parse_where("a = 1");
+        let b = parse_where("b > 0");
+        let c = parse_where("c < 5");
+        let nested = Expression::BinaryOp {
+            left: Box::new(Expression::BinaryOp {
+                left: Box::new(a),
+                op: vibesql_ast::BinaryOperator::And,
+                right: Box::new(b),
+            }),
+            op: vibesql_ast::BinaryOperator::And,
+            right: Box::new(c),
+        };
+        let index = parse_where("b > 0");
+        assert!(query_implies_index_predicate(&nested, &index));
+    }
+
+    #[test]
+    fn flat_conjunction_conjuncts_are_split() {
+        let flat = Expression::Conjunction(vec![
+            parse_where("a = 1"),
+            parse_where("b > 0"),
+            parse_where("c < 5"),
+        ]);
+        let index = parse_where("c < 5");
+        assert!(query_implies_index_predicate(&flat, &index));
+        let index_missing = parse_where("d = 2");
+        assert!(!query_implies_index_predicate(&flat, &index_missing));
+    }
+
+    #[test]
+    fn partial_index_usable_requires_query_where() {
+        use vibesql_storage::Database;
+
+        let mut db = Database::new();
+        let create_table =
+            vibesql_parser::Parser::parse_sql("CREATE TABLE t3 (a INTEGER, b REAL)").unwrap();
+        if let Statement::CreateTable(stmt) = create_table {
+            crate::CreateTableExecutor::execute(&stmt, &mut db).unwrap();
+        }
+        let create_index = vibesql_parser::Parser::parse_sql(
+            "CREATE INDEX t3b1 ON t3(datetime(b)) WHERE typeof(b)='real'",
+        )
+        .unwrap();
+        if let Statement::CreateIndex(stmt) = create_index {
+            crate::CreateIndexExecutor::execute(&stmt, &mut db).unwrap();
+        }
+
+        // No WHERE clause: partial index unusable.
+        assert!(!partial_index_usable(&db, "t3b1", None));
+
+        // Implying WHERE clause: usable.
+        let implying =
+            parse_where("typeof(b)='real' AND datetime(b) BETWEEN '2017-07-04' AND '2017-07-08'");
+        assert!(partial_index_usable(&db, "t3b1", Some(&implying)));
+
+        // Non-implying WHERE clause: unusable.
+        let non_implying = parse_where("datetime(b) BETWEEN '2017-07-04' AND '2017-07-08'");
+        assert!(!partial_index_usable(&db, "t3b1", Some(&non_implying)));
+    }
+
+    #[test]
+    fn partial_index_usable_true_for_non_partial_index() {
+        use vibesql_storage::Database;
+
+        let mut db = Database::new();
+        let create_table =
+            vibesql_parser::Parser::parse_sql("CREATE TABLE t (a INTEGER, b INTEGER)").unwrap();
+        if let Statement::CreateTable(stmt) = create_table {
+            crate::CreateTableExecutor::execute(&stmt, &mut db).unwrap();
+        }
+        let create_index = vibesql_parser::Parser::parse_sql("CREATE INDEX ta ON t(a)").unwrap();
+        if let Statement::CreateIndex(stmt) = create_index {
+            crate::CreateIndexExecutor::execute(&stmt, &mut db).unwrap();
+        }
+
+        assert!(partial_index_usable(&db, "ta", None));
+        let any_where = parse_where("b = 1");
+        assert!(partial_index_usable(&db, "ta", Some(&any_where)));
+    }
+}

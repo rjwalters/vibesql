@@ -19,6 +19,7 @@ pub mod column_pruning;
 pub mod distinct_elimination;
 mod expressions;
 pub mod index_planner;
+pub(crate) mod predicate_implication;
 mod predicate_plan;
 pub mod selectivity;
 pub mod subquery_rewrite;
