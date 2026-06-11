@@ -81,7 +81,7 @@ pub use grant::GrantExecutor;
 pub use index_ddl::{
     AnalyzeExecutor, CreateIndexExecutor, DropIndexExecutor, IndexExecutor, ReindexExecutor,
 };
-pub use insert::InsertExecutor;
+pub use insert::{InsertExecutor, InsertOutcome};
 pub use introspection::IntrospectionExecutor;
 pub use memory::QueryArena;
 pub use persistence::load_sql_dump;

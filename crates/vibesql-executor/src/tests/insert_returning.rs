@@ -49,7 +49,10 @@ fn execute_insert_returning(
     let stmt =
         Parser::parse_sql(sql).unwrap_or_else(|e| panic!("Failed to parse {:?}: {:?}", sql, e));
     match stmt {
-        Statement::Insert(s) => InsertExecutor::execute_returning(db, &s).expect("INSERT failed"),
+        Statement::Insert(s) => {
+            let outcome = InsertExecutor::execute_returning(db, &s).expect("INSERT failed");
+            (outcome.affected_rows, outcome.returning)
+        }
         other => panic!("Expected INSERT, got {:?}", other),
     }
 }

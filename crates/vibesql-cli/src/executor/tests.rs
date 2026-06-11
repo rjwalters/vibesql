@@ -446,3 +446,123 @@ fn test_savepoint() {
 
     executor.execute("COMMIT").unwrap();
 }
+
+// ============================================================================
+// PRAGMA count_changes tests (issue #5283)
+// ============================================================================
+
+#[test]
+fn test_count_changes_default_off() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t(a INT)").unwrap();
+
+    // Default OFF: DML returns no result rows
+    let result = executor.execute("INSERT INTO t VALUES(1),(2)").unwrap();
+    assert!(result.rows.is_empty());
+    assert_eq!(result.row_count, 2);
+
+    // Query form reports 0
+    let result = executor.execute("PRAGMA count_changes").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("0".to_string())]]);
+}
+
+#[test]
+fn test_count_changes_insert_update_delete() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t(a INT)").unwrap();
+    executor.execute("PRAGMA count_changes=ON").unwrap();
+
+    // Query form reports 1 while ON
+    let result = executor.execute("PRAGMA count_changes").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("1".to_string())]]);
+
+    let result = executor.execute("INSERT INTO t VALUES(1),(2),(3)").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("3".to_string())]]);
+
+    let result = executor.execute("UPDATE t SET a=a+10 WHERE a<3").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("2".to_string())]]);
+
+    let result = executor.execute("DELETE FROM t WHERE a=3").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("1".to_string())]]);
+
+    // SELECT output is unaffected by the pragma
+    let result = executor.execute("SELECT count(*) FROM t").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("2".to_string())]]);
+
+    // OFF restores current behavior
+    executor.execute("PRAGMA count_changes=OFF").unwrap();
+    let result = executor.execute("INSERT INTO t VALUES(9)").unwrap();
+    assert!(result.rows.is_empty());
+}
+
+#[test]
+fn test_count_changes_upsert_counts_direct_inserts_only() {
+    // upsert1-400 semantics (verified against sqlite3): the count row for an
+    // upsert INSERT reports only directly inserted rows, while changes()
+    // includes rows taken through the DO UPDATE arm.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t2(a TEXT UNIQUE, b INT DEFAULT 1)").unwrap();
+    executor.execute("INSERT INTO t2(a) VALUES('one'),('two'),('three')").unwrap();
+    executor.execute("PRAGMA count_changes=ON").unwrap();
+
+    let result = executor
+        .execute(
+            "INSERT INTO t2(a) VALUES('one'),('one'),('three'),('four') \
+             ON CONFLICT(a) DO UPDATE SET b=b+1",
+        )
+        .unwrap();
+    // Count row: 1 direct insert ('four'); the 3 DO UPDATE-arm rows excluded
+    assert_eq!(result.rows, vec![vec![Some("1".to_string())]]);
+
+    executor.execute("PRAGMA count_changes=OFF").unwrap();
+
+    // changes() still reports all 4 affected rows (SQLite parity)
+    let result = executor.execute("SELECT changes()").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("4".to_string())]]);
+
+    // upsert1-410: the DO UPDATE arm really ran (one hit twice, three once)
+    let result = executor.execute("SELECT a, b FROM t2 ORDER BY a").unwrap();
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Some("four".to_string()), Some("1".to_string())],
+            vec![Some("one".to_string()), Some("3".to_string())],
+            vec![Some("three".to_string()), Some("2".to_string())],
+            vec![Some("two".to_string()), Some("1".to_string())],
+        ]
+    );
+}
+
+#[test]
+fn test_count_changes_does_not_replace_returning() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t(a INT)").unwrap();
+    executor.execute("PRAGMA count_changes=ON").unwrap();
+
+    // RETURNING output takes precedence over the count row
+    let result = executor.execute("INSERT INTO t VALUES(7) RETURNING a").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("7".to_string())]]);
+    assert_eq!(result.columns, vec!["a".to_string()]);
+}
+
+// ============================================================================
+// ?NNN numbered placeholder tests (issue #5283)
+// ============================================================================
+
+#[test]
+fn test_question_numbered_placeholder_upsert_inexact_target() {
+    // upsert1-1210: once `b+?1` lexes, the inexact-conflict-target path must
+    // yield SQLite's canonical error (not a syntax error near "1")
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t1(a INT, b INT)").unwrap();
+    executor.execute("CREATE UNIQUE INDEX t1x ON t1(b+3)").unwrap();
+
+    let err = executor
+        .execute("INSERT INTO t1(a,b) VALUES(1,2) ON CONFLICT(b+?1) DO NOTHING")
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"),
+        "unexpected error: {msg}"
+    );
+}

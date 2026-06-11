@@ -262,6 +262,55 @@ fn test_tokenize_ascii_placeholders_unchanged() {
 }
 
 // ============================================================================
+// SQLite ?NNN Numbered Placeholder Tests (issue #5283)
+// ============================================================================
+
+#[test]
+fn test_tokenize_question_numbered_placeholder_single_digit() {
+    // SQLite ?NNN syntax: `?1` is a numbered placeholder, not `?` followed by 1
+    let mut lexer = Lexer::new("SELECT ?1");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::NumberedPlaceholder(1));
+    assert_eq!(tokens[2], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_question_numbered_placeholder_multi_digit() {
+    let mut lexer = Lexer::new("SELECT ?23");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::NumberedPlaceholder(23));
+    assert_eq!(tokens[2], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_question_numbered_placeholder_in_expression() {
+    // upsert1-1210: `b+?1` must lex as Identifier, '+', NumberedPlaceholder(1)
+    let mut lexer = Lexer::new("b+?1");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[0], Token::Identifier("b".to_string()));
+    assert_eq!(tokens[1], Token::Symbol('+'));
+    assert_eq!(tokens[2], Token::NumberedPlaceholder(1));
+    assert_eq!(tokens[3], Token::Eof);
+}
+
+#[test]
+fn test_tokenize_question_zero_rejected() {
+    // SQLite rejects ?0: "variable number must be between ?1 and ?NNN"
+    let mut lexer = Lexer::new("SELECT ?0");
+    let err = lexer.tokenize().unwrap_err();
+    assert!(err.message.contains("?1"), "expected ?0 rejection message, got: {}", err.message);
+}
+
+#[test]
+fn test_tokenize_bare_question_placeholder_unchanged() {
+    // Bare `?` (no trailing digits) still lexes as the anonymous placeholder
+    let mut lexer = Lexer::new("SELECT ?, ? + 1");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::Placeholder);
+    assert_eq!(tokens[3], Token::Placeholder);
+}
+
+// ============================================================================
 // Delimited Identifier Tests
 // ============================================================================
 

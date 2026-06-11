@@ -191,8 +191,14 @@ impl<'a> Lexer<'a> {
                 self.tokenize_identifier_or_keyword()
             }
             '?' => {
-                self.advance();
-                Ok(Token::Placeholder)
+                // SQLite-style numbered placeholder (?1, ?2, ...) when digits
+                // follow; otherwise the anonymous `?` placeholder.
+                if self.peek_byte(1).map(|b| b.is_ascii_digit()).unwrap_or(false) {
+                    self.tokenize_question_numbered_placeholder()
+                } else {
+                    self.advance();
+                    Ok(Token::Placeholder)
+                }
             }
             '$' => {
                 // Check what follows the $
@@ -486,6 +492,44 @@ impl<'a> Lexer<'a> {
                 message: "Numbered placeholder must be $1 or higher (no $0)".to_string(),
                 position: start_pos,
                 near_token: Some("$0".to_string()),
+            });
+        }
+
+        Ok(Token::NumberedPlaceholder(index))
+    }
+
+    /// Tokenize a SQLite-style numbered placeholder (?1, ?2, etc.).
+    /// 1-indexed like `$N`; `?0` is rejected (SQLite: "variable number must
+    /// be between ?1 and ?NNN"). Only called when a digit follows the `?`.
+    fn tokenize_question_numbered_placeholder(&mut self) -> Result<Token, LexerError> {
+        self.advance(); // consume '?'
+
+        let start_pos = self.position();
+        let mut num_str = String::new();
+
+        // Read all digits
+        while !self.is_eof() {
+            let ch = self.current_char();
+            if ch.is_ascii_digit() {
+                num_str.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        let index: usize = num_str.parse().map_err(|_| LexerError {
+            message: format!("Invalid numbered placeholder: ?{}", num_str),
+            position: start_pos,
+            near_token: Some(format!("?{}", num_str)),
+        })?;
+
+        // SQLite requires ?1 or higher (no ?0)
+        if index == 0 {
+            return Err(LexerError {
+                message: "variable number must be between ?1 and ?NNN".to_string(),
+                position: start_pos,
+                near_token: Some(format!("?{}", num_str)),
             });
         }
 

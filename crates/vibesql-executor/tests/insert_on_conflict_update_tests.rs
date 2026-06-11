@@ -276,9 +276,11 @@ fn test_returning_post_update_row() {
         vibesql_ast::Statement::Insert(insert) => insert,
         other => panic!("expected INSERT, got {other:?}"),
     };
-    let (count, result) = InsertExecutor::execute_returning(&mut db, &insert).unwrap();
-    assert_eq!(count, 1);
-    let result = result.expect("RETURNING must produce a result set");
+    let outcome = InsertExecutor::execute_returning(&mut db, &insert).unwrap();
+    assert_eq!(outcome.affected_rows, 1);
+    // The single affected row was handled via the DO UPDATE arm
+    assert_eq!(outcome.upsert_updated_rows, 1);
+    let result = outcome.returning.expect("RETURNING must produce a result set");
     assert_eq!(result.rows.len(), 1);
     assert_eq!(result.rows[0].values.to_vec(), vec![int(1), int(15)]);
 }
