@@ -26,6 +26,9 @@ use crate::errors::ExecutorError;
 /// Day origin (-4713-11-24 12:00:00). Returns NULL for NULL/unparseable input or
 /// invalid modifiers.
 pub fn julianday(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if has_misplaced_base_modifier(args) {
+        return Ok(SqlValue::Null);
+    }
     // 'subsec' is accepted but has no effect: julianday is always full precision
     let (filtered, _subsec) = strip_subsec_modifiers(args);
     let dt = match resolve_time_value(&filtered, "JULIANDAY")? {
@@ -35,10 +38,45 @@ pub fn julianday(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     Ok(SqlValue::Real(naive_to_ijd_ms(&dt) as f64 / 86_400_000.0))
 }
 
+/// Check whether a base-interpreting modifier ('unixepoch', 'julianday', or
+/// 'auto') appears at any position other than the first modifier slot
+/// (args[1]) in the ORIGINAL argument list.
+///
+/// In SQLite these modifiers are only valid when they immediately follow the
+/// time value; any other position yields NULL. `resolve_time_value` enforces
+/// that rule, but only on the list it receives — `strip_subsec_modifiers`
+/// would otherwise reposition a later 'unixepoch' into first place (e.g.
+/// `unixepoch(x,'subsec','unixepoch')`, NULL in SQLite). So callers must run
+/// this check on the original positions BEFORE stripping 'subsec'.
+///
+/// Long-term alternative (Option B in issue #5315): drop the stripping
+/// entirely and handle 'subsec'/'subsecond' as a flag-setting no-op inside
+/// `resolve_time_value`'s modifier loop, surfacing the flag to callers. That
+/// is the design that eventually enables 'subsec' OUTPUT for datetime()/time()
+/// — but until that lands, datetime()/time() must keep rejecting 'subsec'.
+fn has_misplaced_base_modifier(args: &[SqlValue]) -> bool {
+    args.iter().skip(2).any(|arg| {
+        if let SqlValue::Varchar(s) | SqlValue::Character(s) = arg {
+            let t = s.trim();
+            t.eq_ignore_ascii_case("unixepoch")
+                || t.eq_ignore_ascii_case("julianday")
+                || t.eq_ignore_ascii_case("auto")
+        } else {
+            false
+        }
+    })
+}
+
 /// Remove 'subsec'/'subsecond' modifiers from an argument list, returning the
 /// filtered arguments and whether any were present. In SQLite, 'subsec' only
-/// changes output precision and is transparent to modifier sequencing (it does
-/// not affect the "unixepoch must be the first modifier" rule).
+/// changes output precision and is order-transparent with respect to ordinary
+/// modifiers such as '+1 day'.
+///
+/// CAUTION: 'subsec' still occupies a modifier position like any other, so it
+/// does NOT exempt 'unixepoch'/'julianday'/'auto' from the must-be-first rule.
+/// Because stripping repositions later modifiers, callers must reject
+/// misplaced base-interpreting modifiers on the original argument list first
+/// (see `has_misplaced_base_modifier`).
 fn strip_subsec_modifiers(args: &[SqlValue]) -> (Vec<SqlValue>, bool) {
     let mut subsec = false;
     let mut filtered: Vec<SqlValue> = Vec::with_capacity(args.len());
@@ -65,6 +103,9 @@ fn strip_subsec_modifiers(args: &[SqlValue]) -> (Vec<SqlValue>, bool) {
 /// negative infinity, matching SQLite). With the `'subsec'` (or `'subsecond'`)
 /// modifier, returns REAL with millisecond precision.
 pub fn unixepoch(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if has_misplaced_base_modifier(args) {
+        return Ok(SqlValue::Null);
+    }
     // Strip 'subsec'/'subsecond' modifiers; they only change the output type
     let (filtered, subsec) = strip_subsec_modifiers(args);
 
@@ -340,6 +381,74 @@ mod tests {
         assert_eq!(ue(&[text("not-a-date")]), SqlValue::Null);
     }
 
+    // ---- 'unixepoch'/'julianday'/'auto' must-be-first rule with 'subsec'
+    //      (issue #5315; all values verified against sqlite3 3.51.0) ----
+
+    #[test]
+    fn test_unixepoch_modifier_after_subsec_is_null() {
+        // 'subsec' occupies a modifier position, so 'unixepoch' is no longer first
+        assert_eq!(
+            ue(&[SqlValue::Integer(1704067200), text("subsec"), text("unixepoch")]),
+            SqlValue::Null
+        );
+        // Double 'subsec' before 'unixepoch' is just as invalid
+        assert_eq!(
+            ue(&[SqlValue::Integer(1704067200), text("subsec"), text("subsec"), text("unixepoch")]),
+            SqlValue::Null
+        );
+        // 'subsecond' alias triggers the same rule
+        assert_eq!(
+            ue(&[SqlValue::Integer(1704067200), text("subsecond"), text("unixepoch")]),
+            SqlValue::Null
+        );
+    }
+
+    #[test]
+    fn test_julianday_modifier_after_subsec_is_null() {
+        assert_eq!(
+            jd(&[SqlValue::Integer(2451545), text("subsec"), text("julianday")]),
+            SqlValue::Null
+        );
+        // Valid ordering still works: 'julianday' first, 'subsec' after
+        assert_real(
+            jd(&[SqlValue::Integer(2451545), text("julianday"), text("subsec")]),
+            2451545.0,
+        );
+    }
+
+    #[test]
+    fn test_auto_modifier_after_subsec_is_null() {
+        assert_eq!(ue(&[SqlValue::Real(1.234), text("subsec"), text("auto")]), SqlValue::Null);
+    }
+
+    #[test]
+    fn test_subsec_remains_order_transparent_for_ordinary_modifiers() {
+        // 'subsec' before or after an ordinary modifier like '+1 day' is fine
+        assert_real(
+            ue(&[text("2024-01-01 00:00:00.5"), text("subsec"), text("+1 day")]),
+            1704153600.5,
+        );
+        assert_real(
+            ue(&[text("2024-01-01 00:00:00.5"), text("+1 day"), text("subsec")]),
+            1704153600.5,
+        );
+    }
+
+    #[test]
+    fn test_misplaced_base_modifier_spelling_variants() {
+        // Mixed case and whitespace padding are still recognized as misplaced
+        assert_eq!(
+            ue(&[SqlValue::Integer(1704067200), text("SubSec"), text("UNIXEPOCH")]),
+            SqlValue::Null
+        );
+        assert_eq!(
+            ue(&[SqlValue::Integer(1704067200), text("subsec"), text("  unixepoch ")]),
+            SqlValue::Null
+        );
+        // 'subsec' as the time value itself still yields NULL (parse failure)
+        assert_eq!(ue(&[text("subsec")]), SqlValue::Null);
+    }
+
     // ---- timediff() (values verified against sqlite3 3.51.0) ----
 
     #[test]
@@ -509,10 +618,7 @@ mod tests {
         assert_real(ue(&[text("1970-01-01T00:00:00.1"), text("subsec")]), 0.1);
         assert_real(ue(&[text("1970-01-01T00:00:00.2"), text("subsecond")]), 0.2);
         // date-18.1 relies on fractional numeric 'unixepoch' input keeping ms
-        assert_real(
-            ue(&[SqlValue::Real(1.234), text("unixepoch"), text("subsec")]),
-            1.234,
-        );
+        assert_real(ue(&[SqlValue::Real(1.234), text("unixepoch"), text("subsec")]), 1.234);
     }
 
     // ---- (+|-)YYYY-MM-DD HH:MM:SS.SSS modifiers (timediff1.test section 5) ----
