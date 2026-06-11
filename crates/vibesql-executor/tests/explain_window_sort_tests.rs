@@ -467,3 +467,134 @@ fn test_repeated_outer_key_leaves_index_key_innermost_suppressed() {
     );
     assert_eq!(count, 1);
 }
+
+// ---------------------------------------------------------------------------
+// Outward sortedness propagation (issue #5292, window9.test 5.1.1)
+//
+// When the innermost pass is satisfied by an index, rows flow outward in
+// index order; every outer pass whose key is a structural prefix of the
+// order delivered by the pass below it needs no sort either. The chain
+// breaks at the first non-prefix key; that key and all keys outside it
+// count. Expected counts below verified against sqlite3 3.51.0.
+// ---------------------------------------------------------------------------
+
+/// window9.test 5.1 schema: CREATE TABLE t1(a,b,c,d,e);
+/// CREATE INDEX i1 ON t1(a,b,c,d,e);
+fn setup_window9_db() -> Database {
+    let mut db = Database::new();
+
+    let create = Parser::parse_sql(
+        "CREATE TABLE t1 (a INTEGER, b INTEGER, c INTEGER, d INTEGER, e INTEGER)",
+    )
+    .unwrap();
+    if let Statement::CreateTable(stmt) = create {
+        vibesql_executor::CreateTableExecutor::execute(&stmt, &mut db).unwrap();
+    } else {
+        panic!("Expected CREATE TABLE statement");
+    }
+
+    let create_index = Parser::parse_sql("CREATE INDEX i1 ON t1(a, b, c, d, e)").unwrap();
+    if let Statement::CreateIndex(stmt) = create_index {
+        vibesql_executor::CreateIndexExecutor::execute(&stmt, &mut db).unwrap();
+    } else {
+        panic!("Expected CREATE INDEX statement");
+    }
+
+    db
+}
+
+// window9.test 5.1.1: all five window keys are nested prefixes of the index
+// order — zero sorts (`~/ORDER/`).
+#[test]
+fn test_window9_5_1_1_covering_index_satisfies_all_passes() {
+    let db = setup_window9_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(e) OVER (),
+            sum(e) OVER (ORDER BY a),
+            sum(e) OVER (PARTITION BY a ORDER BY b),
+            sum(e) OVER (PARTITION BY a, b ORDER BY c),
+            sum(e) OVER (PARTITION BY a, b, c ORDER BY d)
+         FROM t1",
+    );
+    assert_eq!(count, 0);
+}
+
+// Nested prefix chain (a), (a, b), (a, b, c): innermost (a, b, c) is
+// index-satisfied and sortedness propagates outward — zero sorts.
+#[test]
+fn test_nested_prefix_chain_fully_suppressed() {
+    let db = setup_window9_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(e) OVER (ORDER BY a),
+            sum(e) OVER (ORDER BY a, b),
+            sum(e) OVER (ORDER BY a, b, c)
+         FROM t1",
+    );
+    assert_eq!(count, 0);
+}
+
+// Chain break in the middle: keys (a), (c), (a, b, c). Innermost is
+// index-satisfied, but (c) is not a prefix of (a, b, c) — it sorts, and the
+// outermost (a) sorts too (no propagation through a temp B-tree).
+#[test]
+fn test_prefix_chain_break_counts_remaining_outer_keys() {
+    let db = setup_window9_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(e) OVER (ORDER BY a),
+            sum(e) OVER (ORDER BY c),
+            sum(e) OVER (ORDER BY a, b, c)
+         FROM t1",
+    );
+    assert_eq!(count, 2);
+}
+
+// Two windows on t5: outer key (a) is a prefix of the index-satisfied
+// innermost key (a, b) — zero sorts.
+#[test]
+fn test_outer_prefix_of_index_satisfied_innermost_suppressed() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(c) OVER (ORDER BY a),
+            sum(c) OVER (ORDER BY a, b)
+         FROM t5",
+    );
+    assert_eq!(count, 0);
+}
+
+// Two windows on t5: outer key (b) is NOT a prefix of the index-satisfied
+// innermost key (a, b) — one sort.
+#[test]
+fn test_outer_non_prefix_of_index_satisfied_innermost_counts() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(c) OVER (ORDER BY b),
+            sum(c) OVER (ORDER BY a, b)
+         FROM t5",
+    );
+    assert_eq!(count, 1);
+}
+
+// Direction mismatch breaks the structural prefix: outer (a DESC) is not a
+// prefix of innermost (a, b) — one sort.
+#[test]
+fn test_outer_prefix_direction_mismatch_counts() {
+    let db = setup_db();
+    let count = order_count(
+        &db,
+        "SELECT
+            sum(c) OVER (ORDER BY a DESC),
+            sum(c) OVER (ORDER BY a, b)
+         FROM t5",
+    );
+    assert_eq!(count, 1);
+}
