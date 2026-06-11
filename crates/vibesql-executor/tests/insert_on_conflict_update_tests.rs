@@ -332,3 +332,161 @@ fn test_insert_with_unique_expression_index_does_not_panic() {
         .expect("insert with unique expression index must not panic");
     assert_eq!(rows(&db, "t"), vec![vec![int(1), int(2)]]);
 }
+
+// ============================================================================
+// Issue #5279: subqueries in the DO UPDATE arm (SET and WHERE)
+//
+// Reference results below were verified against sqlite3 during curation.
+// ============================================================================
+
+/// Setup shared by the subquery tests: t(a,b) with row (1, 5) and
+/// other(k,b) with row (1, 100).
+fn setup_subquery_db() -> Database {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t(a INT PRIMARY KEY, b INT)").unwrap();
+    exec(&mut db, "INSERT INTO t VALUES (1, 5)").unwrap();
+    exec(&mut db, "CREATE TABLE other(k INT, b INT)").unwrap();
+    exec(&mut db, "INSERT INTO other VALUES (1, 100)").unwrap();
+    db
+}
+
+#[test]
+fn test_do_update_set_plain_scalar_subquery() {
+    // Previously failed with "Subquery execution requires database reference".
+    let mut db = setup_subquery_db();
+    exec(&mut db, "INSERT INTO t VALUES (1, 0) ON CONFLICT(a) DO UPDATE SET b = (SELECT 42)")
+        .expect("plain scalar subquery in SET must execute");
+    assert_eq!(rows(&db, "t"), vec![vec![int(1), int(42)]]);
+}
+
+#[test]
+fn test_do_update_subquery_inner_scope_wins() {
+    // Case 1: unqualified `b` inside the subquery resolves to other.b
+    // (innermost scope), not the outer row's b. SQLite: b = 100.
+    let mut db = setup_subquery_db();
+    exec(
+        &mut db,
+        "INSERT INTO t VALUES (1, 0) ON CONFLICT(a) DO UPDATE SET b = (SELECT max(b) FROM other)",
+    )
+    .unwrap();
+    assert_eq!(rows(&db, "t"), vec![vec![int(1), int(100)]]);
+}
+
+#[test]
+fn test_do_update_subquery_excluded_alias_shadows_pseudo_table() {
+    // Case 2: a FROM alias named `excluded` shadows the upsert pseudo-table,
+    // so excluded.b resolves to other.b. SQLite: b = 100.
+    let mut db = setup_subquery_db();
+    exec(
+        &mut db,
+        "INSERT INTO t VALUES (1, 0) ON CONFLICT(a) DO UPDATE \
+         SET b = (SELECT excluded.b FROM other AS excluded)",
+    )
+    .unwrap();
+    assert_eq!(rows(&db, "t"), vec![vec![int(1), int(100)]]);
+}
+
+#[test]
+fn test_do_update_subquery_correlated_excluded_ref() {
+    // Case 3: correlated excluded. ref inside a non-shadowing subquery
+    // resolves to the would-be-inserted row. SQLite: b = 7 + 100 = 107.
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t(a INT PRIMARY KEY, b INT)").unwrap();
+    exec(&mut db, "INSERT INTO t VALUES (1, 5)").unwrap();
+    exec(&mut db, "CREATE TABLE other(k INT, c INT)").unwrap();
+    exec(&mut db, "INSERT INTO other VALUES (1, 100)").unwrap();
+    exec(
+        &mut db,
+        "INSERT INTO t VALUES (1, 7) ON CONFLICT(a) DO UPDATE \
+         SET b = (SELECT excluded.b + max(c) FROM other)",
+    )
+    .unwrap();
+    assert_eq!(rows(&db, "t"), vec![vec![int(1), int(107)]]);
+}
+
+#[test]
+fn test_do_update_subquery_excluded_in_subquery_where() {
+    // Case 4: correlated excluded. ref in the subquery's WHERE clause.
+    // Insert value 0: excluded.b + 1 = 1 matches o.k = 1 -> max(o.b) = 100.
+    let mut db = setup_subquery_db();
+    exec(&mut db, "INSERT INTO other VALUES (2, 200)").unwrap();
+    exec(
+        &mut db,
+        "INSERT INTO t VALUES (1, 0) ON CONFLICT(a) DO UPDATE \
+         SET b = (SELECT max(o.b) FROM other o WHERE o.k = excluded.b + 1)",
+    )
+    .unwrap();
+    assert_eq!(rows(&db, "t"), vec![vec![int(1), int(100)]]);
+}
+
+#[test]
+fn test_do_update_subquery_qualified_target_ref_correlates() {
+    // Case 5: t.b (target-table-qualified) correlates to the existing row
+    // while unqualified b stays inner-scope. SQLite: b = 5 + 100 = 105.
+    let mut db = setup_subquery_db();
+    exec(
+        &mut db,
+        "INSERT INTO t VALUES (1, 0) ON CONFLICT(a) DO UPDATE \
+         SET b = (SELECT t.b + b FROM other)",
+    )
+    .unwrap();
+    assert_eq!(rows(&db, "t"), vec![vec![int(1), int(105)]]);
+}
+
+#[test]
+fn test_do_update_where_exists_subquery() {
+    // EXISTS in the DO UPDATE ... WHERE clause previously failed with
+    // "EXISTS requires database reference".
+    let mut db = setup_subquery_db();
+    exec(
+        &mut db,
+        "INSERT INTO t VALUES (1, 0) ON CONFLICT(a) DO UPDATE SET b = 42 \
+         WHERE EXISTS (SELECT 1 FROM other)",
+    )
+    .expect("EXISTS in DO UPDATE WHERE must execute");
+    assert_eq!(rows(&db, "t"), vec![vec![int(1), int(42)]]);
+}
+
+#[test]
+fn test_do_update_where_exists_subquery_false_skips() {
+    // EXISTS over an empty table is false: the row is silently dropped.
+    let mut db = setup_subquery_db();
+    exec(&mut db, "CREATE TABLE empty_t(x INT)").unwrap();
+    let n = exec(
+        &mut db,
+        "INSERT INTO t VALUES (1, 0) ON CONFLICT(a) DO UPDATE SET b = 42 \
+         WHERE EXISTS (SELECT 1 FROM empty_t)",
+    )
+    .unwrap();
+    assert_eq!(n, 0, "skipped row is neither inserted nor updated");
+    assert_eq!(rows(&db, "t"), vec![vec![int(1), int(5)]]);
+}
+
+#[test]
+fn test_do_update_excluded_unknown_column_still_errors() {
+    // Top-level excluded.<unknown> keeps SQLite's prepare-time error.
+    let mut db = setup_subquery_db();
+    let err = exec(
+        &mut db,
+        "INSERT INTO t VALUES (1, 0) ON CONFLICT(a) DO UPDATE SET b = excluded.nope",
+    )
+    .expect_err("unknown excluded column must error");
+    assert!(
+        format!("{err:?}").contains("no such column: excluded.nope"),
+        "got: {err:?}"
+    );
+}
+
+#[test]
+fn test_do_update_in_subquery_in_set() {
+    // IN (SELECT ...) inside a SET expression (CASE) executes with the db
+    // reference and resolves the excluded. ref in the outer scope.
+    let mut db = setup_subquery_db();
+    exec(
+        &mut db,
+        "INSERT INTO t VALUES (1, 1) ON CONFLICT(a) DO UPDATE \
+         SET b = CASE WHEN excluded.a IN (SELECT k FROM other) THEN 77 ELSE 0 END",
+    )
+    .unwrap();
+    assert_eq!(rows(&db, "t"), vec![vec![int(1), int(77)]]);
+}
