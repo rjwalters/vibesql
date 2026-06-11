@@ -150,3 +150,37 @@ impl Ord for Timestamp {
         self.date.cmp(&other.date).then_with(|| self.time.cmp(&other.time))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_pads_fraction_to_minimum_three_digits() {
+        // Timestamp delegates fractional rendering to Time (issue #5332):
+        // `.5` must render as `.500` to match SQLite's subsec output.
+        let ts = Timestamp::from_str("2024-01-01 12:00:00.5").unwrap();
+        assert_eq!(ts.to_string(), "2024-01-01 12:00:00.500");
+    }
+
+    #[test]
+    fn display_preserves_sub_millisecond_digits() {
+        let ts = Timestamp::from_str("2024-01-01 14:30:00.123456").unwrap();
+        assert_eq!(ts.to_string(), "2024-01-01 14:30:00.123456");
+    }
+
+    #[test]
+    fn display_parse_round_trip_preserves_value() {
+        for s in [
+            "2024-01-01 12:00:00",
+            "2024-01-01 12:00:00.5",
+            "2024-01-01 12:00:00.500",
+            "2024-01-01 14:30:00.123456",
+            "2024-01-01 14:30:00.123456789",
+        ] {
+            let ts = Timestamp::from_str(s).unwrap();
+            let reparsed = Timestamp::from_str(&ts.to_string()).unwrap();
+            assert_eq!(reparsed, ts, "round-trip failed for '{}' (rendered '{}')", s, ts);
+        }
+    }
+}

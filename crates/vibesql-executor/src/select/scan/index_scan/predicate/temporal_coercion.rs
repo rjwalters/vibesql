@@ -34,10 +34,13 @@
 //!   to exclusive. Equality probes arrive as `start == end` ranges, so the
 //!   two rules compose to the half-open empty range `[T, T)` automatically.
 //!   Anything that doesn't round-trip and isn't a strict rendering prefix
-//!   (junk strings, `T`-separated ISO forms, trailing-zero fractions, ...) is
-//!   *declined*: the caller drops the index predicate and the row set is
-//!   computed by the full-index-scan + WHERE-filter path, which evaluates
-//!   with executor semantics.
+//!   (junk strings, `T`-separated ISO forms, ...) is *declined*: the caller
+//!   drops the index predicate and the row set is computed by the
+//!   full-index-scan + WHERE-filter path, which evaluates with executor
+//!   semantics. (Since #5332 fractions render padded to a minimum of 3
+//!   digits, so trailing-zero strings like `'...44.500'` round-trip exactly
+//!   and shorter ones like `'...44.5'` fall under the prefix rule — both
+//!   stay on the index path.)
 //!
 //! The invariant being preserved: **index probe results == full-scan + WHERE
 //! results under VibeSQL's own comparison semantics.**
@@ -199,7 +202,10 @@ fn coerce_rendered(
 /// semantics (correct, just slower; only hit for unusual string bounds).
 ///
 /// Non-temporal indexes, non-string bounds, and indexes whose key type cannot
-/// be sampled (empty, all-NULL, disk-backed) are passed through unchanged.
+/// be sampled (empty/all-NULL in-memory, vector indexes) are passed through
+/// unchanged. Disk-backed indexes report their key type from the persisted
+/// `key_schema` (page-0 metadata, no I/O), so they are coerced like in-memory
+/// ones — even when empty (issue #5337).
 pub(crate) fn coerce_index_predicate_for_temporal_keys(
     predicate: Option<IndexPredicate>,
     index_data: &IndexData,
@@ -556,5 +562,145 @@ mod tests {
             coerce_equality_key(&date("2017-07-05"), &varchar("junk")),
             EqualityKeyCoercion::Unusable
         ));
+    }
+
+    #[test]
+    fn trailing_zero_fraction_string_round_trips_after_5332() {
+        // Since #5332 fractions render padded to >= 3 digits, so a
+        // trailing-zero string like '.500' round-trips exactly and keeps its
+        // original inclusivity instead of declining.
+        let index = index_with_keys(vec![ts("2024-01-01 13:15:44.5")]);
+        let pred = range(Some(varchar("2024-01-01 13:15:44.500")), None, false, false);
+        let coerced = coerce_index_predicate_for_temporal_keys(pred, &index).unwrap();
+        match coerced {
+            IndexPredicate::Range(r) => {
+                assert_eq!(r.start, Some(ts("2024-01-01 13:15:44.500")));
+                assert!(!r.inclusive_start, "exact round-trip keeps original inclusivity");
+            }
+            other => panic!("expected Range, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn short_fraction_string_takes_prefix_rule_after_5332() {
+        // '...44.5' renders as '...44.500' — a strict rendering prefix, so
+        // lower bounds become inclusive and upper bounds exclusive.
+        let index = index_with_keys(vec![ts("2024-01-01 13:15:44.5")]);
+        let pred = range(
+            Some(varchar("2024-01-01 13:15:44.5")),
+            Some(varchar("2024-01-01 13:15:44.5")),
+            true,
+            true,
+        );
+        let coerced = coerce_index_predicate_for_temporal_keys(pred, &index).unwrap();
+        match coerced {
+            IndexPredicate::Range(r) => {
+                assert_eq!(r.start, Some(ts("2024-01-01 13:15:44.5")));
+                assert!(r.inclusive_start);
+                assert_eq!(r.end, Some(ts("2024-01-01 13:15:44.5")));
+                assert!(!r.inclusive_end);
+            }
+            other => panic!("expected Range, got {:?}", other),
+        }
+    }
+
+    /// Build a disk-backed `IndexData` over the given single-column keys
+    /// with the given key schema. Returns the TempDir so the backing file
+    /// outlives the assertions.
+    fn disk_backed_index_with_keys(
+        key_schema: Vec<vibesql_types::DataType>,
+        keys: Vec<SqlValue>,
+    ) -> (IndexData, tempfile::TempDir) {
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let storage = Arc::new(vibesql_storage::NativeStorage::new(temp_dir.path()).unwrap());
+        let page_manager =
+            Arc::new(vibesql_storage::page::PageManager::new("test_index.idx", storage).unwrap());
+
+        let mut sorted_entries: Vec<(Vec<SqlValue>, usize)> =
+            keys.into_iter().enumerate().map(|(i, key)| (vec![key], i)).collect();
+        sorted_entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let btree = vibesql_storage::btree::BTreeIndex::bulk_load(
+            sorted_entries,
+            key_schema,
+            page_manager.clone(),
+        )
+        .unwrap();
+        let index =
+            IndexData::DiskBacked { btree: Arc::new(parking_lot::Mutex::new(btree)), page_manager };
+        (index, temp_dir)
+    }
+
+    #[test]
+    fn disk_backed_timestamp_index_coerces_string_bounds() {
+        // Issue #5337: disk-backed indexes report their key type from the
+        // persisted key_schema, so string probe bounds are coerced exactly
+        // like for in-memory indexes.
+        let (index, _dir) = disk_backed_index_with_keys(
+            vec![vibesql_types::DataType::Timestamp { with_timezone: false }],
+            vec![ts("2017-07-05 00:00:00"), ts("2017-07-20 15:30:00")],
+        );
+        let pred = range(Some(varchar("2017-07-04")), Some(varchar("2017-07-08")), true, true);
+        let coerced = coerce_index_predicate_for_temporal_keys(pred, &index).unwrap();
+        match coerced {
+            IndexPredicate::Range(r) => {
+                assert_eq!(r.start, Some(ts("2017-07-04 00:00:00")));
+                assert!(r.inclusive_start);
+                assert_eq!(r.end, Some(ts("2017-07-08 00:00:00")));
+                assert!(!r.inclusive_end);
+            }
+            other => panic!("expected Range, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn empty_disk_backed_temporal_index_still_coerces() {
+        // The schema-based key type works even for empty indexes, which the
+        // in-memory sampling approach cannot handle.
+        let (index, _dir) = disk_backed_index_with_keys(
+            vec![vibesql_types::DataType::Timestamp { with_timezone: false }],
+            vec![],
+        );
+        let pred = range(Some(varchar("2017-07-20 15:30:00")), None, true, false);
+        let coerced = coerce_index_predicate_for_temporal_keys(pred, &index).unwrap();
+        match coerced {
+            IndexPredicate::Range(r) => {
+                assert_eq!(r.start, Some(ts("2017-07-20 15:30:00")));
+            }
+            other => panic!("expected Range, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn disk_backed_non_temporal_index_passes_through() {
+        let (index, _dir) = disk_backed_index_with_keys(
+            vec![vibesql_types::DataType::Integer],
+            vec![SqlValue::Integer(1), SqlValue::Integer(2)],
+        );
+        let pred = range(Some(varchar("2017-07-20")), None, true, false);
+        let coerced = coerce_index_predicate_for_temporal_keys(pred, &index).unwrap();
+        match coerced {
+            IndexPredicate::Range(r) => {
+                assert_eq!(r.start, Some(varchar("2017-07-20")), "no coercion expected");
+            }
+            other => panic!("expected Range, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn disk_backed_equality_lookup_key_coerces_via_sample() {
+        // Fast-path point lookups sample per column; the disk-backed sample
+        // must drive the same equality coercion as in-memory samples.
+        let (index, _dir) = disk_backed_index_with_keys(
+            vec![vibesql_types::DataType::Timestamp { with_timezone: false }],
+            vec![ts("2017-07-20 15:30:00")],
+        );
+        let sample = index.first_key_value_sample(0).expect("schema-based sample");
+        match coerce_equality_key(&sample, &varchar("2017-07-20 15:30:00")) {
+            EqualityKeyCoercion::Coerced(v) => assert_eq!(v, ts("2017-07-20 15:30:00")),
+            _ => panic!("expected Coerced"),
+        }
     }
 }

@@ -73,6 +73,16 @@ pub struct BTreeIndex {
 }
 
 impl BTreeIndex {
+    /// The data types of this index's key columns.
+    ///
+    /// Persisted in page-0 metadata at build time and restored by
+    /// [`BTreeIndex::load`], so it is authoritative even for empty indexes.
+    /// Used by the executor to determine the stored key type for probe-bound
+    /// coercion (issue #5337) without any disk I/O.
+    pub fn key_schema(&self) -> &[DataType] {
+        &self.key_schema
+    }
+
     /// Create a new B+ tree index
     ///
     /// Creates a new disk-backed B+ tree index that supports both unique and

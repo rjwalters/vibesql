@@ -387,3 +387,67 @@ fn column_index_timestamp_null_keys_excluded_from_ranges() {
     check_t4(&db, "SELECT id FROM t4 WHERE ts < '2017-07-23'", &[1, 2]);
     check_t4(&db, "SELECT id FROM t4 WHERE ts >= '2017-07-21'", &[2, 3]);
 }
+
+// ---------------------------------------------------------------------------
+// Fractional seconds (issue #5332): Display pads fractions to a minimum of 3
+// digits (`.5` → `.500`, matching SQLite's subsec rendering) while keeping
+// sub-millisecond digits (`.123456` unchanged). Under TEXT-rendering
+// comparison semantics (#5329) this makes trailing-zero-fraction string
+// bounds round-trip (coercible) and short fractions like `.5` strict
+// rendering prefixes. Same literal-expected style as the t4 section (#5335).
+// ---------------------------------------------------------------------------
+
+fn fractional_timestamp_db() -> Database {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        "CREATE TABLE t5 (id INTEGER PRIMARY KEY, ts TIMESTAMP);
+         INSERT INTO t5 VALUES (1, TIMESTAMP '2024-01-01 12:00:00');
+         INSERT INTO t5 VALUES (2, TIMESTAMP '2024-01-01 12:00:00.5');
+         INSERT INTO t5 VALUES (3, TIMESTAMP '2024-01-01 12:00:00.123456');
+         CREATE INDEX t5ts ON t5(ts)",
+    );
+    db
+}
+
+fn check_t5(db: &Database, sql: &str, expected: &[i64]) {
+    let rows = select_ints(db, sql).unwrap_or_else(|e| panic!("query failed: {e}\n  sql: {sql}"));
+    assert_eq!(rows, expected, "wrong rows for indexed query: {sql}");
+}
+
+#[test]
+fn column_index_timestamp_fractional_equality_padded_string() {
+    // '.500' is the canonical rendering after #5332: the bound round-trips
+    // and the equality probe stays on the index path. Before #5332 the
+    // stored value rendered '.5' so this string declined coercion (and the
+    // equality was false under TEXT semantics).
+    let db = fractional_timestamp_db();
+    check_t5(&db, "SELECT id FROM t5 WHERE ts = '2024-01-01 12:00:00.500'", &[2]);
+    // Sub-millisecond renderings are preserved verbatim.
+    check_t5(&db, "SELECT id FROM t5 WHERE ts = '2024-01-01 12:00:00.123456'", &[3]);
+}
+
+#[test]
+fn column_index_timestamp_fractional_equality_short_string_is_empty() {
+    // '.5' is now a strict rendering *prefix* of '.500': no rendering equals
+    // it, so equality matches nothing — via the index and the full scan.
+    let db = fractional_timestamp_db();
+    check_t5(&db, "SELECT id FROM t5 WHERE ts = '2024-01-01 12:00:00.5'", &[]);
+}
+
+#[test]
+fn column_index_timestamp_fractional_ranges() {
+    let db = fractional_timestamp_db();
+    // Renderings: row1 '…12:00:00' < row3 '…12:00:00.123456' < row2 '…12:00:00.500'.
+    check_t5(&db, "SELECT id FROM t5 WHERE ts >= '2024-01-01 12:00:00.500'", &[2]);
+    check_t5(&db, "SELECT id FROM t5 WHERE ts < '2024-01-01 12:00:00.500'", &[1, 3]);
+    // Prefix-rule bound: every fractional rendering with prefix '.5' sorts
+    // strictly above the bound, so >= and > agree.
+    check_t5(&db, "SELECT id FROM t5 WHERE ts >= '2024-01-01 12:00:00.5'", &[2]);
+    check_t5(&db, "SELECT id FROM t5 WHERE ts > '2024-01-01 12:00:00.5'", &[2]);
+    check_t5(
+        &db,
+        "SELECT id FROM t5 WHERE ts BETWEEN '2024-01-01 12:00:00.123456' AND '2024-01-01 12:00:00.500'",
+        &[2, 3],
+    );
+}
