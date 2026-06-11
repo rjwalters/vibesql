@@ -17,10 +17,17 @@
 //! - When the `DO UPDATE ... WHERE` predicate is false or NULL the candidate
 //!   row is silently dropped (neither inserted nor updated).
 //!
-//! Known limitations (v1, issue #5269):
-//! - Expression-index conflict targets (`ON CONFLICT(a+b)`) and partial-index
-//!   targets (`ON CONFLICT(b) WHERE ...`) are not matched; they raise the
-//!   canonical "does not match" error like a non-unique target.
+//! Conflict targets match the PRIMARY KEY, table-level UNIQUE constraints,
+//! and unique indexes — including expression indexes (`ON CONFLICT(a+b)`
+//! matches `CREATE UNIQUE INDEX ... ON t(a+b)`, upsert1-200) and partial
+//! indexes (`ON CONFLICT(b) WHERE b>10` matches
+//! `CREATE UNIQUE INDEX ... ON t(b) WHERE b>10`, upsert1-320). Expression
+//! components are compared structurally (`a+(+b)` does NOT match `a+b`,
+//! upsert1-210) and a target WHERE must structurally equal the index
+//! predicate (upsert1-300/310).
+//!
+//! Known limitations (issue #5269):
+//! - Non-BINARY `COLLATE` in the target is never matched (upsert1-130).
 //! - UPDATE triggers do not fire on the upsert update arm (parity with the
 //!   MySQL-style `ON DUPLICATE KEY UPDATE` path).
 //!
@@ -32,9 +39,12 @@
 use crate::errors::ExecutorError;
 use vibesql_ast::{
     visitor::{transform_expression, ExpressionMutVisitor, VisitResult},
-    Assignment, Expression, FromClause, SelectStmt,
+    Assignment, ConflictTargetItem, Expression, FromClause, SelectStmt,
 };
 use vibesql_types::SqlValue;
+
+use crate::partial_index_maintenance::is_predicate_truthy;
+use crate::select::grouping::expressions_equal;
 
 /// Outcome of attempting the DO UPDATE arm for one candidate row.
 pub enum UpsertAction {
@@ -47,83 +57,186 @@ pub enum UpsertAction {
     NoConflict,
 }
 
-/// Collect every unique column set that can act as an upsert conflict target:
-/// the PRIMARY KEY, table-level UNIQUE constraints, and unique non-partial,
-/// simple-column indexes created via `CREATE UNIQUE INDEX`.
-///
-/// Partial indexes (`CREATE UNIQUE INDEX ... WHERE ...`) and expression
-/// indexes are intentionally excluded: a plain column-list conflict target
-/// cannot match them in SQLite either (upsert1-300).
-fn collect_unique_column_sets(
+/// One key component of a unique constraint/index candidate.
+enum KeyPart {
+    /// Plain column, resolved to a schema column index.
+    Column(usize),
+    /// Expression component of an expression index.
+    Expr(Expression),
+}
+
+/// A unique constraint or index that can act as an upsert conflict target:
+/// the PRIMARY KEY, a table-level UNIQUE constraint, or a unique index
+/// created via `CREATE UNIQUE INDEX` (including expression and partial
+/// indexes).
+struct UniqueCandidate {
+    /// Key components (column references or index expressions).
+    parts: Vec<KeyPart>,
+    /// Partial-index WHERE predicate; None for full indexes/constraints.
+    predicate: Option<Expression>,
+}
+
+/// Collect every unique constraint/index that can act as an upsert conflict
+/// target.
+fn collect_unique_candidates(
     db: &vibesql_storage::Database,
     table_name: &str,
     schema: &vibesql_catalog::TableSchema,
-) -> Vec<Vec<usize>> {
-    let mut sets: Vec<Vec<usize>> = Vec::new();
+) -> Vec<UniqueCandidate> {
+    let mut candidates: Vec<UniqueCandidate> = Vec::new();
 
     if let Some(pk) = schema.get_primary_key_indices() {
         if !pk.is_empty() {
-            sets.push(pk);
+            candidates.push(UniqueCandidate {
+                parts: pk.into_iter().map(KeyPart::Column).collect(),
+                predicate: None,
+            });
         }
     }
 
     for unique in schema.get_unique_constraint_indices() {
         if !unique.is_empty() {
-            sets.push(unique);
+            candidates.push(UniqueCandidate {
+                parts: unique.into_iter().map(KeyPart::Column).collect(),
+                predicate: None,
+            });
         }
     }
 
     for index_name in db.list_indexes_for_table(table_name) {
         let Some(meta) = db.get_index(&index_name) else { continue };
-        if !meta.unique || meta.is_partial() {
+        if !meta.unique {
             continue;
         }
-        let mut cols = Vec::with_capacity(meta.columns.len());
-        let mut simple = true;
+        let mut parts = Vec::with_capacity(meta.columns.len());
+        let mut representable = true;
         for index_col in &meta.columns {
-            match index_col.column_name().and_then(|name| schema.get_column_index(name)) {
-                Some(idx) => cols.push(idx),
-                None => {
-                    // Expression index component (or unknown column): the
-                    // whole index cannot be matched by a column-list target.
-                    simple = false;
-                    break;
+            if let Some(name) = index_col.column_name() {
+                match schema.get_column_index(name) {
+                    Some(idx) => parts.push(KeyPart::Column(idx)),
+                    None => {
+                        // Unknown column: the index cannot be matched.
+                        representable = false;
+                        break;
+                    }
                 }
+            } else if let Some(expr) = index_col.get_expression() {
+                // Normalize bare column-ref expressions to plain columns so
+                // a column-name target can match them.
+                match bare_column_index(schema, expr) {
+                    Some(idx) => parts.push(KeyPart::Column(idx)),
+                    None => parts.push(KeyPart::Expr(expr.clone())),
+                }
+            } else {
+                representable = false;
+                break;
             }
         }
-        if simple && !cols.is_empty() {
-            sets.push(cols);
+        if representable && !parts.is_empty() {
+            candidates
+                .push(UniqueCandidate { parts, predicate: meta.where_clause.as_deref().cloned() });
         }
     }
 
-    sets
+    candidates
 }
 
-/// Resolve conflict-target column names to schema column indices.
-/// Errors with SQLite's "no such column" message for unknown names.
-fn resolve_target_indices(
+/// If `expr` is a bare (unqualified) column reference naming a schema
+/// column, return that column's index.
+fn bare_column_index(schema: &vibesql_catalog::TableSchema, expr: &Expression) -> Option<usize> {
+    match expr {
+        Expression::ColumnRef(id) if id.table_canonical().is_none() => {
+            schema.get_column_index(id.column_canonical())
+        }
+        _ => None,
+    }
+}
+
+/// A conflict-target item resolved against the table schema.
+enum ResolvedTargetItem<'a> {
+    Column(usize),
+    Expr(&'a Expression),
+}
+
+/// Resolve conflict-target items against the schema. Plain column names that
+/// don't exist raise SQLite's "no such column" error (upsert1-110).
+fn resolve_target_items<'a>(
     schema: &vibesql_catalog::TableSchema,
-    target: &[String],
-) -> Result<Vec<usize>, ExecutorError> {
+    target: &'a [ConflictTargetItem],
+) -> Result<Vec<ResolvedTargetItem<'a>>, ExecutorError> {
     target
         .iter()
-        .map(|col| {
-            schema.get_column_index(col).ok_or_else(|| {
-                ExecutorError::SqliteCompatError(format!("no such column: {}", col))
-            })
+        .map(|item| match item {
+            ConflictTargetItem::Column(name) => {
+                schema.get_column_index(name).map(ResolvedTargetItem::Column).ok_or_else(|| {
+                    ExecutorError::SqliteCompatError(format!("no such column: {}", name))
+                })
+            }
+            ConflictTargetItem::Expression(expr) => match bare_column_index(schema, expr) {
+                Some(idx) => Ok(ResolvedTargetItem::Column(idx)),
+                None => Ok(ResolvedTargetItem::Expr(expr)),
+            },
         })
         .collect()
 }
 
-/// Normalize a column index set for order-insensitive comparison.
-fn normalized(mut indices: Vec<usize>) -> Vec<usize> {
-    indices.sort_unstable();
-    indices.dedup();
-    indices
+/// Does this candidate match the resolved conflict target?
+///
+/// The target must cover the candidate's key components exactly
+/// (order-insensitive). Column items match resolved column indices;
+/// expression items match expression components structurally
+/// (`expressions_equal`, so `a+(+b)` does NOT match `a+b` — upsert1-210).
+/// The target-level WHERE must structurally equal the index predicate:
+/// a bare target never matches a partial index (upsert1-300) and a
+/// mismatched predicate never matches (upsert1-310).
+fn candidate_matches_target(
+    candidate: &UniqueCandidate,
+    target: &[ResolvedTargetItem<'_>],
+    target_where: Option<&Expression>,
+) -> bool {
+    // Partial-index predicate must match structurally.
+    match (target_where, candidate.predicate.as_ref()) {
+        (None, None) => {}
+        (Some(tw), Some(pred)) => {
+            if !expressions_equal(tw, pred) {
+                return false;
+            }
+        }
+        _ => return false,
+    }
+
+    if candidate.parts.len() != target.len() {
+        return false;
+    }
+
+    // Order-insensitive multiset match between target items and key parts.
+    let mut used = vec![false; candidate.parts.len()];
+    for item in target {
+        let mut matched = false;
+        for (i, part) in candidate.parts.iter().enumerate() {
+            if used[i] {
+                continue;
+            }
+            let matches = match (item, part) {
+                (ResolvedTargetItem::Column(t), KeyPart::Column(c)) => t == c,
+                (ResolvedTargetItem::Expr(t), KeyPart::Expr(c)) => expressions_equal(t, c),
+                _ => false,
+            };
+            if matches {
+                used[i] = true;
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            return false;
+        }
+    }
+    true
 }
 
-/// Validate an explicit `ON CONFLICT (cols)` target against the table's
-/// PRIMARY KEY, UNIQUE constraints, and unique indexes.
+/// Validate an explicit `ON CONFLICT (cols) [WHERE ...]` target against the
+/// table's PRIMARY KEY, UNIQUE constraints, and unique indexes.
 ///
 /// SQLite validates the conflict target at prepare time, even when no row
 /// actually conflicts (upsert1-110/120). Unknown columns raise
@@ -133,12 +246,13 @@ pub fn validate_conflict_target(
     db: &vibesql_storage::Database,
     table_name: &str,
     schema: &vibesql_catalog::TableSchema,
-    target: &[String],
+    target: &[ConflictTargetItem],
+    target_where: Option<&Expression>,
 ) -> Result<(), ExecutorError> {
-    let target_set = normalized(resolve_target_indices(schema, target)?);
-    let matched = collect_unique_column_sets(db, table_name, schema)
-        .into_iter()
-        .any(|set| normalized(set) == target_set);
+    let resolved = resolve_target_items(schema, target)?;
+    let matched = collect_unique_candidates(db, table_name, schema)
+        .iter()
+        .any(|candidate| candidate_matches_target(candidate, &resolved, target_where));
 
     if matched {
         Ok(())
@@ -147,6 +261,129 @@ pub fn validate_conflict_target(
             "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint".to_string(),
         ))
     }
+}
+
+/// Evaluate a candidate's key for a row. Returns `None` when any component
+/// is NULL (NULL keys never conflict under UNIQUE semantics) or when an
+/// expression component fails to evaluate (treated as NULL, matching
+/// expression-index maintenance).
+fn eval_candidate_key(
+    evaluator: &crate::evaluator::ExpressionEvaluator,
+    candidate: &UniqueCandidate,
+    row: &vibesql_storage::Row,
+) -> Option<Vec<SqlValue>> {
+    let mut key = Vec::with_capacity(candidate.parts.len());
+    for part in &candidate.parts {
+        let value = match part {
+            KeyPart::Column(idx) => row.values.get(*idx)?.clone(),
+            KeyPart::Expr(expr) => evaluator.eval(expr, row).unwrap_or(SqlValue::Null),
+        };
+        if matches!(value, SqlValue::Null) {
+            return None;
+        }
+        key.push(value);
+    }
+    Some(key)
+}
+
+/// Does the row satisfy the candidate's partial-index predicate (or is the
+/// candidate a full index/constraint)? Rows outside a partial index can
+/// never conflict through it.
+fn row_in_candidate(
+    evaluator: &crate::evaluator::ExpressionEvaluator,
+    candidate: &UniqueCandidate,
+    row: &vibesql_storage::Row,
+) -> bool {
+    match &candidate.predicate {
+        None => true,
+        Some(pred) => evaluator.eval(pred, row).map(|v| is_predicate_truthy(&v)).unwrap_or(false),
+    }
+}
+
+/// Find a live row that conflicts with `row_values` on one of the candidate
+/// constraints. Candidates are tested in order (SQLite tests the targeted
+/// constraint first — upsert1-700 series).
+fn find_conflicting_live_row(
+    db: &vibesql_storage::Database,
+    table_name: &str,
+    schema: &vibesql_catalog::TableSchema,
+    candidates: &[UniqueCandidate],
+    row_values: &[SqlValue],
+) -> Result<Option<usize>, ExecutorError> {
+    let table = db
+        .get_table(table_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+    let evaluator = crate::evaluator::ExpressionEvaluator::new(schema);
+    let candidate_row = vibesql_storage::Row::new(row_values.to_vec());
+
+    for candidate in candidates {
+        let Some(new_key) = eval_candidate_key(&evaluator, candidate, &candidate_row) else {
+            continue;
+        };
+        if !row_in_candidate(&evaluator, candidate, &candidate_row) {
+            continue;
+        }
+        for (row_id, row) in table.scan_live() {
+            if !row_in_candidate(&evaluator, candidate, row) {
+                continue;
+            }
+            if eval_candidate_key(&evaluator, candidate, row).as_deref() == Some(&new_key[..]) {
+                return Ok(Some(row_id));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Would inserting `row_values` conflict on the explicit DO NOTHING conflict
+/// target? Used by the targeted `ON CONFLICT (cols) [WHERE ...] DO NOTHING`
+/// path: only conflicts on the *targeted* constraint are suppressed —
+/// conflicts on other constraints surface as normal UNIQUE errors
+/// (upsert1-201).
+///
+/// `batch_rows` carries earlier rows from the same multi-row INSERT that
+/// have been validated but not yet inserted, so later rows in a VALUES list
+/// can conflict with earlier ones (upsert1-320).
+pub fn row_conflicts_on_target(
+    db: &vibesql_storage::Database,
+    table_name: &str,
+    schema: &vibesql_catalog::TableSchema,
+    row_values: &[SqlValue],
+    target: &[ConflictTargetItem],
+    target_where: Option<&Expression>,
+    batch_rows: &[Vec<SqlValue>],
+) -> Result<bool, ExecutorError> {
+    let resolved = resolve_target_items(schema, target)?;
+    let candidates: Vec<UniqueCandidate> = collect_unique_candidates(db, table_name, schema)
+        .into_iter()
+        .filter(|candidate| candidate_matches_target(candidate, &resolved, target_where))
+        .collect();
+
+    if find_conflicting_live_row(db, table_name, schema, &candidates, row_values)?.is_some() {
+        return Ok(true);
+    }
+
+    // Conflicts with earlier (not-yet-inserted) rows from the same batch.
+    let evaluator = crate::evaluator::ExpressionEvaluator::new(schema);
+    let candidate_row = vibesql_storage::Row::new(row_values.to_vec());
+    for candidate in &candidates {
+        let Some(new_key) = eval_candidate_key(&evaluator, candidate, &candidate_row) else {
+            continue;
+        };
+        if !row_in_candidate(&evaluator, candidate, &candidate_row) {
+            continue;
+        }
+        for batch_row in batch_rows {
+            let row = vibesql_storage::Row::new(batch_row.clone());
+            if !row_in_candidate(&evaluator, candidate, &row) {
+                continue;
+            }
+            if eval_candidate_key(&evaluator, candidate, &row).as_deref() == Some(&new_key[..]) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// Handle the `ON CONFLICT [(cols)] DO UPDATE SET ... [WHERE ...]` arm for a
@@ -160,46 +397,34 @@ pub fn validate_conflict_target(
 ///   caller should proceed with a normal insert (which may still raise
 ///   UNIQUE errors for constraints other than the named target — SQLite
 ///   semantics, upsert1-201).
+#[allow(clippy::too_many_arguments)]
 pub fn handle_on_conflict_update(
     db: &mut vibesql_storage::Database,
     table_name: &str,
     schema: &vibesql_catalog::TableSchema,
     row_values: &[SqlValue],
-    conflict_target: Option<&Vec<String>>,
+    conflict_target: Option<&[ConflictTargetItem]>,
+    target_where: Option<&Expression>,
     assignments: &[Assignment],
     where_clause: Option<&Expression>,
 ) -> Result<UpsertAction, ExecutorError> {
-    // Determine which unique column sets the update arm applies to.
+    // Determine which unique constraints/indexes the update arm applies to.
     // SQLite tests the targeted constraint first (upsert1-700 series).
-    let all_sets = collect_unique_column_sets(db, table_name, schema);
-    let candidate_sets: Vec<Vec<usize>> = match conflict_target {
+    let all_candidates = collect_unique_candidates(db, table_name, schema);
+    let candidates: Vec<UniqueCandidate> = match conflict_target {
         Some(target) => {
-            let target_set = normalized(resolve_target_indices(schema, target)?);
-            all_sets.into_iter().filter(|set| normalized(set.clone()) == target_set).collect()
+            let resolved = resolve_target_items(schema, target)?;
+            all_candidates
+                .into_iter()
+                .filter(|candidate| candidate_matches_target(candidate, &resolved, target_where))
+                .collect()
         }
-        None => all_sets,
+        None => all_candidates,
     };
 
     // Find a live row that conflicts on one of the candidate constraints.
-    let conflicting_row_id = {
-        let table = db
-            .get_table(table_name)
-            .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
-        let mut found = None;
-        'outer: for set in &candidate_sets {
-            // NULLs never conflict under UNIQUE semantics.
-            if set.iter().any(|&i| matches!(row_values[i], SqlValue::Null)) {
-                continue;
-            }
-            for (row_id, row) in table.scan_live() {
-                if set.iter().all(|&i| row.values[i] == row_values[i]) {
-                    found = Some(row_id);
-                    break 'outer;
-                }
-            }
-        }
-        found
-    };
+    let conflicting_row_id =
+        find_conflicting_live_row(db, table_name, schema, &candidates, row_values)?;
 
     let Some(row_id) = conflicting_row_id else {
         return Ok(UpsertAction::NoConflict);

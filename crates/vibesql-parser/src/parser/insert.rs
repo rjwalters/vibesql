@@ -420,12 +420,14 @@ impl Parser {
             // We mirror that behavior so nulls1.test 3.1.11 / 3.1.12 see the
             // expected error message.
             //
-            // v1 (issue #5269) matches plain column names with the default
-            // BINARY collation only. Expression components, non-BINARY
-            // COLLATE, and target WHERE predicates parse successfully but
-            // mark the target "inexact" so the executor reports SQLite's
-            // canonical "ON CONFLICT clause does not match any PRIMARY KEY
-            // or UNIQUE constraint" error (upsert1-130/210/310/1210).
+            // Plain column names (default BINARY collation) become
+            // `ConflictTargetItem::Column`; everything else is retained as a
+            // `ConflictTargetItem::Expression` for structural matching
+            // against expression indexes (upsert1-200/210). An explicit
+            // non-BINARY COLLATE still marks the target "inexact" so the
+            // executor reports SQLite's canonical "ON CONFLICT clause does
+            // not match any PRIMARY KEY or UNIQUE constraint" error
+            // (upsert1-130; issue #5269).
             let mut target_inexact = false;
             let conflict_target = if matches!(self.peek(), Token::LParen) {
                 self.advance(); // consume (
@@ -445,46 +447,46 @@ impl Parser {
                     p.reject_nulls_in_index_position()?;
 
                     // Peel an optional COLLATE wrapper.
-                    let (base, collation) = match &expr {
+                    let (base, collation) = match expr {
                         vibesql_ast::Expression::Collate { expr: inner, collation } => {
-                            (inner.as_ref(), Some(collation.as_str()))
+                            (*inner, Some(collation))
                         }
                         other => (other, None),
                     };
 
-                    match base {
+                    // A non-default (non-BINARY) collation cannot be matched
+                    // against an index in v1 (upsert1-130).
+                    let inexact = collation
+                        .as_deref()
+                        .map(|c| !c.eq_ignore_ascii_case("binary"))
+                        .unwrap_or(false);
+
+                    let item = match &base {
                         vibesql_ast::Expression::ColumnRef(id)
                             if id.table_canonical().is_none() =>
                         {
-                            // Plain column: exact unless a non-default
-                            // (non-BINARY) collation was requested.
-                            let inexact = collation
-                                .map(|c| !c.eq_ignore_ascii_case("binary"))
-                                .unwrap_or(false);
-                            Ok((id.column_display().to_string(), inexact))
+                            vibesql_ast::ConflictTargetItem::Column(id.column_display().to_string())
                         }
-                        _ => {
-                            // Expression component: cannot match a plain
-                            // column-list constraint in v1.
-                            Ok((String::new(), true))
-                        }
-                    }
+                        _ => vibesql_ast::ConflictTargetItem::Expression(base),
+                    };
+                    Ok((item, inexact))
                 })?;
                 self.expect_token(Token::RParen)?;
                 target_inexact = entries.iter().any(|(_, inexact)| *inexact);
-                Some(entries.into_iter().map(|(name, _)| name).collect())
+                Some(entries.into_iter().map(|(item, _)| item).collect())
             } else {
                 None
             };
 
-            // Optional target-level WHERE predicate (partial-index upsert).
-            // Parsed but not matched in v1: marks the target inexact
-            // (upsert1-310).
-            if conflict_target.is_some() && self.peek_keyword(Keyword::Where) {
+            // Optional target-level WHERE predicate (partial-index upsert,
+            // upsert1-310/320). Retained for structural matching against a
+            // partial unique index's predicate.
+            let target_where = if conflict_target.is_some() && self.peek_keyword(Keyword::Where) {
                 self.advance(); // consume WHERE
-                let _predicate = self.parse_expression()?;
-                target_inexact = true;
-            }
+                Some(self.parse_expression()?)
+            } else {
+                None
+            };
 
             self.expect_keyword(Keyword::Do)?;
 
@@ -514,7 +516,12 @@ impl Parser {
             };
 
             Ok((
-                Some(vibesql_ast::OnConflictClause { conflict_target, target_inexact, action }),
+                Some(vibesql_ast::OnConflictClause {
+                    conflict_target,
+                    target_where,
+                    target_inexact,
+                    action,
+                }),
                 None,
             ))
         } else if self.peek_keyword(Keyword::Duplicate) {

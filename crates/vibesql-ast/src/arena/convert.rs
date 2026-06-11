@@ -641,10 +641,20 @@ impl<'a, 'arena> Converter<'a, 'arena> {
         clause: &arena_dml::OnConflictClause<'arena>,
     ) -> crate::OnConflictClause {
         crate::OnConflictClause {
-            conflict_target: clause
-                .conflict_target
-                .as_ref()
-                .map(|cols| cols.iter().map(|s| self.resolve(*s)).collect()),
+            conflict_target: clause.conflict_target.as_ref().map(|items| {
+                items
+                    .iter()
+                    .map(|item| match item {
+                        arena_dml::ConflictTargetItem::Column(s) => {
+                            crate::ConflictTargetItem::Column(self.resolve(*s))
+                        }
+                        arena_dml::ConflictTargetItem::Expression(e) => {
+                            crate::ConflictTargetItem::Expression(self.convert_expression(e))
+                        }
+                    })
+                    .collect()
+            }),
+            target_where: clause.target_where.as_ref().map(|e| self.convert_expression(e)),
             target_inexact: clause.target_inexact,
             action: match &clause.action {
                 arena_dml::OnConflictAction::DoNothing => crate::OnConflictAction::DoNothing,

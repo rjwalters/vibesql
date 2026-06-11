@@ -250,12 +250,32 @@ pub fn enforce_unique_indexes(
                 continue;
             }
 
-            // Skip expression indexes: this check builds keys from plain
-            // column values and expect_column_name() panics on expression
-            // components (observed via upsert1-800 with a UNIQUE expression
-            // index). Expression indexes are maintained separately by
-            // expression_index_maintenance.
+            // Partial index: a row that doesn't satisfy the predicate never
+            // enters the index, so it cannot violate its uniqueness.
+            if let Some(predicate) = index_metadata.where_clause.as_deref() {
+                let candidate_row = vibesql_storage::Row::new(row_values.to_vec());
+                let evaluator = crate::evaluator::ExpressionEvaluator::new(schema);
+                let satisfied = evaluator
+                    .eval(predicate, &candidate_row)
+                    .map(|v| crate::partial_index_maintenance::is_predicate_truthy(&v))
+                    .unwrap_or(false);
+                if !satisfied {
+                    continue;
+                }
+            }
+
+            // Expression indexes need their key built by evaluating the
+            // index expressions; they get a dedicated enforcement path that
+            // scans live rows (index data can be stale after upsert-arm
+            // updates) and SQLite's index-name error format (upsert1-201).
             if index_metadata.columns.iter().any(|col| col.is_expression()) {
+                enforce_unique_expression_index(
+                    schema,
+                    index_metadata,
+                    row_values,
+                    table,
+                    &snapshot,
+                )?;
                 continue;
             }
 
@@ -318,4 +338,87 @@ pub fn enforce_unique_indexes(
     }
 
     Ok(())
+}
+
+/// Enforce a UNIQUE *expression* index (e.g. `CREATE UNIQUE INDEX t1x1 ON
+/// t1(a+b)`) against a candidate row.
+///
+/// The key is built by evaluating each index component (expression or plain
+/// column) against the candidate row, then compared against every
+/// MVCC-visible live row — the maintained index data is not used because it
+/// can be stale after upsert-arm updates (known limitation, issue #5269).
+///
+/// SQLite reports violations of expression indexes with the index-name
+/// format: `UNIQUE constraint failed: index 't1x1'` (upsert1-201).
+fn enforce_unique_expression_index(
+    schema: &vibesql_catalog::TableSchema,
+    index_metadata: &vibesql_storage::database::indexes::IndexMetadata,
+    row_values: &[vibesql_types::SqlValue],
+    table: Option<&vibesql_storage::Table>,
+    snapshot: &vibesql_storage::TxnSnapshot,
+) -> Result<(), ExecutorError> {
+    let Some(table) = table else {
+        return Ok(());
+    };
+
+    let evaluator = crate::evaluator::ExpressionEvaluator::new(schema);
+    let candidate_row = vibesql_storage::Row::new(row_values.to_vec());
+
+    // Build the candidate key. Evaluation failures become NULL (matching
+    // expression-index maintenance), and NULL keys never conflict.
+    let Some(new_key) =
+        eval_expression_index_key(&evaluator, schema, index_metadata, &candidate_row)
+    else {
+        return Ok(());
+    };
+
+    for (_idx, existing_row) in table.scan_visible(snapshot) {
+        // Partial expression indexes: rows outside the predicate are not in
+        // the index. (The caller already verified the candidate row.)
+        if let Some(predicate) = index_metadata.where_clause.as_deref() {
+            let in_index = evaluator
+                .eval(predicate, existing_row)
+                .map(|v| crate::partial_index_maintenance::is_predicate_truthy(&v))
+                .unwrap_or(false);
+            if !in_index {
+                continue;
+            }
+        }
+        if eval_expression_index_key(&evaluator, schema, index_metadata, existing_row).as_deref()
+            == Some(&new_key[..])
+        {
+            // SQLite format for expression indexes: index name, not columns.
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "UNIQUE constraint failed: index '{}'",
+                index_metadata.index_name
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Evaluate an expression index's key for a row. Returns `None` when any
+/// component is NULL (NULL keys never conflict) or fails to evaluate.
+fn eval_expression_index_key(
+    evaluator: &crate::evaluator::ExpressionEvaluator,
+    schema: &vibesql_catalog::TableSchema,
+    index_metadata: &vibesql_storage::database::indexes::IndexMetadata,
+    row: &vibesql_storage::Row,
+) -> Option<Vec<vibesql_types::SqlValue>> {
+    let mut key = Vec::with_capacity(index_metadata.columns.len());
+    for col in &index_metadata.columns {
+        let value = if let Some(expr) = col.get_expression() {
+            evaluator.eval(expr, row).unwrap_or(vibesql_types::SqlValue::Null)
+        } else if let Some(name) = col.column_name() {
+            row.values.get(schema.get_column_index(name)?)?.clone()
+        } else {
+            vibesql_types::SqlValue::Null
+        };
+        if matches!(value, vibesql_types::SqlValue::Null) {
+            return None;
+        }
+        key.push(value);
+    }
+    Some(key)
 }

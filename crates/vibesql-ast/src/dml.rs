@@ -78,6 +78,21 @@ pub enum OnConflictAction {
     },
 }
 
+/// One entry of an `ON CONFLICT (...)` conflict target.
+///
+/// SQLite allows each entry to be an arbitrary indexed expression: a plain
+/// column name matches simple-column indexes/constraints, while an
+/// expression entry (`ON CONFLICT(a+b)`) matches expression indexes with a
+/// structurally identical component (upsert1-200).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConflictTargetItem {
+    /// Plain column name with the default BINARY collation.
+    Column(String),
+    /// Expression entry (e.g. `ON CONFLICT(a+b)`); matched structurally
+    /// against expression-index components.
+    Expression(Expression),
+}
+
 /// ON CONFLICT clause for INSERT statements (SQLite upsert)
 ///
 /// Syntax:
@@ -91,18 +106,20 @@ pub enum OnConflictAction {
 /// See: <https://www.sqlite.org/lang_upsert.html>
 #[derive(Debug, Clone, PartialEq)]
 pub struct OnConflictClause {
-    /// Optional list of indexed columns to match for conflict detection.
-    /// When None, matches any unique constraint violation.
-    pub conflict_target: Option<Vec<String>>,
-    /// True when the conflict target contains components that a plain
-    /// column-name list cannot represent exactly: expression components
-    /// (`ON CONFLICT(a+b)`), an explicit non-BINARY COLLATE
-    /// (`ON CONFLICT(b COLLATE nocase)`), or a target-level WHERE predicate
-    /// (`ON CONFLICT(b) WHERE b>10`, partial-index upsert).
+    /// Optional list of indexed columns/expressions to match for conflict
+    /// detection. When None, matches any unique constraint violation.
+    pub conflict_target: Option<Vec<ConflictTargetItem>>,
+    /// Optional target-level WHERE predicate (`ON CONFLICT(b) WHERE b>10`),
+    /// matched structurally against a partial unique index's predicate
+    /// (upsert1-320).
+    pub target_where: Option<Expression>,
+    /// True when the conflict target contains components that the AST cannot
+    /// represent exactly: currently an explicit non-BINARY COLLATE
+    /// (`ON CONFLICT(b COLLATE nocase)`).
     ///
     /// The executor conservatively reports inexact targets with SQLite's
     /// canonical "ON CONFLICT clause does not match any PRIMARY KEY or
-    /// UNIQUE constraint" error (v1 limitation, issue #5269).
+    /// UNIQUE constraint" error (upsert1-130; issue #5269).
     pub target_inexact: bool,
     /// The action to take when a conflict occurs.
     pub action: OnConflictAction,

@@ -1344,7 +1344,22 @@ pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertSt
         },
         conflict_clause: stmt.conflict_clause,
         on_conflict: stmt.on_conflict.map(|clause| crate::OnConflictClause {
-            conflict_target: clause.conflict_target,
+            conflict_target: clause.conflict_target.map(|items| {
+                items
+                    .into_iter()
+                    .map(|item| match item {
+                        crate::ConflictTargetItem::Column(name) => {
+                            crate::ConflictTargetItem::Column(name)
+                        }
+                        crate::ConflictTargetItem::Expression(expr) => {
+                            crate::ConflictTargetItem::Expression(transform_expression(
+                                visitor, expr,
+                            ))
+                        }
+                    })
+                    .collect()
+            }),
+            target_where: clause.target_where.map(|e| transform_expression(visitor, e)),
             target_inexact: clause.target_inexact,
             action: match clause.action {
                 crate::OnConflictAction::DoNothing => crate::OnConflictAction::DoNothing,

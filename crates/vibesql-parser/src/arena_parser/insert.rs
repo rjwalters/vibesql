@@ -267,11 +267,20 @@ impl<'arena> ArenaParser<'arena> {
         if self.try_consume_keyword(Keyword::Conflict) {
             // SQLite/PostgreSQL: ON CONFLICT [(cols)] DO {NOTHING | UPDATE SET ...}
 
-            // Parse optional conflict target (column list)
+            // Parse optional conflict target (column list).
+            //
+            // The arena parser only supports plain column-name targets;
+            // expression targets, COLLATE, and target-level WHERE predicates
+            // fail here and fall back to the standard parser (which retains
+            // them — see parser/insert.rs).
             let conflict_target = if self.try_consume(&Token::LParen) {
                 let cols = self.parse_identifier_list()?;
                 self.expect_token(Token::RParen)?;
-                Some(cols)
+                let mut items = BumpVec::new_in(self.arena);
+                for col in cols {
+                    items.push(vibesql_ast::arena::ConflictTargetItem::Column(col));
+                }
+                Some(items)
             } else {
                 None
             };
@@ -300,7 +309,15 @@ impl<'arena> ArenaParser<'arena> {
                 });
             };
 
-            Ok((Some(OnConflictClause { conflict_target, target_inexact: false, action }), None))
+            Ok((
+                Some(OnConflictClause {
+                    conflict_target,
+                    target_where: None,
+                    target_inexact: false,
+                    action,
+                }),
+                None,
+            ))
         } else if self.try_consume_keyword(Keyword::Duplicate) {
             // MySQL: ON DUPLICATE KEY UPDATE ...
             self.consume_keyword(Keyword::Key)?;

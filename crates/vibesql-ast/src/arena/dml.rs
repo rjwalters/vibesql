@@ -73,6 +73,16 @@ pub enum OnConflictAction<'arena> {
     },
 }
 
+/// One entry of an `ON CONFLICT (...)` conflict target.
+/// Arena mirror of the owned-AST `ConflictTargetItem`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConflictTargetItem<'arena> {
+    /// Plain column name with the default BINARY collation.
+    Column(Symbol),
+    /// Expression entry (e.g. `ON CONFLICT(a+b)`).
+    Expression(Expression<'arena>),
+}
+
 /// ON CONFLICT clause for INSERT statements (SQLite upsert)
 ///
 /// Syntax:
@@ -86,12 +96,14 @@ pub enum OnConflictAction<'arena> {
 /// See: <https://www.sqlite.org/lang_upsert.html>
 #[derive(Debug, Clone, PartialEq)]
 pub struct OnConflictClause<'arena> {
-    /// Optional list of indexed columns to match for conflict detection.
-    /// When None, matches any unique constraint violation.
-    pub conflict_target: Option<BumpVec<'arena, Symbol>>,
-    /// True when the conflict target contains components that a plain
-    /// column-name list cannot represent exactly (expressions, non-BINARY
-    /// COLLATE, or a target WHERE predicate). See the owned-AST
+    /// Optional list of indexed columns/expressions to match for conflict
+    /// detection. When None, matches any unique constraint violation.
+    pub conflict_target: Option<BumpVec<'arena, ConflictTargetItem<'arena>>>,
+    /// Optional target-level WHERE predicate (partial-index upsert). See the
+    /// owned-AST `OnConflictClause::target_where`.
+    pub target_where: Option<Expression<'arena>>,
+    /// True when the conflict target contains components the AST cannot
+    /// represent exactly (currently non-BINARY COLLATE). See the owned-AST
     /// `OnConflictClause::target_inexact` for details (issue #5269).
     pub target_inexact: bool,
     /// The action to take when a conflict occurs.
