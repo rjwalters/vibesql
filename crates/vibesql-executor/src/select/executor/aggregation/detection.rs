@@ -571,6 +571,18 @@ fn expression_has_column_outside_scopes(
 
     match expr {
         Expression::ColumnRef(col) => {
+            // The legacy parser represents COUNT(*) as ColumnRef { column: "*" }
+            // (the arena parser uses Expression::Wildcard). The "*" wildcard
+            // references no specific column — it counts rows of its own query
+            // scope — so it can never be an outer column reference. Without
+            // this guard, "*" is absent from every inner scope and would be
+            // misclassified as outer, incorrectly triggering collapse (#5288).
+            if col.schema_canonical().is_none()
+                && col.table_canonical().is_none()
+                && col.column_canonical() == "*"
+            {
+                return false;
+            }
             let name = col.column_canonical().to_ascii_lowercase();
             // If the column is qualified by a table name, we still check by
             // column name only — qualifying doesn't change whether the
@@ -645,6 +657,16 @@ fn expression_has_column_inside_scopes(
 
     match expr {
         Expression::ColumnRef(col) => {
+            // Legacy-parser COUNT(*) wildcard (ColumnRef { column: "*" }) is
+            // not a column reference. "*" can never appear in a scope set, so
+            // this guard is a no-op behaviorally, but it documents intent and
+            // mirrors expression_has_column_outside_scopes (#5288).
+            if col.schema_canonical().is_none()
+                && col.table_canonical().is_none()
+                && col.column_canonical() == "*"
+            {
+                return false;
+            }
             let name = col.column_canonical().to_ascii_lowercase();
             inner_scopes.iter().any(|s| s.contains(&name))
         }
@@ -808,7 +830,14 @@ fn expression_contains_column_ref_simple(expr: &vibesql_ast::Expression) -> bool
     use vibesql_ast::Expression;
 
     match expr {
-        Expression::ColumnRef(_) => true,
+        Expression::ColumnRef(col) => {
+            // Exclude the legacy-parser COUNT(*) representation
+            // (ColumnRef { column: "*" }) — "*" references no specific column,
+            // so it is never an outer column reference (#5288).
+            !(col.schema_canonical().is_none()
+                && col.table_canonical().is_none()
+                && col.column_canonical() == "*")
+        }
         Expression::BinaryOp { left, right, .. } => {
             expression_contains_column_ref_simple(left)
                 || expression_contains_column_ref_simple(right)
