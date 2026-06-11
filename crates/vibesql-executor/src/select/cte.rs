@@ -19,8 +19,13 @@ pub type CteResult = (vibesql_catalog::TableSchema, Arc<Vec<vibesql_storage::Row
 /// Execute all CTEs and return their results
 ///
 /// CTEs are executed in order, allowing later CTEs to reference earlier ones.
+///
+/// The `database` reference is used to statically expand wildcard SELECT items
+/// (`SELECT * FROM t`) into the underlying table's column names when deriving
+/// each CTE's schema (#5293).
 pub fn execute_ctes<F>(
     ctes: &[vibesql_ast::CommonTableExpr],
+    database: &vibesql_storage::Database,
     executor: F,
 ) -> Result<HashMap<String, CteResult>, ExecutorError>
 where
@@ -30,7 +35,7 @@ where
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
 {
     // Use the memory-tracking version with a no-op memory check
-    execute_ctes_with_memory_check(ctes, executor, |_| Ok(()))
+    execute_ctes_with_memory_check(ctes, database, executor, |_| Ok(()))
 }
 
 /// Execute all CTEs with memory tracking
@@ -40,6 +45,7 @@ where
 /// the estimated size of the CTE result to enforce memory limits.
 pub(super) fn execute_ctes_with_memory_check<F, M>(
     ctes: &[vibesql_ast::CommonTableExpr],
+    database: &vibesql_storage::Database,
     executor: F,
     memory_check: M,
 ) -> Result<HashMap<String, CteResult>, ExecutorError>
@@ -61,7 +67,7 @@ where
         let is_recursive = cte.recursive || is_cte_self_referential(cte);
         let rows = if is_recursive {
             // Recursive CTE: execute base term, then iteratively execute recursive term
-            execute_recursive_cte(cte, &cte_results, &executor, &memory_check)?
+            execute_recursive_cte(cte, &cte_results, database, &executor, &memory_check)?
         } else {
             // Non-recursive CTE: execute query directly
             executor(&cte.query, &cte_results)?
@@ -72,7 +78,7 @@ where
         memory_check(estimated_size)?;
 
         //  Determine the schema for this CTE
-        let schema = derive_cte_schema(cte, &rows)?;
+        let schema = derive_cte_schema(cte, &rows, database, &cte_results)?;
 
         // Store the CTE result wrapped in Arc for efficient sharing
         cte_results.insert(cte.name.clone(), (schema, Arc::new(rows)));
@@ -82,9 +88,16 @@ where
 }
 
 /// Derive the schema for a CTE from its query and results
+///
+/// `database` and `prior_ctes` are used to statically expand wildcard SELECT
+/// items (`*` / `t.*`) into the column names of the underlying FROM sources
+/// (#5293). Without expansion, `WITH cte AS (SELECT * FROM t)` would
+/// materialize a single `col{i}` column, silently dropping columns.
 pub(super) fn derive_cte_schema(
     cte: &vibesql_ast::CommonTableExpr,
     rows: &[vibesql_storage::Row],
+    database: &vibesql_storage::Database,
+    prior_ctes: &HashMap<String, CteResult>,
 ) -> Result<vibesql_catalog::TableSchema, ExecutorError> {
     // If column names are explicitly specified, use those
     if let Some(column_names) = &cte.columns {
@@ -126,47 +139,257 @@ pub(super) fn derive_cte_schema(
             Ok(vibesql_catalog::TableSchema::new(cte.name.clone(), columns))
         }
     } else {
-        // No explicit column names - infer from query SELECT list
-        // Extract column names from SELECT items
-        let columns = cte
-            .query
-            .select_list
-            .iter()
-            .enumerate()
-            .map(|(i, item)| {
-                // Infer data type from first row if available, otherwise use default
-                let data_type = if let Some(first_row) = rows.first() {
-                    infer_type_from_value(&first_row.values[i])
-                } else {
-                    // No rows - use default type (VARCHAR)
-                    vibesql_types::DataType::Varchar { max_length: Some(255) }
-                };
+        // No explicit column names - infer from query SELECT list.
+        // Wildcard items are statically expanded into the column names of the
+        // underlying FROM sources (#5293). A running value offset tracks the
+        // position of each output column in the materialized rows so that
+        // type inference stays aligned after expansion (e.g. `SELECT *, expr`
+        // from a 2-column table puts `expr` at value index 2, not 1).
+        let mut columns: Vec<vibesql_catalog::ColumnSchema> = Vec::new();
+        let mut value_idx = 0usize;
 
-                // Extract column name from SELECT item
-                let col_name = match item {
-                    vibesql_ast::SelectItem::Wildcard { .. }
-                    | vibesql_ast::SelectItem::QualifiedWildcard { .. } => format!("col{}", i),
-                    vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
-                        if let Some(a) = alias {
-                            a.clone()
-                        } else {
-                            // Try to extract name from expression
-                            match expr {
-                                vibesql_ast::Expression::ColumnRef(col_id) => {
-                                    col_id.column_canonical().to_string()
-                                }
-                                _ => format!("col{}", i),
+        for (i, item) in cte.query.select_list.iter().enumerate() {
+            // Determine the output column name(s) for this SELECT item
+            let names: Vec<String> = match item {
+                vibesql_ast::SelectItem::Wildcard { .. }
+                | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
+                    expand_wildcard_names(item, &cte.query, database, prior_ctes)
+                        // Unresolvable FROM source (e.g. a view): fall back to
+                        // the legacy positional name for this item
+                        .unwrap_or_else(|| vec![format!("col{}", i)])
+                }
+                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
+                    vec![if let Some(a) = alias {
+                        a.clone()
+                    } else {
+                        // Try to extract name from expression
+                        match expr {
+                            vibesql_ast::Expression::ColumnRef(col_id) => {
+                                col_id.column_canonical().to_string()
                             }
+                            _ => format!("col{}", i),
                         }
-                    }
-                };
+                    }]
+                }
+            };
 
-                vibesql_catalog::ColumnSchema::new(col_name, data_type, true) // nullable
-            })
-            .collect();
+            for name in names {
+                // Infer data type from first row if available, otherwise use default
+                let data_type = rows
+                    .first()
+                    .and_then(|first_row| first_row.values.get(value_idx))
+                    .map(infer_type_from_value)
+                    .unwrap_or(vibesql_types::DataType::Varchar { max_length: Some(255) });
+
+                columns.push(vibesql_catalog::ColumnSchema::new(name, data_type, true)); // nullable
+                value_idx += 1;
+            }
+        }
+
+        // Sanity check: if static expansion disagrees with the actual row
+        // width, the resolution was wrong (e.g. an exotic FROM source).
+        // Fall back to the legacy one-column-per-item naming rather than
+        // exposing a schema that misattributes columns.
+        if let Some(first_row) = rows.first() {
+            if columns.len() != first_row.values.len() {
+                return Ok(legacy_cte_schema(cte, rows));
+            }
+        }
 
         Ok(vibesql_catalog::TableSchema::new(cte.name.clone(), columns))
     }
+}
+
+/// Legacy schema derivation: one column per SELECT item, wildcards named
+/// `col{i}`. Used only as a fallback when static wildcard expansion cannot
+/// resolve the FROM sources or disagrees with the materialized row width.
+fn legacy_cte_schema(
+    cte: &vibesql_ast::CommonTableExpr,
+    rows: &[vibesql_storage::Row],
+) -> vibesql_catalog::TableSchema {
+    let columns = cte
+        .query
+        .select_list
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let data_type = rows
+                .first()
+                .and_then(|first_row| first_row.values.get(i))
+                .map(infer_type_from_value)
+                .unwrap_or(vibesql_types::DataType::Varchar { max_length: Some(255) });
+
+            let col_name = match item {
+                vibesql_ast::SelectItem::Wildcard { .. }
+                | vibesql_ast::SelectItem::QualifiedWildcard { .. } => format!("col{}", i),
+                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
+                    if let Some(a) = alias {
+                        a.clone()
+                    } else {
+                        match expr {
+                            vibesql_ast::Expression::ColumnRef(col_id) => {
+                                col_id.column_canonical().to_string()
+                            }
+                            _ => format!("col{}", i),
+                        }
+                    }
+                }
+            };
+
+            vibesql_catalog::ColumnSchema::new(col_name, data_type, true) // nullable
+        })
+        .collect();
+
+    vibesql_catalog::TableSchema::new(cte.name.clone(), columns)
+}
+
+/// A FROM-clause source resolved for wildcard expansion: the effective
+/// qualifier (alias if present, else table name) and its column names.
+struct WildcardSource {
+    qualifier: String,
+    columns: Vec<String>,
+}
+
+/// Expand a wildcard SELECT item (`*` or `qualifier.*`) into column names
+/// using the statement's FROM clause.
+///
+/// Returns `None` if any FROM source cannot be resolved statically (e.g. a
+/// view); callers fall back to legacy `col{i}` naming.
+fn expand_wildcard_names(
+    item: &vibesql_ast::SelectItem,
+    stmt: &vibesql_ast::SelectStmt,
+    database: &vibesql_storage::Database,
+    prior_ctes: &HashMap<String, CteResult>,
+) -> Option<Vec<String>> {
+    match item {
+        vibesql_ast::SelectItem::Wildcard { alias } => {
+            // SQL:1999 E051-07 derived column list: SELECT * AS (a, b, ...)
+            if let Some(alias_names) = alias {
+                return Some(alias_names.clone());
+            }
+            let sources = collect_from_sources(stmt.from.as_ref()?, database, prior_ctes)?;
+            Some(sources.into_iter().flat_map(|s| s.columns).collect())
+        }
+        vibesql_ast::SelectItem::QualifiedWildcard { qualifier, alias } => {
+            if let Some(alias_names) = alias {
+                return Some(alias_names.clone());
+            }
+            let sources = collect_from_sources(stmt.from.as_ref()?, database, prior_ctes)?;
+            sources
+                .into_iter()
+                .find(|s| s.qualifier.eq_ignore_ascii_case(qualifier))
+                .map(|s| s.columns)
+        }
+        vibesql_ast::SelectItem::Expression { .. } => None,
+    }
+}
+
+/// Resolve the sources of a FROM clause to their column names for wildcard
+/// expansion. Mirrors the traversal in
+/// `evaluator::combined::subqueries::schema_utils::count_columns_in_from_clause`
+/// but collects names instead of counts.
+///
+/// Returns `None` when a source cannot be resolved statically; callers fall
+/// back to legacy naming rather than erroring.
+fn collect_from_sources(
+    from: &vibesql_ast::FromClause,
+    database: &vibesql_storage::Database,
+    prior_ctes: &HashMap<String, CteResult>,
+) -> Option<Vec<WildcardSource>> {
+    match from {
+        vibesql_ast::FromClause::Table { name, alias, column_aliases, .. } => {
+            // Check prior CTEs first (case-insensitive, matching the
+            // resolution convention used elsewhere), then database tables
+            let base_columns: Vec<String> = if let Some((schema, _)) =
+                prior_ctes.get(name).or_else(|| {
+                    prior_ctes.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v)
+                }) {
+                schema.columns.iter().map(|c| c.name.clone()).collect()
+            } else if let Some(table) = database.get_table(name) {
+                table.schema.columns.iter().map(|c| c.name.clone()).collect()
+            } else {
+                // Unknown source (e.g. a view) - cannot resolve statically
+                return None;
+            };
+
+            // SQL:1999 E051-09: FROM t AS a(x, y) renames the columns
+            let columns = match column_aliases {
+                Some(aliases) if aliases.len() == base_columns.len() => aliases.clone(),
+                Some(_) => return None, // mismatched rename list - bail out
+                None => base_columns,
+            };
+
+            let qualifier = alias.clone().unwrap_or_else(|| name.clone());
+            Some(vec![WildcardSource { qualifier, columns }])
+        }
+        vibesql_ast::FromClause::Join { left, right, natural, using_columns, .. } => {
+            // NATURAL and USING joins deduplicate common columns during
+            // wildcard expansion; a simple concatenation would produce wrong
+            // names, so fall back to legacy naming for those
+            if *natural || using_columns.is_some() {
+                return None;
+            }
+            let mut sources = collect_from_sources(left, database, prior_ctes)?;
+            sources.extend(collect_from_sources(right, database, prior_ctes)?);
+            Some(sources)
+        }
+        vibesql_ast::FromClause::Subquery { query, alias, column_aliases } => {
+            let columns = if let Some(aliases) = column_aliases {
+                aliases.clone()
+            } else {
+                collect_select_list_columns(query, database, prior_ctes)?
+            };
+            Some(vec![WildcardSource { qualifier: alias.clone(), columns }])
+        }
+        vibesql_ast::FromClause::Values { rows, alias, column_aliases } => {
+            let columns = if let Some(aliases) = column_aliases {
+                aliases.clone()
+            } else {
+                let first_row = rows.first()?;
+                (0..first_row.len()).map(|i| format!("col{}", i)).collect()
+            };
+            Some(vec![WildcardSource { qualifier: alias.clone(), columns }])
+        }
+    }
+}
+
+/// Compute the output column names of a SELECT statement, expanding any
+/// wildcard items. Used to resolve subqueries appearing in a FROM clause.
+///
+/// Returns `None` if names cannot be determined statically.
+fn collect_select_list_columns(
+    stmt: &vibesql_ast::SelectStmt,
+    database: &vibesql_storage::Database,
+    prior_ctes: &HashMap<String, CteResult>,
+) -> Option<Vec<String>> {
+    // VALUES statement: names come from the first row's width
+    if let Some(values_rows) = &stmt.values {
+        let first_row = values_rows.first()?;
+        return Some((0..first_row.len()).map(|i| format!("col{}", i)).collect());
+    }
+
+    let mut names = Vec::new();
+    for (i, item) in stmt.select_list.iter().enumerate() {
+        match item {
+            vibesql_ast::SelectItem::Wildcard { .. }
+            | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
+                names.extend(expand_wildcard_names(item, stmt, database, prior_ctes)?);
+            }
+            vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
+                names.push(if let Some(a) = alias {
+                    a.clone()
+                } else {
+                    match expr {
+                        vibesql_ast::Expression::ColumnRef(col_id) => {
+                            col_id.column_canonical().to_string()
+                        }
+                        _ => format!("col{}", i),
+                    }
+                });
+            }
+        }
+    }
+    Some(names)
 }
 
 /// Execute a recursive CTE using iterative evaluation
@@ -191,6 +414,7 @@ pub(super) fn derive_cte_schema(
 fn execute_recursive_cte<F, M>(
     cte: &vibesql_ast::CommonTableExpr,
     cte_results: &HashMap<String, CteResult>,
+    database: &vibesql_storage::Database,
     executor: &F,
     memory_check: &M,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>
@@ -272,7 +496,9 @@ where
     let mut working_table = all_rows.clone();
 
     // Derive schema from base term result
-    let schema = derive_cte_schema(cte, &all_rows)?;
+    // Wildcards in the base term are expanded against database tables and
+    // prior CTEs (#5293)
+    let schema = derive_cte_schema(cte, &all_rows, database, cte_results)?;
 
     // Track seen rows for UNION (deduplication)
     // For UNION ALL, we skip tracking to preserve all rows

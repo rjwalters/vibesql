@@ -214,6 +214,7 @@ impl SelectExecutor<'_> {
             // This query has its own CTEs - execute them with memory tracking
             execute_ctes_with_memory_check(
                 with_clause,
+                self.database,
                 |query, cte_ctx| self.execute_with_ctes(query, cte_ctx),
                 |size| self.track_memory_allocation(size),
             )?
@@ -422,7 +423,9 @@ impl SelectExecutor<'_> {
         // First, get the FROM result to access the schema
         let from_result = if let Some(from_clause) = &stmt.from {
             let mut cte_results = if let Some(with_clause) = &stmt.with_clause {
-                execute_ctes(with_clause, |query, cte_ctx| self.execute_with_ctes(query, cte_ctx))?
+                execute_ctes(with_clause, self.database, |query, cte_ctx| {
+                    self.execute_with_ctes(query, cte_ctx)
+                })?
             } else {
                 HashMap::new()
             };
@@ -518,7 +521,9 @@ impl SelectExecutor<'_> {
         // Execute the FROM clause to get combined schema
         let from_result = if let Some(from_clause) = &stmt.from {
             let mut cte_results = if let Some(with_clause) = &stmt.with_clause {
-                execute_ctes(with_clause, |query, cte_ctx| self.execute_with_ctes(query, cte_ctx))?
+                execute_ctes(with_clause, self.database, |query, cte_ctx| {
+                    self.execute_with_ctes(query, cte_ctx)
+                })?
             } else {
                 HashMap::new()
             };

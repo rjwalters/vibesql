@@ -219,7 +219,7 @@ fn execute_insert_internal(
             let select_result = if let Some(ref cte_list) = stmt.with_clause {
                 // Execute CTEs first
                 let cte_results =
-                    crate::select::cte::execute_ctes(cte_list, |cte_query, prior_ctes| {
+                    crate::select::cte::execute_ctes(cte_list, db, |cte_query, prior_ctes| {
                         let cte_executor = crate::SelectExecutor::new_with_cte(db, prior_ctes);
                         cte_executor
                             .execute_with_columns(cte_query)
