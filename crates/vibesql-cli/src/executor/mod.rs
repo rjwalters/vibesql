@@ -15,6 +15,10 @@ mod tests;
 pub struct SqlExecutor {
     db: Database,
     timing_enabled: bool,
+    /// PRAGMA count_changes session flag (SQLite-compatible, default OFF).
+    /// When ON, INSERT/UPDATE/DELETE statements return a one-row, one-column
+    /// result containing the change count.
+    count_changes: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -163,7 +167,7 @@ impl SqlExecutor {
             Database::new()
         };
 
-        Ok(SqlExecutor { db, timing_enabled: false })
+        Ok(SqlExecutor { db, timing_enabled: false, count_changes: false })
     }
 
     /// Returns true if the current session is inside an active transaction.
@@ -222,7 +226,8 @@ impl SqlExecutor {
                     &mut self.db,
                     &insert_stmt,
                 ) {
-                    Ok((affected_rows, returning)) => {
+                    Ok(outcome) => {
+                        let affected_rows = outcome.affected_rows;
                         // Track changes count for changes() and total_changes() functions
                         self.db.set_last_changes_count(affected_rows);
                         self.db.increment_total_changes_count(affected_rows);
@@ -230,7 +235,7 @@ impl SqlExecutor {
 
                         // RETURNING clause: render the projected NEW rows like
                         // a SELECT result (SQLite 3.35.0+ semantics).
-                        if let Some(returning_result) = returning {
+                        if let Some(returning_result) = outcome.returning {
                             result.row_count = returning_result.rows.len();
                             result.columns = returning_result.columns;
                             for row in returning_result.rows {
@@ -247,6 +252,16 @@ impl SqlExecutor {
                                         .collect();
                                 result.rows.push(row_strs);
                             }
+                        } else if self.count_changes {
+                            // PRAGMA count_changes=ON (SQLite parity): emit a
+                            // one-row result with the DIRECT insert count.
+                            // Rows taken through the upsert DO UPDATE arm are
+                            // excluded here even though changes() includes
+                            // them (verified against sqlite3; upsert1-400).
+                            let count = affected_rows - outcome.upsert_updated_rows;
+                            result.columns = vec!["rows inserted".to_string()];
+                            result.rows = vec![vec![Some(count.to_string())]];
+                            result.row_count = 1;
                         }
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -282,6 +297,12 @@ impl SqlExecutor {
                                         .collect();
                                 result.rows.push(row_strs);
                             }
+                        } else if self.count_changes {
+                            // PRAGMA count_changes=ON (SQLite parity): emit a
+                            // one-row result with the number of updated rows.
+                            result.columns = vec!["rows updated".to_string()];
+                            result.rows = vec![vec![Some(affected_rows.to_string())]];
+                            result.row_count = 1;
                         }
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -317,6 +338,12 @@ impl SqlExecutor {
                                         .collect();
                                 result.rows.push(row_strs);
                             }
+                        } else if self.count_changes {
+                            // PRAGMA count_changes=ON (SQLite parity): emit a
+                            // one-row result with the number of deleted rows.
+                            result.columns = vec!["rows deleted".to_string()];
+                            result.rows = vec![vec![Some(affected_rows.to_string())]];
+                            result.row_count = 1;
                         }
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -979,6 +1006,19 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "COUNT_CHANGES" => {
+                    // SQLite-compatible PRAGMA count_changes: when ON, each
+                    // INSERT/UPDATE/DELETE returns a one-row result with the
+                    // change count (issue #5283). Session-scoped, default OFF.
+                    self.count_changes = bool_value;
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 "REVERSE_UNORDERED_SELECTS" => {
                     self.db.set_reverse_unordered_selects(bool_value);
                     Ok(QueryResult {
@@ -1051,6 +1091,16 @@ impl SqlExecutor {
                     let value = if self.db.case_sensitive_like() { "1" } else { "0" };
                     Ok(QueryResult {
                         columns: vec!["case_sensitive_like".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "COUNT_CHANGES" => {
+                    let value = if self.count_changes { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["count_changes".to_string()],
                         rows: vec![vec![Some(value.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,

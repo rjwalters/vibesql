@@ -11,6 +11,8 @@ pub mod validation;
 
 use crate::errors::ExecutorError;
 
+pub use execution::InsertOutcome;
+
 /// Executor for INSERT statements
 pub struct InsertExecutor;
 
@@ -26,17 +28,19 @@ impl InsertExecutor {
 
     /// Execute an INSERT statement, capturing RETURNING rows (SQLite 3.35.0+)
     ///
-    /// Returns the number of inserted rows plus, when the statement carries a
-    /// RETURNING clause, the projected NEW rows (values as actually inserted,
-    /// including defaults, generated columns, and auto INTEGER PRIMARY KEY).
-    /// Rows skipped by `OR IGNORE` / `ON CONFLICT DO NOTHING` are omitted;
-    /// `ON DUPLICATE KEY UPDATE` contributes the post-UPDATE row.
+    /// Returns an [`InsertOutcome`] carrying the number of affected rows, the
+    /// number of rows handled via the upsert `ON CONFLICT DO UPDATE` arm, and,
+    /// when the statement carries a RETURNING clause, the projected NEW rows
+    /// (values as actually inserted, including defaults, generated columns,
+    /// and auto INTEGER PRIMARY KEY). Rows skipped by `OR IGNORE` /
+    /// `ON CONFLICT DO NOTHING` are omitted; `ON DUPLICATE KEY UPDATE`
+    /// contributes the post-UPDATE row.
     ///
-    /// When the statement has no RETURNING clause the second element is `None`.
+    /// When the statement has no RETURNING clause `returning` is `None`.
     pub fn execute_returning(
         db: &mut vibesql_storage::Database,
         stmt: &vibesql_ast::InsertStmt,
-    ) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
+    ) -> Result<InsertOutcome, ExecutorError> {
         execution::execute_insert_returning(db, stmt)
     }
 

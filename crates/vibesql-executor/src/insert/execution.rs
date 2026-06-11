@@ -7,29 +7,44 @@ use crate::{
     sqlite_schema::is_sqlite_schema_table, sqlite_stat::is_sqlite_stat1_table,
 };
 
+/// Outcome of an INSERT statement execution.
+#[derive(Debug)]
+pub struct InsertOutcome {
+    /// Total affected rows: direct inserts plus rows taken through the
+    /// `ON CONFLICT DO UPDATE` arm. Matches SQLite's `changes()`.
+    pub affected_rows: usize,
+    /// Rows handled via the `ON CONFLICT DO UPDATE` arm (subset of
+    /// `affected_rows`). SQLite's `PRAGMA count_changes` reports
+    /// `affected_rows - upsert_updated_rows` for INSERT (direct inserts
+    /// only), while `changes()` includes the update-arm rows.
+    pub upsert_updated_rows: usize,
+    /// Projected RETURNING rows when the statement carries a RETURNING
+    /// clause; `None` otherwise.
+    pub returning: Option<crate::select::SelectResult>,
+}
+
 /// Execute an INSERT statement
 /// Returns number of rows inserted
 pub fn execute_insert(
     db: &mut vibesql_storage::Database,
     stmt: &vibesql_ast::InsertStmt,
 ) -> Result<usize, ExecutorError> {
-    execute_insert_internal(db, stmt, None, None).map(|(count, _)| count)
+    execute_insert_internal(db, stmt, None, None).map(|outcome| outcome.affected_rows)
 }
 
 /// Execute an INSERT statement, capturing RETURNING rows (SQLite 3.35.0+)
 ///
-/// Returns the number of inserted rows plus, when the statement carries a
-/// RETURNING clause, the projected NEW rows (values as actually inserted,
-/// including defaults, generated columns, and auto INTEGER PRIMARY KEY) —
-/// one per inserted row, in insertion order. Rows skipped by `OR IGNORE` /
-/// `ON CONFLICT DO NOTHING` do not appear. For `ON DUPLICATE KEY UPDATE`,
-/// the post-UPDATE row is returned.
-///
-/// When the statement has no RETURNING clause the second element is `None`.
+/// Returns an [`InsertOutcome`] carrying the number of affected rows, the
+/// number of rows handled via the upsert `DO UPDATE` arm, and, when the
+/// statement carries a RETURNING clause, the projected NEW rows (values as
+/// actually inserted, including defaults, generated columns, and auto
+/// INTEGER PRIMARY KEY) — one per affected row, in insertion order. Rows
+/// skipped by `OR IGNORE` / `ON CONFLICT DO NOTHING` do not appear. For
+/// `ON DUPLICATE KEY UPDATE`, the post-UPDATE row is returned.
 pub fn execute_insert_returning(
     db: &mut vibesql_storage::Database,
     stmt: &vibesql_ast::InsertStmt,
-) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
+) -> Result<InsertOutcome, ExecutorError> {
     execute_insert_internal(db, stmt, None, None)
 }
 
@@ -40,7 +55,8 @@ pub fn execute_insert_with_procedural_context(
     stmt: &vibesql_ast::InsertStmt,
     procedural_context: &crate::procedural::ExecutionContext,
 ) -> Result<usize, ExecutorError> {
-    execute_insert_internal(db, stmt, Some(procedural_context), None).map(|(count, _)| count)
+    execute_insert_internal(db, stmt, Some(procedural_context), None)
+        .map(|outcome| outcome.affected_rows)
 }
 
 /// Execute an INSERT statement with trigger context
@@ -51,7 +67,8 @@ pub fn execute_insert_with_trigger_context(
     stmt: &vibesql_ast::InsertStmt,
     trigger_context: &crate::trigger_execution::TriggerContext,
 ) -> Result<usize, ExecutorError> {
-    execute_insert_internal(db, stmt, None, Some(trigger_context)).map(|(count, _)| count)
+    execute_insert_internal(db, stmt, None, Some(trigger_context))
+        .map(|outcome| outcome.affected_rows)
 }
 
 /// Internal implementation of INSERT execution
@@ -60,7 +77,7 @@ fn execute_insert_internal(
     stmt: &vibesql_ast::InsertStmt,
     procedural_context: Option<&crate::procedural::ExecutionContext>,
     trigger_context: Option<&crate::trigger_execution::TriggerContext>,
-) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
+) -> Result<InsertOutcome, ExecutorError> {
     // Build full table name for error messages and privilege checks
     let full_table_name = match &stmt.schema_name {
         Some(schema) => format!("{}.{}", schema, stmt.table_name),
@@ -78,7 +95,11 @@ fn execute_insert_internal(
     // Check if target is sqlite_stat1 (special writable statistics table)
     // RETURNING is not supported on this virtual statistics table.
     if is_sqlite_stat1_table(&stmt.table_name) {
-        return execute_insert_sqlite_stat1(db, stmt).map(|count| (count, None));
+        return execute_insert_sqlite_stat1(db, stmt).map(|count| InsertOutcome {
+            affected_rows: count,
+            upsert_updated_rows: 0,
+            returning: None,
+        });
     }
 
     // Check INSERT privilege on the table
@@ -91,7 +112,12 @@ fn execute_insert_internal(
         if stmt.on_conflict.is_some() {
             return Err(ExecutorError::SqliteCompatError("cannot UPSERT a view".to_string()));
         }
-        return execute_insert_on_view(db, stmt, &view_def, procedural_context, trigger_context);
+        return execute_insert_on_view(db, stmt, &view_def, procedural_context, trigger_context)
+            .map(|(count, returning)| InsertOutcome {
+                affected_rows: count,
+                upsert_updated_rows: 0,
+                returning,
+            });
     }
 
     // Get table schema from catalog (clone to avoid borrow issues)
@@ -175,7 +201,11 @@ fn execute_insert_internal(
                     super::bulk_transfer::try_bulk_transfer(db, table_name, select_stmt)?
                 {
                     // Fast path succeeded, return early
-                    return Ok((count, None));
+                    return Ok(InsertOutcome {
+                        affected_rows: count,
+                        upsert_updated_rows: 0,
+                        returning: None,
+                    });
                 }
             }
 
@@ -709,6 +739,11 @@ fn execute_insert_internal(
 
     let mut rows_inserted = 0;
 
+    // Rows taken through the upsert ON CONFLICT DO UPDATE arm. These count
+    // toward changes() (rows_inserted) but are excluded from the direct-insert
+    // count that PRAGMA count_changes reports for INSERT (issue #5283).
+    let mut upsert_updated_rows = 0;
+
     // RETURNING (SQLite 3.35.0+): collect the rows as ACTUALLY inserted (or
     // updated by ON DUPLICATE KEY UPDATE). The slow path can rewrite the
     // IPK/rowid after validation (REPLACE reserved-rowid interplay), so rows
@@ -892,6 +927,7 @@ fn execute_insert_internal(
                     super::on_conflict_update::UpsertAction::Updated(updated_row_id) => {
                         // Row was updated, count it toward affected rows
                         rows_inserted += 1;
+                        upsert_updated_rows += 1;
 
                         // RETURNING: SQLite returns the post-UPDATE row for
                         // upserts that take the update arm.
@@ -1210,7 +1246,11 @@ fn execute_insert_internal(
         None
     };
 
-    Ok((rows_inserted, returning_result))
+    Ok(InsertOutcome {
+        affected_rows: rows_inserted,
+        upsert_updated_rows,
+        returning: returning_result,
+    })
 }
 
 /// Check if inserting a row would violate any constraints (for IGNORE conflict resolution)
