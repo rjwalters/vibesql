@@ -195,7 +195,7 @@ impl SelectExecutor<'_> {
         // index scans inside the subquery). Mirrors SQLite's
         // pushDownWhereTerms() gate for window queries.
         let optimized_stmt =
-            crate::optimizer::push_where_into_window_subqueries(&optimized_stmt, self.database);
+            crate::optimizer::push_where_into_window_subqueries(optimized_stmt, self.database);
 
         // Apply scalar subquery decorrelation (#4760)
         // Transforms correlated scalar subqueries with aggregates (e.g., AVG, SUM, MIN)

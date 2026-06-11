@@ -46,32 +46,28 @@ use vibesql_storage::Database;
 use super::where_pushdown::flatten_conjuncts;
 
 /// Apply WHERE push-down into window subqueries/views at the top level of
-/// `stmt`. Returns the (possibly) rewritten statement.
+/// `stmt`. Returns the (possibly) rewritten statement; when the pass does
+/// not fire the input is returned unchanged (no AST clone).
 ///
 /// Nested subqueries are handled when they are themselves executed: the
 /// SELECT executor invokes this pass for every statement it runs, so a
 /// derived table's own FROM subquery is rewritten during the derived table's
 /// execution.
-pub fn push_where_into_window_subqueries(stmt: &SelectStmt, database: &Database) -> SelectStmt {
-    let Some(where_clause) = &stmt.where_clause else {
-        return stmt.clone();
+pub fn push_where_into_window_subqueries(mut stmt: SelectStmt, database: &Database) -> SelectStmt {
+    let Some(where_clause) = stmt.where_clause.as_ref() else {
+        return stmt;
     };
 
-    match &stmt.from {
+    let new_from = match &stmt.from {
         // FROM (SELECT ... window fns ...) AS alias [(col, ...)]
         Some(FromClause::Subquery { query, alias, column_aliases }) => {
-            match try_push_into_subquery(where_clause, query, alias, column_aliases.as_deref()) {
-                Some(new_query) => {
-                    let mut new_stmt = stmt.clone();
-                    new_stmt.from = Some(FromClause::Subquery {
-                        query: Box::new(new_query),
-                        alias: alias.clone(),
-                        column_aliases: column_aliases.clone(),
-                    });
-                    new_stmt
-                }
-                None => stmt.clone(),
-            }
+            try_push_into_subquery(where_clause, query, alias, column_aliases.as_deref()).map(
+                |new_query| FromClause::Subquery {
+                    query: Box::new(new_query),
+                    alias: alias.clone(),
+                    column_aliases: column_aliases.clone(),
+                },
+            )
         }
 
         // FROM view_name [AS alias] — expand the view into a derived table
@@ -81,41 +77,40 @@ pub fn push_where_into_window_subqueries(stmt: &SelectStmt, database: &Database)
         // scan performs; if the check would fail here we skip the rewrite
         // and let the scan raise the error).
         Some(FromClause::Table { name, alias, column_aliases, .. }) => {
-            let Some(view) = database.catalog.get_view(name) else {
-                return stmt.clone();
-            };
-            if crate::privilege_checker::PrivilegeChecker::check_select(database, name).is_err() {
-                return stmt.clone();
-            }
-            // Effective correlation name: explicit alias wins, else the view
-            // name as written in the query.
-            let source = alias.as_deref().unwrap_or(name.as_str());
-            // Effective output column names: FROM-clause column aliases
-            // override the view's explicit column list.
-            let effective_aliases: Option<Vec<String>> =
-                column_aliases.clone().or_else(|| view.columns.clone());
-
-            match try_push_into_subquery(
-                where_clause,
-                &view.query,
-                source,
-                effective_aliases.as_deref(),
-            ) {
-                Some(new_query) => {
-                    let mut new_stmt = stmt.clone();
-                    new_stmt.from = Some(FromClause::Subquery {
-                        query: Box::new(new_query),
-                        alias: source.to_string(),
-                        column_aliases: effective_aliases,
-                    });
-                    new_stmt
+            database.catalog.get_view(name).and_then(|view| {
+                if crate::privilege_checker::PrivilegeChecker::check_select(database, name).is_err()
+                {
+                    return None;
                 }
-                None => stmt.clone(),
-            }
+                // Effective correlation name: explicit alias wins, else the
+                // view name as written in the query.
+                let source = alias.as_deref().unwrap_or(name.as_str());
+                // Effective output column names: FROM-clause column aliases
+                // override the view's explicit column list.
+                let effective_aliases: Option<Vec<String>> =
+                    column_aliases.clone().or_else(|| view.columns.clone());
+
+                try_push_into_subquery(
+                    where_clause,
+                    &view.query,
+                    source,
+                    effective_aliases.as_deref(),
+                )
+                .map(|new_query| FromClause::Subquery {
+                    query: Box::new(new_query),
+                    alias: source.to_string(),
+                    column_aliases: effective_aliases,
+                })
+            })
         }
 
-        _ => stmt.clone(),
+        _ => None,
+    };
+
+    if let Some(from) = new_from {
+        stmt.from = Some(from);
     }
+    stmt
 }
 
 /// Attempt to push conjuncts of `where_clause` into `subquery`.
@@ -521,7 +516,7 @@ mod tests {
     }
 
     fn rewrite(db: &Database, sql: &str) -> SelectStmt {
-        push_where_into_window_subqueries(&parse_select(sql), db)
+        push_where_into_window_subqueries(parse_select(sql), db)
     }
 
     // ----------------------------------------------------------------
@@ -612,7 +607,7 @@ mod tests {
 
     fn assert_unchanged(db: &Database, sql: &str) {
         let stmt = parse_select(sql);
-        let out = push_where_into_window_subqueries(&stmt, db);
+        let out = push_where_into_window_subqueries(stmt.clone(), db);
         assert_eq!(stmt, out, "statement should be unchanged");
     }
 
@@ -763,7 +758,7 @@ mod tests {
              WHERE grp_id > 1",
         ] {
             let stmt = parse_select(sql);
-            let rewritten = push_where_into_window_subqueries(&stmt, &db);
+            let rewritten = push_where_into_window_subqueries(stmt.clone(), &db);
             assert_ne!(stmt, rewritten, "rewrite should fire for: {}", sql);
 
             // Execute the REWRITTEN statement (executor will not rewrite the
