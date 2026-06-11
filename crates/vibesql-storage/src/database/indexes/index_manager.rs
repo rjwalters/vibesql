@@ -474,6 +474,14 @@ impl IndexManager {
                     SqlValue::Character(_) | SqlValue::Varchar(_) => {
                         DataType::Varchar { max_length: None }
                     }
+                    // Temporal keys must keep their temporal type: the
+                    // persisted key_schema is what `first_key_value_sample`
+                    // reports for disk-backed indexes, and a mis-typed
+                    // (Integer) schema would silently disable temporal
+                    // probe-bound coercion for spilled indexes (issue #5337).
+                    SqlValue::Date(_) => DataType::Date,
+                    SqlValue::Timestamp(_) => DataType::Timestamp { with_timezone: false },
+                    SqlValue::Time(_) => DataType::Time { with_timezone: false },
                     _ => DataType::Integer, // Fallback for other types
                 })
                 .collect()
@@ -514,5 +522,127 @@ impl IndexManager {
 impl Default for IndexManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use std::{collections::BTreeMap, str::FromStr};
+
+    use tempfile::TempDir;
+
+    use super::*;
+
+    /// Regression test for issue #5337 (caveat 1): `spill_index_to_disk`
+    /// inferred the persisted key schema from the first key's `SqlValue`
+    /// with an `_ => Integer` fallback, mis-typing temporal keys. A spilled
+    /// temporal index would then report no temporal key type via
+    /// `first_key_value_sample`, silently disabling probe-bound coercion.
+    #[test]
+    fn spill_preserves_temporal_key_schema() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut manager = IndexManager::new();
+        manager.set_database_path(temp_dir.path().to_path_buf());
+
+        let index_name = "idx_ts";
+        let ts = |s: &str| SqlValue::Timestamp(vibesql_types::Timestamp::from_str(s).unwrap());
+
+        let mut data: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
+        data.insert(vec![ts("2024-01-01 12:00:00.5")], vec![0]);
+        data.insert(vec![ts("2024-06-15 08:30:00")], vec![1]);
+
+        manager.indexes.insert(
+            index_name.to_string(),
+            IndexMetadata {
+                index_name: index_name.to_string(),
+                table_name: "events".to_string(),
+                unique: false,
+                columns: vec![vibesql_ast::IndexColumn::new_column(
+                    "created_at".to_string(),
+                    vibesql_ast::OrderDirection::Asc,
+                )],
+                where_clause: None,
+            },
+        );
+        manager.index_data.insert(
+            index_name.to_string(),
+            IndexData::InMemory { data, pending_deletions: vec![] },
+        );
+
+        manager.spill_index_to_disk(index_name).unwrap();
+
+        let spilled = manager.index_data.get(index_name).unwrap();
+        match spilled {
+            IndexData::DiskBacked { btree, .. } => {
+                let guard = acquire_btree_lock(btree).unwrap();
+                assert_eq!(
+                    guard.key_schema(),
+                    &[DataType::Timestamp { with_timezone: false }],
+                    "spilled temporal index must persist a temporal key schema"
+                );
+            }
+            other => panic!("expected DiskBacked after spill, got {:?}", other),
+        }
+
+        // The key type must remain detectable for probe-bound coercion.
+        assert!(matches!(spilled.first_key_value_sample(0), Some(SqlValue::Timestamp(_))));
+    }
+
+    #[test]
+    fn spill_preserves_date_and_time_key_schema() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut manager = IndexManager::new();
+        manager.set_database_path(temp_dir.path().to_path_buf());
+
+        let cases: Vec<(&str, Vec<SqlValue>, DataType)> = vec![
+            (
+                "idx_date",
+                vec![SqlValue::Date(vibesql_types::Date::from_str("2024-01-01").unwrap())],
+                DataType::Date,
+            ),
+            (
+                "idx_time",
+                vec![SqlValue::Time(vibesql_types::Time::from_str("12:00:00").unwrap())],
+                DataType::Time { with_timezone: false },
+            ),
+        ];
+
+        for (index_name, key, expected_type) in cases {
+            let mut data: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
+            data.insert(key, vec![0]);
+
+            manager.indexes.insert(
+                index_name.to_string(),
+                IndexMetadata {
+                    index_name: index_name.to_string(),
+                    table_name: "events".to_string(),
+                    unique: false,
+                    columns: vec![vibesql_ast::IndexColumn::new_column(
+                        "c".to_string(),
+                        vibesql_ast::OrderDirection::Asc,
+                    )],
+                    where_clause: None,
+                },
+            );
+            manager.index_data.insert(
+                index_name.to_string(),
+                IndexData::InMemory { data, pending_deletions: vec![] },
+            );
+
+            manager.spill_index_to_disk(index_name).unwrap();
+
+            match manager.index_data.get(index_name).unwrap() {
+                IndexData::DiskBacked { btree, .. } => {
+                    let guard = acquire_btree_lock(btree).unwrap();
+                    assert_eq!(
+                        guard.key_schema(),
+                        std::slice::from_ref(&expected_type),
+                        "{}",
+                        index_name
+                    );
+                }
+                other => panic!("expected DiskBacked after spill, got {:?}", other),
+            }
+        }
     }
 }

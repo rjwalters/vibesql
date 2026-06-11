@@ -175,10 +175,15 @@ impl IndexData {
 
     /// Sample the stored key value at a given column position.
     ///
-    /// Returns the first non-NULL `SqlValue` found at position `col_idx`
-    /// across the index's stored keys, or `None` if the index is empty, all
-    /// keys are NULL at that position, or the backend does not support cheap
-    /// key sampling (disk-backed / vector indexes).
+    /// For in-memory indexes, returns the first non-NULL `SqlValue` found at
+    /// position `col_idx` across the index's stored keys. For disk-backed B+
+    /// trees, synthesizes a representative value from the persisted
+    /// `key_schema` (page-0 metadata, in memory after load — no I/O), which
+    /// works even for empty or all-NULL indexes (issue #5337); only temporal
+    /// schema types yield a sample, preserving current caller behavior for
+    /// non-temporal keys. Returns `None` if the key type cannot be
+    /// determined (empty/all-NULL in-memory index, non-temporal disk-backed
+    /// schema, vector indexes).
     ///
     /// This is used by the executor to determine the stored key *type* so
     /// that string probe bounds can be coerced to match temporal keys
@@ -190,9 +195,28 @@ impl IndexData {
                 .filter_map(|key| key.get(col_idx))
                 .find(|v| !matches!(v, SqlValue::Null))
                 .cloned(),
-            // Disk-backed B+ trees don't expose cheap key iteration; vector
-            // indexes don't store comparable scalar keys. Callers treat None
-            // as "unknown key type" and skip coercion.
+            IndexData::DiskBacked { btree, .. } => {
+                use vibesql_types::DataType;
+
+                let guard = acquire_btree_lock(btree).ok()?;
+                // Synthesize a representative value of the declared key type;
+                // only the type is meaningful per this method's contract.
+                let min_date = vibesql_types::Date { year: 1, month: 1, day: 1 };
+                let midnight = vibesql_types::Time { hour: 0, minute: 0, second: 0, nanosecond: 0 };
+                match guard.key_schema().get(col_idx)? {
+                    DataType::Date => Some(SqlValue::Date(min_date)),
+                    DataType::Timestamp { .. } => {
+                        Some(SqlValue::Timestamp(vibesql_types::Timestamp::new(min_date, midnight)))
+                    }
+                    DataType::Time { .. } => Some(SqlValue::Time(midnight)),
+                    // Non-temporal schema types: callers treat None as
+                    // "unknown key type" and skip coercion (no behavior
+                    // change for non-temporal disk-backed indexes).
+                    _ => None,
+                }
+            }
+            // Vector indexes don't store comparable scalar keys. Callers
+            // treat None as "unknown key type" and skip coercion.
             _ => None,
         }
     }
@@ -227,5 +251,99 @@ impl IndexData {
             // Clear pending deletions after applying
             pending_deletions.clear();
         }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use std::str::FromStr;
+
+    use tempfile::TempDir;
+    use vibesql_types::DataType;
+
+    use super::*;
+    use crate::NativeStorage;
+
+    /// Build a disk-backed `IndexData` with the given key schema and keys.
+    /// Returns the TempDir so the backing file outlives the assertions.
+    fn disk_backed_index(
+        key_schema: Vec<DataType>,
+        keys: Vec<Vec<SqlValue>>,
+    ) -> (IndexData, TempDir) {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = Arc::new(NativeStorage::new(temp_dir.path()).unwrap());
+        let page_manager = Arc::new(PageManager::new("test_index.idx", storage).unwrap());
+
+        let mut sorted_entries: Vec<(Vec<SqlValue>, usize)> =
+            keys.into_iter().enumerate().map(|(i, key)| (key, i)).collect();
+        sorted_entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let btree =
+            BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager.clone()).unwrap();
+        let index = IndexData::DiskBacked { btree: Arc::new(Mutex::new(btree)), page_manager };
+        (index, temp_dir)
+    }
+
+    fn ts(s: &str) -> SqlValue {
+        SqlValue::Timestamp(vibesql_types::Timestamp::from_str(s).unwrap())
+    }
+
+    #[test]
+    fn disk_backed_sample_reports_timestamp_from_schema() {
+        let (index, _dir) = disk_backed_index(
+            vec![DataType::Timestamp { with_timezone: false }],
+            vec![vec![ts("2024-01-01 12:00:00")]],
+        );
+        assert!(matches!(index.first_key_value_sample(0), Some(SqlValue::Timestamp(_))));
+    }
+
+    #[test]
+    fn disk_backed_sample_reports_date_from_schema() {
+        let (index, _dir) = disk_backed_index(
+            vec![DataType::Date],
+            vec![vec![SqlValue::Date(vibesql_types::Date::from_str("2024-01-01").unwrap())]],
+        );
+        assert!(matches!(index.first_key_value_sample(0), Some(SqlValue::Date(_))));
+    }
+
+    #[test]
+    fn disk_backed_sample_reports_time_from_schema() {
+        let (index, _dir) = disk_backed_index(
+            vec![DataType::Time { with_timezone: false }],
+            vec![vec![SqlValue::Time(vibesql_types::Time::from_str("12:00:00").unwrap())]],
+        );
+        assert!(matches!(index.first_key_value_sample(0), Some(SqlValue::Time(_))));
+    }
+
+    #[test]
+    fn disk_backed_sample_returns_none_for_non_temporal_schema() {
+        // Non-temporal disk-backed indexes keep the pre-#5337 behavior:
+        // callers treat None as "unknown key type" and skip coercion.
+        let (index, _dir) =
+            disk_backed_index(vec![DataType::Integer], vec![vec![SqlValue::Integer(42)]]);
+        assert_eq!(index.first_key_value_sample(0), None);
+    }
+
+    #[test]
+    fn disk_backed_sample_works_for_empty_index() {
+        // The schema-based sample comes from page-0 metadata, so it works
+        // even when the index holds no keys (impossible for the in-memory
+        // sampling approach).
+        let (index, _dir) =
+            disk_backed_index(vec![DataType::Timestamp { with_timezone: false }], vec![]);
+        assert!(matches!(index.first_key_value_sample(0), Some(SqlValue::Timestamp(_))));
+    }
+
+    #[test]
+    fn disk_backed_sample_uses_per_column_schema() {
+        // Multi-column index with the temporal column at position 1: the
+        // fast-path point lookup samples each column index separately.
+        let (index, _dir) = disk_backed_index(
+            vec![DataType::Integer, DataType::Timestamp { with_timezone: false }],
+            vec![vec![SqlValue::Integer(1), ts("2024-01-01 12:00:00")]],
+        );
+        assert_eq!(index.first_key_value_sample(0), None);
+        assert!(matches!(index.first_key_value_sample(1), Some(SqlValue::Timestamp(_))));
+        assert_eq!(index.first_key_value_sample(2), None);
     }
 }

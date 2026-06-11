@@ -76,9 +76,22 @@ impl fmt::Display for Time {
         if self.nanosecond == 0 {
             write!(f, "{:02}:{:02}:{:02}", self.hour, self.minute, self.second)
         } else {
-            // Display fractional seconds, trimming trailing zeros for readability
-            let frac = format!("{:09}", self.nanosecond).trim_end_matches('0').to_string();
-            write!(f, "{:02}:{:02}:{:02}.{}", self.hour, self.minute, self.second, frac)
+            // Display fractional seconds, trimming trailing zeros but never
+            // below 3 digits. SQLite's subsec rendering is always exactly 3
+            // digits (`HH:MM:SS.SSS`); padding to a minimum of 3 keeps
+            // `.5` → `.500` aligned with SQLite while preserving stored
+            // sub-millisecond precision (e.g. `.123456`) so Display → parse
+            // round-trips hold (issue #5332).
+            let frac = format!("{:09}", self.nanosecond);
+            let trimmed_len = frac.trim_end_matches('0').len().max(3);
+            write!(
+                f,
+                "{:02}:{:02}:{:02}.{}",
+                self.hour,
+                self.minute,
+                self.second,
+                &frac[..trimmed_len]
+            )
         }
     }
 }
@@ -96,5 +109,58 @@ impl Ord for Time {
             .then_with(|| self.minute.cmp(&other.minute))
             .then_with(|| self.second.cmp(&other.second))
             .then_with(|| self.nanosecond.cmp(&other.nanosecond))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn time_with_ns(nanosecond: u32) -> Time {
+        Time::new(13, 15, 44, nanosecond).unwrap()
+    }
+
+    #[test]
+    fn display_no_fraction_when_nanosecond_zero() {
+        assert_eq!(time_with_ns(0).to_string(), "13:15:44");
+    }
+
+    #[test]
+    fn display_pads_fraction_to_minimum_three_digits() {
+        // SQLite renders subsec with exactly 3 digits: `.5` must become `.500`.
+        assert_eq!(time_with_ns(500_000_000).to_string(), "13:15:44.500");
+        assert_eq!(time_with_ns(120_000_000).to_string(), "13:15:44.120");
+        assert_eq!(time_with_ns(1_000_000).to_string(), "13:15:44.001");
+    }
+
+    #[test]
+    fn display_keeps_three_digit_fractions_unchanged() {
+        assert_eq!(time_with_ns(123_000_000).to_string(), "13:15:44.123");
+    }
+
+    #[test]
+    fn display_preserves_sub_millisecond_digits() {
+        // No hard truncation: stored sub-ms precision must stay visible.
+        assert_eq!(time_with_ns(123_456_000).to_string(), "13:15:44.123456");
+        assert_eq!(time_with_ns(123_456_789).to_string(), "13:15:44.123456789");
+    }
+
+    #[test]
+    fn display_parse_round_trip_preserves_nanoseconds() {
+        for ns in [
+            0u32,
+            500_000_000,
+            123_000_000,
+            120_000_000,
+            123_456_000,
+            1_000_000,
+            123_456_789,
+            999_999_999,
+            1, // renders as .000000001
+        ] {
+            let t = time_with_ns(ns);
+            let parsed = Time::from_str(&t.to_string()).unwrap();
+            assert_eq!(parsed, t, "round-trip failed for ns={} (rendered '{}')", ns, t);
+        }
     }
 }
