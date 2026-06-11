@@ -18,13 +18,13 @@ use chrono::{Datelike, Timelike};
 use vibesql_types::SqlValue;
 
 use super::current::resolve_time_value;
-use crate::errors::ExecutorError;
+use crate::{errors::ExecutorError, evaluator::SchemaExprContext};
 
 /// DATE - Return the date component of a time value
 ///
 /// `date(time-value, modifier, modifier, ...)`
-pub fn date(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
-    let dt = match resolve_time_value(args, "DATE")? {
+pub fn date(args: &[SqlValue], ctx: SchemaExprContext) -> Result<SqlValue, ExecutorError> {
+    let dt = match resolve_time_value(args, "DATE", ctx)? {
         Some(dt) => dt,
         None => return Ok(SqlValue::Null),
     };
@@ -41,8 +41,8 @@ pub fn date(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 /// Truncates to whole seconds: SQLite's `time()` renders `HH:MM:SS` without a
 /// fractional part, while `vibesql_types::Time` Display prints fractional
 /// seconds when nonzero - so nanoseconds must not be carried through.
-pub fn time(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
-    let dt = match resolve_time_value(args, "TIME")? {
+pub fn time(args: &[SqlValue], ctx: SchemaExprContext) -> Result<SqlValue, ExecutorError> {
+    let dt = match resolve_time_value(args, "TIME", ctx)? {
         Some(dt) => dt,
         None => return Ok(SqlValue::Null),
     };

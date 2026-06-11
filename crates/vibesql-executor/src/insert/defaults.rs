@@ -379,9 +379,12 @@ pub fn apply_generated_columns(
     row_values: &mut [vibesql_types::SqlValue],
     _database: &vibesql_storage::Database,
 ) -> Result<(), ExecutorError> {
-    // Create a temporary row to evaluate generated expressions
+    // Create a temporary row to evaluate generated expressions.
+    // GeneratedColumn context: non-deterministic date/time uses (e.g.
+    // `z AS (date())`) are rejected at evaluation time (SQLite, date2-140).
     let temp_row = vibesql_storage::Row::new(row_values.to_vec());
-    let evaluator = crate::ExpressionEvaluator::new(schema);
+    let evaluator = crate::ExpressionEvaluator::new(schema)
+        .with_schema_context(crate::evaluator::SchemaExprContext::GeneratedColumn);
 
     for (col_idx, col) in schema.columns.iter().enumerate() {
         // If column has a generated expression, compute and apply it

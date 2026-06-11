@@ -103,6 +103,19 @@ impl<'a> RowValidator<'a> {
             &mut result.deferred_fk_violations,
         )?;
 
+        // Phase 7: Reject non-deterministic date/time function uses in index
+        // expressions and partial-index WHERE predicates (SQLite raises
+        // "non-deterministic use of <fn>() in an index" at evaluation time;
+        // the trigger can come from row data, e.g. inserting the value 'now'
+        // under an index on date(b) — see date2-210/430/510/520/612).
+        // Runs pre-insert so the statement aborts before any mutation.
+        super::constraints::enforce_index_expression_determinism(
+            self.db,
+            self.schema,
+            self.table_name,
+            row_values,
+        )?;
+
         Ok(result)
     }
 
@@ -331,7 +344,11 @@ impl<'a> RowValidator<'a> {
     ) -> Result<(), ExecutorError> {
         if !self.schema.check_constraints.is_empty() {
             let row = vibesql_storage::Row::new(row_values.to_vec());
-            let evaluator = crate::evaluator::ExpressionEvaluator::new(self.schema);
+            // CHECK context: non-deterministic date/time uses ('now', zero-arg
+            // date(), 'localtime'/'utc') are rejected at evaluation time
+            // (SQLite, date2-110/600/603).
+            let evaluator = crate::evaluator::ExpressionEvaluator::new(self.schema)
+                .with_schema_context(crate::evaluator::SchemaExprContext::CheckConstraint);
 
             for (constraint_name, check_expr) in &self.schema.check_constraints {
                 let result = evaluator.eval(check_expr, &row)?;

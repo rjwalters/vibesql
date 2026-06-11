@@ -48,7 +48,7 @@ use chrono::{Datelike, NaiveDateTime, Timelike};
 use vibesql_types::SqlValue;
 
 use super::current::{resolve_time_value, JULIAN_EPOCH_OFFSET_MS};
-use crate::errors::ExecutorError;
+use crate::{errors::ExecutorError, evaluator::SchemaExprContext};
 
 /// STRFTIME - Format a time value according to a format string
 ///
@@ -59,7 +59,7 @@ use crate::errors::ExecutorError;
 /// - the time value cannot be parsed
 /// - a modifier is invalid
 /// - the format contains an unsupported `%x` specifier
-pub fn strftime(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+pub fn strftime(args: &[SqlValue], ctx: SchemaExprContext) -> Result<SqlValue, ExecutorError> {
     if args.is_empty() {
         return Err(ExecutorError::UnsupportedFeature(
             "STRFTIME requires at least 1 argument".to_string(),
@@ -79,7 +79,7 @@ pub fn strftime(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     };
 
     // Remaining arguments are the time value + modifiers (an empty list means 'now')
-    let dt = match resolve_time_value(&args[1..], "STRFTIME")? {
+    let dt = match resolve_time_value(&args[1..], "STRFTIME", ctx)? {
         Some(dt) => dt,
         None => return Ok(SqlValue::Null),
     };
@@ -206,7 +206,7 @@ mod tests {
     use super::*;
 
     fn sf(args: &[SqlValue]) -> SqlValue {
-        strftime(args).expect("strftime should not error")
+        strftime(args, SchemaExprContext::None).expect("strftime should not error")
     }
 
     fn text(s: &str) -> SqlValue {

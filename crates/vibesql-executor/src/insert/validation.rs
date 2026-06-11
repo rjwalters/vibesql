@@ -238,6 +238,19 @@ pub fn coerce_value(
         (SqlValue::Numeric(f), DataType::Real) => Ok(SqlValue::Real(*f)), // Real is now f64
         (SqlValue::Numeric(f), DataType::DoublePrecision) => Ok(SqlValue::Double(*f)),
 
+        // Float/Double → Real (and Real/Double → Float, Float/Real → Double):
+        // cross-coercion between the IEEE float storage classes. Arithmetic
+        // over mixed inputs can produce any of these (e.g. REAL + INTEGER
+        // yields Float), and SQLite's REAL affinity accepts them all
+        // (date2-604: `INSERT INTO t600(a) VALUES(julianday('now')+10)` into
+        // a REAL column must reach CHECK evaluation, not fail coercion).
+        (SqlValue::Float(f), DataType::Real) => Ok(SqlValue::Real(*f as f64)),
+        (SqlValue::Double(f), DataType::Real) => Ok(SqlValue::Real(*f)),
+        (SqlValue::Real(f), DataType::Float { .. }) => Ok(SqlValue::Float(*f as f32)),
+        (SqlValue::Double(f), DataType::Float { .. }) => Ok(SqlValue::Float(*f as f32)),
+        (SqlValue::Float(f), DataType::DoublePrecision) => Ok(SqlValue::Double(*f as f64)),
+        (SqlValue::Real(f), DataType::DoublePrecision) => Ok(SqlValue::Double(*f)),
+
         // Numeric literal → Integer types
         // SQLite type affinity: try to convert to integer if possible,
         // otherwise keep as numeric (SQLite stores values with actual type, not column affinity)

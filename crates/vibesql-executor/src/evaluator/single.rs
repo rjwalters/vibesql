@@ -38,6 +38,10 @@ pub struct ExpressionEvaluator<'a> {
     /// Table alias for UPDATE/DELETE statements (SQLite extension: UPDATE t1 AS xyz)
     /// When set, column references qualified with this alias will resolve to the schema
     pub(super) table_alias: Option<String>,
+    /// Schema-attached expression context (CHECK constraint, generated
+    /// column, index expression). Non-deterministic date/time function uses
+    /// are rejected at evaluation time in these contexts (SQLite semantics).
+    pub(super) schema_context: super::SchemaExprContext,
 }
 
 impl<'a> ExpressionEvaluator<'a> {
@@ -57,6 +61,7 @@ impl<'a> ExpressionEvaluator<'a> {
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             row_index: None,
             table_alias: None,
+            schema_context: super::SchemaExprContext::None,
         }
     }
 
@@ -80,6 +85,7 @@ impl<'a> ExpressionEvaluator<'a> {
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             row_index: None,
             table_alias: None,
+            schema_context: super::SchemaExprContext::None,
         }
     }
 
@@ -102,6 +108,7 @@ impl<'a> ExpressionEvaluator<'a> {
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             row_index: None,
             table_alias: None,
+            schema_context: super::SchemaExprContext::None,
         }
     }
 
@@ -125,6 +132,7 @@ impl<'a> ExpressionEvaluator<'a> {
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             row_index: None,
             table_alias: None,
+            schema_context: super::SchemaExprContext::None,
         }
     }
 
@@ -150,6 +158,7 @@ impl<'a> ExpressionEvaluator<'a> {
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             row_index: None,
             table_alias: None,
+            schema_context: super::SchemaExprContext::None,
         }
     }
 
@@ -174,6 +183,7 @@ impl<'a> ExpressionEvaluator<'a> {
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             row_index: None,
             table_alias: None,
+            schema_context: super::SchemaExprContext::None,
         }
     }
 
@@ -198,6 +208,7 @@ impl<'a> ExpressionEvaluator<'a> {
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             row_index: None,
             table_alias: None,
+            schema_context: super::SchemaExprContext::None,
         }
     }
 
@@ -220,6 +231,18 @@ impl<'a> ExpressionEvaluator<'a> {
     /// SQLite extension: UPDATE t1 AS xyz SET ... WHERE xyz.column = ...
     pub fn set_table_alias(&mut self, alias: String) {
         self.table_alias = Some(alias);
+    }
+
+    /// Mark this evaluator as evaluating a schema-attached expression
+    /// (CHECK constraint, generated column, or index expression).
+    ///
+    /// In these contexts SQLite rejects non-deterministic uses of the
+    /// date/time functions ('now' / zero-argument defaults / 'localtime' /
+    /// 'utc') at evaluation time with
+    /// `non-deterministic use of <fn>() in <context>`.
+    pub fn with_schema_context(mut self, schema_context: super::SchemaExprContext) -> Self {
+        self.schema_context = schema_context;
+        self
     }
 
     /// Evaluate a binary operation
@@ -308,6 +331,7 @@ impl<'a> ExpressionEvaluator<'a> {
             subquery_cache: self.subquery_cache.clone(),
             row_index: self.row_index,
             table_alias: self.table_alias.clone(),
+            schema_context: self.schema_context,
         };
         f(&evaluator)
     }

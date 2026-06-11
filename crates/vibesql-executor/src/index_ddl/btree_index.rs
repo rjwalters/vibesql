@@ -67,66 +67,23 @@ pub fn create_btree_index(
     .with_where_clause(stmt.where_clause.as_ref().map(|expr| (**expr).clone()));
     database.catalog.add_index(index_metadata)?;
 
-    // Create the B-tree index
-    if has_expression {
-        // Expression index: pre-compute keys using ExpressionEvaluator
-        // (Expression partial indexes are not yet supported — the partial
-        // predicate is ignored here. The catalog still records the
-        // where_clause, but `is_partial()` on the storage metadata will be
-        // false because expression indexes go through a different storage
-        // path. This is acceptable for now; the planner's
-        // `IndexedColumn::is_expression()` check already excludes expression
-        // indexes from most query-time paths.)
-        create_expression_index(
-            database,
-            table_name,
-            index_name,
-            table_schema,
-            &stmt.columns,
-            unique,
-        )?;
-    } else if let Some(where_expr) = stmt.where_clause.as_deref() {
-        // Partial column-only index: evaluate the predicate against each
-        // existing row and only insert matching rows into the index body.
-        let table_rows: Vec<vibesql_storage::Row> = match database.get_table(table_name) {
-            Some(table) => table.scan().to_vec(),
-            None => Vec::new(),
-        };
-        let evaluator = ExpressionEvaluator::new(table_schema);
-        let mut included: HashSet<usize> = HashSet::with_capacity(table_rows.len());
-        for (row_idx, row) in table_rows.iter().enumerate() {
-            match evaluator.eval(where_expr, row) {
-                Ok(v) if is_predicate_truthy(&v) => {
-                    included.insert(row_idx);
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    log::warn!(
-                        "Failed to evaluate partial-index '{}' predicate on row {}: {:?}; \
-                         treating row as not-in-index",
-                        index_name,
-                        row_idx,
-                        e
-                    );
-                }
-            }
-        }
-        database.create_index_partial(
-            index_name.clone(),
-            table_name.to_string(),
-            unique,
-            stmt.columns.clone(),
-            Box::new(where_expr.clone()),
-            &included,
-        )?;
-    } else {
-        // Column-only index: use existing storage API
-        database.create_index(
-            index_name.clone(),
-            table_name.to_string(),
-            unique,
-            stmt.columns.clone(),
-        )?;
+    // Create the B-tree index. On build failure the catalog entry added above
+    // must be rolled back — otherwise a failed CREATE INDEX (e.g. SQLite's
+    // evaluation-time "non-deterministic use of <fn>() in an index"
+    // rejection, date2-310/410) would leave a phantom catalog entry that
+    // blocks re-creating the index under the same name (date2-320/420).
+    let build_result = build_btree_index_body(
+        database,
+        stmt,
+        table_name,
+        index_name,
+        table_schema,
+        unique,
+        has_expression,
+    );
+    if let Err(e) = build_result {
+        let _ = database.catalog.drop_index(table_name, index_name);
+        return Err(e);
     }
 
     // Emit WAL entry for persistence
@@ -139,6 +96,93 @@ pub fn create_btree_index(
     );
 
     Ok(format!("Index '{}' created successfully on table '{}'", index_name, qualified_table_name))
+}
+
+/// Build the physical B-tree index body (expression, partial, or plain
+/// column index). Factored out of [`create_btree_index`] so a build failure
+/// can roll back the already-added catalog entry.
+fn build_btree_index_body(
+    database: &mut Database,
+    stmt: &CreateIndexStmt,
+    table_name: &str,
+    index_name: &str,
+    table_schema: &TableSchema,
+    unique: bool,
+    has_expression: bool,
+) -> Result<(), ExecutorError> {
+    if has_expression {
+        // Expression index: pre-compute keys using ExpressionEvaluator.
+        // A partial predicate filters rows at build time; the catalog records
+        // the where_clause, but `is_partial()` on the storage metadata will
+        // be false because expression indexes go through a different storage
+        // path. This is acceptable for now; the planner's
+        // `IndexedColumn::is_expression()` check already excludes expression
+        // indexes from most query-time paths.
+        create_expression_index(
+            database,
+            table_name,
+            index_name,
+            table_schema,
+            &stmt.columns,
+            unique,
+            stmt.where_clause.as_deref(),
+        )?;
+    } else if let Some(where_expr) = stmt.where_clause.as_deref() {
+        // Partial column-only index: evaluate the predicate against each
+        // existing LIVE row and only insert matching rows into the index
+        // body. Deleted rows must not be evaluated — a tombstoned row could
+        // otherwise still trigger the non-deterministic rejection below
+        // (date2-420 deletes the 'now' row and expects the CREATE to pass).
+        let table_rows: Vec<(usize, vibesql_storage::Row)> = match database.get_table(table_name) {
+            Some(table) => table.scan_live().map(|(idx, row)| (idx, row.clone())).collect(),
+            None => Vec::new(),
+        };
+        // Index context: SQLite rejects non-deterministic date/time uses in
+        // a partial index's WHERE predicate at evaluation time, so the
+        // CREATE INDEX build fails when an existing row triggers one
+        // (date2-410: row data 'now' under WHERE date(b) BETWEEN ...).
+        let evaluator = ExpressionEvaluator::new(table_schema)
+            .with_schema_context(crate::evaluator::SchemaExprContext::Index);
+        let mut included: HashSet<usize> = HashSet::with_capacity(table_rows.len());
+        for (row_idx, row) in table_rows.iter().map(|(idx, row)| (*idx, row)) {
+            match evaluator.eval(where_expr, row) {
+                Ok(v) if is_predicate_truthy(&v) => {
+                    included.insert(row_idx);
+                }
+                Ok(_) => {}
+                // The non-deterministic rejection must PROPAGATE and fail the
+                // CREATE INDEX; other evaluation errors keep the lenient
+                // not-in-index treatment.
+                Err(e) if e.is_non_deterministic_use() => return Err(e),
+                Err(e) => {
+                    log::warn!(
+                        "Failed to evaluate partial-index '{}' predicate on row {}: {:?}; \
+                         treating row as not-in-index",
+                        index_name,
+                        row_idx,
+                        e
+                    );
+                }
+            }
+        }
+        database.create_index_partial(
+            index_name.to_string(),
+            table_name.to_string(),
+            unique,
+            stmt.columns.clone(),
+            Box::new(where_expr.clone()),
+            &included,
+        )?;
+    } else {
+        // Column-only index: use existing storage API
+        database.create_index(
+            index_name.to_string(),
+            table_name.to_string(),
+            unique,
+            stmt.columns.clone(),
+        )?;
+    }
+    Ok(())
 }
 
 /// Convert AST IndexColumn to catalog IndexedColumn.

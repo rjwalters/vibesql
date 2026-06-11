@@ -188,6 +188,15 @@ fn execute_bulk_transfer(
         Vec::new()
     };
 
+    // Expression / partial indexes on the destination require the
+    // evaluation-time non-deterministic date/time check per row (issue
+    // #5313); gate the per-row call on a single catalog lookup.
+    let has_schema_expr_indexes = db
+        .catalog
+        .get_table_indexes(dest_table)
+        .iter()
+        .any(|idx| idx.is_partial() || idx.columns.iter().any(|c| c.is_expression()));
+
     // Collect all validated rows for batch insert
     let mut validated_rows: Vec<vibesql_storage::Row> = Vec::with_capacity(source_rows.len());
 
@@ -219,6 +228,17 @@ fn execute_bulk_transfer(
         // CHECK constraints (if dest has them)
         if compat_result.validate_check {
             super::constraints::enforce_check_constraints(dest_schema, &row_values)?;
+        }
+
+        // Non-deterministic date/time uses in index expressions /
+        // partial-index predicates (evaluation-time, SQLite semantics)
+        if has_schema_expr_indexes {
+            super::constraints::enforce_index_expression_determinism(
+                db,
+                dest_schema,
+                dest_table,
+                &row_values,
+            )?;
         }
 
         // Foreign key constraints (if dest has them)

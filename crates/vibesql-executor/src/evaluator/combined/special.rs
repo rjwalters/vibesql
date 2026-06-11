@@ -238,7 +238,16 @@ impl CombinedExpressionEvaluator<'_> {
 
         // Call shared scalar function evaluator
         let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
-        eval_scalar_function(name, &arg_values, character_unit, &sql_mode)
+        // Schema-attached expressions (CHECK / generated column / index) are
+        // always evaluated through the single-table ExpressionEvaluator, so
+        // the combined evaluator runs in the unrestricted context.
+        eval_scalar_function(
+            name,
+            &arg_values,
+            character_unit,
+            &sql_mode,
+            crate::evaluator::SchemaExprContext::None,
+        )
     }
 
     /// Evaluate unary operation

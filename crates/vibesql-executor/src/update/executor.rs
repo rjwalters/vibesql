@@ -361,6 +361,17 @@ pub(super) fn execute_internal(
             // even when intermediate states transiently duplicate keys (issue #5137).
             constraint_validator.validate_row_skip_uniqueness(table_name, &new_row)?;
 
+            // Reject non-deterministic date/time uses in index expressions /
+            // partial-index predicates for the updated row (evaluation-time,
+            // SQLite). Runs pre-application so the UPDATE aborts before any
+            // mutation and the lenient index-maintenance paths never see it.
+            crate::insert::constraints::enforce_index_expression_determinism(
+                database,
+                schema,
+                table_name,
+                &new_row.values,
+            )?;
+
             // Enforce FOREIGN KEY constraints (child table)
             if !schema.foreign_keys.is_empty() {
                 let deferred = ForeignKeyValidator::collect_constraints(
@@ -1138,8 +1149,11 @@ fn apply_generated_columns_for_update(
         return Ok(());
     }
 
-    // Create evaluator with the current row values
-    let evaluator = ExpressionEvaluator::new(schema);
+    // Create evaluator with the current row values.
+    // GeneratedColumn context: non-deterministic date/time uses are rejected
+    // at evaluation time (SQLite semantics, date2-140 / date3-620).
+    let evaluator = ExpressionEvaluator::new(schema)
+        .with_schema_context(crate::evaluator::SchemaExprContext::GeneratedColumn);
 
     for (col_idx, col) in schema.columns.iter().enumerate() {
         if let Some(generated_expr) = &col.generated_expr {
@@ -1429,6 +1443,15 @@ fn execute_update_from(
         // Default: per-row NOT NULL/CHECK; PK/UNIQUE deferred to post-statement pass.
         for u in &updates {
             constraint_validator.validate_row_skip_uniqueness(table_name, &u.new_row)?;
+
+            // Reject non-deterministic date/time uses in index expressions /
+            // partial-index predicates (evaluation-time, SQLite semantics).
+            crate::insert::constraints::enforce_index_expression_determinism(
+                database,
+                schema,
+                table_name,
+                &u.new_row.values,
+            )?;
 
             // Validate foreign key constraints
             if !schema.foreign_keys.is_empty() {

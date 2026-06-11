@@ -1,5 +1,5 @@
 mod bulk_transfer;
-mod constraints;
+pub(crate) mod constraints;
 pub mod defaults;
 mod duplicate_key_update;
 mod execution;
