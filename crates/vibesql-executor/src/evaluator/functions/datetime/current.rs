@@ -7,6 +7,20 @@ use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;
 
+/// Milliseconds between the start of the Julian Day epoch (-4713-11-24 12:00:00)
+/// and the Unix epoch (1970-01-01 00:00:00). Matches SQLite's internal iJD origin.
+pub(super) const JULIAN_EPOCH_OFFSET_MS: i64 = 210_866_760_000_000;
+
+/// Largest valid iJD value in milliseconds (9999-12-31 23:59:59.999), matching
+/// SQLite's `validJulianDay()`.
+const MAX_IJD_MS: i64 = 464_269_060_799_999;
+
+/// Convert a `NaiveDateTime` to SQLite iJD milliseconds (milliseconds since the
+/// Julian Day origin). Sub-millisecond precision is truncated, like SQLite.
+pub(super) fn naive_to_ijd_ms(dt: &NaiveDateTime) -> i64 {
+    dt.and_utc().timestamp_millis() + JULIAN_EPOCH_OFFSET_MS
+}
+
 /// CURRENT_DATE / CURDATE - Returns current date
 /// Alias: CURDATE
 /// SQL:1999 Section 6.31: Datetime value functions
@@ -320,8 +334,10 @@ fn parse_base_datetime_for_unixepoch(
         SqlValue::Null => Ok(None),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             // Try to parse string as number for unixepoch
-            if let Ok(n) = s.parse::<i64>() {
+            if let Ok(n) = s.trim().parse::<i64>() {
                 Ok(unix_epoch_to_datetime(n))
+            } else if let Ok(n) = s.trim().parse::<f64>() {
+                Ok(unix_epoch_seconds_f64_to_datetime(n))
             } else {
                 // String that's not a valid number + unixepoch = NULL
                 Ok(None)
@@ -331,13 +347,13 @@ fn parse_base_datetime_for_unixepoch(
             // Date/Timestamp with unixepoch doesn't make sense - return NULL
             Ok(None)
         }
-        // Integer or float: treat as Unix timestamp
+        // Integer or float: treat as Unix timestamp (floats keep ms precision)
         SqlValue::Integer(n) => Ok(unix_epoch_to_datetime(*n as i64)),
         SqlValue::Bigint(n) => Ok(unix_epoch_to_datetime(*n)),
         SqlValue::Smallint(n) => Ok(unix_epoch_to_datetime(*n as i64)),
-        SqlValue::Float(n) => Ok(unix_epoch_to_datetime(*n as i64)),
+        SqlValue::Float(n) => Ok(unix_epoch_seconds_f64_to_datetime(*n as f64)),
         SqlValue::Double(n) | SqlValue::Real(n) | SqlValue::Numeric(n) => {
-            Ok(unix_epoch_to_datetime(*n as i64))
+            Ok(unix_epoch_seconds_f64_to_datetime(*n))
         }
         _ => Err(ExecutorError::UnsupportedFeature(format!(
             "{} requires string, date, timestamp, or numeric argument, got {:?}",
@@ -398,8 +414,95 @@ fn apply_datetime_modifier(dt: NaiveDateTime, modifier: &str) -> Option<NaiveDat
         return Some(dt);
     }
 
+    // Handle (+|-)YYYY-MM-DD[ HH:MM[:SS[.FFF]]] modifiers (the inverse of
+    // timediff(); SQLite 3.43+). Must be checked before generic time shifts.
+    if let Some(result) = try_apply_date_offset_modifier(dt, modifier) {
+        return result;
+    }
+
     // Handle time shift modifiers: +N unit, -N unit, N unit
     parse_and_apply_time_shift(dt, modifier)
+}
+
+/// Detect and apply a `(+|-)YYYY-MM-DD[ HH:MM[:SS[.FFF]]]` modifier.
+///
+/// Returns:
+/// - `None` if the modifier is not of this form (caller should fall through)
+/// - `Some(None)` if it is of this form but invalid (SQLite returns NULL)
+/// - `Some(Some(dt))` on success
+///
+/// SQLite semantics (date.c `parseModifier`, '+'/'-' digit case): the year may
+/// be 4 or 5 digits, MM is limited to 0-11 and DD to 0-30. Years and months are
+/// applied with calendar normalization (day-of-month overflow rolls into the
+/// next month), then days and the optional time offset are added as exact
+/// durations.
+fn try_apply_date_offset_modifier(
+    dt: NaiveDateTime,
+    modifier: &str,
+) -> Option<Option<NaiveDateTime>> {
+    let sign: i64 = match modifier.as_bytes().first() {
+        Some(b'+') => 1,
+        Some(b'-') => -1,
+        _ => return None,
+    };
+    let rest = &modifier[1..];
+    let year_digits = rest.bytes().take_while(|b| b.is_ascii_digit()).count();
+    if !((year_digits == 4 || year_digits == 5) && rest.as_bytes().get(year_digits) == Some(&b'-'))
+    {
+        return None; // Not the date-offset form; fall through to other modifiers
+    }
+    Some(apply_date_offset_modifier(dt, sign, rest, year_digits))
+}
+
+/// Apply a validated-prefix `YYYY-MM-DD[ HH:MM[:SS[.FFF]]]` offset to `dt`.
+/// Any malformation makes the whole modifier invalid (returns None -> NULL).
+fn apply_date_offset_modifier(
+    dt: NaiveDateTime,
+    sign: i64,
+    rest: &str,
+    year_digits: usize,
+) -> Option<NaiveDateTime> {
+    let years: i64 = rest[..year_digits].parse().ok()?;
+    let after = &rest[year_digits + 1..];
+    let ab = after.as_bytes();
+    if ab.len() < 5
+        || !ab[0].is_ascii_digit()
+        || !ab[1].is_ascii_digit()
+        || ab[2] != b'-'
+        || !ab[3].is_ascii_digit()
+        || !ab[4].is_ascii_digit()
+    {
+        return None;
+    }
+    let months: i64 = after[..2].parse().ok()?;
+    let days: i64 = after[3..5].parse().ok()?;
+    // SQLite limits: MM in 0..11, DD in 0..30
+    if months >= 12 || days >= 31 {
+        return None;
+    }
+
+    // Optional time component: exactly one space, then HH:MM[:SS[.FFF...]]
+    let tail = &after[5..];
+    let time_offset_ms: i64 = if tail.is_empty() {
+        0
+    } else {
+        let mut chars = tail.chars();
+        if !chars.next().is_some_and(|c| c.is_ascii_whitespace()) {
+            return None;
+        }
+        parse_hh_mm_ss_ms(chars.as_str())?
+    };
+
+    // Apply years + months with calendar normalization (matching SQLite's
+    // computeJD: an out-of-range day-of-month rolls into the following month)
+    let total_months =
+        dt.year() as i64 * 12 + (dt.month() as i64 - 1) + sign * (years * 12 + months);
+    let new_year = i32::try_from(total_months.div_euclid(12)).ok()?;
+    let new_month = total_months.rem_euclid(12) as u32 + 1;
+    let base = chrono::NaiveDate::from_ymd_opt(new_year, new_month, 1)?.and_time(dt.time())
+        + Duration::days(dt.day() as i64 - 1);
+
+    Some(base + Duration::days(sign * days) + Duration::milliseconds(sign * time_offset_ms))
 }
 
 /// Apply weekday modifier - advances to the next occurrence of the specified weekday
@@ -456,37 +559,30 @@ fn parse_and_apply_time_shift(dt: NaiveDateTime, modifier: &str) -> Option<Naive
     let unit_lower = unit.to_lowercase();
     let unit_normalized = unit_lower.trim_end_matches('s');
 
-    match unit_normalized {
-        "day" => {
-            // Fractional days: 1.25 days = 1 day + 6 hours
-            let total_seconds = amount * 86400.0;
-            Some(dt + Duration::seconds(total_seconds as i64))
-        }
-        "hour" => {
-            let total_seconds = amount * 3600.0;
-            Some(dt + Duration::seconds(total_seconds as i64))
-        }
-        "minute" => {
-            let total_seconds = amount * 60.0;
-            Some(dt + Duration::seconds(total_seconds as i64))
-        }
-        "second" => Some(dt + Duration::seconds(amount as i64)),
-        "month" => {
-            // For fractional months, SQLite adds the fractional part as days
-            // 1.5 months = 1 month + 15 days (roughly)
-            let whole_months = amount.trunc() as i32;
-            let frac_days = (amount.fract() * 30.0) as i64; // Approximate month as 30 days
+    // SQLite rounds the millisecond result half away from zero
+    let to_ms = |value: f64| -> i64 {
+        let rounder = if value < 0.0 { -0.5 } else { 0.5 };
+        (value + rounder) as i64
+    };
 
+    match unit_normalized {
+        "day" => Some(dt + Duration::milliseconds(to_ms(amount * 86_400_000.0))),
+        "hour" => Some(dt + Duration::milliseconds(to_ms(amount * 3_600_000.0))),
+        "minute" => Some(dt + Duration::milliseconds(to_ms(amount * 60_000.0))),
+        "second" => Some(dt + Duration::milliseconds(to_ms(amount * 1000.0))),
+        "month" => {
+            // Whole months shift the calendar; the fractional residue is added
+            // as 30-day months in milliseconds (SQLite aXformType rXform)
+            let whole_months = amount.trunc() as i32;
             let new_dt = add_months(dt, whole_months)?;
-            Some(new_dt + Duration::days(frac_days))
+            Some(new_dt + Duration::milliseconds(to_ms(amount.fract() * 2_592_000_000.0)))
         }
         "year" => {
-            // Similar to months, but years
+            // Whole years shift the calendar; the fractional residue is added
+            // as 365-day years in milliseconds (SQLite aXformType rXform)
             let whole_years = amount.trunc() as i32;
-            let frac_days = (amount.fract() * 365.0) as i64; // Approximate year as 365 days
-
             let new_dt = add_months(dt, whole_years * 12)?;
-            Some(new_dt + Duration::days(frac_days))
+            Some(new_dt + Duration::milliseconds(to_ms(amount.fract() * 31_536_000_000.0)))
         }
         _ => None, // Unknown unit
     }
@@ -563,18 +659,34 @@ fn unix_epoch_to_datetime(timestamp: i64) -> Option<NaiveDateTime> {
     chrono::DateTime::from_timestamp(timestamp, 0).map(|dt| dt.naive_utc())
 }
 
-/// Convert Julian Day to NaiveDateTime
-fn julian_day_to_naive(jd: f64) -> Option<NaiveDateTime> {
-    // JD 2440587.5 = January 1, 1970 00:00:00 UTC (Unix epoch)
-    let unix_jd: f64 = 2440587.5;
-    let seconds_since_unix = (jd - unix_jd) * 86400.0;
-
-    // Check for reasonable bounds
-    if jd < 0.0 || jd > 5373484.0 {
+/// Convert a fractional Unix epoch timestamp (seconds) to NaiveDateTime with
+/// millisecond precision, matching SQLite's `iJD = (i64)(r*1000.0 + offset + 0.5)`.
+fn unix_epoch_seconds_f64_to_datetime(seconds: f64) -> Option<NaiveDateTime> {
+    if !seconds.is_finite() {
         return None;
     }
+    let ijd_ms = (seconds * 1000.0 + JULIAN_EPOCH_OFFSET_MS as f64 + 0.5).floor() as i64;
+    if !(0..=MAX_IJD_MS).contains(&ijd_ms) {
+        return None;
+    }
+    chrono::DateTime::from_timestamp_millis(ijd_ms - JULIAN_EPOCH_OFFSET_MS)
+        .map(|dt| dt.naive_utc())
+}
 
-    chrono::DateTime::from_timestamp(seconds_since_unix as i64, 0).map(|dt| dt.naive_utc())
+/// Convert Julian Day to NaiveDateTime
+///
+/// Matches SQLite: `iJD = (sqlite3_int64)(jd*86400000.0 + 0.5)` with millisecond
+/// precision, valid for 0 <= iJD <= 464269060799999 (-4713-11-24 .. 9999-12-31).
+fn julian_day_to_naive(jd: f64) -> Option<NaiveDateTime> {
+    if !jd.is_finite() || jd < 0.0 {
+        return None;
+    }
+    let ijd_ms = (jd * 86_400_000.0 + 0.5).floor() as i64;
+    if ijd_ms > MAX_IJD_MS {
+        return None;
+    }
+    chrono::DateTime::from_timestamp_millis(ijd_ms - JULIAN_EPOCH_OFFSET_MS)
+        .map(|dt| dt.naive_utc())
 }
 
 /// Convert NaiveDateTime to SqlValue::Timestamp
@@ -586,34 +698,124 @@ fn naive_datetime_to_timestamp(dt: NaiveDateTime) -> Result<SqlValue, ExecutorEr
     Ok(SqlValue::Timestamp(vibesql_types::Timestamp::new(date, time)))
 }
 
-/// Helper to parse datetime strings to NaiveDateTime
+/// Helper to parse SQLite datetime strings to NaiveDateTime
+///
+/// Follows SQLite's `parseYyyyMmDd` grammar strictly:
+/// `[-]YYYY-MM-DD[<space|T>HH:MM[:SS[.FFF...]]]` where every field is exactly
+/// the documented number of digits. An out-of-range day-of-month (e.g.
+/// `2003-02-31`) normalizes into the following month, matching SQLite's
+/// `computeJD`. A plain numeric string is interpreted as a Julian Day number.
 fn parse_datetime_string_to_naive(s: &str) -> Option<NaiveDateTime> {
-    use chrono::NaiveDate;
+    let s = s.trim();
 
-    // Try parsing as full timestamp: "YYYY-MM-DD HH:MM:SS"
-    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+    if let Some(dt) = parse_yyyy_mm_dd(s) {
         return Some(dt);
     }
 
-    // Try parsing as timestamp with fractional seconds: "YYYY-MM-DD HH:MM:SS.fff"
-    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f") {
-        return Some(dt);
-    }
-
-    // Try parsing as "YYYY-MM-DD HH:MM" (no seconds)
-    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M") {
-        return Some(dt);
-    }
-
-    // Try parsing as date only: "YYYY-MM-DD" - return with time 00:00:00
-    if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        return d.and_hms_opt(0, 0, 0);
-    }
-
-    // Try parsing with T separator: "YYYY-MM-DDTHH:MM:SS"
-    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
-        return Some(dt);
+    // SQLite: a string that is a plain numeric literal is interpreted as a
+    // Julian Day number, e.g. datetime('2451545.0') = '2000-01-01 12:00:00'
+    if let Ok(jd) = s.parse::<f64>() {
+        return julian_day_to_naive(jd);
     }
 
     None
+}
+
+/// Strict `[-]YYYY-MM-DD[<sep>HH:MM[:SS[.FFF...]]]` parser (SQLite parseYyyyMmDd).
+fn parse_yyyy_mm_dd(s: &str) -> Option<NaiveDateTime> {
+    // Optional leading '-' for negative (astronomical) years
+    let (negative_year, rest) = match s.strip_prefix('-') {
+        Some(r) => (true, r),
+        None => (false, s),
+    };
+
+    // Date part: exactly "YYYY-MM-DD"
+    let b = rest.as_bytes();
+    if b.len() < 10
+        || !b[..4].iter().all(u8::is_ascii_digit)
+        || b[4] != b'-'
+        || !b[5].is_ascii_digit()
+        || !b[6].is_ascii_digit()
+        || b[7] != b'-'
+        || !b[8].is_ascii_digit()
+        || !b[9].is_ascii_digit()
+    {
+        return None;
+    }
+    let year: i32 = rest[..4].parse().ok()?;
+    let year = if negative_year { -year } else { year };
+    let month: u32 = rest[5..7].parse().ok()?;
+    let day: i64 = rest[8..10].parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    // Day-of-month overflow rolls into the next month (SQLite computeJD
+    // normalization, e.g. 2003-02-31 -> 2003-03-03)
+    let date = chrono::NaiveDate::from_ymd_opt(year, month, 1)? + Duration::days(day - 1);
+
+    // Optional time part. SQLite skips any run of whitespace and/or 'T'
+    // characters between the date and the time (including none at all).
+    let tail = rest[10..].trim_start_matches(|c: char| c.is_ascii_whitespace() || c == 'T');
+    if tail.is_empty() {
+        return date.and_hms_opt(0, 0, 0);
+    }
+
+    let time_ms = parse_hh_mm_ss_ms(tail)?;
+    Some(date.and_hms_opt(0, 0, 0)? + Duration::milliseconds(time_ms))
+}
+
+/// Strict `HH:MM[:SS[.FFF...]]` parser returning milliseconds since midnight.
+/// Mirrors SQLite's parseHhMmSs limits: HH <= 24, MM/SS <= 59, the fraction
+/// needs at least one digit, sub-millisecond fractions round like SQLite.
+/// Trailing content other than whitespace is an error (timezone suffixes are
+/// not supported and yield NULL).
+fn parse_hh_mm_ss_ms(t: &str) -> Option<i64> {
+    let b = t.as_bytes();
+    if b.len() < 5
+        || !b[0].is_ascii_digit()
+        || !b[1].is_ascii_digit()
+        || b[2] != b':'
+        || !b[3].is_ascii_digit()
+        || !b[4].is_ascii_digit()
+    {
+        return None;
+    }
+    let hours: i64 = t[..2].parse().ok()?;
+    let minutes: i64 = t[3..5].parse().ok()?;
+    if hours > 24 || minutes > 59 {
+        return None;
+    }
+    let mut total_ms = (hours * 3600 + minutes * 60) * 1000;
+
+    let mut rest = &t[5..];
+    if let Some(sec_part) = rest.strip_prefix(':') {
+        let sb = sec_part.as_bytes();
+        if sb.len() < 2 || !sb[0].is_ascii_digit() || !sb[1].is_ascii_digit() {
+            return None;
+        }
+        let seconds: i64 = sec_part[..2].parse().ok()?;
+        if seconds > 59 {
+            return None;
+        }
+        total_ms += seconds * 1000;
+        rest = &sec_part[2..];
+        // Optional fractional seconds: '.' followed by at least one digit
+        if let Some(frac_part) = rest.strip_prefix('.') {
+            let frac_digits = frac_part.bytes().take_while(|c| c.is_ascii_digit()).count();
+            if frac_digits == 0 {
+                return None;
+            }
+            let frac: f64 = format!("0.{}", &frac_part[..frac_digits]).parse().ok()?;
+            // SQLite caps sub-millisecond fractions then rounds to ms
+            total_ms += ((frac.min(0.999)) * 1000.0 + 0.5).floor() as i64;
+            rest = &frac_part[frac_digits..];
+        }
+    }
+
+    // Only trailing whitespace is allowed
+    if rest.chars().all(|c| c.is_ascii_whitespace()) {
+        Some(total_ms)
+    } else {
+        None
+    }
 }
