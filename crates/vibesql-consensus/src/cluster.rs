@@ -92,7 +92,13 @@ impl TestCluster {
         for id in 1..=n {
             let node = if durable {
                 let dir = TempDir::new().expect("create tempdir for durable raft log");
-                let store = DurableLogStore::open(dir.path()).expect("open durable raft log");
+                // Fresh (empty) snapshot watermark: these cluster tests
+                // exercise log replication, not snapshots, so no purge ever
+                // becomes legal — which is exactly the pre-snapshot state.
+                let watermark =
+                    std::sync::Arc::new(crate::snapshot::DurableSnapshotWatermark::default());
+                let store =
+                    DurableLogStore::open(dir.path(), watermark).expect("open durable raft log");
                 let backend = OpenraftBackend::join_channel_cluster(
                     id,
                     &members,
@@ -176,7 +182,10 @@ impl TestCluster {
                 .await
             }
             NodeStorage::Durable(dir) => {
-                let store = DurableLogStore::open(dir.path()).expect("reopen durable raft log");
+                let watermark =
+                    std::sync::Arc::new(crate::snapshot::DurableSnapshotWatermark::default());
+                let store =
+                    DurableLogStore::open(dir.path(), watermark).expect("reopen durable raft log");
                 OpenraftBackend::join_channel_cluster(
                     id,
                     &self.members,

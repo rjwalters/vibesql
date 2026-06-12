@@ -97,6 +97,7 @@ use openraft::{Entry, LogId, LogState, RaftLogReader, StorageError, StorageIOErr
 use serde::{Deserialize, Serialize};
 
 use crate::openraft_backend::TypeConfig;
+use crate::snapshot::DurableSnapshotWatermark;
 
 /// Name of the Raft log file inside the data directory.
 const RAFT_LOG_FILE_NAME: &str = "raft.log";
@@ -114,7 +115,9 @@ const RAFT_LOG_HEADER_SIZE: usize = 32;
 const RECORD_FRAME_SIZE: usize = 8;
 
 /// CRC-32 (IEEE polynomial), identical to `vibesql-storage::wal::writer`.
-fn crc32(data: &[u8]) -> u32 {
+/// Shared with the snapshot store (`crate::snapshot`), which mirrors the
+/// same framing conventions.
+pub(crate) fn crc32(data: &[u8]) -> u32 {
     const CRC32_TABLE: [u32; 256] = {
         let mut table = [0u32; 256];
         let mut i = 0;
@@ -436,15 +439,29 @@ struct DurableInner {
 #[derive(Debug, Clone)]
 pub(crate) struct DurableLogStore {
     inner: Arc<Mutex<DurableInner>>,
+    /// Raw index of the last snapshot that is durable on disk, shared with
+    /// the [`SnapshotStore`](crate::snapshot::SnapshotStore). [`purge`]
+    /// refuses to exceed it — the Phase A4 safety rule that log entries may
+    /// only be discarded once a durable snapshot covers them.
+    ///
+    /// [`purge`]: RaftLogStorage::purge
+    snapshot_watermark: Arc<DurableSnapshotWatermark>,
 }
 
 impl DurableLogStore {
     /// Open (or create) the Raft log under `dir`, replaying any existing
     /// state from disk.
-    pub(crate) fn open(dir: &Path) -> io::Result<Self> {
+    ///
+    /// `snapshot_watermark` is the durable-snapshot index this store's
+    /// `purge` is allowed to reach (shared with the snapshot store that
+    /// advances it).
+    pub(crate) fn open(
+        dir: &Path,
+        snapshot_watermark: Arc<DurableSnapshotWatermark>,
+    ) -> io::Result<Self> {
         std::fs::create_dir_all(dir)?;
         let (file, image) = RaftLogFile::open(&dir.join(RAFT_LOG_FILE_NAME))?;
-        Ok(Self { inner: Arc::new(Mutex::new(DurableInner { file, image })) })
+        Ok(Self { inner: Arc::new(Mutex::new(DurableInner { file, image })), snapshot_watermark })
     }
 
     fn lock(&self) -> MutexGuard<'_, DurableInner> {
@@ -456,6 +473,13 @@ impl DurableLogStore {
     pub(crate) fn recovery_summary(&self) -> (bool, Option<u64>) {
         let inner = self.lock();
         (inner.image.has_state(), inner.image.last_log_id().map(|id| id.index))
+    }
+
+    /// Raw index of the purge watermark recovered from disk, if any. The
+    /// backend cross-checks it against the durable snapshot on startup: a
+    /// log purged beyond the snapshot is unrecoverable and must fail loudly.
+    pub(crate) fn last_purged_index(&self) -> Option<u64> {
+        self.lock().image.last_purged.map(|id| id.index)
     }
 
     /// Durably append one record and apply it to the in-memory image.
@@ -559,6 +583,25 @@ impl RaftLogStorage<TypeConfig> for DurableLogStore {
     }
 
     async fn purge(&mut self, log_id: LogId<u64>) -> Result<(), StorageError<u64>> {
+        // Phase A4 safety rule: never purge above the last *durable*
+        // snapshot. openraft's own purge policy respects its in-memory view
+        // of the snapshot, but this storage-level check is the final
+        // defense: the watermark only advances after the snapshot file is
+        // fsynced and renamed, so a purge acknowledged here can never
+        // outrun what would survive a crash. (When to purge — the policy —
+        // is PR 2 of #5198; this PR only enforces legality.)
+        let durable = self.snapshot_watermark.get();
+        if durable.is_none_or(|covered| log_id.index > covered) {
+            let e = io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "refusing to purge raft log through index {}: the durable snapshot covers \
+                     only {durable:?}, and purging beyond it would make state unrecoverable",
+                    log_id.index
+                ),
+            );
+            return Err(StorageError::IO { source: StorageIOError::write_logs(&e) });
+        }
         self.append_and_apply(LogRecord::Purge(log_id))
             .map_err(|e| StorageError::IO { source: StorageIOError::write_logs(&e) })
     }
@@ -574,6 +617,16 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    fn test_watermark() -> Arc<DurableSnapshotWatermark> {
+        Arc::new(DurableSnapshotWatermark::default())
+    }
+
+    /// Open a store with a fresh (empty) snapshot watermark — the state of
+    /// every node before its first durable snapshot.
+    fn open_store(dir: &TempDir) -> io::Result<DurableLogStore> {
+        DurableLogStore::open(dir.path(), test_watermark())
+    }
 
     fn entry(term: u64, index: u64, payload: &[u8]) -> Entry<TypeConfig> {
         Entry {
@@ -593,7 +646,7 @@ mod tests {
     #[test]
     fn fresh_store_is_empty() {
         let dir = TempDir::new().unwrap();
-        let store = DurableLogStore::open(dir.path()).unwrap();
+        let store = open_store(&dir).unwrap();
         assert_eq!(store.recovery_summary(), (false, None));
         assert!(entry_indices(&store).is_empty());
     }
@@ -602,7 +655,7 @@ mod tests {
     fn entries_survive_reopen() {
         let dir = TempDir::new().unwrap();
         {
-            let store = DurableLogStore::open(dir.path()).unwrap();
+            let store = open_store(&dir).unwrap();
             store
                 .append_entries(vec![
                     entry(1, 1, b"one"),
@@ -612,7 +665,7 @@ mod tests {
                 .unwrap();
         }
 
-        let store = DurableLogStore::open(dir.path()).unwrap();
+        let store = open_store(&dir).unwrap();
         assert_eq!(store.recovery_summary(), (true, Some(3)));
         assert_eq!(entry_indices(&store), vec![1, 2, 3]);
         let payload = match &store.lock().image.entries[&2].payload {
@@ -627,11 +680,11 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let vote = Vote::new(7, 1);
         {
-            let store = DurableLogStore::open(dir.path()).unwrap();
+            let store = open_store(&dir).unwrap();
             store.append_and_apply(LogRecord::Vote(vote)).unwrap();
         }
 
-        let store = DurableLogStore::open(dir.path()).unwrap();
+        let store = open_store(&dir).unwrap();
         assert_eq!(store.lock().image.vote, Some(vote));
         // A vote alone counts as prior state: recovery must not re-initialize.
         assert_eq!(store.recovery_summary(), (true, None));
@@ -642,12 +695,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let committed = Some(LogId::new(CommittedLeaderId::new(1, 1), 2));
         {
-            let store = DurableLogStore::open(dir.path()).unwrap();
+            let store = open_store(&dir).unwrap();
             store.append_entries(vec![entry(1, 1, b"a"), entry(1, 2, b"b")]).unwrap();
             store.append_and_apply(LogRecord::Committed(committed)).unwrap();
         }
 
-        let store = DurableLogStore::open(dir.path()).unwrap();
+        let store = open_store(&dir).unwrap();
         assert_eq!(store.lock().image.committed, committed);
     }
 
@@ -655,7 +708,7 @@ mod tests {
     fn truncate_survives_reopen() {
         let dir = TempDir::new().unwrap();
         {
-            let store = DurableLogStore::open(dir.path()).unwrap();
+            let store = open_store(&dir).unwrap();
             store.append_entries((1..=5).map(|i| entry(1, i, b"x")).collect()).unwrap();
             // Conflict rollback: drop entries >= 3...
             store.append_and_apply(LogRecord::Truncate(3)).unwrap();
@@ -663,7 +716,7 @@ mod tests {
             store.append_entries(vec![entry(2, 3, b"replacement")]).unwrap();
         }
 
-        let store = DurableLogStore::open(dir.path()).unwrap();
+        let store = open_store(&dir).unwrap();
         assert_eq!(entry_indices(&store), vec![1, 2, 3]);
         let replayed = store.lock().image.entries[&3].log_id;
         assert_eq!(replayed, LogId::new(CommittedLeaderId::new(2, 1), 3));
@@ -674,12 +727,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let purge_id = LogId::new(CommittedLeaderId::new(1, 1), 3);
         {
-            let store = DurableLogStore::open(dir.path()).unwrap();
+            let store = open_store(&dir).unwrap();
             store.append_entries((1..=5).map(|i| entry(1, i, b"x")).collect()).unwrap();
             store.append_and_apply(LogRecord::Purge(purge_id)).unwrap();
         }
 
-        let store = DurableLogStore::open(dir.path()).unwrap();
+        let store = open_store(&dir).unwrap();
         assert_eq!(entry_indices(&store), vec![4, 5]);
         assert_eq!(store.lock().image.last_purged, Some(purge_id));
         assert_eq!(store.recovery_summary(), (true, Some(5)));
@@ -690,21 +743,75 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let purge_id = LogId::new(CommittedLeaderId::new(1, 1), 2);
         {
-            let store = DurableLogStore::open(dir.path()).unwrap();
+            let store = open_store(&dir).unwrap();
             store.append_entries(vec![entry(1, 1, b"a"), entry(1, 2, b"b")]).unwrap();
             store.append_and_apply(LogRecord::Purge(purge_id)).unwrap();
         }
 
-        let store = DurableLogStore::open(dir.path()).unwrap();
+        let store = open_store(&dir).unwrap();
         assert!(entry_indices(&store).is_empty());
         assert_eq!(store.lock().image.last_log_id(), Some(purge_id));
+    }
+
+    // -----------------------------------------------------------------------
+    // Purge safety: never purge above the durable snapshot (Phase A4, PR 1)
+    // -----------------------------------------------------------------------
+
+    /// With no durable snapshot at all, every purge is illegal.
+    #[tokio::test]
+    async fn purge_without_durable_snapshot_is_rejected() {
+        let dir = TempDir::new().unwrap();
+        let mut store = open_store(&dir).unwrap();
+        store.append_entries((1..=5).map(|i| entry(1, i, b"x")).collect()).unwrap();
+
+        let err = RaftLogStorage::purge(&mut store, LogId::new(CommittedLeaderId::new(1, 1), 3))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("refusing to purge"), "unexpected error: {err}");
+
+        // The rejection wrote nothing: all entries survive a reopen.
+        drop(store);
+        let store = open_store(&dir).unwrap();
+        assert_eq!(entry_indices(&store), vec![1, 2, 3, 4, 5]);
+        assert_eq!(store.last_purged_index(), None);
+    }
+
+    /// Purging above the durable snapshot index is rejected; purging at or
+    /// below it succeeds and survives a reopen.
+    #[tokio::test]
+    async fn purge_is_clamped_to_the_durable_snapshot_index() {
+        let dir = TempDir::new().unwrap();
+        let watermark = test_watermark();
+        let mut store = DurableLogStore::open(dir.path(), Arc::clone(&watermark)).unwrap();
+        store.append_entries((1..=5).map(|i| entry(1, i, b"x")).collect()).unwrap();
+
+        // A durable snapshot covers entries up to index 3.
+        watermark.advance(3);
+
+        // Above the snapshot: rejected, nothing written.
+        let err = RaftLogStorage::purge(&mut store, LogId::new(CommittedLeaderId::new(1, 1), 4))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("durable snapshot covers only Some(3)"), "{err}");
+        assert_eq!(store.last_purged_index(), None);
+
+        // At the snapshot: legal.
+        RaftLogStorage::purge(&mut store, LogId::new(CommittedLeaderId::new(1, 1), 3))
+            .await
+            .unwrap();
+        assert_eq!(entry_indices(&store), vec![4, 5]);
+
+        drop(store);
+        let store = open_store(&dir).unwrap();
+        assert_eq!(entry_indices(&store), vec![4, 5]);
+        assert_eq!(store.last_purged_index(), Some(3));
     }
 
     #[test]
     fn torn_trailing_record_is_discarded() {
         let dir = TempDir::new().unwrap();
         {
-            let store = DurableLogStore::open(dir.path()).unwrap();
+            let store = open_store(&dir).unwrap();
             store
                 .append_entries(vec![
                     entry(1, 1, b"one"),
@@ -721,7 +828,7 @@ mod tests {
         file.set_len(len - 3).unwrap();
         drop(file);
 
-        let store = DurableLogStore::open(dir.path()).unwrap();
+        let store = open_store(&dir).unwrap();
         assert_eq!(entry_indices(&store), vec![1, 2]);
         assert_eq!(store.recovery_summary(), (true, Some(2)));
 
@@ -730,7 +837,7 @@ mod tests {
         store.append_entries(vec![entry(1, 3, b"retry")]).unwrap();
         drop(store);
 
-        let store = DurableLogStore::open(dir.path()).unwrap();
+        let store = open_store(&dir).unwrap();
         assert_eq!(entry_indices(&store), vec![1, 2, 3]);
     }
 
@@ -738,7 +845,7 @@ mod tests {
     fn torn_frame_header_is_discarded() {
         let dir = TempDir::new().unwrap();
         {
-            let store = DurableLogStore::open(dir.path()).unwrap();
+            let store = open_store(&dir).unwrap();
             store.append_entries(vec![entry(1, 1, b"one")]).unwrap();
         }
 
@@ -748,7 +855,7 @@ mod tests {
         file.write_all(&42u32.to_le_bytes()).unwrap();
         drop(file);
 
-        let store = DurableLogStore::open(dir.path()).unwrap();
+        let store = open_store(&dir).unwrap();
         assert_eq!(entry_indices(&store), vec![1]);
     }
 
@@ -763,7 +870,7 @@ mod tests {
     fn corrupt_checksum_truncates_the_tail() {
         let dir = TempDir::new().unwrap();
         {
-            let store = DurableLogStore::open(dir.path()).unwrap();
+            let store = open_store(&dir).unwrap();
             store.append_entries(vec![entry(1, 1, b"one"), entry(1, 2, b"two")]).unwrap();
         }
 
@@ -774,7 +881,7 @@ mod tests {
         buf[last] ^= 0xFF;
         std::fs::write(&path, &buf).unwrap();
 
-        let store = DurableLogStore::open(dir.path()).unwrap();
+        let store = open_store(&dir).unwrap();
         assert_eq!(entry_indices(&store), vec![1]);
     }
 
@@ -800,7 +907,7 @@ mod tests {
     fn mid_file_corruption_is_rejected_and_file_untouched() {
         let dir = TempDir::new().unwrap();
         {
-            let store = DurableLogStore::open(dir.path()).unwrap();
+            let store = open_store(&dir).unwrap();
             store.append_entries((1..=5).map(|i| entry(1, i, b"payload")).collect()).unwrap();
             store.append_and_apply(LogRecord::Vote(Vote::new(7, 1))).unwrap();
             store
@@ -819,14 +926,14 @@ mod tests {
         buf[frame2 + RECORD_FRAME_SIZE + 2] ^= 0xFF;
         std::fs::write(&path, &buf).unwrap();
 
-        let err = DurableLogStore::open(dir.path()).unwrap_err();
+        let err = open_store(&dir).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("mid-file corruption"), "unexpected error: {err}");
         // The file was left byte-for-byte untouched: nothing truncated.
         assert_eq!(std::fs::metadata(&path).unwrap().len(), len_before);
 
         // The refusal is stable: a second open attempt fails the same way.
-        let err = DurableLogStore::open(dir.path()).unwrap_err();
+        let err = open_store(&dir).unwrap_err();
         assert!(err.to_string().contains("mid-file corruption"), "unexpected error: {err}");
     }
 
@@ -841,7 +948,7 @@ mod tests {
         for corrupt_len in [u32::MAX, 1u32] {
             let dir = TempDir::new().unwrap();
             {
-                let store = DurableLogStore::open(dir.path()).unwrap();
+                let store = open_store(&dir).unwrap();
                 store.append_entries((1..=5).map(|i| entry(1, i, b"payload")).collect()).unwrap();
             }
 
@@ -852,7 +959,7 @@ mod tests {
             buf[frame2..frame2 + 4].copy_from_slice(&corrupt_len.to_le_bytes());
             std::fs::write(&path, &buf).unwrap();
 
-            let err = DurableLogStore::open(dir.path()).unwrap_err();
+            let err = open_store(&dir).unwrap_err();
             assert!(
                 err.to_string().contains("mid-file corruption"),
                 "len={corrupt_len}: unexpected error: {err}"
@@ -868,12 +975,12 @@ mod tests {
         // Creation crashed mid-header: fewer than 32 bytes, no records.
         std::fs::write(log_file_path(&dir), b"VRFT\x01").unwrap();
 
-        let store = DurableLogStore::open(dir.path()).unwrap();
+        let store = open_store(&dir).unwrap();
         assert_eq!(store.recovery_summary(), (false, None));
         store.append_entries(vec![entry(1, 1, b"one")]).unwrap();
         drop(store);
 
-        let store = DurableLogStore::open(dir.path()).unwrap();
+        let store = open_store(&dir).unwrap();
         assert_eq!(entry_indices(&store), vec![1]);
     }
 
@@ -883,7 +990,7 @@ mod tests {
         std::fs::create_dir_all(dir.path()).unwrap();
         std::fs::write(log_file_path(&dir), [b'X'; 64]).unwrap();
 
-        let err = DurableLogStore::open(dir.path()).unwrap_err();
+        let err = open_store(&dir).unwrap_err();
         assert!(err.to_string().contains("expected magic"), "unexpected error: {err}");
     }
 
@@ -897,7 +1004,7 @@ mod tests {
         buf.extend_from_slice(&[0u8; 24]);
         std::fs::write(log_file_path(&dir), &buf).unwrap();
 
-        let err = DurableLogStore::open(dir.path()).unwrap_err();
+        let err = open_store(&dir).unwrap_err();
         assert!(
             err.to_string().contains("unsupported raft log version"),
             "unexpected error: {err}"
