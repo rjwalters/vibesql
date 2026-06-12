@@ -27,6 +27,10 @@ mvcc_enabled = ["vibesql-storage/mvcc_enabled", "vibesql-executor/mvcc_enabled"]
 # log entries to a real database. Dependency direction is consensus →
 # executor → storage (never the reverse), per ADR-0004's layering rule.
 vibesql-ast = { version = "0.1.4", path = "../vibesql-ast" }
+# `catalog` for TableSchema in the freeze pass (#5377): the propose-side
+# evaluation context and the volatile-DEFAULT audit inspect column
+# defaults.
+vibesql-catalog = { version = "0.1.4", path = "../vibesql-catalog" }
 vibesql-executor = { version = "0.1.4", path = "../vibesql-executor" }
 vibesql-parser = { version = "0.1.4", path = "../vibesql-parser" }
 vibesql-storage = { version = "0.1.4", path = "../vibesql-storage" }

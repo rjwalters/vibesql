@@ -20,8 +20,11 @@
 
 use vibesql_types::SqlValue;
 
-use crate::backend::{ConsensusBackend, LogIndex, Result, Snapshot};
-use crate::state_machine::{ApplyOutcome, TxnEntry, VibesqlStateMachine};
+use crate::{
+    backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Snapshot},
+    freeze,
+    state_machine::{ApplyOutcome, TxnEntry, VibesqlStateMachine},
+};
 
 /// A database whose writes flow through a consensus backend.
 ///
@@ -74,6 +77,15 @@ where
     /// per committed transaction) and applied atomically with
     /// commit_ts = the entry's log index.
     ///
+    /// Non-deterministic expressions (`random()`, `CURRENT_TIMESTAMP`,
+    /// `datetime('now')`, …) are **frozen here, at propose time**
+    /// (#5377): each call site is evaluated once and the drawn values
+    /// travel in the entry, so every replica applies identical
+    /// statements. Statements whose nondeterminism cannot be frozen
+    /// (per-row `random()`, session-state functions, volatile calls in
+    /// subqueries/CTEs/`INSERT … SELECT`) fail the propose with a
+    /// [`ConsensusError::Backend`] error before consuming a log index.
+    ///
     /// Returns the entry's log index and its apply outcome. A rejected
     /// entry (failed statement, rolled back) is an `Ok` with
     /// [`ApplyOutcome::Rejected`] — the rejection consumed a log index
@@ -82,7 +94,14 @@ where
         &self,
         statements: &[&str],
     ) -> Result<(LogIndex, ApplyOutcome)> {
-        let entry = TxnEntry::batch(statements.iter().copied());
+        let mut frozen = Vec::with_capacity(statements.len());
+        for sql in statements {
+            frozen.push(freeze::freeze_statement(sql).map_err(|e| {
+                ConsensusError::Backend(format!("statement cannot be replicated: {e}"))
+            })?);
+        }
+        let entry =
+            TxnEntry::frozen_batch(statements.iter().map(|s| s.to_string()).collect(), frozen);
         let index = self.backend.propose(entry).await?;
         let outcome = self.catch_up_to(index).await?;
         Ok((index, outcome))
@@ -267,6 +286,125 @@ mod tests {
             target.propose(entry).await.unwrap();
         }
         target
+    }
+
+    /// The #5377 acceptance roundtrip: non-deterministic expressions
+    /// are frozen at propose time, the logged entry carries the drawn
+    /// values, the applied rows equal those values, and a second
+    /// machine replaying the identical log converges exactly —
+    /// including `random()`, `randomblob()`, `datetime('now')`, and
+    /// `CURRENT_TIMESTAMP` in both INSERT (exactly-once) and UPDATE
+    /// (per-row, clock) positions.
+    #[tokio::test]
+    async fn nondeterministic_sql_freezes_at_propose_and_converges() {
+        let db = replicated();
+        db.execute_replicated(
+            "CREATE TABLE t (id INTEGER PRIMARY KEY, r INTEGER, b BLOB, ts TIMESTAMP)",
+        )
+        .await
+        .unwrap();
+
+        let (index, outcome) = db
+            .execute_replicated(
+                "INSERT INTO t VALUES (1, random(), randomblob(8), CURRENT_TIMESTAMP)",
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+        db.execute_replicated("INSERT INTO t (id, ts) VALUES (2, datetime('now'))").await.unwrap();
+        let (_, outcome) = db
+            .execute_replicated("UPDATE t SET ts = CURRENT_TIMESTAMP WHERE id = 2")
+            .await
+            .unwrap();
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+
+        // The logged entry carries the proposer-drawn values, and the
+        // applied row equals them (the determinism proof: apply did not
+        // re-evaluate the volatile calls).
+        let entry = db.backend().read_committed(index).await.unwrap();
+        assert_eq!(entry.frozen.len(), 1);
+        assert_eq!(entry.frozen[0].len(), 3, "random, randomblob, CURRENT_TIMESTAMP");
+        let rows = db.query("SELECT r, b FROM t WHERE id = 1").unwrap();
+        assert_eq!(rows[0][0], SqlValue::from(entry.frozen[0][0].clone()));
+        assert_eq!(rows[0][1], SqlValue::from(entry.frozen[0][1].clone()));
+
+        // A second machine replaying the same log converges exactly.
+        let recovered = ReplicatedDb::new(clone_log(&db).await);
+        recovered.catch_up_to(db.backend().last_index()).await.unwrap();
+        assert_eq!(
+            recovered.query("SELECT id, r, b, ts FROM t ORDER BY id").unwrap(),
+            db.query("SELECT id, r, b, ts FROM t ORDER BY id").unwrap(),
+            "replicas must converge on identical rows despite non-deterministic SQL"
+        );
+
+        // ... and replaying the already-applied log again changes nothing
+        // (idempotence with frozen entries).
+        recovered.catch_up_to(db.backend().last_index()).await.unwrap();
+        assert_eq!(
+            recovered.query("SELECT id, r, b, ts FROM t ORDER BY id").unwrap(),
+            db.query("SELECT id, r, b, ts FROM t ORDER BY id").unwrap()
+        );
+    }
+
+    /// Statements whose nondeterminism cannot be frozen fail at propose
+    /// time, before consuming a log index.
+    #[tokio::test]
+    async fn unfreezable_nondeterminism_is_rejected_at_propose() {
+        let db = replicated();
+        seed_users(&db).await;
+        for sql in [
+            // Per-row volatile: freezing would change semantics.
+            "UPDATE users SET name = random()",
+            "DELETE FROM users WHERE random() % 2 = 0",
+            // Session state is not replicated state.
+            "INSERT INTO users VALUES (1, last_insert_rowid())",
+            // Data-dependent evaluation count.
+            "INSERT INTO users SELECT id + 1, random() FROM users",
+        ] {
+            let err = db.execute_replicated(sql).await.unwrap_err();
+            assert!(
+                matches!(err, ConsensusError::Backend(_)),
+                "{sql} must fail at propose, got: {err:?}"
+            );
+        }
+        assert_eq!(db.backend().last_index(), 1, "no log index may be consumed");
+    }
+
+    /// A rejected entry (constraint violation) rejects identically on a
+    /// second machine replaying the log: rejection is part of the
+    /// deterministic history.
+    #[tokio::test]
+    async fn rejected_entries_replay_identically_on_a_second_machine() {
+        let db = replicated();
+        seed_users(&db).await;
+        let mut outcomes = Vec::new();
+        for sql in [
+            "INSERT INTO users VALUES (1, 'alice')",
+            "INSERT INTO users VALUES (1, 'dupe')", // PK violation: rejected
+            "INSERT INTO users VALUES (2, 'bob')",
+        ] {
+            let (_, outcome) = db.execute_replicated(sql).await.unwrap();
+            outcomes.push(outcome);
+        }
+        assert!(matches!(outcomes[1], ApplyOutcome::Rejected { .. }));
+
+        let backend = clone_log(&db).await;
+        let machine = VibesqlStateMachine::new();
+        for idx in 1..=backend.last_index() {
+            let entry = backend.read_committed(idx).await.unwrap();
+            let outcome = machine.apply(idx, &entry).unwrap();
+            if idx > 1 {
+                assert_eq!(
+                    outcome,
+                    outcomes[(idx - 2) as usize],
+                    "entry {idx} must produce the same outcome on the second machine"
+                );
+            }
+        }
+        assert_eq!(
+            machine.query("SELECT name FROM users ORDER BY id").unwrap(),
+            db.query("SELECT name FROM users ORDER BY id").unwrap()
+        );
     }
 
     /// Replaying an already-applied prefix is harmless (idempotence at

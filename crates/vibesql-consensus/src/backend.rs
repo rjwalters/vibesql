@@ -54,6 +54,18 @@ pub enum ConsensusError {
     /// The cluster configuration is invalid or could not be loaded.
     #[error("cluster configuration error: {0}")]
     Config(String),
+    /// Applying a committed entry failed for a reason that may be local
+    /// to this node — resource exhaustion, a storage failure, or a
+    /// frozen-entry mismatch suggesting proposer/applier version skew
+    /// (#5377). The state machine did **not** consume the entry's index.
+    ///
+    /// Unlike a deterministic statement failure (which every replica
+    /// records identically as a rejected entry), this class of failure
+    /// may not reproduce on other replicas: recording it as a rejection
+    /// would silently diverge the cluster. The node must treat it as
+    /// fatal — halt and recover via snapshot install + log replay.
+    #[error("fatal apply failure (halt this node and resync; do not record a rejection): {0}")]
+    FatalApply(String),
     /// Catch-all for backend-internal failures.
     #[error("consensus backend error: {0}")]
     Backend(String),

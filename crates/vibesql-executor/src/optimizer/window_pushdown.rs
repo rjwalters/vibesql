@@ -323,31 +323,13 @@ impl PushContext<'_> {
     }
 }
 
-/// Reject functions that are (or may be) non-deterministic. Mirrors the
-/// blacklist used by `ExpressionHasher`, extended with SQLite date/time
-/// functions (non-deterministic when invoked with 'now') and statement
-/// counters.
+/// Reject functions that are (or may be) non-deterministic. The
+/// classification is centralized in [`vibesql_ast::volatility`] (also
+/// used by the replication freeze pass in `vibesql-consensus`); push-down
+/// uses the coarse union — any possibly-volatile function blocks the
+/// rewrite.
 fn is_volatile_function(canonical_name: &str) -> bool {
-    matches!(
-        canonical_name,
-        "rand"
-            | "random"
-            | "randomblob"
-            | "now"
-            | "current_date"
-            | "current_time"
-            | "current_timestamp"
-            | "date"
-            | "time"
-            | "datetime"
-            | "julianday"
-            | "unixepoch"
-            | "strftime"
-            | "timediff"
-            | "changes"
-            | "total_changes"
-            | "last_insert_rowid"
-    )
+    vibesql_ast::volatility::is_volatile_function(canonical_name)
 }
 
 /// Recursively rewrite a conjunct for pushing: outer column references are
