@@ -35,9 +35,14 @@
 //! Records are a [`LogRecord`] each: appends, vote saves, commit-point saves,
 //! truncates (conflict rollback), and purges are all **logical records in one
 //! ordered stream**. Recovery replays the stream to rebuild the in-memory
-//! index; `truncate` and `purge` therefore never rewrite the file. Physical
-//! space reclamation (compaction) is deferred to the snapshot/purge-policy
-//! work in Phase A4 (#5198).
+//! index; `truncate` never rewrites the file. `purge` (Raft Phase A4, PR 2 of
+//! #5198) **compacts**: it rewrites the file as header + the post-purge image
+//! (vote, commit point, purge watermark, surviving entries) via the same
+//! tmp → fsync → rename → dir-fsync discipline as the snapshot store, so
+//! purging actually reclaims the disk space the snapshot made redundant. A
+//! crash mid-compaction leaves either the old file (the purge was never
+//! acknowledged) or the new one — never a torn final file; a leftover
+//! `raft.log.tmp` is silently removed on the next open.
 //!
 //! ## Durability contract
 //!
@@ -89,7 +94,7 @@ use std::fmt::Debug;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::ops::RangeBounds;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use openraft::storage::{LogFlushed, RaftLogStorage};
@@ -174,7 +179,7 @@ enum LogRecord {
 }
 
 /// In-memory image of the log, rebuilt from disk on open.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct RaftLogImage {
     vote: Option<Vote<u64>>,
     committed: Option<LogId<u64>>,
@@ -233,6 +238,12 @@ impl RaftLogFile {
     /// somewhere after it) is an error and leaves the file untouched — see
     /// the module docs for the rationale (etcd's tail-only repair rule).
     fn open(path: &Path) -> io::Result<(Self, RaftLogImage)> {
+        // A leftover compaction tmp file is a crash mid-`purge`: it was never
+        // renamed over the final name, so the purge was never acknowledged
+        // and the original `raft.log` is still authoritative. Removing it is
+        // safe (same rule as the snapshot store's `.tmp` cleanup).
+        let _ = std::fs::remove_file(compaction_tmp_path(path));
+
         let mut file =
             OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
 
@@ -279,6 +290,48 @@ impl RaftLogFile {
         }
 
         Ok((Self { file }, image))
+    }
+
+    /// Rewrite the log at `path` as `image`, compacted: header + the minimal
+    /// record stream that replays back to exactly `image` (vote, commit
+    /// point, purge watermark, then the surviving entries). Written to a tmp
+    /// file, fsynced, renamed over the final name, directory fsynced — a
+    /// crash anywhere leaves either the old complete file or the new one,
+    /// never a torn final file.
+    ///
+    /// Returns the (post-rename) handle to the new file, positioned at the
+    /// end for appends: the tmp handle stays valid across the rename because
+    /// it names the same inode.
+    fn rewrite(path: &Path, image: &RaftLogImage) -> io::Result<Self> {
+        let tmp_path = compaction_tmp_path(path);
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp_path)?;
+        write_header(&mut file)?;
+
+        let mut records = Vec::with_capacity(3 + image.entries.len());
+        if let Some(vote) = image.vote {
+            records.push(LogRecord::Vote(vote));
+        }
+        if image.committed.is_some() {
+            records.push(LogRecord::Committed(image.committed));
+        }
+        // The purge watermark precedes the surviving entries so replay
+        // cannot drop them: `apply(Purge)` only removes indices <= the
+        // watermark, and every surviving entry is above it.
+        if let Some(purged) = image.last_purged {
+            records.push(LogRecord::Purge(purged));
+        }
+        records.extend(image.entries.values().cloned().map(LogRecord::Append));
+
+        let mut rewritten = Self { file };
+        rewritten.append_records(&records)?;
+        std::fs::rename(&tmp_path, path)?;
+        sync_parent_dir(path)?;
+        Ok(rewritten)
     }
 
     /// Frame, write, and fsync a batch of records (single fsync per batch).
@@ -403,6 +456,14 @@ fn scan_for_valid_frame(buf: &[u8], from: usize) -> Option<usize> {
     None
 }
 
+/// Sibling tmp path a compaction rewrite goes through before its rename
+/// (`raft.log` → `raft.log.tmp`).
+fn compaction_tmp_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".tmp");
+    path.with_file_name(name)
+}
+
 /// fsync the directory containing `path` so the file's creation itself is
 /// durable (POSIX requires syncing the directory entry separately).
 fn sync_parent_dir(path: &Path) -> io::Result<()> {
@@ -425,6 +486,8 @@ fn current_timestamp_ms() -> u64 {
 struct DurableInner {
     file: RaftLogFile,
     image: RaftLogImage,
+    /// Path of `raft.log`, kept for compaction rewrites on purge.
+    path: PathBuf,
 }
 
 /// File-backed [`RaftLogStorage`] for the durable
@@ -441,8 +504,9 @@ pub(crate) struct DurableLogStore {
     inner: Arc<Mutex<DurableInner>>,
     /// Raw index of the last snapshot that is durable on disk, shared with
     /// the [`SnapshotStore`](crate::snapshot::SnapshotStore). [`purge`]
-    /// refuses to exceed it — the Phase A4 safety rule that log entries may
-    /// only be discarded once a durable snapshot covers them.
+    /// never durably exceeds it (uncovered purges are deferred) — the Phase
+    /// A4 safety rule that log entries may only be discarded once a durable
+    /// snapshot covers them.
     ///
     /// [`purge`]: RaftLogStorage::purge
     snapshot_watermark: Arc<DurableSnapshotWatermark>,
@@ -460,8 +524,12 @@ impl DurableLogStore {
         snapshot_watermark: Arc<DurableSnapshotWatermark>,
     ) -> io::Result<Self> {
         std::fs::create_dir_all(dir)?;
-        let (file, image) = RaftLogFile::open(&dir.join(RAFT_LOG_FILE_NAME))?;
-        Ok(Self { inner: Arc::new(Mutex::new(DurableInner { file, image })), snapshot_watermark })
+        let path = dir.join(RAFT_LOG_FILE_NAME);
+        let (file, image) = RaftLogFile::open(&path)?;
+        Ok(Self {
+            inner: Arc::new(Mutex::new(DurableInner { file, image, path })),
+            snapshot_watermark,
+        })
     }
 
     fn lock(&self) -> MutexGuard<'_, DurableInner> {
@@ -502,6 +570,55 @@ impl DurableLogStore {
         for record in records {
             inner.image.apply(record);
         }
+        Ok(())
+    }
+
+    /// Durably purge the log through `log_id`, compacting the file.
+    ///
+    /// This is the body of [`RaftLogStorage::purge`], also called by the
+    /// state machine right after persisting an installed snapshot and by
+    /// the backend's recovery repair for an interrupted install (Raft Phase
+    /// A4, PR 2 of #5198 — see `DurableStorage::open`). Two rules:
+    ///
+    /// 1. **Coverage** (Phase A4 safety): a purge above the last *durable*
+    ///    snapshot is **deferred** — nothing is written and the call
+    ///    succeeds as a no-op. The on-disk invariant is absolute: a durable
+    ///    purge record never exceeds a durable snapshot (recording one
+    ///    would make the covered entries unrecoverable across a crash).
+    ///    The no-op (rather than an error, as in PR 1) is required by
+    ///    openraft's snapshot-install path: the engine's `PurgeLog` command
+    ///    carries no completion condition, so on a follower it reaches this
+    ///    store *before* the state-machine worker has persisted the
+    ///    installed snapshot — erroring here would (and did, in testing)
+    ///    fatally kill the follower's Raft core mid-install. The deferred
+    ///    purge is written durably moments later by
+    ///    `install_snapshot` (once the snapshot file is fsynced, before the
+    ///    install is acknowledged), or by the recovery repair if the node
+    ///    crashes in between. The watermark only advances after the
+    ///    snapshot file is fsynced and renamed, so a purge *recorded* here
+    ///    can never outrun what would survive a crash.
+    /// 2. **Monotonicity**: a purge at or below the existing watermark is a
+    ///    no-op success (never regress `last_purged`, never rewrite for
+    ///    nothing). openraft's engine already guards this; the storage-level
+    ///    guard makes the install/repair paths idempotent too.
+    ///
+    /// The compaction itself is atomic (tmp → fsync → rename → dir-fsync),
+    /// and the in-memory image is only swapped once the rewrite is durable.
+    pub(crate) fn purge_compacted(&self, log_id: LogId<u64>) -> io::Result<()> {
+        let durable = self.snapshot_watermark.get();
+        if durable.is_none_or(|covered| log_id.index > covered) {
+            return Ok(());
+        }
+
+        let mut inner = self.lock();
+        if inner.image.last_purged.is_some_and(|purged| log_id.index <= purged.index) {
+            return Ok(());
+        }
+        let mut image = inner.image.clone();
+        image.apply(LogRecord::Purge(log_id));
+        let file = RaftLogFile::rewrite(&inner.path, &image)?;
+        inner.image = image;
+        inner.file = file;
         Ok(())
     }
 }
@@ -583,26 +700,12 @@ impl RaftLogStorage<TypeConfig> for DurableLogStore {
     }
 
     async fn purge(&mut self, log_id: LogId<u64>) -> Result<(), StorageError<u64>> {
-        // Phase A4 safety rule: never purge above the last *durable*
-        // snapshot. openraft's own purge policy respects its in-memory view
-        // of the snapshot, but this storage-level check is the final
-        // defense: the watermark only advances after the snapshot file is
-        // fsynced and renamed, so a purge acknowledged here can never
-        // outrun what would survive a crash. (When to purge — the policy —
-        // is PR 2 of #5198; this PR only enforces legality.)
-        let durable = self.snapshot_watermark.get();
-        if durable.is_none_or(|covered| log_id.index > covered) {
-            let e = io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "refusing to purge raft log through index {}: the durable snapshot covers \
-                     only {durable:?}, and purging beyond it would make state unrecoverable",
-                    log_id.index
-                ),
-            );
-            return Err(StorageError::IO { source: StorageIOError::write_logs(&e) });
-        }
-        self.append_and_apply(LogRecord::Purge(log_id))
+        // Coverage (never durably above the durable snapshot — uncovered
+        // purges are deferred), monotonicity, and compaction all live in
+        // `purge_compacted` — see its docs. The *policy* deciding when
+        // openraft calls this is configured through `RaftTuning` (Phase A4,
+        // PR 2 of #5198).
+        self.purge_compacted(log_id)
             .map_err(|e| StorageError::IO { source: StorageIOError::write_logs(&e) })
     }
 }
@@ -754,30 +857,37 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Purge safety: never purge above the durable snapshot (Phase A4, PR 1)
+    // Purge safety: never durably purge above the durable snapshot
+    // (Phase A4 — PR 1 introduced the gate, PR 2 made the uncovered case a
+    // deferral instead of a fatal error, because openraft's install path
+    // purges before the state machine has persisted the snapshot)
     // -----------------------------------------------------------------------
 
-    /// With no durable snapshot at all, every purge is illegal.
+    /// With no durable snapshot at all, a purge is deferred: it succeeds
+    /// (openraft must not be killed mid-install) but writes **nothing** —
+    /// every entry survives a reopen and no purge watermark is recorded.
     #[tokio::test]
-    async fn purge_without_durable_snapshot_is_rejected() {
+    async fn purge_without_durable_snapshot_is_deferred_not_recorded() {
         let dir = TempDir::new().unwrap();
         let mut store = open_store(&dir).unwrap();
         store.append_entries((1..=5).map(|i| entry(1, i, b"x")).collect()).unwrap();
 
-        let err = RaftLogStorage::purge(&mut store, LogId::new(CommittedLeaderId::new(1, 1), 3))
+        RaftLogStorage::purge(&mut store, LogId::new(CommittedLeaderId::new(1, 1), 3))
             .await
-            .unwrap_err();
-        assert!(err.to_string().contains("refusing to purge"), "unexpected error: {err}");
+            .unwrap();
+        assert_eq!(store.last_purged_index(), None, "uncovered purge must not be recorded");
+        assert_eq!(entry_indices(&store), vec![1, 2, 3, 4, 5]);
 
-        // The rejection wrote nothing: all entries survive a reopen.
+        // The deferral wrote nothing: all entries survive a reopen.
         drop(store);
         let store = open_store(&dir).unwrap();
         assert_eq!(entry_indices(&store), vec![1, 2, 3, 4, 5]);
         assert_eq!(store.last_purged_index(), None);
     }
 
-    /// Purging above the durable snapshot index is rejected; purging at or
-    /// below it succeeds and survives a reopen.
+    /// Purging above the durable snapshot index is deferred (nothing
+    /// recorded); purging at or below it is recorded durably and survives a
+    /// reopen.
     #[tokio::test]
     async fn purge_is_clamped_to_the_durable_snapshot_index() {
         let dir = TempDir::new().unwrap();
@@ -788,14 +898,14 @@ mod tests {
         // A durable snapshot covers entries up to index 3.
         watermark.advance(3);
 
-        // Above the snapshot: rejected, nothing written.
-        let err = RaftLogStorage::purge(&mut store, LogId::new(CommittedLeaderId::new(1, 1), 4))
+        // Above the snapshot: deferred, nothing written.
+        RaftLogStorage::purge(&mut store, LogId::new(CommittedLeaderId::new(1, 1), 4))
             .await
-            .unwrap_err();
-        assert!(err.to_string().contains("durable snapshot covers only Some(3)"), "{err}");
+            .unwrap();
         assert_eq!(store.last_purged_index(), None);
+        assert_eq!(entry_indices(&store), vec![1, 2, 3, 4, 5]);
 
-        // At the snapshot: legal.
+        // At the snapshot: recorded.
         RaftLogStorage::purge(&mut store, LogId::new(CommittedLeaderId::new(1, 1), 3))
             .await
             .unwrap();
@@ -805,6 +915,98 @@ mod tests {
         let store = open_store(&dir).unwrap();
         assert_eq!(entry_indices(&store), vec![4, 5]);
         assert_eq!(store.last_purged_index(), Some(3));
+    }
+
+    /// Purging compacts the file: the purged prefix's bytes are physically
+    /// reclaimed, and everything that must survive (vote, commit point,
+    /// purge watermark, surviving entries) replays back identically on
+    /// reopen. (Raft Phase A4, PR 2: disk reclamation after purge.)
+    #[tokio::test]
+    async fn purge_compacts_the_log_file_and_reclaims_disk() {
+        let dir = TempDir::new().unwrap();
+        let watermark = test_watermark();
+        let mut store = DurableLogStore::open(dir.path(), Arc::clone(&watermark)).unwrap();
+
+        let vote = Vote::new(3, 1);
+        store.append_and_apply(LogRecord::Vote(vote)).unwrap();
+        let payload = vec![b'x'; 1024];
+        store.append_entries((1..=20).map(|i| entry(3, i, &payload)).collect()).unwrap();
+        let committed = Some(LogId::new(CommittedLeaderId::new(3, 1), 20));
+        store.append_and_apply(LogRecord::Committed(committed)).unwrap();
+
+        let size_before = std::fs::metadata(log_file_path(&dir)).unwrap().len();
+        assert!(size_before > 20 * 1024, "20 KiB of payload should be on disk");
+
+        watermark.advance(18);
+        let purge_id = LogId::new(CommittedLeaderId::new(3, 1), 18);
+        RaftLogStorage::purge(&mut store, purge_id).await.unwrap();
+
+        // 18 of the 20 KiB entries are gone from disk.
+        let size_after = std::fs::metadata(log_file_path(&dir)).unwrap().len();
+        assert!(
+            size_after < size_before / 4,
+            "purge should reclaim disk: {size_before} -> {size_after} bytes"
+        );
+        assert!(!compaction_tmp_path(&log_file_path(&dir)).exists(), "tmp renamed away");
+
+        // The compacted file replays to the same image: vote, commit point,
+        // watermark, and the surviving tail all intact.
+        drop(store);
+        let store = open_store(&dir).unwrap();
+        assert_eq!(entry_indices(&store), vec![19, 20]);
+        assert_eq!(store.lock().image.vote, Some(vote));
+        assert_eq!(store.lock().image.committed, committed);
+        assert_eq!(store.lock().image.last_purged, Some(purge_id));
+
+        // And the compacted file accepts further appends across a reopen.
+        store.append_entries(vec![entry(3, 21, b"after-compaction")]).unwrap();
+        drop(store);
+        let store = open_store(&dir).unwrap();
+        assert_eq!(entry_indices(&store), vec![19, 20, 21]);
+    }
+
+    /// A purge at or below the existing watermark is a no-op success: the
+    /// watermark never regresses (openraft's engine guards this too; the
+    /// storage guard also makes the recovery repair idempotent).
+    #[tokio::test]
+    async fn purge_is_monotone_and_idempotent() {
+        let dir = TempDir::new().unwrap();
+        let watermark = test_watermark();
+        let mut store = DurableLogStore::open(dir.path(), Arc::clone(&watermark)).unwrap();
+        store.append_entries((1..=5).map(|i| entry(1, i, b"x")).collect()).unwrap();
+        watermark.advance(4);
+
+        let at = |index| LogId::new(CommittedLeaderId::new(1, 1), index);
+        RaftLogStorage::purge(&mut store, at(4)).await.unwrap();
+        assert_eq!(store.last_purged_index(), Some(4));
+
+        // Same index again, and a lower one: both succeed without regressing.
+        RaftLogStorage::purge(&mut store, at(4)).await.unwrap();
+        RaftLogStorage::purge(&mut store, at(2)).await.unwrap();
+        assert_eq!(store.last_purged_index(), Some(4));
+        assert_eq!(entry_indices(&store), vec![5]);
+
+        drop(store);
+        let store = open_store(&dir).unwrap();
+        assert_eq!(store.last_purged_index(), Some(4));
+        assert_eq!(entry_indices(&store), vec![5]);
+    }
+
+    /// A crash mid-compaction leaves a `raft.log.tmp`; the original file is
+    /// still authoritative and the leftover is removed silently on reopen.
+    #[test]
+    fn compaction_tmp_leftover_is_removed_silently() {
+        let dir = TempDir::new().unwrap();
+        {
+            let store = open_store(&dir).unwrap();
+            store.append_entries(vec![entry(1, 1, b"keep")]).unwrap();
+        }
+        let tmp = compaction_tmp_path(&log_file_path(&dir));
+        std::fs::write(&tmp, b"torn compaction garbage").unwrap();
+
+        let store = open_store(&dir).unwrap();
+        assert_eq!(entry_indices(&store), vec![1]);
+        assert!(!tmp.exists(), "crash leftover must be cleaned up");
     }
 
     #[test]

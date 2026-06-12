@@ -217,6 +217,34 @@ impl TestCluster {
         .await;
     }
 
+    /// Propose on whoever currently leads, re-resolving leadership if a
+    /// spurious election deposed the previous leader mid-call.
+    ///
+    /// The durable nodes fsync inline on their core task (see
+    /// `crate::durable`), so when the whole test suite runs in parallel an
+    /// fsync stall can exceed the 200ms election timeout and trigger a
+    /// re-election a cached leader id would not survive. Committed results
+    /// are identical either way — only the door the write goes through
+    /// moves — so tests that don't specifically assert *which* node leads
+    /// propose through this helper. Bounded like every other wait.
+    async fn propose_on_leader(&self, value: &str) -> LogIndex {
+        let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+        loop {
+            let leader = self.wait_for_leader().await;
+            match self.node(leader).propose(value.to_string()).await {
+                Ok(idx) => return idx,
+                Err(ConsensusError::NotLeader { .. }) => {
+                    assert!(
+                        tokio::time::Instant::now() < deadline,
+                        "timed out after {WAIT_TIMEOUT:?} proposing {value:?}: leadership \
+                         never settled"
+                    );
+                }
+                Err(other) => panic!("propose of {value:?} failed: {other:?}"),
+            }
+        }
+    }
+
     /// Poll `probe` until it yields a value, panicking after
     /// [`WAIT_TIMEOUT`]. The single bounded-wait primitive every
     /// cluster-level synchronization goes through.
@@ -372,8 +400,12 @@ async fn durable_node_recovers_from_disk_and_rejoins() {
     let mut cluster = TestCluster::new_durable(3).await;
     let leader = cluster.wait_for_leader().await;
 
+    // Proposes go through `propose_on_leader`: with inline fsyncs on every
+    // node, parallel-suite disk stalls can trigger spurious re-elections
+    // this test does not care about (it asserts durability + catch-up, not
+    // leadership stability).
     for i in 1..=3u64 {
-        let idx = cluster.node(leader).propose(format!("entry-{i}")).await.unwrap();
+        let idx = cluster.propose_on_leader(&format!("entry-{i}")).await;
         assert_eq!(idx, i);
     }
     let follower = follower_of(&cluster, leader);
@@ -382,7 +414,7 @@ async fn durable_node_recovers_from_disk_and_rejoins() {
     cluster.kill(follower).await;
 
     for i in 4..=5u64 {
-        let idx = cluster.node(leader).propose(format!("entry-{i}")).await.unwrap();
+        let idx = cluster.propose_on_leader(&format!("entry-{i}")).await;
         assert_eq!(idx, i);
     }
 

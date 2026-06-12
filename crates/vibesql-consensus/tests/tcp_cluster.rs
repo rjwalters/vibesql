@@ -6,7 +6,9 @@
 //! each node persisting its Raft log in its own tempdir, and exercises the
 //! A3 acceptance scenarios end-to-end: election, replication, leader kill →
 //! re-election, restart → rebind + catch-up, minority partition, and
-//! garbage on the wire.
+//! garbage on the wire — plus the A4 PR 2 scenarios (#5198): policy-driven
+//! snapshot + purge, lagging-follower rejoin via chunked snapshot install,
+//! and post-install restart liveness.
 //!
 //! ## Port strategy
 //!
@@ -45,7 +47,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 
 use vibesql_consensus::{
-    ClusterConfig, ConsensusBackend, ConsensusError, LogIndex, OpenraftBackend, Role,
+    ClusterConfig, ConsensusBackend, ConsensusError, LogIndex, OpenraftBackend, RaftTuning, Role,
 };
 
 /// Upper bound for any single cluster-level wait (election, catch-up).
@@ -173,21 +175,29 @@ struct TcpTestCluster {
     /// Directed-edge proxies; empty unless built with
     /// [`boot_partitionable`](Self::boot_partitionable).
     proxies: BTreeMap<(u64, u64), Proxy>,
+    /// Snapshot/retention tuning every node (and every restore) runs with.
+    tuning: RaftTuning,
 }
 
 impl TcpTestCluster {
     /// Boot `n` voters (ids `1..=n`) dialing each other directly.
     async fn boot(n: u64) -> Self {
-        Self::build(n, false).await
+        Self::build(n, false, RaftTuning::default()).await
+    }
+
+    /// Like [`boot`](Self::boot), with explicit snapshot/retention tuning
+    /// (Raft Phase A4, PR 2: snapshot-transfer and purge-policy scenarios).
+    async fn boot_tuned(n: u64, tuning: RaftTuning) -> Self {
+        Self::build(n, false, tuning).await
     }
 
     /// Like [`boot`](Self::boot), but every directed edge runs through a
     /// severable [`Proxy`], enabling [`partition`](Self::partition).
     async fn boot_partitionable(n: u64) -> Self {
-        Self::build(n, true).await
+        Self::build(n, true, RaftTuning::default()).await
     }
 
-    async fn build(n: u64, with_proxies: bool) -> Self {
+    async fn build(n: u64, with_proxies: bool, tuning: RaftTuning) -> Self {
         let addrs = free_localhost_addrs(n);
 
         let mut proxies = BTreeMap::new();
@@ -215,9 +225,14 @@ impl TcpTestCluster {
             });
             let config = ClusterConfig::new(view).expect("valid cluster config");
             let dir = TempDir::new().expect("create node data directory");
-            let backend = OpenraftBackend::join_tcp_cluster_with_data_dir(id, &config, dir.path())
-                .await
-                .expect("boot tcp cluster node");
+            let backend = OpenraftBackend::join_tcp_cluster_with_data_dir_tuned(
+                id,
+                &config,
+                dir.path(),
+                tuning,
+            )
+            .await
+            .expect("boot tcp cluster node");
             nodes.insert(
                 id,
                 TestNode {
@@ -229,7 +244,7 @@ impl TcpTestCluster {
             );
         }
 
-        Self { nodes, proxies }
+        Self { nodes, proxies, tuning }
     }
 
     /// The backend of a live node. Panics if `id` is killed or unknown.
@@ -268,13 +283,19 @@ impl TcpTestCluster {
     /// address. Bind is retried briefly because the killed node's listener
     /// task is aborted asynchronously by the runtime.
     async fn restore(&mut self, id: u64) {
+        let tuning = self.tuning;
         let node = self.nodes.get_mut(&id).expect("unknown node");
         assert!(node.backend.is_none(), "node {id} is not killed");
 
         let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
         let backend = loop {
-            match OpenraftBackend::join_tcp_cluster_with_data_dir(id, &node.config, node.dir.path())
-                .await
+            match OpenraftBackend::join_tcp_cluster_with_data_dir_tuned(
+                id,
+                &node.config,
+                node.dir.path(),
+                tuning,
+            )
+            .await
             {
                 Ok(backend) => break backend,
                 Err(e) => {
@@ -586,4 +607,154 @@ async fn garbage_frames_drop_the_connection_without_disrupting_the_cluster() {
         cluster.wait_for_apply(id, idx2).await;
         assert_eq!(cluster.node(id).read_committed(idx2).await.unwrap(), "after-garbage");
     }
+}
+
+// ---------------------------------------------------------------------------
+// A4 acceptance scenarios (snapshot transfer + purge policy, PR 2 of #5198)
+// ---------------------------------------------------------------------------
+
+/// Tuning that makes the A4 scenarios cheap to trigger: snapshot every 8
+/// log entries, purge everything snapshotted (no catch-up tail) — so a
+/// follower that misses more than a handful of writes can only be healed by
+/// snapshot transfer, never by log replay.
+fn aggressive_purge_tuning() -> RaftTuning {
+    RaftTuning { snapshot_after_entries: 8, keep_in_log: 0, ..RaftTuning::default() }
+}
+
+/// Drive the lagging-follower-rejoin-via-snapshot flow and return the
+/// converged cluster:
+///
+/// 1. 3 voters; a follower applies the first 3 entries and is killed.
+/// 2. The survivors commit `entries` total writes of `payload_bytes` each;
+///    the policy snapshots and purges the leader's log **past** everything
+///    the dead follower ever held (its log ended around raw index 5; we
+///    wait for the purge watermark to clear raw index 10).
+/// 3. The follower restores. Its gap is purged on the leader, so log
+///    replay cannot heal it — catch-up must go through openraft's chunked
+///    snapshot install over the TCP `InstallSnapshot` leg.
+/// 4. The follower converges on the full history, byte-identical.
+async fn rejoin_lagging_follower_via_snapshot(
+    tuning: RaftTuning,
+    entries: u64,
+    payload_bytes: usize,
+    convergence_timeout: Duration,
+) -> (TcpTestCluster, u64, u64) {
+    let value = {
+        let payload = "x".repeat(payload_bytes);
+        move |i: u64| format!("entry-{i}-{payload}")
+    };
+
+    let mut cluster = TcpTestCluster::boot_tuned(3, tuning).await;
+    let leader = cluster.wait_for_leader().await;
+
+    for i in 1..=3u64 {
+        cluster.node(leader).propose(value(i)).await.unwrap();
+    }
+    let follower = follower_of(&cluster, leader);
+    cluster.wait_for_apply(follower, 3).await;
+    cluster.kill(follower).await;
+
+    for i in 4..=entries {
+        cluster.node(leader).propose(value(i)).await.unwrap();
+    }
+    cluster
+        .wait_until("the leader's policy purge to pass the dead follower's position", || {
+            (cluster.node(leader).purged_log_index() >= Some(10)).then_some(())
+        })
+        .await;
+
+    cluster.restore(follower).await;
+    // Bounded wait with a scenario-specific deadline (the stress variant
+    // moves a lot more data than WAIT_TIMEOUT is sized for).
+    let deadline = tokio::time::Instant::now() + convergence_timeout;
+    while cluster.node(follower).last_index() < entries {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "follower did not converge to {entries} entries within {convergence_timeout:?} \
+             (at {})",
+            cluster.node(follower).last_index()
+        );
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+
+    for i in 1..=entries {
+        assert_eq!(
+            cluster.node(follower).read_committed(i).await.unwrap(),
+            value(i),
+            "rejoined follower diverged at index {i}"
+        );
+    }
+    // Supporting evidence that the heal was a snapshot install: the
+    // follower now knows a snapshot covering the purged prefix it could
+    // never have replayed.
+    assert!(
+        cluster.node(follower).snapshot_log_index() >= Some(10),
+        "rejoined follower should hold a snapshot covering the purged prefix, has {:?}",
+        cluster.node(follower).snapshot_log_index()
+    );
+
+    (cluster, leader, follower)
+}
+
+/// The A4 rejoin acceptance criterion plus the #5369 judge's PR 2 liveness
+/// requirement, end-to-end: a follower whose gap was purged heals via
+/// snapshot install, converges, and then **survives a subsequent
+/// kill/restart** — recovery from a data directory whose durable snapshot
+/// arrived over the network (snapshot first, then whatever log tail exists)
+/// comes back cleanly and stays current.
+#[tokio::test]
+async fn lagging_follower_rejoins_via_snapshot_and_survives_restart() {
+    let (mut cluster, leader, follower) =
+        rejoin_lagging_follower_via_snapshot(aggressive_purge_tuning(), 30, 16, WAIT_TIMEOUT).await;
+
+    cluster.kill(follower).await;
+    cluster.restore(follower).await;
+
+    let idx = cluster.node(leader).propose("after-second-restart".to_string()).await.unwrap();
+    assert_eq!(idx, 31, "application indices stay dense across install + restart");
+    cluster.wait_for_apply(follower, idx).await;
+    assert_eq!(cluster.node(follower).read_committed(idx).await.unwrap(), "after-second-restart");
+    // And the pre-restart history is still all there.
+    for i in [1u64, 10, 30] {
+        assert!(cluster.node(follower).read_committed(i).await.is_ok(), "lost index {i}");
+    }
+}
+
+/// Snapshot transfer is *chunked*: with 4 KiB chunks, the ~250 KiB snapshot
+/// blob this builds (30 entries x 2 KiB payload, JSON-encoded) streams as
+/// dozens of bounded frames. This is the CI-sane proof that the transport's
+/// 64 MiB frame limit bounds a chunk, never the snapshot — see
+/// `large_snapshot_transfer_stress` for the beyond-64 MiB variant.
+#[tokio::test]
+async fn snapshot_transfer_spans_many_chunks() {
+    let tuning = RaftTuning { snapshot_chunk_bytes: 4096, ..aggressive_purge_tuning() };
+    rejoin_lagging_follower_via_snapshot(tuning, 30, 2048, WAIT_TIMEOUT).await;
+}
+
+/// Env-tunable large-snapshot variant for manual / nightly runs (curator
+/// acceptance criterion on #5198): set `VIBESQL_SNAPSHOT_STRESS_MIB` to the
+/// desired snapshot-blob size in MiB — e.g. `80` pushes the blob past the
+/// 64 MiB frame limit that capped a single InstallSnapshot frame before
+/// chunking (judge follow-up from PR #5368) — and the rejoin still heals
+/// through bounded default-size (3 MiB) chunks.
+#[tokio::test]
+async fn large_snapshot_transfer_stress() {
+    let Ok(mib) = std::env::var("VIBESQL_SNAPSHOT_STRESS_MIB") else {
+        eprintln!("skipping large-snapshot stress: set VIBESQL_SNAPSHOT_STRESS_MIB (e.g. 80)");
+        return;
+    };
+    let mib: usize = mib.parse().expect("VIBESQL_SNAPSHOT_STRESS_MIB must be a number of MiB");
+
+    // The snapshot blob JSON-encodes each payload byte as ~4 wire bytes, so
+    // size the raw payload at a quarter of the requested blob size, spread
+    // over 64 entries.
+    let entries = 64u64;
+    let payload_bytes = mib * 1024 * 1024 / 4 / entries as usize;
+    rejoin_lagging_follower_via_snapshot(
+        aggressive_purge_tuning(),
+        entries,
+        payload_bytes,
+        Duration::from_secs(300),
+    )
+    .await;
 }
