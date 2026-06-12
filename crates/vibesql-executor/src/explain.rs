@@ -67,6 +67,11 @@ pub struct PlanNode {
     pub scan_type: Option<ScanType>,
     /// Index name used (for SEARCH operations)
     pub index_name: Option<String>,
+    /// True when `index_name` covers every column the query reads from this
+    /// table (SELECT list + WHERE, with the rowid alias carried implicitly).
+    /// Ordering scans then render as SQLite's
+    /// `SCAN <table> USING COVERING INDEX <index>` (#5371).
+    pub index_covering: bool,
     /// Index predicates for SQLite EQP format (e.g., "w=?", "x>? AND x<?")
     pub index_predicates: Vec<IndexPredicate>,
     /// Whether this query requires a temp B-tree for ORDER BY
@@ -112,6 +117,7 @@ impl PlanNode {
             children: Vec::new(),
             scan_type: None,
             index_name: None,
+            index_covering: false,
             index_predicates: Vec::new(),
             needs_temp_btree_for_order_by: false,
             needs_temp_btree_for_group_by: false,
@@ -671,9 +677,16 @@ fn format_sqlite_eqp_node(node: &PlanNode) -> String {
 
     match node.scan_type.as_ref() {
         Some(ScanType::Scan) => {
-            // Check if we have an index for ordering (SCAN table USING INDEX idx)
+            // Check if we have an index for ordering (SCAN table USING INDEX idx).
+            // When the index also covers every column read, SQLite renders
+            // `SCAN <table> USING COVERING INDEX <index>` (verified live
+            // against sqlite3 3.51.0, #5371).
             if let Some(ref index_name) = node.index_name {
-                format!("SCAN {} USING INDEX {}", table_name, index_name)
+                if node.index_covering {
+                    format!("SCAN {} USING COVERING INDEX {}", table_name, index_name)
+                } else {
+                    format!("SCAN {} USING INDEX {}", table_name, index_name)
+                }
             } else {
                 format!("SCAN {}", table_name)
             }
@@ -846,22 +859,112 @@ impl ExplainExecutor {
         // Extract columns needed by the SELECT list for covering index detection
         let needed_columns = extract_select_columns(&stmt.select_list);
 
-        // Analyze FROM clause. When the SELECT list contains window
-        // functions, the base-table scan feeds the INNERMOST window sorting
-        // pass (SQLite's co-routine rewrite, see count_window_sorts), so the
-        // scan's effective ordering requirement is the last distinct window
-        // key — SQLite picks an index that delivers PARTITION BY/ORDER BY
-        // order even without any predicate (windowpushd.test 2.1.3.6).
+        // Temp-structure suppression keys (#5367), computed BEFORE the FROM
+        // analysis because the base scan's effective ordering requirement
+        // depends on which suppression (if any) fires (#5371): when an index
+        // delivers GROUP BY / DISTINCT order, sqlite3 shows the scan riding
+        // that index (`SCAN t USING [COVERING ]INDEX i`, verified live).
+        //
+        // The simple GROUP BY key (ordinals and output aliases resolved like
+        // SQLite) is also reused below to suppress the ORDER BY line when the
+        // statement-level ORDER BY matches the grouping output order.
+        let group_key: Option<Vec<&Expression>> =
+            stmt.group_by.as_ref().map(|g| g.as_simple()).and_then(|simple| {
+                simple.map(|exprs| {
+                    exprs
+                        .iter()
+                        .map(|e| Self::resolve_output_expr(e, &stmt.select_list))
+                        .collect()
+                })
+            });
+        // The index-delivered group order (as written or permuted into an
+        // index's column order); `Some` exactly when the GROUP BY temp line
+        // is suppressed.
+        let group_index_order: Option<Vec<vibesql_ast::OrderByItem>> = if stmt.group_by.is_some()
+        {
+            group_key.as_ref().and_then(|key| {
+                Self::group_key_index_order(
+                    stmt.from.as_ref(),
+                    stmt.where_clause.as_ref(),
+                    key,
+                    database,
+                )
+            })
+        } else {
+            None
+        };
+
+        // The DISTINCT key is the SELECT list. SQLite suppresses the line
+        // when an index delivers the SELECT-list order — but never when a
+        // GROUP BY intervenes (`SELECT DISTINCT a FROM t GROUP BY a` with an
+        // index on `a` still shows the DISTINCT line; verified live).
+        let distinct_key: Option<Vec<&Expression>> = if stmt.distinct {
+            Self::distinct_key_exprs(&stmt.select_list)
+        } else {
+            None
+        };
+        // The index-delivered SELECT-list order for DISTINCT; `Some` exactly
+        // when the DISTINCT temp line is suppressed.
+        let distinct_index_order: Option<Vec<vibesql_ast::OrderByItem>> =
+            if stmt.distinct && stmt.group_by.is_none() {
+                distinct_key.as_ref().and_then(|key| {
+                    let items = Self::exprs_as_asc_order_items(key);
+                    if Self::needs_temp_btree_for_order_by(
+                        stmt.from.as_ref(),
+                        stmt.where_clause.as_ref(),
+                        &items,
+                        database,
+                    ) {
+                        None
+                    } else {
+                        Some(items)
+                    }
+                })
+            } else {
+                None
+            };
+
+        // Analyze FROM clause. The base scan's effective ordering
+        // requirement follows SQLite's pipeline priority:
+        // - When the SELECT list contains window functions, the scan feeds
+        //   the INNERMOST window sorting pass (SQLite's co-routine rewrite,
+        //   see count_window_sorts) — SQLite picks an index that delivers
+        //   PARTITION BY/ORDER BY order even without any predicate
+        //   (windowpushd.test 2.1.3.6).
+        // - Otherwise the grouping/dedup pass consumes the scan's order:
+        //   when its suppression fired, the scan rides the delivering index
+        //   (#5371, sqlite3 3.51.0 verified live).
+        // - Otherwise the statement-level ORDER BY applies; the scan may
+        //   ride an ordering index exactly when the ORDER BY temp-line
+        //   suppression fires, so non-suppressed shapes keep their
+        //   pre-existing rendering.
         let window_scan_key = Self::distinct_window_keys(stmt).pop();
-        let order_from_window = window_scan_key.is_some();
-        let scan_order_by: Option<Vec<vibesql_ast::OrderByItem>> =
-            window_scan_key.or_else(|| stmt.order_by.clone());
+        let (scan_order_by, prefer_ordering_scan): (Option<Vec<vibesql_ast::OrderByItem>>, bool) =
+            if window_scan_key.is_some() {
+                (window_scan_key, true)
+            } else if group_index_order.is_some() {
+                (group_index_order.clone(), true)
+            } else if distinct_index_order.is_some() {
+                (distinct_index_order.clone(), true)
+            } else if stmt.group_by.is_none() && !stmt.distinct {
+                let order_by_suppressed = stmt.order_by.as_ref().is_some_and(|ob| {
+                    !Self::needs_temp_btree_for_order_by(
+                        stmt.from.as_ref(),
+                        stmt.where_clause.as_ref(),
+                        ob,
+                        database,
+                    )
+                });
+                (stmt.order_by.clone(), order_by_suppressed)
+            } else {
+                (stmt.order_by.clone(), false)
+            };
         if let Some(ref from_clause) = stmt.from {
             let scan_node = Self::explain_from_clause(
                 from_clause,
                 &stmt.where_clause,
                 &scan_order_by,
-                order_from_window,
+                prefer_ordering_scan,
                 &needed_columns,
                 database,
                 &ctes,
@@ -891,56 +994,17 @@ impl ExplainExecutor {
         // truthfully describe those temp structures; the index suppression
         // mirrors the established permissive EQP-level convention (see
         // `needs_temp_btree_for_order_by_eqp`).
-        //
-        // The simple GROUP BY key (ordinals and output aliases resolved like
-        // SQLite) is also reused below to suppress the ORDER BY line when the
-        // statement-level ORDER BY matches the grouping output order.
-        let group_key: Option<Vec<&Expression>> =
-            stmt.group_by.as_ref().map(|g| g.as_simple()).and_then(|simple| {
-                simple.map(|exprs| {
-                    exprs
-                        .iter()
-                        .map(|e| Self::resolve_output_expr(e, &stmt.select_list))
-                        .collect()
-                })
-            });
         if stmt.group_by.is_some() {
-            root.needs_temp_btree_for_group_by = match &group_key {
-                // ROLLUP/CUBE/GROUPING SETS always build temp structures.
-                None => true,
-                Some(key) => !Self::group_key_satisfied_by_index(
-                    stmt.from.as_ref(),
-                    stmt.where_clause.as_ref(),
-                    key,
-                    database,
-                ),
-            };
+            // ROLLUP/CUBE/GROUPING SETS (`group_key` is None) always build
+            // temp structures; a simple key suppresses exactly when an index
+            // delivers group order (`group_index_order`, computed above).
+            root.needs_temp_btree_for_group_by = group_index_order.is_none();
         }
-
-        // The DISTINCT key is the SELECT list. SQLite suppresses the line
-        // when an index delivers the SELECT-list order — but never when a
-        // GROUP BY intervenes (`SELECT DISTINCT a FROM t GROUP BY a` with an
-        // index on `a` still shows the DISTINCT line; verified live).
-        let distinct_key: Option<Vec<&Expression>> = if stmt.distinct {
-            Self::distinct_key_exprs(&stmt.select_list)
-        } else {
-            None
-        };
         if stmt.distinct {
-            root.needs_temp_btree_for_distinct = stmt.group_by.is_some()
-                || match &distinct_key {
-                    // Wildcard SELECT lists never suppress.
-                    None => true,
-                    Some(key) => {
-                        let items = Self::exprs_as_asc_order_items(key);
-                        Self::needs_temp_btree_for_order_by(
-                            stmt.from.as_ref(),
-                            stmt.where_clause.as_ref(),
-                            &items,
-                            database,
-                        )
-                    }
-                };
+            // Wildcard SELECT lists and grouped queries never suppress;
+            // `distinct_index_order` (computed above) is `Some` exactly when
+            // an index delivers the SELECT-list order.
+            root.needs_temp_btree_for_distinct = distinct_index_order.is_none();
         }
 
         // Check if we need a temp B-tree for ORDER BY
@@ -1122,6 +1186,21 @@ impl ExplainExecutor {
             // Continue to nested set operations
             current_set_op = set_op.right.set_operation.as_ref();
         }
+
+        // A compound's statement-level ORDER BY renders as a trailing
+        // `USE TEMP B-TREE FOR ORDER BY` line after the COMPOUND QUERY
+        // block. Truthful (#5371): the runtime materializes the combined
+        // result and sorts it in one pass (`sort_set_operation_results`,
+        // select/executor/execute.rs) for every operator, ALL or not.
+        //
+        // Documented divergence: sqlite3 3.51.0 instead renders a
+        // `MERGE (UNION)` / `MERGE (UNION ALL)` / ... block with per-branch
+        // `USE TEMP B-TREE FOR ORDER BY` lines (verified live) because its
+        // runtime sorts each branch and merges them. VibeSQL does not
+        // merge pre-sorted branches, so rendering MERGE would fabricate a
+        // plan shape that never executes (per the #5355/#5360/#5366
+        // truthfulness precedent).
+        root.needs_temp_btree_for_order_by = stmt.order_by.is_some();
 
         Ok(root)
     }
@@ -1412,28 +1491,31 @@ impl ExplainExecutor {
             })
     }
 
-    /// True when an index delivers the rows in GROUP BY order, suppressing
-    /// the `USE TEMP B-TREE FOR GROUP BY` line.
+    /// The ASC ORDER BY items under which an index delivers the rows in
+    /// GROUP BY order, if any — `Some` suppresses the
+    /// `USE TEMP B-TREE FOR GROUP BY` line, and the returned key becomes the
+    /// base scan's ordering requirement so the scan line shows the
+    /// delivering index like sqlite3 (#5371).
     ///
     /// Grouping is order-insensitive, so SQLite reorders the GROUP BY terms
     /// to match a candidate index (`GROUP BY b, a` with index `(a, b)`
     /// suppresses — verified live). We first try the key as written, then
     /// retry with the terms permuted into each index's column order.
-    fn group_key_satisfied_by_index(
+    fn group_key_index_order(
         from: Option<&vibesql_ast::FromClause>,
         where_clause: Option<&vibesql_ast::Expression>,
         group_key: &[&Expression],
         database: &Database,
-    ) -> bool {
+    ) -> Option<Vec<vibesql_ast::OrderByItem>> {
         let items = Self::exprs_as_asc_order_items(group_key);
         if !Self::needs_temp_btree_for_order_by(from, where_clause, &items, database) {
-            return true;
+            return Some(items);
         }
 
         // Order-insensitive retry: only bare column references can be
         // realigned to an index's column order.
         let Some(vibesql_ast::FromClause::Table { name, .. }) = from else {
-            return false;
+            return None;
         };
         let col_names: Option<Vec<&str>> = group_key
             .iter()
@@ -1442,9 +1524,7 @@ impl ExplainExecutor {
                 _ => None,
             })
             .collect();
-        let Some(col_names) = col_names else {
-            return false;
-        };
+        let col_names = col_names?;
 
         for index_name in database.list_indexes_for_table(name) {
             let Some(index) = database.get_index(&index_name) else { continue };
@@ -1470,11 +1550,11 @@ impl ExplainExecutor {
             let permuted_items = Self::exprs_as_asc_order_items(&permuted);
             if !Self::needs_temp_btree_for_order_by(from, where_clause, &permuted_items, database)
             {
-                return true;
+                return Some(permuted_items);
             }
         }
 
-        false
+        None
     }
 
     /// True when the SELECT list (or named WINDOW clause) of `stmt` contains
@@ -1537,14 +1617,16 @@ impl ExplainExecutor {
 
     /// Generate plan node for FROM clause
     ///
-    /// `order_from_window` is true when `order_by` is a window sort key
-    /// rather than the statement-level ORDER BY; the base scan then prefers
-    /// an index that delivers the window order even without predicates.
+    /// `prefer_ordering_scan` is true when `order_by` is an ordering
+    /// requirement the scan may ride an index for even without predicates —
+    /// a window sort key (windowpushd.test 2.1.3.6), an index-delivered
+    /// GROUP BY/DISTINCT key, or a statement-level ORDER BY whose temp-line
+    /// suppression fired (#5371).
     fn explain_from_clause(
         from: &vibesql_ast::FromClause,
         where_clause: &Option<vibesql_ast::Expression>,
         order_by: &Option<Vec<vibesql_ast::OrderByItem>>,
-        order_from_window: bool,
+        prefer_ordering_scan: bool,
         needed_columns: &HashSet<String>,
         database: &Database,
         ctes: &HashSet<String>,
@@ -1618,7 +1700,7 @@ impl ExplainExecutor {
                     alias.as_deref(),
                     where_clause,
                     order_by,
-                    order_from_window,
+                    prefer_ordering_scan,
                     needed_columns,
                     database,
                 )
@@ -1661,7 +1743,7 @@ impl ExplainExecutor {
                     left,
                     where_clause,
                     order_by,
-                    order_from_window,
+                    prefer_ordering_scan,
                     needed_columns,
                     database,
                     ctes,
@@ -1726,13 +1808,42 @@ impl ExplainExecutor {
         }
     }
 
+    /// True when `index_name` covers every column the query reads from
+    /// `table_name`: all SELECT-list and WHERE columns are index columns,
+    /// with the rowid-alias column carried implicitly (SQLite indexes always
+    /// store the rowid — windowpushd.test 1.4). An empty `needed_columns`
+    /// set means a wildcard SELECT, which can never be covering.
+    fn index_covers_scan(
+        table_name: &str,
+        index_name: &str,
+        where_clause: &Option<vibesql_ast::Expression>,
+        needed_columns: &HashSet<String>,
+        database: &Database,
+    ) -> bool {
+        if needed_columns.is_empty() {
+            return false;
+        }
+        let mut all_needed_columns = needed_columns.clone();
+        if let Some(where_expr) = where_clause {
+            collect_column_refs(where_expr, &mut all_needed_columns);
+        }
+        if let Some(table) = database.get_table(table_name) {
+            if let Some(rowid_idx) = table.schema.rowid_alias_column {
+                if let Some(col) = table.schema.columns.get(rowid_idx) {
+                    all_needed_columns.remove(&col.name.to_lowercase());
+                }
+            }
+        }
+        is_covering_index(index_name, &all_needed_columns, database)
+    }
+
     /// Generate plan node for table scan (sequential or index)
     fn explain_table_scan(
         table_name: &str,
         alias: Option<&str>,
         where_clause: &Option<vibesql_ast::Expression>,
         order_by: &Option<Vec<vibesql_ast::OrderByItem>>,
-        order_from_window: bool,
+        prefer_ordering_scan: bool,
         needed_columns: &HashSet<String>,
         database: &Database,
     ) -> Result<PlanNode, ExecutorError> {
@@ -1781,35 +1892,15 @@ impl ExplainExecutor {
 
             skip_node
         } else if let Some((index_name, sorted_cols)) = index_info {
-            // Check if this is a covering index (all needed columns are in the index)
-            // A covering index requires:
-            // 1. All SELECT columns are in the index
-            // 2. All WHERE clause columns are also in the index (or evaluable from index)
-            //
-            // NOTE: If needed_columns is empty, it means SELECT * was used (wildcard),
-            // which requires ALL table columns - this can never be a covering index
-            // unless the index literally contains all columns.
-            let is_covering = if needed_columns.is_empty() {
-                // Wildcard case: need all table columns, cannot be a covering index
-                false
-            } else {
-                let mut all_needed_columns = needed_columns.clone();
-                if let Some(where_expr) = where_clause {
-                    collect_column_refs(where_expr, &mut all_needed_columns);
-                }
-                // SQLite indexes implicitly carry the rowid, so an INTEGER
-                // PRIMARY KEY column (rowid alias) never disqualifies a
-                // covering index (windowpushd.test 1.4: index i1(grp_id)
-                // covers `SELECT grp_id, id` when id is the rowid alias).
-                if let Some(table) = database.get_table(table_name) {
-                    if let Some(rowid_idx) = table.schema.rowid_alias_column {
-                        if let Some(col) = table.schema.columns.get(rowid_idx) {
-                            all_needed_columns.remove(&col.name.to_lowercase());
-                        }
-                    }
-                }
-                is_covering_index(&index_name, &all_needed_columns, database)
-            };
+            // Check if this is a covering index (all needed columns are in
+            // the index) — see `index_covers_scan` for the rules.
+            let is_covering = Self::index_covers_scan(
+                table_name,
+                &index_name,
+                where_clause,
+                needed_columns,
+                database,
+            );
 
             // Check if we have any predicates on the index (determines SCAN vs SEARCH)
             let has_index_predicates = if let Some(where_expr) = where_clause {
@@ -1839,6 +1930,11 @@ impl ExplainExecutor {
                 .with_object(table_name)
                 .with_scan_type(scan_type.clone())
                 .with_index_name(&index_name);
+            // Pure ordering scans (no predicates) render `SCAN t USING
+            // COVERING INDEX i` when the index covers all read columns,
+            // matching sqlite3 (#5371). SEARCH paths carry covering via
+            // `ScanType::CoveringIndex` instead.
+            idx_node.index_covering = is_covering;
             idx_node.details.push(format!("USING INDEX {} ", index_name));
 
             // Extract predicates from WHERE clause for SQLite EQP format
@@ -1868,18 +1964,28 @@ impl ExplainExecutor {
 
             idx_node
         } else if let Some(ordering_index) =
-            order_by.as_deref().filter(|_| order_from_window).and_then(|items| {
+            order_by.as_deref().filter(|_| prefer_ordering_scan).and_then(|items| {
                 eqp_ordering_index(table_name, where_clause.as_ref(), items, database, true)
             })
         {
-            // No filtering index, but the scan feeds a window sorting pass
-            // whose key an index delivers: SQLite scans that index instead
-            // of sorting (windowpushd.test 2.1.3.6: `SCAN t1 USING INDEX
-            // i2` — i2 is chosen purely for PARTITION BY order).
-            PlanNode::new("Index Scan")
+            // No filtering index, but the scan feeds a pass whose key an
+            // index delivers — a window sorting pass (windowpushd.test
+            // 2.1.3.6: `SCAN t1 USING INDEX i2`, chosen purely for PARTITION
+            // BY order), or a GROUP BY/DISTINCT/ORDER BY whose temp-line
+            // suppression fired (#5371): SQLite scans that index instead of
+            // sorting, rendering COVERING when it covers all read columns.
+            let mut idx_node = PlanNode::new("Index Scan")
                 .with_object(table_name)
                 .with_scan_type(ScanType::Scan)
-                .with_index_name(&ordering_index)
+                .with_index_name(&ordering_index);
+            idx_node.index_covering = Self::index_covers_scan(
+                table_name,
+                &ordering_index,
+                where_clause,
+                needed_columns,
+                database,
+            );
+            idx_node
         } else {
             PlanNode::new("Seq Scan").with_object(table_name).with_scan_type(ScanType::Scan)
         };
@@ -2022,7 +2128,13 @@ fn extract_select_columns(select_list: &[SelectItem]) -> HashSet<String> {
 fn collect_column_refs(expr: &Expression, columns: &mut HashSet<String>) {
     match expr {
         Expression::ColumnRef(col_id) => {
-            columns.insert(col_id.column_canonical().to_lowercase());
+            // `count(*)` parses with a `*` pseudo-column argument; it reads
+            // no actual column and must not defeat covering-index detection
+            // (sqlite3 renders `SCAN t USING COVERING INDEX i` for
+            // `SELECT x, count(*) ... GROUP BY x`, verified live — #5371).
+            if col_id.column_canonical() != "*" {
+                columns.insert(col_id.column_canonical().to_lowercase());
+            }
         }
         Expression::BinaryOp { left, right, .. } => {
             collect_column_refs(left, columns);

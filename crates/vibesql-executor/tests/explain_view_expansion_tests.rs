@@ -356,9 +356,9 @@ fn test_outer_order_by_over_flattened_view_keeps_temp_btree() {
 //
 // Expected shapes verified against sqlite3 3.51.0 per category; divergences
 // are noted on each test:
-// - SQLite uses `SCAN t3 USING COVERING INDEX i3x` for covering-index-only
-//   bodies; VibeSQL's pre-existing base-scan rendering shows `SCAN t3`
-//   (same for bare bodies — unrelated to view expansion, see #5355 notes).
+// - Since #5371, bodies whose GROUP BY/DISTINCT/ORDER BY key rides the i3x
+//   index render the scan on that index (`SCAN t3 USING [COVERING ]INDEX
+//   i3x`) like sqlite3. Bodies with no usable ordering key keep `SCAN t3`.
 // - `USE TEMP B-TREE FOR GROUP BY` / `FOR DISTINCT` lines render like
 //   SQLite's since #5367 (suppressed here because the i3x index delivers
 //   x-order for the grouping/dedup keys below — sqlite3 suppresses too;
@@ -369,7 +369,8 @@ fn test_outer_order_by_over_flattened_view_keeps_temp_btree() {
 //   |  `--SEARCH t3 USING COVERING INDEX i3x (x=?)   [outer WHERE pushed]
 //   `--SCAN av
 // VibeSQL materializes the body and post-filters the outer WHERE, so the
-// inner plan truthfully shows the body's own scan (no fabricated probe).
+// inner plan truthfully shows the body's own scan (no fabricated probe) —
+// the body's GROUP BY x rides the covering i3x index (#5371).
 #[test]
 fn test_aggregate_group_by_view_renders_coroutine() {
     let db = setup_plain_view_db();
@@ -379,7 +380,7 @@ fn test_aggregate_group_by_view_renders_coroutine() {
         output,
         "QUERY PLAN\n\
          |--CO-ROUTINE av\n\
-         |  `--SCAN t3\n\
+         |  `--SCAN t3 USING COVERING INDEX i3x\n\
          `--SCAN av\n"
     );
 }
@@ -460,11 +461,14 @@ fn test_limit_offset_view_renders_coroutine() {
 
 // DISTINCT view. sqlite3 (with the index, dedup rides the covering index
 // and the `USE TEMP B-TREE FOR DISTINCT` line is suppressed — VibeSQL
-// suppresses too since #5367; the unindexed emitted case is covered in
+// suppresses too since #5367, and shows the dedup riding the covering
+// index since #5371; the unindexed emitted case is covered in
 // explain_temp_btree_annotation_tests.rs):
 //   |--CO-ROUTINE dv
 //   |  `--SEARCH t3 USING COVERING INDEX i3x (x=?)
 //   `--SCAN dv
+// Divergence: no fabricated outer-WHERE probe (the runtime materializes
+// the body and post-filters), so the body's own covering scan renders.
 #[test]
 fn test_distinct_view_renders_coroutine() {
     let db = setup_plain_view_db();
@@ -474,7 +478,7 @@ fn test_distinct_view_renders_coroutine() {
         output,
         "QUERY PLAN\n\
          |--CO-ROUTINE dv\n\
-         |  `--SCAN t3\n\
+         |  `--SCAN t3 USING COVERING INDEX i3x\n\
          `--SCAN dv\n"
     );
 }
@@ -569,8 +573,9 @@ fn test_with_view_renders_coroutine_divergence() {
 
 // A blocked body with its own ORDER BY: the body's temp B-tree line renders
 // INSIDE the CO-ROUTINE block, exactly once. No GROUP BY line: the i3x
-// index delivers GROUP BY x order (sqlite3 suppresses too), and ORDER BY c
-// does not match the group key, so the ORDER BY line renders. sqlite3:
+// index delivers GROUP BY x order (sqlite3 suppresses too, and the scan
+// rides the covering index since #5371), and ORDER BY c does not match the
+// group key, so the ORDER BY line renders. sqlite3 — identical:
 //   |--CO-ROUTINE aov
 //   |  |--SCAN t3 USING COVERING INDEX i3x
 //   |  `--USE TEMP B-TREE FOR ORDER BY
@@ -584,7 +589,7 @@ fn test_blocked_view_order_by_temp_btree_inside_coroutine_once() {
         output,
         "QUERY PLAN\n\
          |--CO-ROUTINE aov\n\
-         |  |--SCAN t3\n\
+         |  |--SCAN t3 USING COVERING INDEX i3x\n\
          |  `--USE TEMP B-TREE FOR ORDER BY\n\
          `--SCAN aov\n"
     );
@@ -592,9 +597,9 @@ fn test_blocked_view_order_by_temp_btree_inside_coroutine_once() {
 
 // Plain view over a blocked view: the outer view flattens away (#5355) and
 // the inner blocked view renders its CO-ROUTINE block. sqlite3 — identical
-// shape (modulo covering index):
+// shape:
 //   |--CO-ROUTINE av
-//   |  `--SCAN t3
+//   |  `--SCAN t3 USING COVERING INDEX i3x
 //   `--SCAN av
 #[test]
 fn test_plain_view_over_blocked_view() {
@@ -605,7 +610,7 @@ fn test_plain_view_over_blocked_view() {
         output,
         "QUERY PLAN\n\
          |--CO-ROUTINE av\n\
-         |  `--SCAN t3\n\
+         |  `--SCAN t3 USING COVERING INDEX i3x\n\
          `--SCAN av\n"
     );
     assert!(!output.contains("pav"), "outer plain view must flatten away:\n{}", output);
@@ -626,7 +631,7 @@ fn test_outer_order_by_over_blocked_view() {
         output,
         "QUERY PLAN\n\
          |--CO-ROUTINE av\n\
-         |  `--SCAN t3\n\
+         |  `--SCAN t3 USING COVERING INDEX i3x\n\
          |--SCAN av\n\
          `--USE TEMP B-TREE FOR ORDER BY\n"
     );
