@@ -178,7 +178,13 @@ impl TxnEntry {
 }
 
 /// Result of applying one [`TxnEntry`] to the state machine.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Serializable because the openraft mount (PR 2 of #5199,
+/// `crate::mvcc_raft`) returns it as the engine-level apply response
+/// (`R` of the raft type config), which openraft requires to be serde-
+/// capable. It never travels between nodes — `client_write` responses
+/// are local.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApplyOutcome {
     /// The entry's transaction committed; `rows_affected` sums the DML
     /// row counts across its statements.
@@ -217,7 +223,8 @@ struct MachineInner {
 /// convention of the other state machines in this crate. PR 1 drives it
 /// through [`ReplicatedDb`](crate::ReplicatedDb) over
 /// [`SingleNodeBackend`](crate::SingleNodeBackend); PR 2 mounts it
-/// behind openraft's `RaftStateMachine` for multi-node replication.
+/// behind openraft's `RaftStateMachine` for multi-node replication —
+/// see `crate::mvcc_raft` ([`MvccRaftNode`](crate::MvccRaftNode)).
 #[derive(Debug, Clone)]
 pub struct VibesqlStateMachine {
     inner: Arc<Mutex<MachineInner>>,
@@ -418,12 +425,26 @@ impl VibesqlStateMachine {
     /// `<= last_included_index`) is correct and the next applied entry
     /// keeps the commit_ts = log index mapping.
     pub fn install_snapshot(&self, snapshot: &Snapshot) -> Result<()> {
-        let mut db = deserialize_database(&snapshot.data)?;
-        db.set_next_txn_id(snapshot.last_included_index + 1)
+        let db = deserialize_database(&snapshot.data)?;
+        self.install_decoded(db, snapshot.last_included_index)
+    }
+
+    /// Install an already-decoded database as this machine's state, with
+    /// `last_applied` resuming at `last_included_index`. The openraft
+    /// mount (`crate::mvcc_raft`) uses this split so a received snapshot
+    /// can be fully validated (decoded) **before** it is durably
+    /// persisted, and persisted before the machine mutates — a corrupt
+    /// stream must neither half-install nor leave a corrupt file behind.
+    pub(crate) fn install_decoded(
+        &self,
+        mut db: Database,
+        last_included_index: LogIndex,
+    ) -> Result<()> {
+        db.set_next_txn_id(last_included_index + 1)
             .map_err(|e| ConsensusError::SnapshotCodec(format!("failed to seed commit_ts: {e}")))?;
         let mut inner = self.lock();
         inner.db = db;
-        inner.last_applied = snapshot.last_included_index;
+        inner.last_applied = last_included_index;
         Ok(())
     }
 
@@ -521,7 +542,7 @@ fn serialize_database(db: &Database) -> Result<Vec<u8>> {
 
 /// Decode a snapshot payload back into a database. Fails loudly (and
 /// without side effects) on a corrupt payload.
-fn deserialize_database(data: &[u8]) -> Result<Database> {
+pub(crate) fn deserialize_database(data: &[u8]) -> Result<Database> {
     let codec = |e: vibesql_storage::StorageError| ConsensusError::SnapshotCodec(e.to_string());
     let mut reader = data;
     let version = read_header(&mut reader).map_err(codec)?;

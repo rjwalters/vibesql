@@ -94,14 +94,32 @@
 //!
 //! The generic byte-echo configurations above remain unchanged (and keep
 //! their conformance suite); the MVCC machine is a new configuration on
-//! top of them. PR 2 of #5199 mounts [`VibesqlStateMachine`] behind
-//! openraft's `RaftStateMachine` for multi-node replication with
-//! leader-only writes.
+//! top of them.
 //!
-//! Deliberately **not** here yet (later Raft phases): multi-node MVCC
-//! replication and leader-only write enforcement (Phase B1 PR 2), TLS
-//! on the consensus port, production wiring into `vibesql-server`, and
-//! membership changes.
+//! Phase B1, PR 2, mounts that machine **inside** openraft (the
+//! `mvcc_raft` module):
+//!
+//! - [`MvccRaftNode`]: one voter of a multi-node cluster whose state
+//!   machine is the MVCC database — apply happens in the engine's
+//!   state-machine worker on every voter, with commit_ts = dense log
+//!   index surviving leader changes (protocol entries consume no dense
+//!   index).
+//! - **Leader-only writes**: proposals anywhere but the leader fail
+//!   fast with [`ConsensusError::NotLeader`] + leader hint;
+//!   freeze-at-propose (#5377) always runs on the leader.
+//! - **Fatal apply = node halt**: a possibly-node-local apply failure
+//!   surfaces as a storage error to openraft, which shuts the node down
+//!   *without* acknowledging the entry — `last_applied` never advances
+//!   past it (the [`ConsensusError::FatalApply`] obligation).
+//! - **MVCC snapshots across the network**: chunked install of the
+//!   binary database payload heals followers that fell behind a purge,
+//!   with the Phase A4 durability order (persist before acknowledge).
+//!
+//! Deliberately **not** here yet (later Raft phases): TLS on the
+//! consensus port, production wiring into `vibesql-server` (PostgreSQL
+//! sessions do not yet route writes through [`MvccRaftNode`]; surfacing
+//! `NotLeader` as a SQL error is follow-on work), and membership
+//! changes.
 //!
 //! Note on retention: the Raft log purge gated above is orthogonal to the
 //! pre-existing data-WAL checkpoint/truncation in `vibesql-storage::wal`
@@ -119,6 +137,7 @@ mod cluster_config;
 mod conformance;
 mod durable;
 mod freeze;
+mod mvcc_raft;
 #[cfg(test)]
 mod network;
 mod openraft_backend;
@@ -131,6 +150,7 @@ mod tcp;
 pub use backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Role, Snapshot};
 pub use cluster_config::{ClusterConfig, DEFAULT_CONSENSUS_PORT};
 pub use freeze::{freeze_statement, FreezeError, FrozenValue, SubstituteError};
+pub use mvcc_raft::MvccRaftNode;
 pub use openraft_backend::{OpenraftBackend, RaftTuning};
 pub use replicated::ReplicatedDb;
 pub use single_node::SingleNodeBackend;
