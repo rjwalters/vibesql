@@ -53,12 +53,13 @@
 //!
 //! [`DurableSnapshotWatermark`] is the bridge between the snapshot store and
 //! the log store: it carries the raw raft index of the last snapshot that is
-//! **durable on disk**. `DurableLogStore::purge` refuses to purge above it
-//! (the Phase A4 safety rule: log entries may only be discarded once a
-//! durable snapshot covers them). The watermark only advances *after* the
-//! snapshot file is fsynced and renamed, so openraft can never be told about
-//! — and can never purge against — a snapshot that might not survive a
-//! crash.
+//! **durable on disk**. `DurableLogStore::purge` never *records* a purge
+//! above it — uncovered purges are deferred, not written (the Phase A4
+//! safety rule: log entries may only be discarded once a durable snapshot
+//! covers them; see `purge_compacted` for why the uncovered case must
+//! succeed as a no-op). The watermark only advances *after* the snapshot
+//! file is fsynced and renamed, so a purge record on disk can never refer
+//! to a snapshot that might not survive a crash.
 //!
 //! [`OpenraftBackend`]: crate::OpenraftBackend
 
@@ -152,7 +153,8 @@ impl SnapshotHorizonPin for NoopHorizonPin {
 
 /// The raw raft index of the last snapshot that is **durable on disk**
 /// (`None` until one exists). Shared between [`SnapshotStore`] (which
-/// advances it) and `DurableLogStore` (whose `purge` refuses to exceed it).
+/// advances it) and `DurableLogStore` (whose `purge` never durably exceeds
+/// it — uncovered purges are deferred).
 ///
 /// `0` is the "no snapshot" sentinel: raw raft log indices are 1-based, so
 /// no real snapshot ever covers index 0 (a restore-seeded snapshot with no

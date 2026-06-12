@@ -56,8 +56,24 @@
 //! - Log purge is storage-enforced to never exceed the last durable
 //!   snapshot's index.
 //!
-//! Deliberately **not** here yet (later Raft phases): snapshot *transfer*
-//! between nodes and the purge *policy* (Phase A4 PR 2), applying entries
+//! Phase A4, PR 2, completes snapshots across the network:
+//!
+//! - **Snapshot transfer**: a lagging node whose gap was purged on the
+//!   leader is healed by chunked snapshot streaming over the existing
+//!   `InstallSnapshot` RPC leg (design in the `tcp` module docs); the frame
+//!   limit bounds a chunk, never the snapshot.
+//! - **Purge policy** ([`RaftTuning`]): automatic snapshots every N
+//!   entries and automatic purge keeping a catch-up tail, exposed on the
+//!   durable constructors
+//!   ([`OpenraftBackend::with_data_dir_tuned`] /
+//!   [`OpenraftBackend::join_tcp_cluster_with_data_dir_tuned`]). Purge
+//!   compacts `raft.log`, physically reclaiming the purged prefix.
+//! - **Interrupted-install recovery**: a follower that crashes between
+//!   durably installing a snapshot and recording the follow-up log purge
+//!   restarts cleanly (recovery repairs the log from the snapshot); a
+//!   snapshot next to a log with no state at all still fails loudly.
+//!
+//! Deliberately **not** here yet (later Raft phases): applying entries
 //! to VibeSQL storage (Phase B1), TLS on the consensus port, production
 //! wiring into `vibesql-server`, and membership changes.
 //!
@@ -85,5 +101,5 @@ mod tcp;
 
 pub use backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Role, Snapshot};
 pub use cluster_config::{ClusterConfig, DEFAULT_CONSENSUS_PORT};
-pub use openraft_backend::OpenraftBackend;
+pub use openraft_backend::{OpenraftBackend, RaftTuning};
 pub use single_node::SingleNodeBackend;
