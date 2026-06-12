@@ -1,7 +1,9 @@
-//! Tests for EXPLAIN QUERY PLAN temp-structure annotations (#5367):
+//! Tests for EXPLAIN QUERY PLAN temp-structure annotations (#5367, #5371):
 //! `USE TEMP B-TREE FOR GROUP BY`, `USE TEMP B-TREE FOR DISTINCT`, the
-//! `<OP> USING TEMP B-TREE` compound dedup branch labels, and the
-//! `CO-ROUTINE <alias>` wrapper for non-flattenable derived tables.
+//! `<OP> USING TEMP B-TREE` compound dedup branch labels, the
+//! `CO-ROUTINE <alias>` wrapper for non-flattenable derived tables,
+//! ordering-index scan lines (`SCAN t USING [COVERING ]INDEX i`), and the
+//! compound + ORDER BY shape.
 //!
 //! Every expected shape below was verified live against sqlite3 3.51.0
 //! (`.eqp on`); divergences are noted per test. Truthfulness (per the
@@ -19,6 +21,17 @@
 //! - Compound dedup (UNION/INTERSECT/EXCEPT) executes via temp hash
 //!   structures (select/set_operations.rs), so `USING TEMP B-TREE` labels
 //!   are truthful.
+//! - Where a GROUP BY/DISTINCT/ORDER BY temp line is suppressed because an
+//!   index delivers the key order, the scan line shows that index like
+//!   sqlite3 (`SCAN t USING COVERING INDEX i` when it covers all read
+//!   columns) — the same permissive EQP-level convention (#5371).
+//! - A compound's statement-level ORDER BY renders as a trailing
+//!   `USE TEMP B-TREE FOR ORDER BY` line after the COMPOUND QUERY block:
+//!   the runtime materializes the combined result and sorts it in one pass
+//!   (`sort_set_operation_results`). sqlite3 3.51.0 instead renders a
+//!   `MERGE (<OP>)` block with per-branch ORDER BY lines (sorted branches
+//!   merged at read time, verified live) — a documented divergence, since
+//!   rendering MERGE would fabricate a plan VibeSQL never executes (#5371).
 
 use vibesql_ast::Statement;
 use vibesql_executor::ExplainExecutor;
@@ -99,30 +112,56 @@ fn test_group_by_unindexed_emits_temp_btree() {
 }
 
 // Indexed GROUP BY: the i1a index delivers group order, so the line is
-// suppressed (sqlite3 suppresses too: `SCAN t1 USING COVERING INDEX i1a`
-// alone). Scan-line divergence: VibeSQL's runtime hash-groups over a plain
-// scan, so the pre-existing base-scan rendering shows `SCAN t1` (#5355
-// notes); the suppression itself matches SQLite.
+// suppressed and the scan rides the index (#5371). The `count(*)`
+// pseudo-column reads nothing, so i1a covers the SELECT list. sqlite3 —
+// identical:
+//   `--SCAN t1 USING COVERING INDEX i1a
 #[test]
 fn test_group_by_indexed_suppresses_temp_btree() {
     let db = setup_db();
     let output = eqp(&db, "SELECT a, count(*) FROM t1 GROUP BY a");
 
-    assert!(!output.contains("USE TEMP B-TREE"), "indexed GROUP BY must suppress:\n{}", output);
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         `--SCAN t1 USING COVERING INDEX i1a\n"
+    );
+}
+
+// Indexed GROUP BY whose SELECT list reads a column outside the index: the
+// scan rides the ordering index without the COVERING tag. sqlite3 —
+// identical:
+//   `--SCAN t1 USING INDEX i1a
+#[test]
+fn test_group_by_indexed_non_covering_scan_line() {
+    let db = setup_db();
+    let output = eqp(&db, "SELECT a, c FROM t1 GROUP BY a");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         `--SCAN t1 USING INDEX i1a\n"
+    );
 }
 
 // GROUP BY on two columns when the index only covers the first. sqlite3:
 //   |--SCAN t1 USING INDEX i1a        [scan-line divergence: SCAN t1]
 //   `--USE TEMP B-TREE FOR GROUP BY
+// Scan-line divergence (documented, #5371): sqlite3 still rides i1a for
+// the partial prefix of the group key so its sorter benefits from partial
+// order; VibeSQL's runtime seq-scans and hash-groups, and the #5371 scan
+// rendering only fires when the temp-line suppression fires, so the bare
+// `SCAN t1` is the truthful rendering here.
 #[test]
 fn test_group_by_partially_indexed_emits_temp_btree() {
     let db = setup_db();
     let output = eqp(&db, "SELECT a, b, count(*) FROM t1 GROUP BY a, b");
 
-    assert!(
-        output.contains("USE TEMP B-TREE FOR GROUP BY"),
-        "partially indexed GROUP BY needs the temp structure:\n{}",
-        output
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--SCAN t1\n\
+         `--USE TEMP B-TREE FOR GROUP BY\n"
     );
 }
 
@@ -139,18 +178,19 @@ fn test_group_by_pinned_by_where_suppresses_temp_btree() {
 }
 
 // Grouping is order-insensitive: SQLite reorders `GROUP BY b, a` to match
-// the (a, b) index and suppresses the line (verified live:
-// `SCAN tab USING COVERING INDEX iab` alone). VibeSQL retries the group key
-// permuted into each index's column order.
+// the (a, b) index, suppresses the line, and rides the covering index.
+// VibeSQL retries the group key permuted into each index's column order
+// and renders the matched index (#5371). sqlite3 — identical:
+//   `--SCAN tab USING COVERING INDEX iab
 #[test]
 fn test_group_by_order_insensitive_index_match_suppresses() {
     let db = setup_composite_db();
     let output = eqp(&db, "SELECT b, a, count(*) FROM tab GROUP BY b, a");
 
-    assert!(
-        !output.contains("USE TEMP B-TREE"),
-        "reordered GROUP BY matching the (a, b) index must suppress:\n{}",
-        output
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         `--SCAN tab USING COVERING INDEX iab\n"
     );
 }
 
@@ -170,7 +210,9 @@ fn test_group_by_rollup_emits_temp_btree() {
 }
 
 // Plain aggregate without GROUP BY: no temp-structure line. sqlite3 agrees
-// (`SCAN t1 USING COVERING INDEX i1a` for count(*) — scan-line divergence).
+// (`SCAN t1 USING COVERING INDEX i1a` for count(*) — scan-line divergence:
+// sqlite3 counts over the smallest index; VibeSQL's runtime seq-scans, and
+// with no grouping/dedup/ordering key there is no ordering index to ride).
 #[test]
 fn test_aggregate_without_group_by_no_temp_btree() {
     let db = setup_db();
@@ -315,14 +357,19 @@ fn test_distinct_unindexed_emits_temp_btree() {
 }
 
 // Indexed DISTINCT: rows arrive in SELECT-list order via i1a, so the line
-// is suppressed (sqlite3: `SCAN t1 USING COVERING INDEX i1a` alone —
-// scan-line divergence as usual).
+// is suppressed and the dedup rides the covering index (#5371). sqlite3 —
+// identical:
+//   `--SCAN t1 USING COVERING INDEX i1a
 #[test]
 fn test_distinct_indexed_suppresses_temp_btree() {
     let db = setup_db();
     let output = eqp(&db, "SELECT DISTINCT a FROM t1");
 
-    assert!(!output.contains("USE TEMP B-TREE"), "indexed DISTINCT must suppress:\n{}", output);
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         `--SCAN t1 USING COVERING INDEX i1a\n"
+    );
 }
 
 // DISTINCT + ORDER BY on the exact (all-ASC) SELECT list: the dedup
@@ -420,36 +467,37 @@ fn test_distinct_with_group_by_emits_both_in_order() {
 
 // With GROUP BY present the index never suppresses DISTINCT (the grouping
 // pass intervenes): sqlite3 keeps the DISTINCT line for
-// `SELECT DISTINCT a ... GROUP BY a` even with the index (verified live).
+// `SELECT DISTINCT a ... GROUP BY a` even with the index, while the
+// grouping itself rides the covering index (verified live, #5371) —
+// identical:
+//   |--SCAN t1 USING COVERING INDEX i1a
+//   `--USE TEMP B-TREE FOR DISTINCT
 #[test]
 fn test_distinct_not_suppressed_by_index_when_grouped() {
     let db = setup_db();
     let output = eqp(&db, "SELECT DISTINCT a FROM t1 GROUP BY a");
 
-    assert!(
-        !output.contains("USE TEMP B-TREE FOR GROUP BY"),
-        "indexed group key must suppress the GROUP BY line:\n{}",
-        output
-    );
-    assert!(
-        output.contains("USE TEMP B-TREE FOR DISTINCT"),
-        "DISTINCT after grouping still dedups:\n{}",
-        output
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--SCAN t1 USING COVERING INDEX i1a\n\
+         `--USE TEMP B-TREE FOR DISTINCT\n"
     );
 }
 
 // Indexed DISTINCT + reverse ORDER BY: the dedup rides the index and the
-// reverse traversal satisfies the DESC order — no lines at all. sqlite3 —
-// no temp B-tree lines (verified live; scan-line divergence as usual).
+// reverse traversal satisfies the DESC order — no lines at all, and the
+// scan shows the covering index (#5371). sqlite3 — identical:
+//   `--SCAN t1 USING COVERING INDEX i1a
 #[test]
 fn test_distinct_indexed_order_by_desc_no_lines() {
     let db = setup_db();
     let output = eqp(&db, "SELECT DISTINCT a FROM t1 ORDER BY a DESC");
 
-    assert!(
-        !output.contains("USE TEMP B-TREE"),
-        "index-backed dedup + reversible order needs no temp lines:\n{}",
-        output
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         `--SCAN t1 USING COVERING INDEX i1a\n"
     );
 }
 
@@ -782,5 +830,190 @@ fn test_outer_order_by_over_group_by_view() {
          |  `--USE TEMP B-TREE FOR GROUP BY\n\
          |--SCAN gvu\n\
          `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Ordering-index scan lines (#5371)
+// ---------------------------------------------------------------------------
+// Where a temp-line suppression fires because an index delivers the key
+// order, the scan line shows that index like sqlite3. The runtime truthfully
+// hash-groups/dedups over its scan; the index rendering follows the same
+// permissive EQP-level convention as the suppression itself (#5367).
+
+// ORDER BY satisfied by a covering index. sqlite3 — identical:
+//   `--SCAN t1 USING COVERING INDEX i1a
+#[test]
+fn test_order_by_indexed_covering_scan_line() {
+    let db = setup_db();
+    let output = eqp(&db, "SELECT a FROM t1 ORDER BY a");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         `--SCAN t1 USING COVERING INDEX i1a\n"
+    );
+}
+
+// ORDER BY satisfied by a non-covering index (c is not in i1a). sqlite3 —
+// identical:
+//   `--SCAN t1 USING INDEX i1a
+#[test]
+fn test_order_by_indexed_non_covering_scan_line() {
+    let db = setup_db();
+    let output = eqp(&db, "SELECT a, c FROM t1 ORDER BY a");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         `--SCAN t1 USING INDEX i1a\n"
+    );
+}
+
+// GROUP BY + matching ORDER BY both ride the index: one covering scan, no
+// temp lines. sqlite3 — identical:
+//   `--SCAN t1 USING COVERING INDEX i1a
+#[test]
+fn test_group_by_order_by_indexed_covering_scan_line() {
+    let db = setup_db();
+    let output = eqp(&db, "SELECT a, count(*) FROM t1 GROUP BY a ORDER BY a");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         `--SCAN t1 USING COVERING INDEX i1a\n"
+    );
+}
+
+// Unindexed keys keep the bare scan: the #5371 rendering only fires with
+// the suppression. sqlite3 — identical (no index on b).
+#[test]
+fn test_unindexed_order_by_keeps_bare_scan() {
+    let db = setup_db();
+    let output = eqp(&db, "SELECT b FROM t1 ORDER BY b");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--SCAN t1\n\
+         `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Compound + ORDER BY (#5371)
+// ---------------------------------------------------------------------------
+// The runtime materializes the combined result and sorts it in ONE pass
+// (`sort_set_operation_results`, select/executor/execute.rs) for every set
+// operator, so the truthful shape is the COMPOUND QUERY block plus a single
+// trailing `USE TEMP B-TREE FOR ORDER BY` line.
+//
+// Documented divergence: sqlite3 3.51.0 renders `MERGE (UNION)` /
+// `MERGE (UNION ALL)` / `MERGE (INTERSECT)` / `MERGE (EXCEPT)` with LEFT /
+// RIGHT branch blocks each carrying its own ORDER BY line (verified live):
+//   `--MERGE (UNION)
+//      |--LEFT
+//      |  |--SCAN u1
+//      |  `--USE TEMP B-TREE FOR ORDER BY
+//      `--RIGHT
+//         |--SCAN u2
+//         `--USE TEMP B-TREE FOR ORDER BY
+// because its runtime sorts each branch and merges the sorted streams.
+// VibeSQL never merges pre-sorted branches, so rendering MERGE would
+// fabricate a plan shape that never executes (#5355/#5360/#5366 precedent).
+
+// UNION + ORDER BY: dedup branch label plus one trailing sort line.
+#[test]
+fn test_union_order_by_trailing_temp_btree() {
+    let db = setup_compound_db();
+    let output = eqp(&db, "SELECT a FROM u1 UNION SELECT a FROM u2 ORDER BY 1");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--COMPOUND QUERY\n\
+         |  |--LEFT-MOST SUBQUERY\n\
+         |  |  `--SCAN u1\n\
+         |  `--UNION USING TEMP B-TREE\n\
+         |     `--SCAN u2\n\
+         `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// UNION ALL + ORDER BY: bare branch label, same trailing sort line (the
+// runtime sorts ALL-variants identically).
+#[test]
+fn test_union_all_order_by_trailing_temp_btree() {
+    let db = setup_compound_db();
+    let output = eqp(&db, "SELECT a FROM u1 UNION ALL SELECT a FROM u2 ORDER BY 1");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--COMPOUND QUERY\n\
+         |  |--LEFT-MOST SUBQUERY\n\
+         |  |  `--SCAN u1\n\
+         |  `--UNION ALL\n\
+         |     `--SCAN u2\n\
+         `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// INTERSECT and EXCEPT take the same trailing line; ORDER BY by name
+// resolves like ordinals.
+#[test]
+fn test_intersect_except_order_by_trailing_temp_btree() {
+    let db = setup_compound_db();
+
+    let intersect = eqp(&db, "SELECT a FROM u1 INTERSECT SELECT a FROM u2 ORDER BY a");
+    assert!(
+        intersect.ends_with("`--USE TEMP B-TREE FOR ORDER BY\n"),
+        "INTERSECT + ORDER BY needs the trailing sort line:\n{}",
+        intersect
+    );
+
+    let except = eqp(&db, "SELECT a FROM u1 EXCEPT SELECT a FROM u2 ORDER BY 1");
+    assert!(
+        except.ends_with("`--USE TEMP B-TREE FOR ORDER BY\n"),
+        "EXCEPT + ORDER BY needs the trailing sort line:\n{}",
+        except
+    );
+}
+
+// A compound WITHOUT ORDER BY keeps the bare COMPOUND QUERY shape (no
+// trailing line) — sqlite3 identical (no MERGE without an ORDER BY).
+#[test]
+fn test_compound_without_order_by_no_trailing_line() {
+    let db = setup_compound_db();
+    let output = eqp(&db, "SELECT a FROM u1 UNION SELECT a FROM u2");
+
+    assert!(
+        !output.contains("USE TEMP B-TREE FOR ORDER BY"),
+        "no ORDER BY, no sort line:\n{}",
+        output
+    );
+}
+
+// Dedup-compound derived table with an inner ORDER BY: the trailing sort
+// line renders INSIDE the CO-ROUTINE block (the body sorts before the
+// outer query reads it). sqlite3 nests its MERGE block in the co-routine
+// the same way (divergence as above).
+#[test]
+fn test_compound_order_by_inside_coroutine() {
+    let db = setup_compound_db();
+    let output =
+        eqp(&db, "SELECT * FROM (SELECT a FROM u1 UNION SELECT a FROM u2 ORDER BY 1) AS q");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE q\n\
+         |  |--COMPOUND QUERY\n\
+         |  |  |--LEFT-MOST SUBQUERY\n\
+         |  |  |  `--SCAN u1\n\
+         |  |  `--UNION USING TEMP B-TREE\n\
+         |  |     `--SCAN u2\n\
+         |  `--USE TEMP B-TREE FOR ORDER BY\n\
+         `--SCAN q\n"
     );
 }
