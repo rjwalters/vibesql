@@ -635,9 +635,101 @@ pub(crate) fn needs_temp_btree_for_order_by_eqp(
     let Some(table) = database.get_table(table_name) else {
         return true;
     };
-    let _ = &table.schema; // table-only check (avoid unused warning on schema)
+
+    // #5375: ORDER BY led by the table's INTEGER PRIMARY KEY (the rowid
+    // alias) over a plain sequential scan. The executor guarantees that a
+    // sequential scan of a rowid-alias table delivers rows in rowid order
+    // (`sort_rows_by_integer_primary_key`, #4926), so the requested order —
+    // or its exact reverse, for DESC — IS the scan's natural output order
+    // and the runtime ORDER BY sort is order-equivalent to the natural
+    // traversal. sqlite3 3.51.0 shows a bare `SCAN t` with no temp line here
+    // (its table B-tree is keyed by rowid); suppressing the line falls under
+    // the same permissive EQP convention as the index stabilization-sort
+    // suppression below. Trailing ORDER BY terms are ignored: the rowid is
+    // unique, so they can never affect the order (verified live: sqlite3
+    // suppresses for `ORDER BY id, y` and `ORDER BY id ASC, y DESC`).
+    //
+    // This only applies when the planner picks NO index for the scan: if the
+    // WHERE clause rides an index (SEARCH/skip-scan), rows arrive in index
+    // order, not rowid order, and the sort is real. It also does NOT apply
+    // to the bare `rowid` pseudo-column on tables WITHOUT an INTEGER PRIMARY
+    // KEY: their sequential scan yields physical insertion order, which
+    // explicit-rowid INSERTs and `UPDATE ... SET rowid = ...` can decouple
+    // from rowid order, so that temp line stays truthful (documented
+    // divergence from sqlite3).
+    if order_by_leads_with_rowid_alias(&table.schema, table_name, order_by)
+        && cost_based_index_selection(table_name, where_clause, Some(order_by), database).is_none()
+        && !has_skip_scan_plan(table_name, where_clause, database)
+    {
+        return false;
+    }
 
     eqp_ordering_index(table_name, where_clause, order_by, database, false).is_none()
+}
+
+/// True when the planner would choose a skip-scan for this table + WHERE
+/// (mirrors the skip-scan fallback in `ExplainExecutor::explain_table_scan`).
+fn has_skip_scan_plan(
+    table_name: &str,
+    where_clause: Option<&Expression>,
+    database: &Database,
+) -> bool {
+    let Some(where_expr) = where_clause else {
+        return false;
+    };
+    IndexPlanner::new(database).plan_skip_scan(table_name, where_expr).is_some()
+}
+
+/// EQP-only (#5375): true when the FIRST ORDER BY term is a column reference
+/// to the table's INTEGER PRIMARY KEY rowid alias — either by the declared
+/// column name, or via the `rowid`/`_rowid_`/`oid` pseudo-column keywords
+/// (which resolve to the alias column; real columns shadow the keywords, and
+/// WITHOUT ROWID tables have no rowid pseudo-column, #4953).
+///
+/// Direction is ignored: ASC is the scan's natural rowid order and DESC its
+/// exact reverse (the same reverse-traversal convention as index DESC
+/// suppression; sqlite3 shows a bare `SCAN t` for both). Trailing terms are
+/// ignored because the rowid is unique.
+fn order_by_leads_with_rowid_alias(
+    schema: &TableSchema,
+    table_name: &str,
+    order_by: &[vibesql_ast::OrderByItem],
+) -> bool {
+    let Some(ipk_idx) = schema.rowid_alias_column else {
+        return false;
+    };
+    let Some(ipk_col) = schema.columns.get(ipk_idx) else {
+        return false;
+    };
+    let Some(first) = order_by.first() else {
+        return false;
+    };
+    let Expression::ColumnRef(col_id) = &first.expr else {
+        return false;
+    };
+    // Schema-qualified references are out of scope; a table qualifier must
+    // match the scanned table.
+    if col_id.schema_canonical().is_some() {
+        return false;
+    }
+    if let Some(qualifier) = col_id.table_canonical() {
+        if !qualifier.eq_ignore_ascii_case(table_name) {
+            return false;
+        }
+    }
+
+    let col_name = col_id.column_canonical();
+    if col_name.eq_ignore_ascii_case(&ipk_col.name) {
+        return true;
+    }
+
+    // rowid/_rowid_/oid keywords: only when no real column shadows the
+    // keyword (real columns take precedence, matching the evaluator) and the
+    // table is not WITHOUT ROWID (no rowid pseudo-column there).
+    let is_rowid_keyword = col_name.eq_ignore_ascii_case("rowid")
+        || col_name.eq_ignore_ascii_case("_rowid_")
+        || col_name.eq_ignore_ascii_case("oid");
+    is_rowid_keyword && !schema.without_rowid && schema.get_column_index(col_name).is_none()
 }
 
 /// EQP-only: the index whose natural traversal delivers `order_by` for a

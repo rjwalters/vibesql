@@ -993,16 +993,46 @@ fn test_order_by_mixed_directions_keeps_bare_scan_and_temp_line() {
     );
 }
 
-// ORDER BY rowid: sqlite3's table B-tree traversal natively delivers rowid
-// order, so it shows a bare scan and NO temp line:
-//   `--SCAN t1
-// VibeSQL's runtime performs a real sort pass on the rowid pseudo-column
-// after the scan (rowid matches no index column, so no ordering index
-// applies), so the temp line truthfully describes execution. Suppressing it
-// when the storage scan provably yields rowid order is tracked as a
-// follow-on (#5375).
+// ---------------------------------------------------------------------------
+// ORDER BY rowid / INTEGER PRIMARY KEY alias (#5375)
+// ---------------------------------------------------------------------------
+// sqlite3 3.51.0 shows a bare `SCAN t` with NO temp line for ORDER BY on the
+// rowid (or its INTEGER PRIMARY KEY alias): its table B-tree is keyed by
+// rowid, so traversal natively delivers rowid order (DESC via reverse
+// traversal). Verified live for: bare rowid/_rowid_/oid ASC and DESC, the
+// IPK alias column ASC and DESC, qualified `t.id`, trailing terms after the
+// unique first key (`ORDER BY id, y`, `ORDER BY id ASC, y DESC` — never
+// evaluated, fully suppressed), and a non-indexed WHERE filter.
+//
+// VibeSQL splits on the storage scan-order guarantee (#5375 investigation):
+//
+// - Tables WITH a rowid alias (INTEGER PRIMARY KEY): the executor sorts
+//   every sequential scan's output by the IPK column (#4926,
+//   `sort_rows_by_integer_primary_key`), so rowid order IS the scan's
+//   guaranteed natural output order and the runtime ORDER BY sort is
+//   order-equivalent to it (its exact reverse for DESC — same convention as
+//   index reverse-traversal suppression). The temp line is suppressed,
+//   matching sqlite3 (`needs_temp_btree_for_order_by_eqp`).
+//
+// - Plain tables (NO rowid alias): the sequential scan yields physical
+//   insertion order, which `INSERT INTO t(rowid, ...)` with out-of-order
+//   values and `UPDATE t SET rowid = ...` (both supported, verified by
+//   probe) decouple from rowid order. The ORDER BY sort genuinely reorders
+//   rows, so the temp line stays — a documented divergence from sqlite3's
+//   bare `SCAN t`.
+
+/// r1(id INTEGER PRIMARY KEY, y TEXT) — rowid-alias table, no other indexes.
+fn setup_rowid_alias_db() -> Database {
+    let mut db = Database::new();
+    run_ddl(&mut db, "CREATE TABLE r1(id INTEGER PRIMARY KEY, y TEXT)");
+    db
+}
+
+// Plain table, ORDER BY rowid. sqlite3: `--SCAN t1 (no temp line).
+// DIVERGENCE (documented above): VibeSQL's plain-table scan order is
+// insertion order, not rowid order, so the sort is real and the line stays.
 #[test]
-fn test_order_by_rowid_emits_temp_btree() {
+fn test_order_by_rowid_plain_table_emits_temp_btree() {
     let db = setup_db();
     let output = eqp(&db, "SELECT * FROM t1 ORDER BY rowid");
 
@@ -1010,6 +1040,235 @@ fn test_order_by_rowid_emits_temp_btree() {
         output,
         "QUERY PLAN\n\
          |--SCAN t1\n\
+         `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// Plain table, ORDER BY rowid DESC. sqlite3: `--SCAN t1 (no temp line,
+// reverse traversal). DIVERGENCE: same scan-order reasoning as ASC.
+#[test]
+fn test_order_by_rowid_desc_plain_table_emits_temp_btree() {
+    let db = setup_db();
+    let output = eqp(&db, "SELECT * FROM t1 ORDER BY rowid DESC");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--SCAN t1\n\
+         `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// Plain table, _rowid_ / oid keyword spellings. sqlite3: `--SCAN t1 for
+// both (no temp line). DIVERGENCE: same scan-order reasoning.
+#[test]
+fn test_order_by_rowid_keyword_spellings_plain_table_emit_temp_btree() {
+    let db = setup_db();
+    for sql in ["SELECT * FROM t1 ORDER BY _rowid_", "SELECT * FROM t1 ORDER BY oid"] {
+        let output = eqp(&db, sql);
+        assert_eq!(
+            output,
+            "QUERY PLAN\n\
+             |--SCAN t1\n\
+             `--USE TEMP B-TREE FOR ORDER BY\n",
+            "query: {}",
+            sql
+        );
+    }
+}
+
+// A real column named `rowid` shadows the pseudo-column (the evaluator
+// checks real columns first). sqlite3 — identical (verified live):
+//   |--SCAN t8
+//   `--USE TEMP B-TREE FOR ORDER BY
+#[test]
+fn test_order_by_shadowed_rowid_column_emits_temp_btree() {
+    let mut db = Database::new();
+    run_ddl(&mut db, "CREATE TABLE t8(rowid INT, y TEXT)");
+    let output = eqp(&db, "SELECT * FROM t8 ORDER BY rowid");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--SCAN t8\n\
+         `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// IPK alias, ORDER BY id. sqlite3 — identical: `--SCAN r1 (no temp line).
+// The #4926 scan sort guarantees rowid order, so the suppression is the
+// stabilization-sort convention, not a fabrication.
+#[test]
+fn test_order_by_ipk_alias_suppresses_temp_btree() {
+    let db = setup_rowid_alias_db();
+    let output = eqp(&db, "SELECT * FROM r1 ORDER BY id");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         `--SCAN r1\n"
+    );
+}
+
+// IPK alias, ORDER BY id DESC. sqlite3 — identical (reverse traversal).
+#[test]
+fn test_order_by_ipk_alias_desc_suppresses_temp_btree() {
+    let db = setup_rowid_alias_db();
+    let output = eqp(&db, "SELECT * FROM r1 ORDER BY id DESC");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         `--SCAN r1\n"
+    );
+}
+
+// IPK alias via the rowid keyword spellings (rowid/_rowid_/oid resolve to
+// the alias column), ASC and DESC. sqlite3 — identical for all.
+#[test]
+fn test_order_by_rowid_keywords_on_ipk_table_suppress_temp_btree() {
+    let db = setup_rowid_alias_db();
+    for sql in [
+        "SELECT * FROM r1 ORDER BY rowid",
+        "SELECT * FROM r1 ORDER BY rowid DESC",
+        "SELECT * FROM r1 ORDER BY _rowid_",
+        "SELECT * FROM r1 ORDER BY oid",
+    ] {
+        let output = eqp(&db, sql);
+        assert_eq!(
+            output,
+            "QUERY PLAN\n\
+             `--SCAN r1\n",
+            "query: {}",
+            sql
+        );
+    }
+}
+
+// Trailing terms after the unique IPK first key are never evaluated, so
+// sqlite3 fully suppresses (verified live for `ORDER BY id, y` and
+// `ORDER BY id ASC, y DESC`) — identical here.
+#[test]
+fn test_order_by_ipk_with_trailing_terms_suppresses_temp_btree() {
+    let db = setup_rowid_alias_db();
+    for sql in ["SELECT * FROM r1 ORDER BY id, y", "SELECT * FROM r1 ORDER BY id ASC, y DESC"] {
+        let output = eqp(&db, sql);
+        assert_eq!(
+            output,
+            "QUERY PLAN\n\
+             `--SCAN r1\n",
+            "query: {}",
+            sql
+        );
+    }
+}
+
+// IPK NOT first: `ORDER BY y, id` needs a real sort. sqlite3 — identical:
+//   |--SCAN r1
+//   `--USE TEMP B-TREE FOR ORDER BY
+#[test]
+fn test_order_by_ipk_not_first_emits_temp_btree() {
+    let db = setup_rowid_alias_db();
+    let output = eqp(&db, "SELECT * FROM r1 ORDER BY y, id");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--SCAN r1\n\
+         `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// Table-qualified reference to the IPK alias. sqlite3 — identical.
+#[test]
+fn test_order_by_qualified_ipk_alias_suppresses_temp_btree() {
+    let db = setup_rowid_alias_db();
+    let output = eqp(&db, "SELECT * FROM r1 ORDER BY r1.id");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         `--SCAN r1\n"
+    );
+}
+
+// Non-indexed WHERE + ORDER BY id: the filter preserves the scan's rowid
+// order. sqlite3 — identical: `--SCAN r1 (no temp line).
+#[test]
+fn test_where_filter_order_by_ipk_suppresses_temp_btree() {
+    let db = setup_rowid_alias_db();
+    let output = eqp(&db, "SELECT * FROM r1 WHERE y > 'a' ORDER BY id");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         `--SCAN r1\n"
+    );
+}
+
+// Expression over the IPK (`id+0`) is not the column itself. sqlite3 —
+// identical (verified live: `ORDER BY rowid+0` / `ORDER BY id+0` keep the
+// temp line):
+//   |--SCAN r1
+//   `--USE TEMP B-TREE FOR ORDER BY
+#[test]
+fn test_order_by_ipk_expression_emits_temp_btree() {
+    let db = setup_rowid_alias_db();
+    let output = eqp(&db, "SELECT * FROM r1 ORDER BY id+0");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--SCAN r1\n\
+         `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// When the WHERE clause rides an index, rows arrive in INDEX order, not
+// rowid order, so the suppression does not apply and the temp line stays.
+// sqlite3 (verified live) suppresses even here:
+//   `--SEARCH r2 USING COVERING INDEX r2y (y=?)
+// because its index entries are (key, rowid) pairs — within an equality
+// group, traversal is rowid-ordered. VibeSQL's index buckets carry no such
+// guarantee and the runtime genuinely re-sorts, so the temp line is the
+// truthful rendering. DIVERGENCE (documented).
+#[test]
+fn test_indexed_where_order_by_ipk_keeps_temp_btree() {
+    let mut db = Database::new();
+    run_ddl(&mut db, "CREATE TABLE r2(id INTEGER PRIMARY KEY, y TEXT)");
+    run_ddl(&mut db, "CREATE INDEX r2y ON r2(y)");
+    let output = eqp(&db, "SELECT * FROM r2 WHERE y='a' ORDER BY id");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--SEARCH r2 USING INDEX r2y (y=?)\n\
+         `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// WITHOUT ROWID with a single-column exact-INTEGER PRIMARY KEY: VibeSQL
+// still records the rowid-alias column and the #4926 scan sort applies, so
+// ORDER BY on the PK is the scan's natural order. sqlite3 — identical
+// (verified live; its WITHOUT ROWID B-tree is keyed by the PK):
+//   `--SCAN r3
+// The rowid KEYWORD spelling does not get the exemption on WITHOUT ROWID
+// tables (no rowid pseudo-column there, #4953), so that spelling keeps the
+// temp line.
+#[test]
+fn test_without_rowid_order_by_pk_suppresses_temp_btree() {
+    let mut db = Database::new();
+    run_ddl(&mut db, "CREATE TABLE r3(a INTEGER PRIMARY KEY, b TEXT) WITHOUT ROWID");
+
+    assert_eq!(
+        eqp(&db, "SELECT * FROM r3 ORDER BY a"),
+        "QUERY PLAN\n\
+         `--SCAN r3\n"
+    );
+    assert_eq!(
+        eqp(&db, "SELECT * FROM r3 ORDER BY rowid"),
+        "QUERY PLAN\n\
+         |--SCAN r3\n\
          `--USE TEMP B-TREE FOR ORDER BY\n"
     );
 }
