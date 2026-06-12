@@ -32,6 +32,18 @@
 //!   `MERGE (<OP>)` block with per-branch ORDER BY lines (sorted branches
 //!   merged at read time, verified live) — a documented divergence, since
 //!   rendering MERGE would fabricate a plan VibeSQL never executes (#5371).
+//! - Partial-prefix shapes (#5373): when an index satisfies only a PREFIX
+//!   of the ordering work (partial GROUP BY/DISTINCT/ORDER BY key, mixed
+//!   ASC/DESC directions), sqlite3 still rides the index on the scan line —
+//!   its sorter benefits from partial order — and keeps the temp line
+//!   (`USE TEMP B-TREE FOR LAST TERM OF ORDER BY` for sorts). VibeSQL's
+//!   runtime gains nothing from partial order: the scan layer
+//!   (`cost_based_index_selection`) only accepts a full direction-uniform
+//!   structural match and otherwise seq-scans, and the GROUP BY/DISTINCT
+//!   paths pass no ordering hint to the scan at all. The bare `SCAN t` +
+//!   temp line is therefore the truthful rendering — a documented
+//!   divergence (see the #5373 section below); revisit if the runtime
+//!   learns to exploit partial index order.
 
 use vibesql_ast::Statement;
 use vibesql_executor::ExplainExecutor;
@@ -147,11 +159,14 @@ fn test_group_by_indexed_non_covering_scan_line() {
 // GROUP BY on two columns when the index only covers the first. sqlite3:
 //   |--SCAN t1 USING INDEX i1a        [scan-line divergence: SCAN t1]
 //   `--USE TEMP B-TREE FOR GROUP BY
-// Scan-line divergence (documented, #5371): sqlite3 still rides i1a for
-// the partial prefix of the group key so its sorter benefits from partial
-// order; VibeSQL's runtime seq-scans and hash-groups, and the #5371 scan
-// rendering only fires when the temp-line suppression fires, so the bare
-// `SCAN t1` is the truthful rendering here.
+// Scan-line divergence (documented, #5371/#5373): sqlite3 still rides i1a
+// for the partial prefix of the group key so its sorter benefits from
+// partial order; VibeSQL's runtime seq-scans and hash-groups, and the
+// #5371 scan rendering only fires when the temp-line suppression fires, so
+// the bare `SCAN t1` is the truthful rendering here. #5373 confirmed the
+// access path: the aggregation path passes no ordering hint to the scan
+// (executor/aggregation/mod.rs `execute_from_with_where(..., None, ...)`),
+// so the runtime never traverses i1a for this query.
 #[test]
 fn test_group_by_partially_indexed_emits_temp_btree() {
     let db = setup_db();
@@ -891,6 +906,105 @@ fn test_group_by_order_by_indexed_covering_scan_line() {
 fn test_unindexed_order_by_keeps_bare_scan() {
     let db = setup_db();
     let output = eqp(&db, "SELECT b FROM t1 ORDER BY b");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--SCAN t1\n\
+         `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Partial-prefix ordering-index divergences (#5373) — documented
+// ---------------------------------------------------------------------------
+// sqlite3 3.51.0 rides an index whose columns satisfy only a PREFIX of the
+// ordering work and still emits the temp line: its external sorter exploits
+// partial input order. VibeSQL's runtime cannot — the scan layer
+// (`cost_based_index_selection`, select/scan/index_scan/selection.rs)
+// accepts an index for ordering only on a full direction-uniform structural
+// match (`can_use_index_for_order_by_with_pinned`: partial prefixes fail the
+// length check, mixed ASC/DESC fail the all-match/all-reversed check), the
+// aggregation path passes no ordering hint to the scan at all
+// (executor/aggregation/mod.rs), and DISTINCT hash-dedups over whatever the
+// scan returns (select/helpers.rs `apply_distinct`). In every shape below
+// the runtime performs a bare sequential scan, so rendering
+// `SCAN t USING INDEX i` would misstate the access path; the bare scan +
+// temp line is the truthful rendering. Each sqlite3 shape verified live.
+
+// DISTINCT over a SELECT list whose first column is indexed but whose
+// second is not. sqlite3:
+//   |--SCAN t1 USING INDEX i1a        [scan-line divergence: SCAN t1]
+//   `--USE TEMP B-TREE FOR DISTINCT
+// Runtime: non-aggregate SELECT passes only the statement ORDER BY (none
+// here) as the scan's ordering hint, so the scan is sequential and the
+// dedup is a hash structure — `SCAN t1` is what executes.
+#[test]
+fn test_distinct_partial_prefix_keeps_bare_scan_and_temp_line() {
+    let db = setup_db();
+    let output = eqp(&db, "SELECT DISTINCT a, c FROM t1");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--SCAN t1\n\
+         `--USE TEMP B-TREE FOR DISTINCT\n"
+    );
+}
+
+// ORDER BY extending past the index columns (i1a covers `a` only). sqlite3
+// rides the prefix AND renames the temp line for the unsatisfied suffix:
+//   |--SCAN t1 USING INDEX i1a        [scan-line divergence: SCAN t1]
+//   `--USE TEMP B-TREE FOR LAST TERM OF ORDER BY   [line-text divergence]
+// Runtime: `can_use_index_for_order_by_with_pinned` rejects (a, b) against
+// index (a) — more ORDER BY terms than index columns — so the scan is
+// sequential and ONE full sort pass runs (`apply_order_by`); the plain
+// `USE TEMP B-TREE FOR ORDER BY` line truthfully describes that single
+// full sort (no LAST TERM partial-sort pass exists to describe).
+#[test]
+fn test_order_by_partial_prefix_keeps_bare_scan_and_temp_line() {
+    let db = setup_db();
+    let output = eqp(&db, "SELECT * FROM t1 ORDER BY a, b");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--SCAN t1\n\
+         `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// Mixed-direction ORDER BY over the composite index (a, b). sqlite3 rides
+// iab for the leading term and sorts within each prefix group:
+//   |--SCAN tab USING INDEX iab       [scan-line divergence: SCAN tab]
+//   `--USE TEMP B-TREE FOR LAST TERM OF ORDER BY   [line-text divergence]
+// Runtime: mixed ASC/DESC fails the all-match/all-reversed direction check,
+// so the scan is sequential and one full sort pass runs.
+#[test]
+fn test_order_by_mixed_directions_keeps_bare_scan_and_temp_line() {
+    let db = setup_composite_db();
+    let output = eqp(&db, "SELECT * FROM tab ORDER BY a ASC, b DESC");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--SCAN tab\n\
+         `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// ORDER BY rowid: sqlite3's table B-tree traversal natively delivers rowid
+// order, so it shows a bare scan and NO temp line:
+//   `--SCAN t1
+// VibeSQL's runtime performs a real sort pass on the rowid pseudo-column
+// after the scan (rowid matches no index column, so no ordering index
+// applies), so the temp line truthfully describes execution. Suppressing it
+// when the storage scan provably yields rowid order is tracked as a
+// follow-on (#5375).
+#[test]
+fn test_order_by_rowid_emits_temp_btree() {
+    let db = setup_db();
+    let output = eqp(&db, "SELECT * FROM t1 ORDER BY rowid");
 
     assert_eq!(
         output,

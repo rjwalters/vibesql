@@ -938,6 +938,18 @@ impl ExplainExecutor {
         //   ride an ordering index exactly when the ORDER BY temp-line
         //   suppression fires, so non-suppressed shapes keep their
         //   pre-existing rendering.
+        //
+        // The scan rendering and the suppression stay COUPLED on purpose
+        // (#5373, investigated): sqlite3 also rides an index satisfying only
+        // a partial prefix of the key while keeping the temp line (partial
+        // GROUP BY/DISTINCT keys, mixed ASC/DESC — it then renames the sort
+        // line `USE TEMP B-TREE FOR LAST TERM OF ORDER BY`), but VibeSQL's
+        // runtime never does: `cost_based_index_selection` accepts an index
+        // for ordering only on a full direction-uniform match, and the
+        // aggregation path passes no ordering hint to the scan at all. In
+        // every partial case the runtime seq-scans, so an uncoupled
+        // `SCAN t USING INDEX i` would misstate the access path — documented
+        // divergence (explain_temp_btree_annotation_tests.rs, #5373 section).
         let window_scan_key = Self::distinct_window_keys(stmt).pop();
         let (scan_order_by, prefer_ordering_scan): (Option<Vec<vibesql_ast::OrderByItem>>, bool) =
             if window_scan_key.is_some() {
