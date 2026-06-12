@@ -48,6 +48,54 @@ pub enum ConsensusError {
     /// The requested log index has not been committed (or never existed).
     #[error("log index {0} is not committed")]
     NotCommitted(LogIndex),
+    /// A read-your-writes read (Raft Phase B2, #5200, PR 2:
+    /// `MvccRaftNode::query_at_least`) gave up waiting: this node's
+    /// applied state had not reached the session token within the
+    /// caller's bound. The local state is intact — the caller may retry
+    /// here later, or route the read to the leader (`leader_hint`, when
+    /// known), which by construction has applied every index it ever
+    /// returned from a propose.
+    #[error(
+        "read-your-writes wait expired: this node has applied index {applied}, the session \
+         token requires {required} (leader hint: {leader_hint:?})"
+    )]
+    ReadTimeout {
+        /// The session token: the dense application index the read must
+        /// observe (as returned by the write's propose).
+        required: LogIndex,
+        /// The dense application index this node had reached when the
+        /// wait expired.
+        applied: LogIndex,
+        /// Best-effort identifier of the current leader, if known.
+        leader_hint: Option<u64>,
+    },
+    /// A bounded-staleness read (Raft Phase B2, #5200, PR 2:
+    /// `MvccRaftNode::query_bounded_staleness`) was refused because this
+    /// node could not prove its applied state is no staler than the
+    /// caller's bound. Route the read to the leader (`leader_hint`, when
+    /// known) or retry with a larger bound.
+    #[error(
+        "bounded-staleness read refused: observed staleness {observed_ms:?}ms exceeds the \
+         {max_staleness_ms}ms bound (None = unknown — no leader-stamped entry applied yet; \
+         leader hint: {leader_hint:?})"
+    )]
+    StalenessExceeded {
+        /// Milliseconds elapsed (per this node's clock) since the
+        /// leader-clock stamp of the last stamped entry this node
+        /// applied; `None` when no stamped entry has been applied yet
+        /// (fresh node, pre-#5200 log prefix, or just after a snapshot
+        /// install on a fresh node) — unknown staleness is treated as
+        /// unbounded.
+        observed_ms: Option<u64>,
+        /// The caller's staleness bound, in milliseconds.
+        max_staleness_ms: u64,
+        /// Best-effort identifier of the current leader, if known.
+        /// Deliberately `None` when the refusing node itself believes it
+        /// leads: stale stamps on a "leader" suggest it has been deposed
+        /// or partitioned, and hinting at itself would route callers
+        /// straight back.
+        leader_hint: Option<u64>,
+    },
     /// Snapshot serialization or deserialization failed.
     #[error("snapshot encode/decode failed: {0}")]
     SnapshotCodec(String),

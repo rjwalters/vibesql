@@ -69,9 +69,9 @@
 //! same crash-safety order as the echo machine, including the deferred
 //! post-install log purge (`DurableLogStore::purge_compacted`).
 //!
-//! # Read paths (Raft Phase B2, #5200, PR 1 of 2)
+//! # Read paths (Raft Phase B2, #5200)
 //!
-//! Two read modes, one guarantee each:
+//! Four read modes, one guarantee each:
 //!
 //! - [`MvccRaftNode::query`] — **local, stale-allowed**: runs against
 //!   whatever this node has applied, with no leadership check or network
@@ -90,6 +90,59 @@
 //!   [`ConsensusError::NotLeader`] carrying **no** hint — its own view
 //!   is exactly what could not be confirmed, so hinting at itself would
 //!   route callers straight back to a possibly-stale node.
+//! - [`MvccRaftNode::query_at_least`] — **read-your-writes** (PR 2 of 2,
+//!   clock-free): a session carries the **dense application index** its
+//!   last write's propose returned as a token; any node — leader or
+//!   follower — serves the read once its locally applied dense index
+//!   reaches the token (waiting up to the caller's bound, then failing
+//!   with [`ConsensusError::ReadTimeout`]). Dense indices are identical
+//!   on every replica (see *Index mapping* above) and
+//!   [`execute_replicated`](MvccRaftNode::execute_replicated) returns
+//!   exactly the dense index its entry consumed, so a token minted by a
+//!   leader propose compares like-with-like against any follower's
+//!   applied cursor. Exact, no clocks involved.
+//! - [`MvccRaftNode::query_bounded_staleness`] — **bounded staleness**
+//!   (PR 2 of 2): serves locally iff this node can prove its applied
+//!   state is no staler than the caller's bound, refusing otherwise
+//!   with [`ConsensusError::StalenessExceeded`] (route to the leader or
+//!   retry with a larger bound). A bound of **zero** delegates to
+//!   [`query_linearizable`](MvccRaftNode::query_linearizable) — on a
+//!   follower that is exactly the "staleness 0 redirects to the leader"
+//!   contract.
+//!
+//! ## Bounded staleness: the leader wall-clock piggyback (PR 2 of 2)
+//!
+//! openraft 0.9.24's heartbeats are engine-internal empty AppendEntries
+//! frames with no application payload, so the leader's clock cannot
+//! ride on them without forking the engine. The carrier is therefore
+//! the **log itself**: every entry [`MvccRaftNode`] proposes is stamped
+//! with the leader's wall clock at propose time
+//! ([`TxnEntry::leader_time_ms`] — serde-compatible both ways: pre-#5200
+//! entries decode as unstamped, unstamped entries keep the pre-#5200
+//! byte encoding). Each replica records the stamp of the freshest
+//! stamped entry it has applied, and a bounded read with bound `S` is
+//! served iff `now - last_stamp <= S` on the serving node's own clock.
+//! The stamp is taken at *propose* time — before replication and apply —
+//! so the observed staleness already over-counts replication latency:
+//! the sound direction. A node that has never applied a stamped entry
+//! (fresh boot, pre-#5200 log prefix, or a snapshot installed onto a
+//! fresh node — engine snapshots carry no stamps) treats its staleness
+//! as **unknown** and refuses bounded reads until a stamped entry
+//! arrives; an unstamped entry advances the applied cursor but retains
+//! the previous (older) stamp, which only weakens the freshness claim —
+//! also sound.
+//!
+//! **Idle clusters**: with no writes, the last stamp simply ages, and a
+//! perfectly healthy idle follower ends up refusing bounded reads. Two
+//! supported answers, chosen per deployment: (a) leave it — bounded
+//! reads refuse and callers fall back to leader reads (the default;
+//! zero overhead, zero log noise); or (b) enable the app-level
+//! **staleness beacon** ([`RaftTuning::staleness_beacon_ms`], off by
+//! default): the leader proposes an empty, stamped no-op transaction
+//! entry whenever no stamped entry has been applied within the window,
+//! keeping idle followers fresh at the cost of one tiny log entry per
+//! window (which consumes a dense index / commit_ts like any entry — a
+//! no-op transaction, no rows touched).
 //!
 //! ## Clock skew: what it can and cannot affect
 //!
@@ -113,16 +166,38 @@
 //! *rate* drift — so the fast path is deferred to an openraft upgrade
 //! (or a follow-on) rather than approximated here. When it lands, the
 //! standard requirements apply: lease duration < election timeout minus
-//! a safety margin, monotonic clock only, warn on NTP step. Follower
-//! reads with bounded staleness (leader wall-clock piggyback, sensitive
-//! to leader↔follower skew within a documented bound, plus a clock-free
-//! index-based read-your-writes session token) are PR 2 of #5200.
+//! a safety margin, monotonic clock only, warn on NTP step.
+//!
+//! Of the PR 2 read modes, [`query_at_least`](MvccRaftNode::query_at_least)
+//! is fully clock-free (pure index comparison — skew-immune like the
+//! ReadIndex path). [`query_bounded_staleness`](MvccRaftNode::query_bounded_staleness)
+//! is the one read mode whose *bound* — not its data integrity, which
+//! MVCC snapshots at the applied index guarantee regardless — depends on
+//! wall clocks: staleness is measured as `follower_now - leader_stamp`,
+//! so leader↔follower clock skew adds (or subtracts) directly. Honest
+//! accounting of the real bound a caller gets: **true staleness ≤
+//! max_staleness + skew**, where `skew` is how far the follower's clock
+//! runs *behind* the leader's (a follower running behind under-measures
+//! staleness; one running ahead over-measures and refuses early — only
+//! the behind direction weakens the guarantee). Deployments relying on
+//! tight bounds therefore assume NTP-disciplined clocks and should
+//! budget the expected sync error (and the beacon/heartbeat interval)
+//! into `max_staleness`; an NTP step on the *leader* makes stamps jump,
+//! which at worst makes followers refuse (backward step ages stamps) or
+//! briefly under-measure by the step size (forward step). This is
+//! exactly the documented-skew-term bound from the curator's
+//! acceptance criteria — bounded, never silently unbounded.
 //!
 //! Out of scope here (deliberately): server/CLI wiring of replicated
-//! writes and reads (PostgreSQL-protocol sessions still execute against
+//! writes and reads — PostgreSQL-protocol sessions still execute against
 //! the local engine; surfacing `NotLeader` as a SQL error with redirect
-//! info is follow-on work, #5383) and follower reads / staleness bounds
-//! (PR 2 of #5200).
+//! info, and mapping a per-connection/per-statement `max_staleness_ms`
+//! PG option onto
+//! [`query_bounded_staleness`](MvccRaftNode::query_bounded_staleness)
+//! (plus propose-returned tokens onto
+//! [`query_at_least`](MvccRaftNode::query_at_least) for session-level
+//! read-your-writes), is follow-on work in #5383
+//! (`crates/vibesql-server/src/session.rs`).
 //!
 //! [`RaftStateMachine`]: openraft::storage::RaftStateMachine
 //! [`StorageError`]: openraft::StorageError
@@ -144,6 +219,7 @@ use openraft::{
     BasicNode, Entry, EntryPayload, LogId, Raft, RaftSnapshotBuilder, SnapshotMeta, StorageError,
     StorageIOError, StoredMembership,
 };
+use tokio::sync::watch;
 
 use crate::snapshot::SnapshotHorizonPin as _;
 
@@ -197,6 +273,23 @@ struct StoredMvccSnapshot {
     data: Vec<u8>,
 }
 
+/// The applied-state stamp broadcast by the mounted machine after every
+/// apply and snapshot install (Raft Phase B2, #5200, PR 2 bookkeeping):
+/// what the staleness-bounded and read-your-writes read paths watch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct AppliedStamp {
+    /// Dense application index of the last applied entry (mirrors
+    /// [`VibesqlStateMachine::last_applied`]; `0` = nothing applied).
+    dense: LogIndex,
+    /// Leader wall clock (ms since the UNIX epoch, taken at propose
+    /// time) of the freshest *stamped* entry applied. `None` until one
+    /// arrives — fresh node, pre-#5200 log prefix, or a snapshot
+    /// installed onto a fresh node (engine snapshots carry no stamps).
+    /// Unstamped entries advance `dense` but retain the previous stamp:
+    /// a weaker (older) freshness claim is always sound.
+    leader_time_ms: Option<u64>,
+}
+
 /// Raft-level bookkeeping the engine needs alongside the database state.
 #[derive(Debug, Default)]
 struct MvccSmInner {
@@ -224,6 +317,12 @@ struct MvccSmInner {
 pub(crate) struct MvccStateMachine {
     machine: VibesqlStateMachine,
     inner: Arc<Mutex<MvccSmInner>>,
+    /// Broadcasts the applied dense index + freshest leader-clock stamp
+    /// after every apply / install, so the PR 2 read paths
+    /// (`query_at_least`, `query_bounded_staleness`) can wait/decide
+    /// without polling the machine. Updated under the `inner` lock,
+    /// which serializes applies — values are monotone in `dense`.
+    applied: Arc<watch::Sender<AppliedStamp>>,
     /// Durable persistence for built/installed snapshots (`None` for
     /// in-memory configurations).
     store: Option<Arc<SnapshotStore>>,
@@ -248,6 +347,7 @@ impl MvccStateMachine {
         Self {
             machine: VibesqlStateMachine::new(),
             inner: Arc::default(),
+            applied: Arc::new(watch::Sender::new(AppliedStamp::default())),
             store: None,
             log_store: None,
             fatal: Arc::default(),
@@ -280,6 +380,10 @@ impl MvccStateMachine {
         inner.last_applied = meta.last_log_id;
         inner.last_membership = meta.last_membership.clone();
         inner.current_snapshot = Some(StoredMvccSnapshot { meta, data });
+        // Snapshots carry no leader-clock stamp: the dense cursor jumps,
+        // the previous stamp (typically none — this runs on a fresh
+        // machine) is retained as a sound lower bound on freshness.
+        self.applied.send_modify(|s| s.dense = dense);
         Ok(())
     }
 
@@ -437,6 +541,20 @@ impl RaftStateMachine<TypeConfig> for MvccStateMachine {
                     match self.machine.apply(dense, &txn) {
                         Ok(outcome) => {
                             inner.last_applied = Some(entry.log_id);
+                            // Broadcast for the PR 2 read paths: the new
+                            // dense cursor, plus the entry's leader-clock
+                            // stamp when it has one (an unstamped entry
+                            // retains the previous, older stamp — a
+                            // weaker freshness claim, always sound). A
+                            // rejected entry counts too: it consumed its
+                            // index on every replica, proving this
+                            // node's state is exactly as fresh.
+                            self.applied.send_modify(|s| {
+                                s.dense = dense;
+                                if txn.leader_time_ms.is_some() {
+                                    s.leader_time_ms = txn.leader_time_ms;
+                                }
+                            });
                             AppResponse::Mvcc { index: dense, outcome }
                         }
                         // FatalApply (possibly node-local failure) and
@@ -506,6 +624,11 @@ impl RaftStateMachine<TypeConfig> for MvccStateMachine {
         inner.last_applied = meta.last_log_id;
         inner.last_membership = meta.last_membership.clone();
         inner.current_snapshot = Some(StoredMvccSnapshot { meta: meta.clone(), data });
+        // As in `seed_from_loaded`: dense cursor jumps, no new stamp —
+        // staleness stays unknown (or keeps its older lower bound) until
+        // the next stamped entry applies. Bounded reads refuse until
+        // then; `query_at_least` waiters see the jump immediately.
+        self.applied.send_modify(|s| s.dense = dense);
         Ok(())
     }
 
@@ -550,11 +673,18 @@ pub struct MvccRaftNode {
     /// Accept-loop task of the TCP transport (`None` for channel-network
     /// configurations). Aborted on shutdown and on drop.
     listener_task: Option<tokio::task::JoinHandle<()>>,
+    /// App-level staleness-beacon task (`None` unless
+    /// [`RaftTuning::staleness_beacon_ms`] is non-zero) — see the module
+    /// docs' bounded-staleness section. Aborted on shutdown and on drop.
+    beacon_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Drop for MvccRaftNode {
     fn drop(&mut self) {
         if let Some(task) = &self.listener_task {
+            task.abort();
+        }
+        if let Some(task) = &self.beacon_task {
             task.abort();
         }
     }
@@ -581,13 +711,24 @@ impl MvccRaftNode {
     /// with a bounded timeout). Must be called from within a tokio
     /// runtime.
     pub async fn join_tcp_cluster(node_id: u64, config: &ClusterConfig) -> Result<Self> {
+        Self::join_tcp_cluster_tuned(node_id, config, RaftTuning::default()).await
+    }
+
+    /// Like [`join_tcp_cluster`](Self::join_tcp_cluster), with explicit
+    /// [`RaftTuning`] (snapshot/retention/transfer knobs and the Phase
+    /// B2 staleness beacon).
+    pub async fn join_tcp_cluster_tuned(
+        node_id: u64,
+        config: &ClusterConfig,
+        tuning: RaftTuning,
+    ) -> Result<Self> {
         Self::join_tcp(
             node_id,
             config,
             InMemoryLogStore::default(),
             MvccStateMachine::volatile(),
             Bootstrap::Initialize,
-            RaftTuning::default(),
+            tuning,
         )
         .await
     }
@@ -691,7 +832,15 @@ impl MvccRaftNode {
             .await
             .map_err(|e| ConsensusError::Backend(format!("failed to start raft core: {e}")))?;
         let metrics = raft.metrics();
-        Ok(Self { raft, sm, metrics, listener_task: None })
+        let beacon_task = (tuning.staleness_beacon_ms > 0).then(|| {
+            spawn_staleness_beacon(
+                raft.clone(),
+                metrics.clone(),
+                Arc::clone(&sm.applied),
+                tuning.staleness_beacon_ms,
+            )
+        });
+        Ok(Self { raft, sm, metrics, listener_task: None, beacon_task })
     }
 
     /// Execute one autocommit write statement through consensus. See
@@ -739,8 +888,12 @@ impl MvccRaftNode {
 
     /// Propose a pre-built entry. Internal: the public surface freezes
     /// statements first (tests use this to exercise the apply-side
-    /// defenses with hand-crafted entries).
+    /// defenses with hand-crafted entries). Every entry proposed here is
+    /// stamped with this node's wall clock — the leader-clock piggyback
+    /// the bounded-staleness read path measures against (Raft Phase B2,
+    /// #5200, PR 2; see [`TxnEntry::leader_time_ms`]).
     async fn propose_entry(&self, entry: TxnEntry) -> Result<(LogIndex, ApplyOutcome)> {
+        let entry = entry.stamp_leader_time(current_timestamp_ms());
         let payload =
             serde_json::to_vec(&entry).map_err(|e| ConsensusError::Backend(e.to_string()))?;
         let response =
@@ -839,6 +992,106 @@ impl MvccRaftNode {
         }
     }
 
+    /// Run a read-only SELECT with **read-your-writes** semantics (Raft
+    /// Phase B2, #5200, PR 2): wait — up to `wait` — until this node's
+    /// locally applied **dense application index** reaches `min_index`,
+    /// then read locally. Clock-free and exact: the token is the dense
+    /// index a write's propose returned
+    /// ([`execute_replicated`](Self::execute_replicated) /
+    /// [`execute_replicated_txn`](Self::execute_replicated_txn)), and
+    /// dense indices are identical on every replica (see the module
+    /// docs' index-mapping section), so *write on the leader → carry the
+    /// returned index → read on ANY node with the token* always observes
+    /// the write. Works on leaders and followers alike; `min_index = 0`
+    /// degenerates to a plain local [`query`](Self::query).
+    ///
+    /// Fails with [`ConsensusError::ReadTimeout`] (carrying this node's
+    /// applied index and a best-effort leader hint) if the node does not
+    /// catch up within `wait` — e.g. a partitioned or badly lagging
+    /// follower. The session can then retry here, or route the read to
+    /// the leader, which has applied every index it ever returned.
+    pub async fn query_at_least(
+        &self,
+        min_index: LogIndex,
+        sql: &str,
+        wait: Duration,
+    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>> {
+        let mut rx = self.sm.applied.subscribe();
+        // A closed channel (the inner `Err`) cannot happen while `self`
+        // is alive — the sender lives on `self.sm` — so it folds into
+        // the timeout arm rather than inventing an unreachable error.
+        let caught_up = matches!(
+            tokio::time::timeout(wait, rx.wait_for(|s| s.dense >= min_index)).await,
+            Ok(Ok(_))
+        );
+        if caught_up {
+            self.sm.machine.query(sql)
+        } else {
+            Err(ConsensusError::ReadTimeout {
+                required: min_index,
+                applied: self.sm.applied.borrow().dense,
+                leader_hint: self.current_leader(),
+            })
+        }
+    }
+
+    /// Run a read-only SELECT with **bounded staleness** (Raft Phase B2,
+    /// #5200, PR 2): serve locally iff this node can prove its applied
+    /// state is no staler than `max_staleness` — i.e. the leader-clock
+    /// stamp of the freshest stamped entry it has applied is within the
+    /// bound of this node's current wall clock (see the module docs'
+    /// bounded-staleness section for the carrier design, and the
+    /// clock-skew section for the honest bound: true staleness ≤
+    /// `max_staleness` + leader↔follower skew). Works on any node; a
+    /// leader gets no special treatment — a deposed or partitioned
+    /// ex-leader's stamps age exactly like a follower's, so it refuses
+    /// rather than serve provably-stale data.
+    ///
+    /// A bound of **zero** delegates to
+    /// [`query_linearizable`](Self::query_linearizable): the leader
+    /// serves it linearizably, a follower fails with
+    /// [`ConsensusError::NotLeader`] and a leader hint — the
+    /// "staleness 0 redirects to the leader" contract.
+    ///
+    /// Otherwise fails with [`ConsensusError::StalenessExceeded`] when
+    /// the bound cannot be proven: the observed staleness exceeds it, or
+    /// no stamped entry has been applied yet (`observed_ms: None` —
+    /// fresh node, pre-#5200 log prefix, snapshot install onto a fresh
+    /// node, or an idle cluster without the
+    /// [`RaftTuning::staleness_beacon_ms`] beacon). The error carries a
+    /// leader hint for redirect routing — except when this node itself
+    /// believes it leads, since stale stamps on a "leader" are evidence
+    /// it may be deposed, and hinting at itself would route callers
+    /// straight back (the same discipline as
+    /// [`query_linearizable`](Self::query_linearizable)'s quorum-failure
+    /// arm).
+    ///
+    /// The server's per-connection / per-statement `max_staleness_ms` PG
+    /// option (#5383) maps directly onto this method's `max_staleness`.
+    pub async fn query_bounded_staleness(
+        &self,
+        max_staleness: Duration,
+        sql: &str,
+    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>> {
+        if max_staleness.is_zero() {
+            return self.query_linearizable(sql).await;
+        }
+        let max_staleness_ms = u64::try_from(max_staleness.as_millis()).unwrap_or(u64::MAX);
+        let stamp = self.sm.applied.borrow().leader_time_ms;
+        let observed_ms = stamp.map(|t| current_timestamp_ms().saturating_sub(t));
+        match observed_ms {
+            Some(observed) if observed <= max_staleness_ms => self.sm.machine.query(sql),
+            _ => Err(ConsensusError::StalenessExceeded {
+                observed_ms,
+                max_staleness_ms,
+                leader_hint: match self.role() {
+                    Role::Leader => None,
+                    _ => self.current_leader(),
+                },
+            }),
+        }
+    }
+
     /// This node's current role in the consensus group.
     pub fn role(&self) -> Role {
         role_from_state(self.metrics.borrow().state)
@@ -919,8 +1172,51 @@ impl MvccRaftNode {
         if let Some(task) = &self.listener_task {
             task.abort();
         }
+        if let Some(task) = &self.beacon_task {
+            task.abort();
+        }
         self.raft.shutdown().await.map_err(|e| ConsensusError::Backend(e.to_string()))
     }
+}
+
+/// The app-level staleness beacon (Raft Phase B2, #5200, PR 2 — see the
+/// module docs' bounded-staleness section, idle-cluster paragraph):
+/// every `interval_ms`, a node that believes it leads checks whether any
+/// stamped entry was applied within the window and, if not, proposes an
+/// empty no-op [`TxnEntry`] stamped with its wall clock. On a healthy
+/// idle cluster a follower therefore sees a fresh stamp at least every
+/// ~2×`interval_ms` (one window to notice + one to land).
+///
+/// Deliberately fire-and-forget: a `NotLeader` race (deposed between the
+/// role check and the propose), an engine shutdown, or any other write
+/// failure is a non-event — the beacon retries next tick, and bounded
+/// reads simply refuse in the meantime, which is the safe direction.
+fn spawn_staleness_beacon(
+    raft: Raft<TypeConfig>,
+    metrics: tokio::sync::watch::Receiver<openraft::RaftMetrics<u64, BasicNode>>,
+    applied: Arc<watch::Sender<AppliedStamp>>,
+    interval_ms: u64,
+) -> tokio::task::JoinHandle<()> {
+    tokio::task::spawn(async move {
+        let interval = Duration::from_millis(interval_ms);
+        loop {
+            tokio::time::sleep(interval).await;
+            if role_from_state(metrics.borrow().state) != Role::Leader {
+                continue;
+            }
+            let fresh_enough = applied
+                .borrow()
+                .leader_time_ms
+                .is_some_and(|t| current_timestamp_ms().saturating_sub(t) < interval_ms);
+            if fresh_enough {
+                continue;
+            }
+            let entry =
+                TxnEntry::batch(Vec::<String>::new()).stamp_leader_time(current_timestamp_ms());
+            let Ok(payload) = serde_json::to_vec(&entry) else { continue };
+            let _ = raft.client_write(payload).await;
+        }
+    })
 }
 
 #[cfg(test)]
@@ -1685,5 +1981,231 @@ mod tests {
         // And the leader serves the linearizable read it just confirmed.
         let rows = cluster.node(leader).query_linearizable("SELECT id FROM t").await.unwrap();
         assert!(rows.is_empty(), "no rows inserted yet, got: {rows:?}");
+    }
+
+    // -----------------------------------------------------------------
+    // Raft Phase B2, PR 2 (#5200): read-your-writes tokens +
+    // bounded-staleness follower reads (the partition scenarios run
+    // over real sockets in tests/follower_reads.rs; these cover the
+    // plumbing and the mixed-version / idle-cluster contracts)
+    // -----------------------------------------------------------------
+
+    /// The read-your-writes contract, clock-free: write on the leader,
+    /// carry the returned dense index as the session token, and
+    /// `query_at_least` on ANY node observes the write — no manual
+    /// apply-waiting by the caller.
+    #[tokio::test]
+    async fn read_your_writes_token_serves_on_every_node() {
+        let cluster = MvccCluster::new(3).await;
+        cluster.execute_on_leader("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)").await;
+        let (token, _) = cluster.execute_on_leader("INSERT INTO t VALUES (1, 'one')").await;
+
+        for id in 1..=3 {
+            let rows = cluster
+                .node(id)
+                .query_at_least(token, "SELECT id, v FROM t", WAIT_TIMEOUT)
+                .await
+                .unwrap_or_else(|e| panic!("node {id} must serve the token read: {e:?}"));
+            assert_eq!(rows, vec![vec![SqlValue::Integer(1), SqlValue::Varchar("one".into())]]);
+        }
+    }
+
+    /// A token this node cannot reach within the caller's bound is a
+    /// typed, loud timeout — applied cursor and leader hint attached —
+    /// never a hang and never a stale serve.
+    #[tokio::test]
+    async fn query_at_least_times_out_with_a_typed_error() {
+        let cluster = MvccCluster::new(3).await;
+        let (token, _) = cluster.execute_on_leader("CREATE TABLE t (id INTEGER PRIMARY KEY)").await;
+        let leader = cluster.wait_for_leader().await;
+        let follower = follower_of(&cluster, leader);
+        cluster.wait_for_apply(follower, token).await;
+
+        let err = cluster
+            .node(follower)
+            .query_at_least(token + 100, "SELECT id FROM t", Duration::from_millis(100))
+            .await
+            .unwrap_err();
+        match err {
+            ConsensusError::ReadTimeout { required, applied, .. } => {
+                assert_eq!(required, token + 100);
+                assert!(applied < required, "applied {applied} must trail the token");
+            }
+            other => panic!("expected ReadTimeout, got: {other:?}"),
+        }
+    }
+
+    /// Unknown staleness refuses: a fresh node (only protocol entries
+    /// applied — no stamped entry yet) must not serve bounded reads, and
+    /// a node that itself believes it leads must not hint at itself. The
+    /// first stamped write then makes bounded reads serviceable.
+    #[tokio::test]
+    async fn bounded_staleness_refuses_until_a_stamped_entry_applies() {
+        let node = MvccRaftNode::single_node().await.unwrap();
+
+        let err =
+            node.query_bounded_staleness(Duration::from_secs(10), "SELECT 1").await.unwrap_err();
+        match err {
+            ConsensusError::StalenessExceeded { observed_ms, leader_hint, .. } => {
+                assert_eq!(observed_ms, None, "no stamped entry applied → unknown staleness");
+                assert_eq!(leader_hint, None, "a leader must not hint at itself");
+            }
+            other => panic!("expected StalenessExceeded, got: {other:?}"),
+        }
+
+        node.execute_replicated("CREATE TABLE t (id INTEGER PRIMARY KEY)").await.unwrap();
+        let rows = node
+            .query_bounded_staleness(Duration::from_secs(10), "SELECT id FROM t")
+            .await
+            .expect("a just-stamped node serves bounded reads");
+        assert!(rows.is_empty());
+    }
+
+    /// A zero bound is the linearizable path: the leader serves it (with
+    /// full ReadIndex confirmation), so `max_staleness = 0` never serves
+    /// from an unconfirmed local state.
+    #[tokio::test]
+    async fn bounded_staleness_zero_is_linearizable_on_the_leader() {
+        let node = MvccRaftNode::single_node().await.unwrap();
+        node.execute_replicated("CREATE TABLE t (id INTEGER PRIMARY KEY)").await.unwrap();
+        node.execute_replicated("INSERT INTO t VALUES (7)").await.unwrap();
+
+        let rows = node.query_bounded_staleness(Duration::ZERO, "SELECT id FROM t").await.unwrap();
+        assert_eq!(rows, vec![vec![SqlValue::Integer(7)]]);
+    }
+
+    /// Pre-#5200 (unstamped) entries through the real mount: the dense
+    /// cursor advances — read-your-writes tokens keep working — but
+    /// staleness stays unknown, so bounded reads refuse until the first
+    /// stamped entry arrives (the documented mixed-version behavior).
+    #[tokio::test]
+    async fn unstamped_entry_advances_tokens_but_not_staleness() {
+        let node = MvccRaftNode::single_node().await.unwrap();
+
+        // Bypass the (stamping) propose path: an old proposer's entry.
+        let old_format =
+            serde_json::to_vec(&TxnEntry::single("CREATE TABLE t (id INTEGER PRIMARY KEY)"))
+                .unwrap();
+        node.raft.client_write(old_format).await.unwrap();
+
+        // Token reads work — clock-free, index-based.
+        let rows = node.query_at_least(1, "SELECT id FROM t", WAIT_TIMEOUT).await.unwrap();
+        assert!(rows.is_empty());
+
+        // Bounded reads refuse — staleness unknown.
+        let err = node
+            .query_bounded_staleness(Duration::from_secs(10), "SELECT id FROM t")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ConsensusError::StalenessExceeded { observed_ms: None, .. }),
+            "got: {err:?}"
+        );
+
+        // A stamped entry restores bounded-read service.
+        node.execute_replicated("INSERT INTO t VALUES (1)").await.unwrap();
+        node.query_bounded_staleness(Duration::from_secs(10), "SELECT id FROM t")
+            .await
+            .expect("a stamped entry restores bounded reads");
+    }
+
+    /// Idle aging without the beacon (the default): once the last stamp
+    /// is older than the caller's bound, a healthy but idle follower
+    /// refuses bounded reads — with a leader hint for redirect routing —
+    /// while its token/local reads keep serving (those are clock-free).
+    #[tokio::test]
+    async fn idle_cluster_without_beacon_ages_out_of_bounded_reads() {
+        let cluster = MvccCluster::new(3).await;
+        cluster.execute_on_leader("CREATE TABLE t (id INTEGER PRIMARY KEY)").await;
+        let (token, _) = cluster.execute_on_leader("INSERT INTO t VALUES (1)").await;
+        let leader = cluster.wait_for_leader().await;
+        let follower = follower_of(&cluster, leader);
+        cluster.wait_for_apply(follower, token).await;
+        cluster
+            .wait_until("the follower to learn who leads", || {
+                (cluster.node(follower).current_leader() == Some(leader)).then_some(())
+            })
+            .await;
+
+        // No writes from here on: the stamp can only age. Poll until the
+        // 150ms bound is exceeded (bounded — fails loudly, never hangs).
+        let bound = Duration::from_millis(150);
+        let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+        loop {
+            match cluster.node(follower).query_bounded_staleness(bound, "SELECT id FROM t").await {
+                Err(ConsensusError::StalenessExceeded {
+                    observed_ms: Some(observed),
+                    max_staleness_ms,
+                    leader_hint,
+                }) => {
+                    assert!(observed > max_staleness_ms, "{observed} vs {max_staleness_ms}");
+                    assert_eq!(leader_hint, Some(leader), "refusals must carry the redirect");
+                    break;
+                }
+                Ok(_) => {} // still within the bound — keep aging
+                Err(other) => panic!("expected StalenessExceeded, got: {other:?}"),
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for the idle follower to age out of the bound"
+            );
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+
+        // The clock-free paths are unaffected by idleness.
+        let rows = cluster
+            .node(follower)
+            .query_at_least(token, "SELECT id FROM t", WAIT_TIMEOUT)
+            .await
+            .unwrap();
+        assert_eq!(rows, vec![vec![SqlValue::Integer(1)]]);
+    }
+
+    /// The opt-in staleness beacon keeps an IDLE cluster's bounded reads
+    /// alive: with no application writes for many beacon windows, a
+    /// follower still proves freshness within a 200ms bound, because the
+    /// leader keeps proposing stamped no-op entries (which consume dense
+    /// indices like any entry).
+    #[tokio::test]
+    async fn staleness_beacon_keeps_idle_cluster_bounded_reads_fresh() {
+        let tuning = RaftTuning { staleness_beacon_ms: 50, ..RaftTuning::default() };
+        let cluster = MvccCluster::build(3, false, tuning).await;
+        cluster.execute_on_leader("CREATE TABLE t (id INTEGER PRIMARY KEY)").await;
+        let (token, _) = cluster.execute_on_leader("INSERT INTO t VALUES (1)").await;
+        let leader = cluster.wait_for_leader().await;
+        let follower = follower_of(&cluster, leader);
+        cluster.wait_for_apply(follower, token).await;
+
+        // Go idle for far longer than the 200ms bound the last real
+        // write's stamp could cover on its own.
+        tokio::time::sleep(Duration::from_millis(400)).await;
+
+        // Poll (bounded) until a bounded read succeeds: without the
+        // beacon the stamp could only age further, so success here
+        // proves a beacon-refreshed stamp reached the follower.
+        let bound = Duration::from_millis(200);
+        let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+        loop {
+            match cluster.node(follower).query_bounded_staleness(bound, "SELECT id FROM t").await {
+                Ok(rows) => {
+                    assert_eq!(rows, vec![vec![SqlValue::Integer(1)]]);
+                    break;
+                }
+                Err(ConsensusError::StalenessExceeded { .. }) => {} // beacon not landed yet
+                Err(other) => panic!("expected rows or StalenessExceeded, got: {other:?}"),
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for the beacon to refresh the idle follower"
+            );
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+
+        // Beacons are real (no-op) entries: the dense cursor moved past
+        // the last application write on every replica identically.
+        assert!(
+            cluster.node(follower).last_applied() > token,
+            "beacon entries must have consumed dense indices"
+        );
     }
 }
