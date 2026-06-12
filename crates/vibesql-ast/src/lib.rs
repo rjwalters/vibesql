@@ -37,6 +37,7 @@
 pub mod arena;
 pub mod pretty_print;
 pub mod visitor;
+pub mod volatility;
 
 // ============================================================================
 // Table Reference (with case-sensitivity info)

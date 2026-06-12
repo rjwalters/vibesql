@@ -312,3 +312,163 @@ pub(super) fn eval_scalar_function(
         _ => Err(ExecutorError::NoSuchFunction { function_name: name.to_string() }),
     }
 }
+
+/// Pins `eval_scalar_function`'s dispatch table against the central
+/// volatility classification in [`vibesql_ast::volatility`].
+///
+/// **If you add a function (or an alias) to the dispatch above whose
+/// implementation reads the wall clock, the RNG, or session/server
+/// state, you MUST classify its name in `vibesql_ast::volatility` as
+/// well** — the Raft replication freeze pass (`vibesql-consensus`) and
+/// the optimizer's predicate-pushdown guard both rely on that list, and
+/// an unclassified alias silently diverges replicas (see PR #5382:
+/// `curdate()`/`curtime()`/`age()` slipped through exactly this gap).
+/// This test parses the dispatch source and fails when a name routed to
+/// a volatile handler is missing from the classification.
+#[cfg(test)]
+mod dispatch_volatility {
+    use vibesql_ast::volatility;
+
+    /// The dispatch source, scanned for `"NAME" | "ALIAS" => handler`
+    /// arms. Patterns and `=>` share a line in this file; a handler may
+    /// continue on following lines (until the next arm's `=>`).
+    const DISPATCH_SRC: &str = include_str!("mod.rs");
+
+    /// Handler call tokens whose implementations are non-deterministic,
+    /// paired with the volatility category their dispatch names must be
+    /// classified under. Keep in sync with the implementations:
+    /// - clock: read the wall clock unconditionally
+    /// - datetime-family: read the clock for some argument shapes ('now', implicit now, 1-arg
+    ///   age())
+    /// - random: RNG
+    /// - session: session/server state (identity, server info)
+    const VOLATILE_HANDLERS: &[(&str, Category)] = &[
+        ("datetime::current_date(", Category::Clock),
+        ("datetime::current_time(", Category::Clock),
+        ("datetime::current_timestamp(", Category::Clock),
+        ("datetime::datetime(", Category::DatetimeFamily),
+        ("datetime::date(", Category::DatetimeFamily),
+        ("datetime::time(", Category::DatetimeFamily),
+        ("datetime::strftime(", Category::DatetimeFamily),
+        ("datetime::julianday(", Category::DatetimeFamily),
+        ("datetime::unixepoch(", Category::DatetimeFamily),
+        ("datetime::timediff(", Category::DatetimeFamily),
+        ("datetime::age(", Category::DatetimeFamily),
+        ("sqlite_compat::random(", Category::Random),
+        ("sqlite_compat::randomblob(", Category::Random),
+        ("system::version(", Category::Session),
+        ("system::database(", Category::Session),
+        ("system::user(", Category::Session),
+    ];
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum Category {
+        Clock,
+        DatetimeFamily,
+        Random,
+        Session,
+    }
+
+    impl Category {
+        fn classifies(self, canonical_name: &str) -> bool {
+            match self {
+                Category::Clock => volatility::is_clock_function(canonical_name),
+                Category::DatetimeFamily => volatility::is_datetime_family_function(canonical_name),
+                Category::Random => volatility::is_random_function(canonical_name),
+                Category::Session => volatility::is_session_state_function(canonical_name),
+            }
+        }
+    }
+
+    /// Extract `(pattern names, handler text)` pairs from the dispatch
+    /// source: a line containing `=>` starts an arm whose pattern names
+    /// are the quoted strings before the `=>`; its handler text runs to
+    /// the next such line. The scan stops at this test module's own
+    /// `#[cfg(test)]` attribute so the marker table above is not read
+    /// as dispatch arms.
+    fn dispatch_arms() -> Vec<(Vec<String>, String)> {
+        let dispatch_only =
+            DISPATCH_SRC.split("#[cfg(test)]").next().expect("split always yields a first part");
+        let mut arms: Vec<(Vec<String>, String)> = Vec::new();
+        for line in dispatch_only.lines() {
+            if let Some(arrow) = line.find("=>") {
+                let names = quoted_strings(&line[..arrow]);
+                let handler = line[arrow + 2..].to_string();
+                arms.push((names, handler));
+            } else if let Some((_, handler)) = arms.last_mut() {
+                handler.push('\n');
+                handler.push_str(line);
+            }
+        }
+        arms
+    }
+
+    fn quoted_strings(text: &str) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut rest = text;
+        while let Some(start) = rest.find('"') {
+            let Some(len) = rest[start + 1..].find('"') else { break };
+            names.push(rest[start + 1..start + 1 + len].to_string());
+            rest = &rest[start + 1 + len + 1..];
+        }
+        names
+    }
+
+    #[test]
+    fn every_volatile_dispatch_name_is_classified_in_vibesql_ast_volatility() {
+        let mut seen: Vec<(Category, String)> = Vec::new();
+        for (names, handler) in dispatch_arms() {
+            for &(marker, category) in VOLATILE_HANDLERS {
+                if !handler.contains(marker) {
+                    continue;
+                }
+                assert!(
+                    !names.is_empty(),
+                    "volatile handler {marker} dispatched from an arm without name patterns"
+                );
+                for name in &names {
+                    let canonical = name.to_lowercase();
+                    assert!(
+                        category.classifies(&canonical),
+                        "executor dispatches '{name}' to volatile handler {marker}, but \
+                         vibesql_ast::volatility does not classify '{canonical}' as \
+                         {category:?} — add it to the classification (replication freeze \
+                         and optimizer pushdown depend on it, #5377/#5382)"
+                    );
+                    assert!(
+                        volatility::is_volatile_function(&canonical),
+                        "'{canonical}' must be in the coarse volatile union"
+                    );
+                    seen.push((category, canonical));
+                }
+            }
+        }
+
+        // Sanity check that the source scan actually found the dispatch
+        // arms (guards against refactors that would silently turn this
+        // test into a no-op). These are the alias sets confirmed
+        // divergence-prone in PR #5382's review.
+        for (category, name) in [
+            (Category::Clock, "current_date"),
+            (Category::Clock, "curdate"),
+            (Category::Clock, "current_time"),
+            (Category::Clock, "curtime"),
+            (Category::Clock, "current_timestamp"),
+            (Category::Clock, "now"),
+            (Category::DatetimeFamily, "age"),
+            (Category::Random, "random"),
+            (Category::Random, "randomblob"),
+            (Category::Session, "user"),
+            (Category::Session, "current_user"),
+            (Category::Session, "database"),
+            (Category::Session, "schema"),
+            (Category::Session, "version"),
+        ] {
+            assert!(
+                seen.contains(&(category, name.to_string())),
+                "expected to find '{name}' dispatched to a {category:?} handler — did the \
+                 dispatch-source scan break?"
+            );
+        }
+    }
+}

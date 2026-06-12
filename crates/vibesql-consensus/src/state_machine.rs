@@ -20,24 +20,56 @@
 //! is not implementable against today's storage layer without new
 //! machinery, so PR 1 ships the statement-batch form:
 //!
-//! - The crash-recovery WAL replay (`vibesql-storage::wal::recovery`)
-//!   that the issue proposed reusing as the apply function is a **stub**
-//!   for DML — `apply_op` counts Insert/Update/Delete entries but does
-//!   not apply them (it has no `table_id → table` resolution).
-//! - The only write-set the storage layer captures per transaction is
-//!   `TransactionChange` (kept for savepoint undo). It records DML only
-//!   — no DDL — and replaying it would bypass the executor's index and
-//!   constraint maintenance, which has no row-level "apply with index
-//!   upkeep" entry point today.
+//! - The crash-recovery WAL replay (`vibesql-storage::wal::recovery`) that the issue proposed
+//!   reusing as the apply function is a **stub** for DML — `apply_op` counts Insert/Update/Delete
+//!   entries but does not apply them (it has no `table_id → table` resolution).
+//! - The only write-set the storage layer captures per transaction is `TransactionChange` (kept for
+//!   savepoint undo). It records DML only — no DDL — and replaying it would bypass the executor's
+//!   index and constraint maintenance, which has no row-level "apply with index upkeep" entry point
+//!   today.
 //!
-//! **Tradeoff and follow-up**: statement batches are deterministic only
-//! if the statements are (no `random()`, `CURRENT_TIMESTAMP`, …). On a
-//! single node (this PR) every entry is applied exactly once by one
-//! machine, so nothing can diverge; for multi-node (PR 2) and beyond,
-//! either the proposer must freeze non-deterministic values into
-//! literals before proposing, or the storage layer must grow a real
-//! write-set capture + apply pair (effects form). That follow-up is
-//! filed as #5377.
+//! **Determinism (#5377)**: statement batches are deterministic only if
+//! the statements are — so non-deterministic expressions are **frozen
+//! at propose time**. The proposer evaluates `random()`,
+//! `CURRENT_TIMESTAMP`, `datetime('now')`, … once and ships the drawn
+//! values in [`TxnEntry::frozen`]; the apply path splices them back in
+//! as literals before execution (`crate::freeze`). As defense in depth
+//! the apply path *rejects* (deterministically, on every replica) any
+//! entry that still contains an unfrozen non-deterministic site — the
+//! state machine structurally cannot evaluate volatile SQL. A frozen-
+//! value count mismatch (proposer/applier version skew) is treated as
+//! fatal instead ([`ConsensusError::FatalApply`]), because recording a
+//! local-only failure as a rejection would silently diverge replicas.
+//!
+//! **Failure classification** (judge note on PR #5378): a statement
+//! failure inside apply is recorded as [`ApplyOutcome::Rejected`] only
+//! when the failure is a deterministic function of the entry and the
+//! replicated state (constraint violations, type errors, parse errors,
+//! …) — by state induction every replica rejects it identically.
+//! Failures that may be local to this node (storage errors, memory /
+//! row / join / recursion limits, query timeouts) abort the apply with
+//! [`ConsensusError::FatalApply`] **without consuming the index**: the
+//! node must halt and resync (snapshot + replay) rather than record an
+//! outcome other replicas may not reproduce.
+//!
+//! **Session context**: statements run against a bare [`Database`] with
+//! no session state, and that is load-bearing. The session-scoped knobs
+//! that could change write-statement semantics (`sql_mode`,
+//! `foreign_keys_enabled` / `defer_foreign_keys`,
+//! `case_sensitive_like`, roles/security, session variables — see
+//! `vibesql-storage::database::session`) all sit at their defaults on
+//! every machine, because the replicated statement surface has no way
+//! to mutate them: PRAGMA/SET/GRANT-style statements are rejected by
+//! the dispatch below, and snapshots serialize only catalog + data.
+//! Session functions that *read* such state (`last_insert_rowid()`,
+//! `changes()`, `total_changes()`) are rejected by the freeze pass. If
+//! PR 2+ server wiring ever threads session-scoped settings into
+//! replicated writes, those settings must be captured in [`TxnEntry`] —
+//! do not execute session statements against the machine's database.
+//!
+//! The effects-form write-set (row-level mutations instead of SQL text)
+//! remains the preferred long-term representation; see #5199 for why it
+//! is not implementable against today's storage layer.
 //!
 //! # commit_ts = log index
 //!
@@ -90,6 +122,7 @@ use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
 use crate::backend::{ConsensusError, LogIndex, Result, Snapshot};
+use crate::freeze::{self, FrozenValue, SubstituteError};
 use crate::snapshot::SnapshotHorizonPin;
 
 // ---------------------------------------------------------------------------
@@ -102,22 +135,45 @@ use crate::snapshot::SnapshotHorizonPin;
 /// statement batch) and its tradeoffs. The serde encoding (JSON at the
 /// adapter boundary, like every other entry type) is the payload behind
 /// the backend's opaque `Vec<u8>`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TxnEntry {
     /// The transaction's write statements, in execution order. Applied
     /// atomically: all statements commit together or none do.
     pub statements: Vec<String>,
+    /// Proposer-evaluated values for each statement's non-deterministic
+    /// call sites (`random()`, `CURRENT_TIMESTAMP`, …), parallel to
+    /// [`statements`](Self::statements); `frozen[i]` holds statement
+    /// `i`'s values in the deterministic traversal order of
+    /// [`crate::freeze`]. Empty inner vectors (and, via
+    /// `#[serde(default)]`, entries encoded before #5377) mean "no
+    /// non-deterministic sites" — the apply path then *rejects* any
+    /// statement found to contain one.
+    #[serde(default)]
+    pub frozen: Vec<Vec<FrozenValue>>,
 }
 
 impl TxnEntry {
     /// Entry for a single-statement (autocommit-style) transaction.
+    /// No frozen values: the statement must be deterministic, or the
+    /// apply path will reject it. Use [`crate::freeze::freeze_statement`]
+    /// (as [`ReplicatedDb`](crate::ReplicatedDb) does) to replicate
+    /// non-deterministic SQL.
     pub fn single(sql: impl Into<String>) -> Self {
-        Self { statements: vec![sql.into()] }
+        Self { statements: vec![sql.into()], frozen: Vec::new() }
     }
 
-    /// Entry for a multi-statement transaction.
+    /// Entry for a multi-statement transaction (no frozen values — see
+    /// [`single`](Self::single)).
     pub fn batch<S: Into<String>>(statements: impl IntoIterator<Item = S>) -> Self {
-        Self { statements: statements.into_iter().map(Into::into).collect() }
+        Self { statements: statements.into_iter().map(Into::into).collect(), frozen: Vec::new() }
+    }
+
+    /// Entry whose non-deterministic call sites were frozen at propose
+    /// time: `frozen[i]` carries the evaluated values for
+    /// `statements[i]`.
+    pub fn frozen_batch(statements: Vec<String>, frozen: Vec<Vec<FrozenValue>>) -> Self {
+        debug_assert_eq!(statements.len(), frozen.len());
+        Self { statements, frozen }
     }
 }
 
@@ -246,12 +302,24 @@ impl VibesqlStateMachine {
 
         let mut rows_affected = 0usize;
         let mut failure: Option<String> = None;
-        for sql in &entry.statements {
-            match execute_write_statement(&mut inner.db, sql) {
+        static NO_FROZEN: &[FrozenValue] = &[];
+        for (i, sql) in entry.statements.iter().enumerate() {
+            let frozen = entry.frozen.get(i).map(Vec::as_slice).unwrap_or(NO_FROZEN);
+            match execute_write_statement(&mut inner.db, sql, frozen) {
                 Ok(n) => rows_affected += n,
-                Err(reason) => {
+                Err(StatementFailure::Rejected(reason)) => {
                     failure = Some(reason);
                     break;
+                }
+                Err(StatementFailure::Fatal(reason)) => {
+                    // A possibly node-local failure: roll back, do NOT
+                    // consume the index, and surface a fatal error — the
+                    // node must halt and resync rather than record an
+                    // outcome other replicas may not reproduce.
+                    let _ = inner.db.rollback_transaction();
+                    return Err(ConsensusError::FatalApply(format!(
+                        "entry {index}, statement {i}: {reason}"
+                    )));
                 }
             }
         }
@@ -272,7 +340,16 @@ impl VibesqlStateMachine {
                         if inner.db.in_transaction() {
                             let _ = inner.db.rollback_transaction();
                         }
-                        ApplyOutcome::Rejected { reason: e.to_string() }
+                        match classify_executor_error(&e) {
+                            FailureClass::Deterministic => {
+                                ApplyOutcome::Rejected { reason: e.to_string() }
+                            }
+                            FailureClass::PossiblyLocal => {
+                                return Err(ConsensusError::FatalApply(format!(
+                                    "entry {index}, COMMIT: {e}"
+                                )));
+                            }
+                        }
                     }
                 }
             }
@@ -457,8 +534,69 @@ fn deserialize_database(data: &[u8]) -> Result<Database> {
 // Statement dispatch
 // ---------------------------------------------------------------------------
 
+/// One statement's failure inside apply, split by determinism (#5377,
+/// judge note on PR #5378).
+enum StatementFailure {
+    /// Deterministic function of the entry and the replicated state:
+    /// every replica fails identically, so the entry is recorded as
+    /// [`ApplyOutcome::Rejected`] (and still consumes its index).
+    Rejected(String),
+    /// Possibly local to this node (resource limits, storage failure,
+    /// frozen-entry version skew): surfaced as
+    /// [`ConsensusError::FatalApply`] without consuming the index.
+    Fatal(String),
+}
+
+/// How to record an executor error during apply.
+enum FailureClass {
+    /// Deterministic by state induction → reject the entry identically
+    /// on every replica.
+    Deterministic,
+    /// May depend on node-local resources/configuration → fatal.
+    PossiblyLocal,
+}
+
+/// Classify an executor error for the apply path.
+///
+/// Resource-class failures (storage errors, wall-clock timeouts, and
+/// the memory/row/join/recursion guard rails, whose thresholds are
+/// node-environment-dependent — e.g. `MAX_MEMORY_BYTES` differs by
+/// target) may not reproduce on other replicas, so they must halt the
+/// node instead of rejecting the entry. Misclassifying a deterministic
+/// error as `PossiblyLocal` is safe (every replica halts identically —
+/// an outage, not divergence); the reverse is not, so doubt resolves to
+/// `PossiblyLocal`.
+fn classify_executor_error(e: &vibesql_executor::ExecutorError) -> FailureClass {
+    use vibesql_executor::ExecutorError as E;
+    match e {
+        E::StorageError(_)
+        | E::QueryTimeoutExceeded { .. }
+        | E::MemoryLimitExceeded { .. }
+        | E::RowLimitExceeded { .. }
+        | E::JoinTableLimitExceeded { .. }
+        | E::RecursionLimitExceeded { .. } => FailureClass::PossiblyLocal,
+        _ => FailureClass::Deterministic,
+    }
+}
+
+fn run_executor<T>(
+    result: std::result::Result<T, vibesql_executor::ExecutorError>,
+) -> std::result::Result<T, StatementFailure> {
+    result.map_err(|e| match classify_executor_error(&e) {
+        FailureClass::Deterministic => StatementFailure::Rejected(e.to_string()),
+        FailureClass::PossiblyLocal => StatementFailure::Fatal(e.to_string()),
+    })
+}
+
 /// Parse and execute one write statement inside the apply transaction,
 /// returning its affected-row count.
+///
+/// Before execution, the statement's non-deterministic call sites are
+/// replaced with the entry's frozen values
+/// ([`freeze::substitute_statement`]); a statement with unfrozen
+/// volatile sites — or one that would fire a non-deterministic column
+/// DEFAULT — is rejected deterministically, so the state machine never
+/// evaluates volatile SQL.
 ///
 /// The supported set covers the replicated write surface: DML
 /// (INSERT/UPDATE/DELETE) and the core DDL (CREATE/DROP TABLE,
@@ -469,51 +607,107 @@ fn deserialize_database(data: &[u8]) -> Result<Database> {
 fn execute_write_statement(
     db: &mut Database,
     sql: &str,
-) -> std::result::Result<usize, String> {
-    let statement = vibesql_parser::parse_with_arena_fallback(sql)
-        .map_err(|e| format!("parse error in replicated statement: {e}"))?;
-    match &statement {
-        Statement::Insert(stmt) => vibesql_executor::InsertExecutor::execute(db, stmt)
-            .map_err(|e| e.to_string()),
-        Statement::Update(stmt) => vibesql_executor::UpdateExecutor::execute(stmt, db)
-            .map_err(|e| e.to_string()),
-        Statement::Delete(stmt) => vibesql_executor::DeleteExecutor::execute(stmt, db)
-            .map_err(|e| e.to_string()),
-        Statement::CreateTable(stmt) => vibesql_executor::CreateTableExecutor::execute(stmt, db)
-            .map(|_| 0)
-            .map_err(|e| e.to_string()),
-        Statement::CreateIndex(stmt) => vibesql_executor::CreateIndexExecutor::execute(stmt, db)
-            .map(|_| 0)
-            .map_err(|e| e.to_string()),
-        Statement::CreateView(stmt) => {
-            vibesql_executor::advanced_objects::execute_create_view(stmt, db)
-                .map(|_| 0)
-                .map_err(|e| e.to_string())
+    frozen: &[FrozenValue],
+) -> std::result::Result<usize, StatementFailure> {
+    let statement = vibesql_parser::parse_with_arena_fallback(sql).map_err(|e| {
+        StatementFailure::Rejected(format!("parse error in replicated statement: {e}"))
+    })?;
+    let statement = freeze::substitute_statement(statement, frozen).map_err(|e| match e {
+        SubstituteError::UnfrozenVolatile(_) => StatementFailure::Rejected(e.to_string()),
+        SubstituteError::FrozenSiteMismatch(_) => StatementFailure::Fatal(e.to_string()),
+    })?;
+
+    // Schema-dependent nondeterminism the positional freeze pass cannot
+    // see: non-deterministic column DEFAULTs (`DEFAULT
+    // CURRENT_TIMESTAMP`) that the statement would fire, and
+    // `CAST(<TIME column> AS TIMESTAMP)` (SQL:1999 stamps the current
+    // date per row). Both would be evaluated by the executor at apply
+    // time; reject any statement containing one. The schema is
+    // replicated state, so these rejections are identical on every
+    // replica.
+    let schema_violation = match &statement {
+        Statement::Insert(stmt) => {
+            lookup_table_schema(db, stmt.schema_name.as_deref(), &stmt.table_name).and_then(
+                |schema| {
+                    freeze::volatile_default_violation(stmt, schema)
+                        .or_else(|| freeze::time_cast_violation(&statement, schema))
+                },
+            )
         }
-        Statement::DropTable(stmt) => vibesql_executor::DropTableExecutor::execute(stmt, db)
-            .map(|_| 0)
-            .map_err(|e| e.to_string()),
-        Statement::DropIndex(stmt) => vibesql_executor::DropIndexExecutor::execute(stmt, db)
-            .map(|_| 0)
-            .map_err(|e| e.to_string()),
+        Statement::Update(stmt) => {
+            lookup_table_schema(db, None, &stmt.table_name).and_then(|schema| {
+                freeze::volatile_default_violation_update(stmt, schema)
+                    .or_else(|| freeze::time_cast_violation(&statement, schema))
+            })
+        }
+        Statement::Delete(stmt) => lookup_table_schema(db, None, &stmt.table_name)
+            .and_then(|schema| freeze::time_cast_violation(&statement, schema)),
+        _ => None,
+    };
+    if let Some(reason) = schema_violation {
+        return Err(StatementFailure::Rejected(reason));
+    }
+
+    match &statement {
+        Statement::Insert(stmt) => {
+            run_executor(vibesql_executor::InsertExecutor::execute(db, stmt))
+        }
+        Statement::Update(stmt) => {
+            run_executor(vibesql_executor::UpdateExecutor::execute(stmt, db))
+        }
+        Statement::Delete(stmt) => {
+            run_executor(vibesql_executor::DeleteExecutor::execute(stmt, db))
+        }
+        Statement::CreateTable(stmt) => {
+            run_executor(vibesql_executor::CreateTableExecutor::execute(stmt, db).map(|_| 0))
+        }
+        Statement::CreateIndex(stmt) => {
+            run_executor(vibesql_executor::CreateIndexExecutor::execute(stmt, db).map(|_| 0))
+        }
+        Statement::CreateView(stmt) => run_executor(
+            vibesql_executor::advanced_objects::execute_create_view(stmt, db).map(|_| 0),
+        ),
+        Statement::DropTable(stmt) => {
+            run_executor(vibesql_executor::DropTableExecutor::execute(stmt, db).map(|_| 0))
+        }
+        Statement::DropIndex(stmt) => {
+            run_executor(vibesql_executor::DropIndexExecutor::execute(stmt, db).map(|_| 0))
+        }
         Statement::DropView(stmt) => {
-            vibesql_executor::advanced_objects::execute_drop_view(stmt, db)
-                .map(|_| 0)
-                .map_err(|e| e.to_string())
+            run_executor(vibesql_executor::advanced_objects::execute_drop_view(stmt, db).map(|_| 0))
         }
         Statement::BeginTransaction(_) | Statement::Commit(_) | Statement::Rollback(_) => {
-            Err("transaction control is not allowed inside a replicated entry: the entry itself \
+            Err(StatementFailure::Rejected(
+                "transaction control is not allowed inside a replicated entry: the entry itself \
                  is the transaction (one entry per committed transaction)"
-                .to_string())
+                    .to_string(),
+            ))
         }
-        Statement::Select(_) => Err(
+        Statement::Select(_) => Err(StatementFailure::Rejected(
             "SELECT is not allowed inside a replicated entry: reads are local, not replicated"
                 .to_string(),
-        ),
-        other => Err(format!(
-            "statement is not supported in a replicated entry (Raft Phase B1, PR 1): {other:?}"
         )),
+        other => Err(StatementFailure::Rejected(format!(
+            "statement is not supported in a replicated entry (Raft Phase B1, PR 1): {other:?}"
+        ))),
     }
+}
+
+/// Best-effort schema lookup for the DEFAULT audit. Tries the
+/// schema-qualified storage name first, then the bare table name; a
+/// miss falls through to the executor, which fails (or resolves)
+/// deterministically.
+fn lookup_table_schema<'a>(
+    db: &'a Database,
+    schema_name: Option<&str>,
+    table_name: &str,
+) -> Option<&'a vibesql_catalog::TableSchema> {
+    if let Some(schema_name) = schema_name {
+        if let Some(table) = db.get_table(&format!("{schema_name}.{table_name}")) {
+            return Some(&table.schema);
+        }
+    }
+    db.get_table(table_name).map(|t| &t.schema)
 }
 
 // ---------------------------------------------------------------------------
@@ -548,6 +742,22 @@ mod tests {
         let entry = TxnEntry::batch(["INSERT INTO t VALUES (1)", "UPDATE t SET x = 2"]);
         let bytes = serde_json::to_vec(&entry).unwrap();
         assert_eq!(serde_json::from_slice::<TxnEntry>(&bytes).unwrap(), entry);
+
+        let entry = TxnEntry::frozen_batch(
+            vec!["INSERT INTO t VALUES (random())".to_string()],
+            vec![vec![FrozenValue::Integer(7)]],
+        );
+        let bytes = serde_json::to_vec(&entry).unwrap();
+        assert_eq!(serde_json::from_slice::<TxnEntry>(&bytes).unwrap(), entry);
+    }
+
+    /// Entries encoded before #5377 (no `frozen` field) still decode.
+    #[test]
+    fn entry_decode_without_frozen_field_is_backward_compatible() {
+        let json = br#"{"statements":["INSERT INTO t VALUES (1)"]}"#;
+        let entry: TxnEntry = serde_json::from_slice(json).unwrap();
+        assert_eq!(entry.statements.len(), 1);
+        assert!(entry.frozen.is_empty());
     }
 
     #[test]
@@ -660,6 +870,217 @@ mod tests {
         assert_eq!(machine.last_applied(), 3);
         machine.apply(4, &TxnEntry::single("INSERT INTO users VALUES (3, 'carol')")).unwrap();
         assert_eq!(names(&machine), vec!["alice", "carol"]);
+    }
+
+    /// Defense in depth (#5377): an entry containing an unfrozen
+    /// non-deterministic call site is *rejected* — deterministically,
+    /// with the same outcome on a second machine — instead of being
+    /// evaluated at apply time (which would diverge replicas).
+    #[test]
+    fn unfrozen_volatile_entries_are_rejected_identically_everywhere() {
+        let entries = [
+            TxnEntry::single("CREATE TABLE t (id INTEGER PRIMARY KEY, r INTEGER)"),
+            TxnEntry::single("INSERT INTO t VALUES (1, random())"),
+            TxnEntry::single("INSERT INTO t SELECT id + 1, random() FROM t"),
+            TxnEntry::single("INSERT INTO t VALUES (2, last_insert_rowid())"),
+            TxnEntry::single("INSERT INTO t VALUES (3, 30)"),
+        ];
+        let a = VibesqlStateMachine::new();
+        let b = VibesqlStateMachine::new();
+        for (i, entry) in entries.iter().enumerate() {
+            let index = (i + 1) as LogIndex;
+            let outcome_a = a.apply(index, entry).unwrap();
+            let outcome_b = b.apply(index, entry).unwrap();
+            assert_eq!(outcome_a, outcome_b, "entry {index} must apply identically");
+        }
+        for (index, rejected) in [(2, true), (3, true), (4, true), (5, false)] {
+            // (replay onto a third machine to inspect each outcome)
+            let c = VibesqlStateMachine::new();
+            let mut outcome = ApplyOutcome::AlreadyApplied;
+            for i in 1..=index {
+                outcome = c.apply(i as LogIndex, &entries[i - 1]).unwrap();
+            }
+            if rejected {
+                assert!(
+                    matches!(&outcome, ApplyOutcome::Rejected { reason }
+                        if reason.contains("frozen") || reason.contains("session state")
+                            || reason.contains("non-deterministic")),
+                    "entry {index} must be rejected as unfrozen, got: {outcome:?}"
+                );
+            } else {
+                assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+            }
+        }
+        assert_eq!(a.query("SELECT r FROM t").unwrap(), vec![vec![SqlValue::Integer(30)]]);
+    }
+
+    /// A frozen-value/site-count mismatch indicates proposer/applier
+    /// version skew: fatal ([`ConsensusError::FatalApply`]), and the
+    /// entry's index is NOT consumed — the node halts rather than
+    /// recording an outcome other replicas may not reproduce.
+    #[test]
+    fn frozen_count_mismatch_is_fatal_and_does_not_consume_the_index() {
+        let machine = VibesqlStateMachine::new();
+        machine
+            .apply(1, &TxnEntry::single("CREATE TABLE t (id INTEGER PRIMARY KEY, r INTEGER)"))
+            .unwrap();
+
+        let statements = vec!["INSERT INTO t VALUES (1, random())".to_string()];
+        let skewed = TxnEntry::frozen_batch(
+            statements.clone(),
+            vec![vec![FrozenValue::Integer(7), FrozenValue::Integer(8)]],
+        );
+        let err = machine.apply(2, &skewed).unwrap_err();
+        assert!(matches!(err, ConsensusError::FatalApply(_)), "got: {err}");
+        assert_eq!(machine.last_applied(), 1, "a fatal apply must not consume the index");
+
+        // After "recovery", the correctly-frozen entry applies at the
+        // same index, and the stored row equals the frozen value.
+        let frozen = TxnEntry::frozen_batch(statements, vec![vec![FrozenValue::Integer(7)]]);
+        assert_eq!(machine.apply(2, &frozen).unwrap(), ApplyOutcome::Applied { rows_affected: 1 });
+        assert_eq!(
+            machine.query("SELECT r FROM t WHERE id = 1").unwrap(),
+            vec![vec![SqlValue::Integer(7)]]
+        );
+    }
+
+    /// A non-deterministic column DEFAULT (`DEFAULT CURRENT_TIMESTAMP`)
+    /// is fine as DDL, but an INSERT that would *fire* it at apply time
+    /// is rejected deterministically; supplying the value explicitly
+    /// applies normally.
+    #[test]
+    fn inserts_firing_a_volatile_default_are_rejected() {
+        let machine = VibesqlStateMachine::new();
+        let outcome = machine
+            .apply(
+                1,
+                &TxnEntry::single(
+                    "CREATE TABLE events (id INTEGER PRIMARY KEY, \
+                     ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+                ),
+            )
+            .unwrap();
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 0 });
+
+        let outcome =
+            machine.apply(2, &TxnEntry::single("INSERT INTO events (id) VALUES (1)")).unwrap();
+        assert!(
+            matches!(&outcome, ApplyOutcome::Rejected { reason } if reason.contains("DEFAULT")),
+            "firing a volatile default must reject the entry, got: {outcome:?}"
+        );
+
+        let outcome = machine
+            .apply(3, &TxnEntry::single("INSERT INTO events VALUES (1, '2026-06-11 12:00:00')"))
+            .unwrap();
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+    }
+
+    /// The PR #5382 review probes: unfrozen `curdate()`/`curtime()`/
+    /// 1-arg `age()` entries previously slipped past both the freeze
+    /// pass and the apply-side validation (the volatility list missed
+    /// them) and were applied with the apply-time wall clock. They must
+    /// now be rejected — identically on a second machine.
+    #[test]
+    fn unfrozen_clock_alias_entries_are_rejected_not_applied() {
+        let a = VibesqlStateMachine::new();
+        let b = VibesqlStateMachine::new();
+        let ddl = TxnEntry::single("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+        a.apply(1, &ddl).unwrap();
+        b.apply(1, &ddl).unwrap();
+        for (i, sql) in [
+            "INSERT INTO t VALUES (1, curdate())",
+            "INSERT INTO t VALUES (2, curtime())",
+            "INSERT INTO t VALUES (3, age(DATE '2020-01-02'))",
+            "INSERT INTO t VALUES (4, CAST(TIME '12:34:56' AS TIMESTAMP))",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let entry = TxnEntry::single(*sql);
+            let index = (i + 2) as LogIndex;
+            let outcome = a.apply(index, &entry).unwrap();
+            assert!(
+                matches!(&outcome, ApplyOutcome::Rejected { reason }
+                    if reason.contains("frozen") || reason.contains("non-deterministic")),
+                "{sql} must be rejected as unfrozen, got: {outcome:?}"
+            );
+            assert_eq!(outcome, b.apply(index, &entry).unwrap(), "{sql} must reject identically");
+        }
+        assert!(a.query("SELECT * FROM t").unwrap().is_empty(), "nothing may have applied");
+    }
+
+    /// `CAST(<TIME column> AS TIMESTAMP)` stamps the current date per
+    /// row at apply time (SQL:1999) — invisible to the positional freeze
+    /// pass, so the apply path rejects it against the replicated schema
+    /// (like the DEFAULT audit). Deterministic casts keep working.
+    #[test]
+    fn time_column_casts_to_timestamp_are_rejected() {
+        let machine = VibesqlStateMachine::new();
+        machine
+            .apply(
+                1,
+                &TxnEntry::single("CREATE TABLE sched (id INTEGER PRIMARY KEY, t TIME, s TEXT)"),
+            )
+            .unwrap();
+        machine
+            .apply(2, &TxnEntry::single("INSERT INTO sched VALUES (1, '12:34:56', 'x')"))
+            .unwrap();
+
+        for (index, sql) in [
+            (3, "UPDATE sched SET s = CAST(t AS TIMESTAMP) WHERE id = 1"),
+            (4, "DELETE FROM sched WHERE CAST(t AS TIMESTAMP) < '2026-01-01 00:00:00'"),
+        ] {
+            let outcome = machine.apply(index, &TxnEntry::single(sql)).unwrap();
+            assert!(
+                matches!(&outcome, ApplyOutcome::Rejected { reason }
+                    if reason.contains("TIME column")),
+                "{sql} must be rejected, got: {outcome:?}"
+            );
+        }
+
+        // A deterministic cast of a TEXT column still applies.
+        let outcome = machine
+            .apply(5, &TxnEntry::single("UPDATE sched SET s = CAST(id AS TEXT) WHERE id = 1"))
+            .unwrap();
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+    }
+
+    /// The deterministic-vs-resource error split (judge note on PR
+    /// #5378): resource-class executor errors halt the node; logic
+    /// errors reject the entry.
+    #[test]
+    fn executor_error_classification_splits_resource_from_deterministic() {
+        use vibesql_executor::ExecutorError as E;
+        let possibly_local = [
+            E::StorageError("disk error".to_string()),
+            E::QueryTimeoutExceeded { elapsed_seconds: 301, max_seconds: 300 },
+            E::RowLimitExceeded { rows_processed: 11, max_rows: 10 },
+            E::MemoryLimitExceeded { used_bytes: 11, max_bytes: 10 },
+            E::JoinTableLimitExceeded { table_count: 65, max_tables: 64 },
+            E::RecursionLimitExceeded {
+                message: "too deep".to_string(),
+                call_stack: vec![],
+                max_depth: 100,
+            },
+        ];
+        for e in &possibly_local {
+            assert!(
+                matches!(classify_executor_error(e), FailureClass::PossiblyLocal),
+                "{e:?} must be classified as possibly local (fatal)"
+            );
+        }
+        let deterministic = [
+            E::ConstraintViolation("UNIQUE constraint failed".to_string()),
+            E::TableNotFound("t".to_string()),
+            E::DivisionByZero,
+            E::IntegerOverflow,
+        ];
+        for e in &deterministic {
+            assert!(
+                matches!(classify_executor_error(e), FailureClass::Deterministic),
+                "{e:?} must be classified as deterministic (reject)"
+            );
+        }
     }
 
     #[test]

@@ -118,6 +118,7 @@ mod cluster_config;
 #[cfg(test)]
 mod conformance;
 mod durable;
+mod freeze;
 #[cfg(test)]
 mod network;
 mod openraft_backend;
@@ -129,6 +130,7 @@ mod tcp;
 
 pub use backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Role, Snapshot};
 pub use cluster_config::{ClusterConfig, DEFAULT_CONSENSUS_PORT};
+pub use freeze::{freeze_statement, FreezeError, FrozenValue, SubstituteError};
 pub use openraft_backend::{OpenraftBackend, RaftTuning};
 pub use replicated::ReplicatedDb;
 pub use single_node::SingleNodeBackend;
