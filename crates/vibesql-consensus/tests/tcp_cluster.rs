@@ -33,7 +33,11 @@
 //!
 //! All synchronization is bounded polling ([`TcpTestCluster::wait_until`],
 //! 10s deadline) — no bare sleeps; every wait fails loudly instead of
-//! hanging (PR 1's convention).
+//! hanging (PR 1's convention). Writes that don't specifically assert a
+//! rejection go through [`TcpTestCluster::propose_on_leader`], which
+//! retries the typed `NotLeader` rejection under the same deadline —
+//! release timing lets an election depose a just-observed leader between
+//! `wait_for_leader` and the propose (#5385).
 
 use std::collections::BTreeMap;
 use std::net::TcpListener as StdTcpListener;
@@ -350,6 +354,47 @@ impl TcpTestCluster {
         .await
     }
 
+    /// Propose on whoever currently leads, re-resolving leadership when a
+    /// [`ConsensusError::NotLeader`] rejection arrives (preferring its
+    /// leader hint). Returns the accepting leader and the entry's index.
+    ///
+    /// Release-mode timing compresses the gap between the leadership
+    /// observation in [`wait_for_leader_among`](Self::wait_for_leader_among)
+    /// and the propose enough that a parallel-suite election can depose the
+    /// observed leader mid-call (#5385); the typed rejection means the
+    /// entry was **not** committed, so retrying against the new leader is
+    /// safe. Bounded like every other wait. Tests asserting that a write is
+    /// *rejected* keep calling `propose` directly.
+    async fn propose_on_leader(&self, value: &str) -> (u64, LogIndex) {
+        self.propose_on_leader_among(&self.live_ids(), value).await
+    }
+
+    /// [`propose_on_leader`](Self::propose_on_leader) restricted to `ids`
+    /// (e.g. the majority side of a partition).
+    async fn propose_on_leader_among(&self, ids: &[u64], value: &str) -> (u64, LogIndex) {
+        let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+        let mut hint: Option<u64> = None;
+        loop {
+            let leader = match hint.take().filter(|id| ids.contains(id)) {
+                Some(hinted) => hinted,
+                None => self.wait_for_leader_among(ids).await,
+            };
+            match self.node(leader).propose(value.to_string()).await {
+                Ok(idx) => return (leader, idx),
+                Err(ConsensusError::NotLeader { leader_hint }) => {
+                    assert!(
+                        tokio::time::Instant::now() < deadline,
+                        "timed out after {WAIT_TIMEOUT:?} proposing {value:?}: leadership \
+                         never settled"
+                    );
+                    hint = leader_hint;
+                    tokio::time::sleep(POLL_INTERVAL).await;
+                }
+                Err(other) => panic!("propose of {value:?} failed: {other:?}"),
+            }
+        }
+    }
+
     /// Wait (bounded) until node `id` has applied the application log entry
     /// at `idx`.
     async fn wait_for_apply(&self, id: u64, idx: LogIndex) {
@@ -395,9 +440,8 @@ fn follower_of(cluster: &TcpTestCluster, leader: u64) -> u64 {
 #[tokio::test]
 async fn boots_elects_and_replicates_over_tcp() {
     let cluster = TcpTestCluster::boot(3).await;
-    let leader = cluster.wait_for_leader().await;
 
-    let idx = cluster.node(leader).propose("write-1".to_string()).await.unwrap();
+    let (_, idx) = cluster.propose_on_leader("write-1").await;
     assert_eq!(idx, 1, "first application entry gets the first dense index");
 
     for id in 1..=3 {
@@ -409,8 +453,18 @@ async fn boots_elects_and_replicates_over_tcp() {
         );
     }
 
-    let leaders: Vec<u64> = (1..=3).filter(|id| cluster.node(*id).role() == Role::Leader).collect();
-    assert_eq!(leaders, vec![leader], "leadership must be unique once settled");
+    // Leadership is unique once settled — asserted as a bounded wait, not
+    // a one-shot snapshot: sampling roles non-atomically can catch an
+    // election in flight and see zero or two claimants (#5385).
+    cluster
+        .wait_until("leadership to settle on a unique acknowledged leader", || {
+            let leaders: Vec<u64> =
+                (1..=3).filter(|id| cluster.node(*id).role() == Role::Leader).collect();
+            let [only] = leaders.as_slice() else { return None };
+            let only = *only;
+            (1..=3).all(|id| cluster.node(id).current_leader() == Some(only)).then_some(())
+        })
+        .await;
 }
 
 /// Kill the leader — its listener and every socket it owns die, like a
@@ -419,9 +473,9 @@ async fn boots_elects_and_replicates_over_tcp() {
 #[tokio::test]
 async fn killing_the_leader_severs_its_sockets_and_a_new_leader_emerges() {
     let mut cluster = TcpTestCluster::boot(3).await;
-    let leader = cluster.wait_for_leader().await;
 
-    let idx = cluster.node(leader).propose("before-failover".to_string()).await.unwrap();
+    // The accepting leader is by construction the leader at write time.
+    let (leader, idx) = cluster.propose_on_leader("before-failover").await;
     for id in cluster.live_ids() {
         cluster.wait_for_apply(id, idx).await;
     }
@@ -431,7 +485,7 @@ async fn killing_the_leader_severs_its_sockets_and_a_new_leader_emerges() {
     let new_leader = cluster.wait_for_leader().await;
     assert_ne!(new_leader, leader, "the killed node cannot be the new leader");
 
-    let idx2 = cluster.node(new_leader).propose("after-failover".to_string()).await.unwrap();
+    let (_, idx2) = cluster.propose_on_leader("after-failover").await;
     assert_eq!(idx2, 2, "application indices stay dense across the failover");
 
     for id in cluster.live_ids() {
@@ -446,11 +500,12 @@ async fn killing_the_leader_severs_its_sockets_and_a_new_leader_emerges() {
 #[tokio::test]
 async fn restarted_node_rebinds_reconnects_and_catches_up() {
     let mut cluster = TcpTestCluster::boot(3).await;
-    let leader = cluster.wait_for_leader().await;
 
+    let mut leader = cluster.wait_for_leader().await;
     for i in 1..=3u64 {
-        let idx = cluster.node(leader).propose(format!("entry-{i}")).await.unwrap();
+        let (l, idx) = cluster.propose_on_leader(&format!("entry-{i}")).await;
         assert_eq!(idx, i);
+        leader = l;
     }
     let follower = follower_of(&cluster, leader);
     cluster.wait_for_apply(follower, 3).await;
@@ -459,7 +514,7 @@ async fn restarted_node_rebinds_reconnects_and_catches_up() {
 
     // The two survivors are still a majority: writes keep committing.
     for i in 4..=6u64 {
-        let idx = cluster.node(leader).propose(format!("entry-{i}")).await.unwrap();
+        let (_, idx) = cluster.propose_on_leader(&format!("entry-{i}")).await;
         assert_eq!(idx, i);
     }
 
@@ -489,9 +544,8 @@ async fn restarted_node_rebinds_reconnects_and_catches_up() {
 #[tokio::test]
 async fn minority_partition_rejects_writes_while_the_majority_continues() {
     let cluster = TcpTestCluster::boot_partitionable(3).await;
-    let old_leader = cluster.wait_for_leader().await;
 
-    let idx = cluster.node(old_leader).propose("before-partition".to_string()).await.unwrap();
+    let (old_leader, idx) = cluster.propose_on_leader("before-partition").await;
     for id in 1..=3 {
         cluster.wait_for_apply(id, idx).await;
     }
@@ -508,8 +562,7 @@ async fn minority_partition_rejects_writes_while_the_majority_continues() {
 
     // Majority side: a new leader emerges and writes keep committing.
     let majority: Vec<u64> = (1..=3).filter(|id| *id != old_leader).collect();
-    let new_leader = cluster.wait_for_leader_among(&majority).await;
-    let idx2 = cluster.node(new_leader).propose("majority-write".to_string()).await.unwrap();
+    let (new_leader, idx2) = cluster.propose_on_leader_among(&majority, "majority-write").await;
     assert_eq!(idx2, 2, "the minority write must not have consumed an index");
     for id in &majority {
         cluster.wait_for_apply(*id, idx2).await;
@@ -574,9 +627,8 @@ async fn assert_connection_closed(mut stream: TcpStream) {
 #[tokio::test]
 async fn garbage_frames_drop_the_connection_without_disrupting_the_cluster() {
     let cluster = TcpTestCluster::boot(3).await;
-    let leader = cluster.wait_for_leader().await;
 
-    let idx = cluster.node(leader).propose("before-garbage".to_string()).await.unwrap();
+    let (leader, idx) = cluster.propose_on_leader("before-garbage").await;
     for id in 1..=3 {
         cluster.wait_for_apply(id, idx).await;
     }
@@ -603,7 +655,7 @@ async fn garbage_frames_drop_the_connection_without_disrupting_the_cluster() {
     drop(stream);
 
     // The cluster keeps replicating as if nothing happened.
-    let idx2 = cluster.node(leader).propose("after-garbage".to_string()).await.unwrap();
+    let (_, idx2) = cluster.propose_on_leader("after-garbage").await;
     for id in 1..=3 {
         cluster.wait_for_apply(id, idx2).await;
         assert_eq!(cluster.node(id).read_committed(idx2).await.unwrap(), "after-garbage");
@@ -639,24 +691,26 @@ async fn rejoin_lagging_follower_via_snapshot(
     entries: u64,
     payload_bytes: usize,
     convergence_timeout: Duration,
-) -> (TcpTestCluster, u64, u64) {
+) -> (TcpTestCluster, u64) {
     let value = {
         let payload = "x".repeat(payload_bytes);
         move |i: u64| format!("entry-{i}-{payload}")
     };
 
     let mut cluster = TcpTestCluster::boot_tuned(3, tuning).await;
-    let leader = cluster.wait_for_leader().await;
 
+    let mut leader = cluster.wait_for_leader().await;
     for i in 1..=3u64 {
-        cluster.node(leader).propose(value(i)).await.unwrap();
+        let (l, _) = cluster.propose_on_leader(&value(i)).await;
+        leader = l;
     }
     let follower = follower_of(&cluster, leader);
     cluster.wait_for_apply(follower, 3).await;
     cluster.kill(follower).await;
 
     for i in 4..=entries {
-        cluster.node(leader).propose(value(i)).await.unwrap();
+        let (l, _) = cluster.propose_on_leader(&value(i)).await;
+        leader = l;
     }
     cluster
         .wait_until("the leader's policy purge to pass the dead follower's position", || {
@@ -694,7 +748,7 @@ async fn rejoin_lagging_follower_via_snapshot(
         cluster.node(follower).snapshot_log_index()
     );
 
-    (cluster, leader, follower)
+    (cluster, follower)
 }
 
 /// The A4 rejoin acceptance criterion plus the #5369 judge's PR 2 liveness
@@ -705,13 +759,13 @@ async fn rejoin_lagging_follower_via_snapshot(
 /// comes back cleanly and stays current.
 #[tokio::test]
 async fn lagging_follower_rejoins_via_snapshot_and_survives_restart() {
-    let (mut cluster, leader, follower) =
+    let (mut cluster, follower) =
         rejoin_lagging_follower_via_snapshot(aggressive_purge_tuning(), 30, 16, WAIT_TIMEOUT).await;
 
     cluster.kill(follower).await;
     cluster.restore(follower).await;
 
-    let idx = cluster.node(leader).propose("after-second-restart".to_string()).await.unwrap();
+    let (_, idx) = cluster.propose_on_leader("after-second-restart").await;
     assert_eq!(idx, 31, "application indices stay dense across install + restart");
     cluster.wait_for_apply(follower, idx).await;
     assert_eq!(cluster.node(follower).read_committed(idx).await.unwrap(), "after-second-restart");
