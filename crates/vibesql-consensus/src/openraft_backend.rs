@@ -97,12 +97,35 @@ openraft::declare_raft_types!(
     /// The application payload (`D`) is an opaque byte buffer: the
     /// [`ConsensusBackend`] entry type is serialized at the adapter boundary
     /// so openraft types never leak to consumers (ADR-0004). The response
-    /// (`R`) is the dense application log index assigned by the state
-    /// machine (`0` for protocol entries, which carry no app payload).
+    /// (`R`) is [`AppResponse`]: the dense application log index assigned
+    /// by the state machine, plus — for the MVCC machine (Raft Phase B1,
+    /// PR 2 of #5199, `crate::mvcc_raft`) — the apply outcome.
     pub(crate) TypeConfig:
         D = Vec<u8>,
-        R = u64,
+        R = AppResponse,
 );
+
+/// The engine-level apply response (`R` of [`TypeConfig`]), produced by a
+/// state machine for each applied entry and handed back to `client_write`
+/// callers. Never sent between nodes (client writes are not forwarded), but
+/// serde-capable because openraft's type config requires it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum AppResponse {
+    /// A protocol entry (membership / new-leader blank): no application
+    /// payload, no dense application index consumed.
+    Protocol,
+    /// Echo state machine: the dense application index the entry was
+    /// applied at.
+    Index(u64),
+    /// MVCC state machine (`crate::mvcc_raft`): the dense application
+    /// index (= MVCC commit_ts) and the transaction's apply outcome.
+    Mvcc {
+        /// Dense application index the entry consumed.
+        index: u64,
+        /// Applied or (deterministically) rejected.
+        outcome: crate::state_machine::ApplyOutcome,
+    },
+}
 
 /// The fixed node id of the single-voter cluster.
 const NODE_ID: u64 = 1;
@@ -158,7 +181,7 @@ impl Default for RaftTuning {
 
 impl RaftTuning {
     /// Validate and translate into the engine's [`Config`].
-    fn raft_config(&self) -> Result<Config> {
+    pub(crate) fn raft_config(&self) -> Result<Config> {
         if self.snapshot_chunk_bytes == 0
             || self.snapshot_chunk_bytes > crate::tcp::MAX_SNAPSHOT_CHUNK_BYTES
         {
@@ -466,7 +489,47 @@ impl InMemoryStateMachine {
     }
 }
 
-fn current_timestamp_ms() -> u64 {
+/// Tolerant cluster initialization, shared by every multi-node constructor
+/// (echo and MVCC): with [`Bootstrap::Initialize`], write the static
+/// membership into the fresh log; with [`Bootstrap::Recover`] do nothing
+/// (the membership entry and vote are already in the recovered log, and
+/// re-running `initialize` would be rejected).
+///
+/// openraft documents that multiple nodes initializing with the *same*
+/// membership is safe; a node that already voted for (or received the
+/// membership entry from) a faster peer rejects its own initialize with
+/// `NotAllowed`. Both paths converge on the same membership, so that
+/// rejection is tolerated.
+pub(crate) async fn initialize_membership(
+    raft: &Raft<TypeConfig>,
+    members: BTreeMap<u64, BasicNode>,
+    bootstrap: Bootstrap,
+) -> Result<()> {
+    if !matches!(bootstrap, Bootstrap::Initialize) {
+        return Ok(());
+    }
+    match raft.initialize(members).await {
+        Ok(()) | Err(RaftError::APIError(openraft::error::InitializeError::NotAllowed(_))) => {
+            Ok(())
+        }
+        Err(e) => Err(ConsensusError::Backend(format!("failed to initialize cluster: {e}"))),
+    }
+}
+
+/// Map the engine's server state onto the adapter [`Role`]. Shared by the
+/// echo backend and the MVCC node (`crate::mvcc_raft`).
+pub(crate) fn role_from_state(state: ServerState) -> Role {
+    match state {
+        ServerState::Leader => Role::Leader,
+        ServerState::Candidate => Role::Candidate,
+        // `Learner` (non-voting) and `Shutdown` have no Role equivalent
+        // yet; report Follower, the closest "not sequencing writes"
+        // state. Revisit if consumers need the distinction.
+        ServerState::Follower | ServerState::Learner | ServerState::Shutdown => Role::Follower,
+    }
+}
+
+pub(crate) fn current_timestamp_ms() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
@@ -533,7 +596,10 @@ impl RaftStateMachine<TypeConfig> for InMemoryStateMachine {
         Ok((inner.last_applied, inner.last_membership.clone()))
     }
 
-    async fn apply<I>(&mut self, entries: I) -> std::result::Result<Vec<u64>, StorageError<u64>>
+    async fn apply<I>(
+        &mut self,
+        entries: I,
+    ) -> std::result::Result<Vec<AppResponse>, StorageError<u64>>
     where
         I: IntoIterator<Item = Entry<TypeConfig>> + Send,
         I::IntoIter: Send,
@@ -545,14 +611,14 @@ impl RaftStateMachine<TypeConfig> for InMemoryStateMachine {
             let response = match entry.payload {
                 // Protocol entries carry no application payload; they do not
                 // consume an application log index.
-                EntryPayload::Blank => 0,
+                EntryPayload::Blank => AppResponse::Protocol,
                 EntryPayload::Membership(membership) => {
                     inner.last_membership = StoredMembership::new(Some(entry.log_id), membership);
-                    0
+                    AppResponse::Protocol
                 }
                 EntryPayload::Normal(data) => {
                     inner.entries.push(data);
-                    inner.entries.len() as u64
+                    AppResponse::Index(inner.entries.len() as u64)
                 }
             };
             responses.push(response);
@@ -640,7 +706,7 @@ impl RaftStateMachine<TypeConfig> for InMemoryStateMachine {
 /// transport instead: the in-process channel network in `crate::network`
 /// (Phase A3, PR 1; test-only), with TCP following in PR 2.
 #[derive(Debug, Default)]
-struct NoopNetwork;
+pub(crate) struct NoopNetwork;
 
 fn unreachable_rpc<E: std::error::Error>() -> RPCError<u64, BasicNode, E> {
     RPCError::Unreachable(Unreachable::new(&std::io::Error::other(
@@ -679,7 +745,7 @@ impl openraft::RaftNetwork<TypeConfig> for NoopNetwork {
 }
 
 #[derive(Debug, Default)]
-struct NoopNetworkFactory;
+pub(crate) struct NoopNetworkFactory;
 
 impl openraft::RaftNetworkFactory<TypeConfig> for NoopNetworkFactory {
     type Network = NoopNetwork;
@@ -710,28 +776,36 @@ pub(crate) enum Bootstrap {
     Recover { last_log_index: Option<u64> },
 }
 
-/// Everything recovered from a data directory: the durable log store, plus a
-/// state machine already seeded from the latest durable snapshot (Raft Phase
-/// A4, PR 1 of #5198). Recovery order is **snapshot first, then log
-/// replay**: the state machine resumes at the snapshot's `last_applied`, and
-/// openraft re-applies only the log suffix above it.
-struct DurableStorage {
-    log_store: DurableLogStore,
-    state_machine: InMemoryStateMachine,
+/// The durable artifacts recovered from a data directory — log store,
+/// snapshot store, and (if present) the latest durable snapshot — after the
+/// loss/tampering cross-checks between them have passed. State-machine
+/// seeding is the caller's job: the echo machine ([`DurableStorage`]) and
+/// the MVCC machine (`crate::mvcc_raft`) decode the snapshot payload
+/// differently but share everything up to that point.
+pub(crate) struct RecoveredDurable {
+    pub(crate) log_store: DurableLogStore,
+    pub(crate) snapshot_store: Arc<SnapshotStore>,
+    /// The latest durable snapshot, already integrity-checked at the file
+    /// level (CRC + framing); the payload is decoded by the state machine
+    /// that installs it.
+    pub(crate) loaded: Option<crate::snapshot::LoadedSnapshot>,
     /// The raft *log* holds prior state (vote / entries / purge watermark).
     /// Drives the initialize-vs-recover decision: only a membership entry in
     /// the log makes re-running `Raft::initialize` illegal.
-    log_has_state: bool,
-    /// Any prior state at all, including a durable snapshot. Drives the
-    /// "cannot restore a snapshot into a stateful directory" rejection.
-    has_any_state: bool,
+    pub(crate) log_has_state: bool,
     /// Last raw raft log index (entries or purge watermark), for the
     /// single-node recovery-replay wait.
-    last_log_index: Option<u64>,
+    pub(crate) last_log_index: Option<u64>,
 }
 
-impl DurableStorage {
-    fn open(dir: &Path) -> Result<Self> {
+impl RecoveredDurable {
+    /// Any prior state at all, including a durable snapshot. Drives the
+    /// "cannot restore a snapshot into a stateful directory" rejection.
+    pub(crate) fn has_any_state(&self) -> bool {
+        self.log_has_state || self.loaded.is_some()
+    }
+
+    pub(crate) fn open(dir: &Path) -> Result<Self> {
         let (snapshot_store, loaded) = SnapshotStore::open(dir).map_err(|e| {
             ConsensusError::Backend(format!(
                 "failed to open durable raft snapshot in {}: {e}",
@@ -800,20 +874,48 @@ impl DurableStorage {
             }
         }
 
-        let state_machine = InMemoryStateMachine::durable(Arc::clone(&snapshot_store))
-            .with_log_store(log_store.clone());
-        let mut has_any_state = log_has_state;
-        if let Some(loaded) = loaded {
+        Ok(Self { log_store, snapshot_store, loaded, log_has_state, last_log_index })
+    }
+}
+
+/// Everything recovered from a data directory: the durable log store, plus a
+/// state machine already seeded from the latest durable snapshot (Raft Phase
+/// A4, PR 1 of #5198). Recovery order is **snapshot first, then log
+/// replay**: the state machine resumes at the snapshot's `last_applied`, and
+/// openraft re-applies only the log suffix above it.
+struct DurableStorage {
+    log_store: DurableLogStore,
+    state_machine: InMemoryStateMachine,
+    /// See [`RecoveredDurable::log_has_state`].
+    log_has_state: bool,
+    /// See [`RecoveredDurable::has_any_state`].
+    has_any_state: bool,
+    /// See [`RecoveredDurable::last_log_index`].
+    last_log_index: Option<u64>,
+}
+
+impl DurableStorage {
+    fn open(dir: &Path) -> Result<Self> {
+        let raw = RecoveredDurable::open(dir)?;
+        let has_any_state = raw.has_any_state();
+        let state_machine = InMemoryStateMachine::durable(Arc::clone(&raw.snapshot_store))
+            .with_log_store(raw.log_store.clone());
+        if let Some(loaded) = raw.loaded {
             state_machine.seed_from_snapshot(loaded.meta, loaded.data).map_err(|e| {
                 ConsensusError::Backend(format!(
                     "failed to recover durable raft snapshot in {}: {e}",
                     dir.display()
                 ))
             })?;
-            has_any_state = true;
         }
 
-        Ok(Self { log_store, state_machine, log_has_state, has_any_state, last_log_index })
+        Ok(Self {
+            log_store: raw.log_store,
+            state_machine,
+            log_has_state: raw.log_has_state,
+            has_any_state,
+            last_log_index: raw.last_log_index,
+        })
     }
 }
 
@@ -946,14 +1048,7 @@ impl<E> OpenraftBackend<E> {
     }
 
     fn current_role(&self) -> Role {
-        match self.metrics.borrow().state {
-            ServerState::Leader => Role::Leader,
-            ServerState::Candidate => Role::Candidate,
-            // `Learner` (non-voting) and `Shutdown` have no Role equivalent
-            // yet; report Follower, the closest "not sequencing writes"
-            // state. Revisit if consumers need the distinction.
-            ServerState::Follower | ServerState::Learner | ServerState::Shutdown => Role::Follower,
-        }
+        role_from_state(self.metrics.borrow().state)
     }
 
     #[cfg(test)]
@@ -1039,15 +1134,7 @@ impl<E> OpenraftBackend<E> {
         members: BTreeMap<u64, BasicNode>,
         bootstrap: Bootstrap,
     ) -> Result<()> {
-        if !matches!(bootstrap, Bootstrap::Initialize) {
-            return Ok(());
-        }
-        match self.raft.initialize(members).await {
-            Ok(()) | Err(RaftError::APIError(openraft::error::InitializeError::NotAllowed(_))) => {
-                Ok(())
-            }
-            Err(e) => Err(ConsensusError::Backend(format!("failed to initialize cluster: {e}"))),
-        }
+        initialize_membership(&self.raft, members, bootstrap).await
     }
 
     /// Boot one voter of a **TCP-connected cluster** with an in-memory Raft
@@ -1327,11 +1414,15 @@ where
             other => ConsensusError::Backend(other.to_string()),
         })?;
 
-        // `data` is the dense application index assigned by the state
-        // machine; 0 would mean a protocol entry, which client_write never
-        // produces.
-        debug_assert!(response.data > 0, "client write applied as a protocol entry");
-        Ok(response.data)
+        // The response carries the dense application index assigned by the
+        // state machine; protocol/MVCC responses cannot come back from a
+        // client write on the echo machine.
+        match response.data {
+            AppResponse::Index(idx) => Ok(idx),
+            other => Err(ConsensusError::Backend(format!(
+                "client write resolved with an unexpected apply response: {other:?}"
+            ))),
+        }
     }
 
     async fn read_committed(&self, idx: LogIndex) -> Result<E> {

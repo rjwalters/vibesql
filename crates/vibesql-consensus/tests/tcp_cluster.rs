@@ -47,7 +47,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 
 use vibesql_consensus::{
-    ClusterConfig, ConsensusBackend, ConsensusError, LogIndex, OpenraftBackend, RaftTuning, Role,
+    ClusterConfig, ConsensusBackend, ConsensusError, LogIndex, MvccRaftNode, OpenraftBackend,
+    RaftTuning, Role,
 };
 
 /// Upper bound for any single cluster-level wait (election, catch-up).
@@ -757,4 +758,129 @@ async fn large_snapshot_transfer_stress() {
         Duration::from_secs(300),
     )
     .await;
+}
+
+// ---------------------------------------------------------------------------
+// Raft Phase B1, PR 2 (#5199): the MVCC state machine over real sockets
+// ---------------------------------------------------------------------------
+
+/// Bounded poll shared by the MVCC test below (the `TcpTestCluster`
+/// methods are bound to the echo backend).
+async fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    loop {
+        if let Some(value) = probe() {
+            return value;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out after {WAIT_TIMEOUT:?} waiting for {what}"
+        );
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+/// Drive one write through whoever currently leads the MVCC cluster,
+/// tolerating elections mid-test.
+async fn execute_on_mvcc_leader(
+    nodes: &BTreeMap<u64, MvccRaftNode>,
+    sql: &str,
+) -> (LogIndex, vibesql_consensus::ApplyOutcome) {
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    loop {
+        let leader = wait_for("a leader to be elected", || {
+            nodes.iter().find(|(_, n)| n.role() == Role::Leader).map(|(id, _)| *id)
+        })
+        .await;
+        match nodes[&leader].execute_replicated(sql).await {
+            Ok(result) => return result,
+            Err(ConsensusError::NotLeader { .. }) => {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timed out executing {sql:?}: leadership never settled"
+                );
+            }
+            Err(other) => panic!("execute of {sql:?} failed: {other:?}"),
+        }
+    }
+}
+
+/// A 3-voter **MVCC** cluster over the TCP transport: replicated DML —
+/// including nondeterministic SQL frozen at propose — converges on every
+/// node; a follower write fails fast with `NotLeader` + leader hint.
+/// (The full failure-injection matrix for the MVCC machine runs on the
+/// in-process channel transport in `src/mvcc_raft.rs`; this proves the
+/// mount end-to-end over real sockets.)
+#[tokio::test]
+async fn mvcc_three_node_cluster_replicates_over_tcp() {
+    let addrs = free_localhost_addrs(3);
+    let config = ClusterConfig::new(addrs).expect("valid cluster config");
+
+    let mut nodes: BTreeMap<u64, MvccRaftNode> = BTreeMap::new();
+    for id in 1..=3 {
+        nodes.insert(
+            id,
+            MvccRaftNode::join_tcp_cluster(id, &config).await.expect("boot mvcc tcp node"),
+        );
+    }
+
+    let statements = [
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT, r INTEGER, d DATE)",
+        "INSERT INTO t VALUES (1, 'one', random(), curdate())",
+        "INSERT INTO t VALUES (2, 'two', random(), curdate())",
+        "UPDATE t SET v = 'TWO' WHERE id = 2",
+        "DELETE FROM t WHERE id = 1",
+    ];
+    let mut last_dense = 0;
+    for (i, sql) in statements.iter().enumerate() {
+        let (idx, outcome) = execute_on_mvcc_leader(&nodes, sql).await;
+        assert_eq!(idx, (i + 1) as LogIndex, "{sql}");
+        assert!(
+            matches!(outcome, vibesql_consensus::ApplyOutcome::Applied { .. }),
+            "{sql}: {outcome:?}"
+        );
+        last_dense = idx;
+    }
+
+    // Every voter applies the same log — identical rows everywhere,
+    // including the frozen random()/curdate() values.
+    for (id, node) in &nodes {
+        let id = *id;
+        wait_for(&format!("node {id} to apply dense index {last_dense}"), || {
+            (node.last_applied() >= last_dense).then_some(())
+        })
+        .await;
+    }
+    let reference = nodes[&1].query("SELECT id, v, r, d FROM t ORDER BY id").unwrap();
+    assert_eq!(reference.len(), 1, "one live row after the DELETE");
+    for id in 2..=3 {
+        assert_eq!(
+            nodes[&id].query("SELECT id, v, r, d FROM t ORDER BY id").unwrap(),
+            reference,
+            "node {id} diverged"
+        );
+    }
+
+    // Leader-only writes: a follower fails fast with a leader hint.
+    let leader = wait_for("a settled leader", || {
+        nodes.iter().find(|(_, n)| n.role() == Role::Leader).map(|(id, _)| *id)
+    })
+    .await;
+    let follower = (1..=3).find(|id| *id != leader).expect("a follower exists");
+    wait_for("the follower to learn who leads", || {
+        (nodes[&follower].current_leader() == Some(leader)).then_some(())
+    })
+    .await;
+    let err = nodes[&follower]
+        .execute_replicated("INSERT INTO t VALUES (3, 'nope', random(), curdate())")
+        .await
+        .unwrap_err();
+    match err {
+        ConsensusError::NotLeader { leader_hint } => assert_eq!(leader_hint, Some(leader)),
+        other => panic!("expected NotLeader with a hint, got: {other:?}"),
+    }
+
+    for node in nodes.values() {
+        node.shutdown().await.expect("clean shutdown");
+    }
 }

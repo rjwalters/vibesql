@@ -1,0 +1,1521 @@
+//! The MVCC state machine mounted inside openraft, plus [`MvccRaftNode`]:
+//! a cluster member whose replicated writes apply to a real database
+//! (Raft Phase B1, #5199, PR 2 of 2).
+//!
+//! PR 1 built [`VibesqlStateMachine`] — apply, idempotence, commit_ts =
+//! log index, the MVCC snapshot codec, and the vacuum-horizon pin — and
+//! drove it *outside* the engine through `ReplicatedDb::catch_up_to`.
+//! This module mounts that machine **inside** openraft as a real
+//! [`RaftStateMachine`], so apply happens in the engine's state-machine
+//! worker on every voter: a leader's `client_write` resolves only after
+//! the entry is committed on a quorum and applied locally, and followers
+//! apply the same entries in the same order without any external
+//! catch-up loop.
+//!
+//! # Index mapping
+//!
+//! openraft's raw log interleaves application entries with protocol
+//! entries (membership, new-leader blanks). [`VibesqlStateMachine`]
+//! numbers **application entries only** (dense, 1-based — the indices
+//! its commit timestamps are derived from), so [`MvccStateMachine`]
+//! tracks both: the raw raft `last_applied` (what openraft resumes
+//! from) and the machine's dense index (computed as
+//! `machine.last_applied() + 1` for each `Normal` entry). Protocol
+//! entries advance only the raw cursor, never the dense one — which is
+//! exactly why dense indices (and therefore MVCC `xmin` stamps) are
+//! identical on every replica even across leader changes.
+//!
+//! # Fatal apply = node halt
+//!
+//! [`ConsensusError::FatalApply`] documents the PR 2 obligation: a
+//! possibly-node-local apply failure (resource exhaustion, storage
+//! failure, frozen-entry version skew — see `crate::state_machine`)
+//! must **halt the node**; recording it as a rejection would silently
+//! diverge replicas, and acknowledging it would let openraft advance
+//! `last_applied` past an entry whose effects this node does not have.
+//! The mount discharges that obligation by returning a [`StorageError`]
+//! from [`RaftStateMachine::apply`]: openraft treats storage errors as
+//! fatal — the core shuts down without acknowledging the entry, so
+//! neither the engine's `last_applied` nor the machine's advances. The
+//! reason is retained on the node ([`MvccRaftNode::fatal_reason`]) and
+//! embedded in the error openraft logs and returns to in-flight
+//! writes. Recovery is operational: restart the node and let it resync
+//! via snapshot install + log replay (or fix the version skew the
+//! fatal error reported).
+//!
+//! # Leader-only writes
+//!
+//! Proposals are accepted only on the leader. A follower (or candidate)
+//! fails fast with [`ConsensusError::NotLeader`] carrying its best
+//! guess at the leader id, *before* evaluating any nondeterministic
+//! expression; even without the fast path, openraft's `client_write`
+//! rejects non-leader writes with `ForwardToLeader`, which maps to the
+//! same error. Freeze-at-propose (#5377) therefore always runs on the
+//! leader: [`MvccRaftNode::execute_replicated_txn`] freezes volatile
+//! call sites into the entry before `client_write`, and every replica
+//! applies the identical frozen entry.
+//!
+//! # Snapshots
+//!
+//! The engine-level snapshot payload is an 8-byte LE **dense index
+//! header** followed by the machine's binary database snapshot (the
+//! vbsql codec from PR 1). The header carries the dense application
+//! index across the wire because openraft's `SnapshotMeta` only knows
+//! raw raft log ids; install seeds the machine's dense cursor from it.
+//! Builds pin the MVCC vacuum horizon for their whole duration
+//! (`VibesqlStateMachine::horizon_pin` → `Database::pin_gc_horizon`),
+//! and on durable configurations the blob is persisted via the Phase A4
+//! [`SnapshotStore`] **before** it is registered or acknowledged — the
+//! same crash-safety order as the echo machine, including the deferred
+//! post-install log purge (`DurableLogStore::purge_compacted`).
+//!
+//! Out of scope here (deliberately): server/CLI wiring of replicated
+//! writes (PostgreSQL-protocol sessions still execute against the local
+//! engine; surfacing `NotLeader` as a SQL error with redirect info is
+//! follow-on work) and leases/follower reads (B2, #5200).
+//!
+//! [`RaftStateMachine`]: openraft::storage::RaftStateMachine
+//! [`StorageError`]: openraft::StorageError
+
+#[cfg(test)]
+use std::collections::BTreeMap;
+use std::fmt::Debug;
+use std::io::Cursor;
+use std::path::Path;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
+
+use openraft::error::{ClientWriteError, RaftError};
+use openraft::storage::{RaftLogStorage, RaftStateMachine};
+#[cfg(test)]
+use openraft::ServerState;
+use openraft::{
+    BasicNode, Entry, EntryPayload, LogId, Raft, RaftSnapshotBuilder, SnapshotMeta, StorageError,
+    StorageIOError, StoredMembership,
+};
+
+use crate::snapshot::SnapshotHorizonPin as _;
+
+use crate::backend::{ConsensusError, LogIndex, Result, Role, Snapshot};
+use crate::cluster_config::ClusterConfig;
+use crate::durable::DurableLogStore;
+use crate::freeze;
+use crate::openraft_backend::{
+    current_timestamp_ms, initialize_membership, role_from_state, AppResponse, Bootstrap,
+    InMemoryLogStore, RaftTuning, RecoveredDurable, TypeConfig,
+};
+use crate::snapshot::SnapshotStore;
+use crate::state_machine::{deserialize_database, ApplyOutcome, TxnEntry, VibesqlStateMachine};
+
+// ---------------------------------------------------------------------------
+// Snapshot payload framing: dense index header + vbsql database blob
+// ---------------------------------------------------------------------------
+
+/// Frame the machine's snapshot for the engine: 8-byte LE dense
+/// application index, then the binary database payload.
+fn encode_mvcc_snapshot(last_included_index: LogIndex, db_payload: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(8 + db_payload.len());
+    buf.extend_from_slice(&last_included_index.to_le_bytes());
+    buf.extend_from_slice(db_payload);
+    buf
+}
+
+/// Split an engine-level snapshot payload back into `(dense index,
+/// database payload)`. The database payload itself is validated by the
+/// machine's decoder before anything mutates.
+fn decode_mvcc_snapshot(data: &[u8]) -> std::result::Result<(LogIndex, &[u8]), String> {
+    if data.len() < 8 {
+        return Err(format!(
+            "MVCC snapshot payload is {} bytes — smaller than its 8-byte dense-index header",
+            data.len()
+        ));
+    }
+    let dense = LogIndex::from_le_bytes(data[..8].try_into().expect("8-byte slice"));
+    Ok((dense, &data[8..]))
+}
+
+// ---------------------------------------------------------------------------
+// The mounted state machine
+// ---------------------------------------------------------------------------
+
+/// A registered engine-level snapshot (framed payload + raft meta).
+#[derive(Debug, Clone)]
+struct StoredMvccSnapshot {
+    meta: SnapshotMeta<u64, BasicNode>,
+    /// Framed payload (dense-index header + vbsql blob).
+    data: Vec<u8>,
+}
+
+/// Raft-level bookkeeping the engine needs alongside the database state.
+#[derive(Debug, Default)]
+struct MvccSmInner {
+    /// Raw raft log id of the last applied entry (protocol entries
+    /// included) — what [`RaftStateMachine::applied_state`] reports.
+    last_applied: Option<LogId<u64>>,
+    last_membership: StoredMembership<u64, BasicNode>,
+    /// Monotonic snapshot counter (uniquified with a timestamp in the
+    /// snapshot id, since this counter restarts with the process).
+    snapshot_seq: u64,
+    current_snapshot: Option<StoredMvccSnapshot>,
+}
+
+/// [`VibesqlStateMachine`] mounted as openraft's [`RaftStateMachine`]
+/// (+ [`RaftSnapshotBuilder`]). See the module docs for the index
+/// mapping, the fatal-apply halt, and the snapshot framing.
+///
+/// Cloning shares the underlying state (it is a handle), as openraft
+/// expects from `get_snapshot_builder`. The `inner` mutex is held across
+/// each whole apply batch *and* the snapshot capture, so a concurrently
+/// built snapshot can never observe a raft meta / database pair from two
+/// different instants (lock order is always `inner` → machine; nothing
+/// takes them in the reverse order).
+#[derive(Debug, Clone)]
+pub(crate) struct MvccStateMachine {
+    machine: VibesqlStateMachine,
+    inner: Arc<Mutex<MvccSmInner>>,
+    /// Durable persistence for built/installed snapshots (`None` for
+    /// in-memory configurations).
+    store: Option<Arc<SnapshotStore>>,
+    /// Durable raft log, for the deferred post-install purge record
+    /// (see `DurableLogStore::purge_compacted`).
+    log_store: Option<DurableLogStore>,
+    /// The reason this node halted (a fatal apply), if it did. Never
+    /// cleared: a halted node must be restarted to resync.
+    fatal: Arc<Mutex<Option<String>>>,
+    /// Test-only failure injection: the next apply of the entry at this
+    /// **dense** index fails fatally (as if the executor had hit a
+    /// node-local resource error), exercising the halt path on one node
+    /// without poisoning the replicated log for its peers.
+    #[cfg(test)]
+    inject_fatal_at: Arc<Mutex<Option<LogIndex>>>,
+}
+
+impl MvccStateMachine {
+    /// A fresh machine over an empty in-memory database, with in-memory
+    /// snapshots.
+    fn volatile() -> Self {
+        Self {
+            machine: VibesqlStateMachine::new(),
+            inner: Arc::default(),
+            store: None,
+            log_store: None,
+            fatal: Arc::default(),
+            #[cfg(test)]
+            inject_fatal_at: Arc::default(),
+        }
+    }
+
+    /// A fresh machine that persists built/installed snapshots through
+    /// `store` and records deferred install purges in `log_store`.
+    fn durable(store: Arc<SnapshotStore>, log_store: DurableLogStore) -> Self {
+        Self { store: Some(store), log_store: Some(log_store), ..Self::volatile() }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, MvccSmInner> {
+        self.inner.lock().expect("mvcc raft state machine mutex poisoned")
+    }
+
+    /// Seed this (fresh) machine from a durable snapshot recovered off
+    /// disk, before the Raft core starts: database state, dense index,
+    /// raw `last_applied`, and membership all resume from the snapshot,
+    /// and openraft then replays only the log suffix above
+    /// `meta.last_log_id`.
+    fn seed_from_loaded(&self, meta: SnapshotMeta<u64, BasicNode>, data: Vec<u8>) -> Result<()> {
+        let (dense, db_payload) =
+            decode_mvcc_snapshot(&data).map_err(ConsensusError::SnapshotCodec)?;
+        let db = deserialize_database(db_payload)?;
+        let mut inner = self.lock();
+        self.machine.install_decoded(db, dense)?;
+        inner.last_applied = meta.last_log_id;
+        inner.last_membership = meta.last_membership.clone();
+        inner.current_snapshot = Some(StoredMvccSnapshot { meta, data });
+        Ok(())
+    }
+
+    /// Record the fatal reason and build the [`StorageError`] that halts
+    /// the node: openraft treats a storage error from `apply` as fatal —
+    /// the core shuts down *without* acknowledging the entry, so
+    /// `last_applied` (engine and machine alike) never advances past it.
+    /// The reason survives on the handle for operators/tests
+    /// ([`MvccRaftNode::fatal_reason`]) and rides inside the error the
+    /// engine logs and returns to in-flight `client_write`s.
+    fn halt(&self, log_id: LogId<u64>, reason: String) -> StorageError<u64> {
+        let reason = format!(
+            "halting this node: fatal apply at raft log id {log_id} — {reason} (restart the \
+             node to resync via snapshot install + log replay; recording this as a rejection \
+             would silently diverge replicas)"
+        );
+        let mut fatal = self.fatal.lock().expect("fatal reason mutex poisoned");
+        if fatal.is_none() {
+            *fatal = Some(reason.clone());
+        }
+        StorageError::IO { source: StorageIOError::apply(log_id, &std::io::Error::other(reason)) }
+    }
+
+    fn fatal_reason(&self) -> Option<String> {
+        self.fatal.lock().expect("fatal reason mutex poisoned").clone()
+    }
+}
+
+impl RaftSnapshotBuilder<TypeConfig> for MvccStateMachine {
+    async fn build_snapshot(
+        &mut self,
+    ) -> std::result::Result<openraft::Snapshot<TypeConfig>, StorageError<u64>> {
+        // Pin the MVCC vacuum horizon for the whole build — acquired
+        // before any state is read, released (guard drop) only after the
+        // blob is built, persisted, and registered, so `vacuum_mvcc`
+        // cannot reclaim row versions out from under it. (The machine's
+        // own `snapshot()` briefly takes a nested pin too; pins stack.)
+        let _horizon_pin = self.machine.horizon_pin().acquire();
+
+        // Capture the raft meta and the database state atomically: the
+        // `inner` lock is held across both (apply also holds it across
+        // each batch), so the dense index inside `data` always matches
+        // `meta.last_log_id`.
+        let (meta, data) = {
+            let mut inner = self.lock();
+            let snapshot = self.machine.snapshot().map_err(|e| StorageError::IO {
+                source: StorageIOError::write_state_machine(&std::io::Error::other(e.to_string())),
+            })?;
+            let data = encode_mvcc_snapshot(snapshot.last_included_index, &snapshot.data);
+            inner.snapshot_seq += 1;
+            let meta = SnapshotMeta {
+                last_log_id: inner.last_applied,
+                last_membership: inner.last_membership.clone(),
+                snapshot_id: format!(
+                    "mvcc-{}-{}-{}",
+                    inner.last_applied.map_or(0, |id| id.index),
+                    inner.snapshot_seq,
+                    current_timestamp_ms(),
+                ),
+            };
+            (meta, data)
+        };
+
+        // Persist BEFORE registering: openraft must never see (and purge
+        // against) a snapshot that is not yet durable.
+        if let Some(store) = &self.store {
+            store.save(&meta, &data).map_err(|e| StorageError::IO {
+                source: StorageIOError::write_snapshot(Some(meta.signature()), &e),
+            })?;
+        }
+
+        self.lock().current_snapshot =
+            Some(StoredMvccSnapshot { meta: meta.clone(), data: data.clone() });
+
+        Ok(openraft::Snapshot { meta, snapshot: Box::new(Cursor::new(data)) })
+        // `_horizon_pin` drops here: the horizon was held across read,
+        // persistence, and registration.
+    }
+}
+
+impl RaftStateMachine<TypeConfig> for MvccStateMachine {
+    type SnapshotBuilder = Self;
+
+    async fn applied_state(
+        &mut self,
+    ) -> std::result::Result<
+        (Option<LogId<u64>>, StoredMembership<u64, BasicNode>),
+        StorageError<u64>,
+    > {
+        let inner = self.lock();
+        Ok((inner.last_applied, inner.last_membership.clone()))
+    }
+
+    async fn apply<I>(
+        &mut self,
+        entries: I,
+    ) -> std::result::Result<Vec<AppResponse>, StorageError<u64>>
+    where
+        I: IntoIterator<Item = Entry<TypeConfig>> + Send,
+        I::IntoIter: Send,
+    {
+        // Held across the whole batch so a concurrent snapshot build
+        // never sees raft meta and database state from two different
+        // instants. No `.await` happens under the guard.
+        let mut inner = self.lock();
+        let mut responses = Vec::new();
+        for entry in entries {
+            let response = match entry.payload {
+                // Protocol entries advance only the raw cursor: they do
+                // not consume a dense application index, which is what
+                // keeps dense indices (= MVCC commit timestamps)
+                // identical on every replica across leader changes.
+                EntryPayload::Blank => {
+                    inner.last_applied = Some(entry.log_id);
+                    AppResponse::Protocol
+                }
+                EntryPayload::Membership(membership) => {
+                    inner.last_applied = Some(entry.log_id);
+                    inner.last_membership = StoredMembership::new(Some(entry.log_id), membership);
+                    AppResponse::Protocol
+                }
+                EntryPayload::Normal(data) => {
+                    let txn: TxnEntry = match serde_json::from_slice(&data) {
+                        Ok(txn) => txn,
+                        // Undecodable payloads indicate proposer/applier
+                        // version skew, the same class as a frozen-site
+                        // mismatch: halt rather than guess (halting
+                        // everywhere is an outage; guessing wrong is
+                        // divergence).
+                        Err(e) => {
+                            return Err(self.halt(
+                                entry.log_id,
+                                format!("replicated entry payload failed to decode: {e}"),
+                            ))
+                        }
+                    };
+                    let dense = self.machine.last_applied() + 1;
+
+                    #[cfg(test)]
+                    {
+                        let mut inject =
+                            self.inject_fatal_at.lock().expect("fatal injection mutex poisoned");
+                        if *inject == Some(dense) {
+                            *inject = None;
+                            return Err(self.halt(
+                                entry.log_id,
+                                format!(
+                                    "injected node-local apply failure at dense index {dense} \
+                                     (test hook)"
+                                ),
+                            ));
+                        }
+                    }
+
+                    match self.machine.apply(dense, &txn) {
+                        Ok(outcome) => {
+                            inner.last_applied = Some(entry.log_id);
+                            AppResponse::Mvcc { index: dense, outcome }
+                        }
+                        // FatalApply (possibly node-local failure) and
+                        // Backend (gap/protocol violation) alike: the
+                        // machine did not consume the index, and neither
+                        // may openraft — halt.
+                        Err(e) => {
+                            return Err(self.halt(entry.log_id, format!("dense index {dense}: {e}")))
+                        }
+                    }
+                }
+            };
+            responses.push(response);
+        }
+        Ok(responses)
+    }
+
+    async fn get_snapshot_builder(&mut self) -> Self::SnapshotBuilder {
+        self.clone()
+    }
+
+    async fn begin_receiving_snapshot(
+        &mut self,
+    ) -> std::result::Result<Box<Cursor<Vec<u8>>>, StorageError<u64>> {
+        Ok(Box::new(Cursor::new(Vec::new())))
+    }
+
+    /// Replace this node's database from a received snapshot. The whole
+    /// payload is decoded and validated **before** anything is persisted
+    /// or mutated (a corrupt stream must neither half-install nor leave
+    /// a corrupt durable file), and on durable configurations the blob
+    /// is persisted — and the deferred post-install log purge recorded —
+    /// **before** the install is acknowledged, exactly like the echo
+    /// machine (Phase A4 crash-safety order).
+    async fn install_snapshot(
+        &mut self,
+        meta: &SnapshotMeta<u64, BasicNode>,
+        snapshot: Box<Cursor<Vec<u8>>>,
+    ) -> std::result::Result<(), StorageError<u64>> {
+        let data = snapshot.into_inner();
+        let codec_err = |e: String| StorageError::IO {
+            source: StorageIOError::write_snapshot(
+                Some(meta.signature()),
+                &std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+            ),
+        };
+        let (dense, db_payload) = decode_mvcc_snapshot(&data).map_err(codec_err)?;
+        let db = deserialize_database(db_payload).map_err(|e| codec_err(e.to_string()))?;
+
+        if let Some(store) = &self.store {
+            store.save(meta, &data).map_err(|e| StorageError::IO {
+                source: StorageIOError::write_snapshot(Some(meta.signature()), &e),
+            })?;
+            // Record the log purge openraft issued before this snapshot
+            // was durable (deferred by the log store; see the echo
+            // machine's install for the full rationale and the
+            // crash-window repair in `RecoveredDurable::open`).
+            if let (Some(log_store), Some(last)) = (&self.log_store, meta.last_log_id) {
+                log_store.purge_compacted(last).map_err(|e| StorageError::IO {
+                    source: StorageIOError::write_snapshot(Some(meta.signature()), &e),
+                })?;
+            }
+        }
+
+        let mut inner = self.lock();
+        self.machine.install_decoded(db, dense).map_err(|e| codec_err(e.to_string()))?;
+        inner.last_applied = meta.last_log_id;
+        inner.last_membership = meta.last_membership.clone();
+        inner.current_snapshot = Some(StoredMvccSnapshot { meta: meta.clone(), data });
+        Ok(())
+    }
+
+    async fn get_current_snapshot(
+        &mut self,
+    ) -> std::result::Result<Option<openraft::Snapshot<TypeConfig>>, StorageError<u64>> {
+        let inner = self.lock();
+        Ok(inner.current_snapshot.as_ref().map(|s| openraft::Snapshot {
+            meta: s.meta.clone(),
+            snapshot: Box::new(Cursor::new(s.data.clone())),
+        }))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The node
+// ---------------------------------------------------------------------------
+
+/// One voter of a Raft cluster whose state machine is a real MVCC
+/// database: replicated writes flow leader → quorum → apply-on-every-
+/// voter, with commit_ts = dense log index (Raft Phase B1, #5199, PR 2).
+///
+/// Writes ([`execute_replicated`](Self::execute_replicated) /
+/// [`execute_replicated_txn`](Self::execute_replicated_txn)) are
+/// accepted only on the leader — anywhere else they fail fast with
+/// [`ConsensusError::NotLeader`] and a leader hint — and resolve only
+/// after the entry is committed and applied locally, so a session can
+/// read its own write. Reads ([`query`](Self::query)) are local
+/// (leader-lease/follower-read semantics are B2, #5200).
+///
+/// This is the multi-node successor of the PR 1 harness
+/// (`ReplicatedDb`): same entry type, same freeze-at-propose, same
+/// machine — but apply happens inside openraft's state-machine worker
+/// instead of an external catch-up loop. Server/CLI wiring is follow-on
+/// work (see the module docs).
+pub struct MvccRaftNode {
+    raft: Raft<TypeConfig>,
+    sm: MvccStateMachine,
+    metrics: tokio::sync::watch::Receiver<openraft::RaftMetrics<u64, BasicNode>>,
+    /// Accept-loop task of the TCP transport (`None` for channel-network
+    /// configurations). Aborted on shutdown and on drop.
+    listener_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for MvccRaftNode {
+    fn drop(&mut self) {
+        if let Some(task) = &self.listener_task {
+            task.abort();
+        }
+    }
+}
+
+impl Debug for MvccRaftNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MvccRaftNode")
+            .field("role", &self.role())
+            .field("last_applied", &self.last_applied())
+            .finish_non_exhaustive()
+    }
+}
+
+impl MvccRaftNode {
+    /// Boot one voter of a **TCP-connected MVCC cluster** with an
+    /// in-memory Raft log. Prefer
+    /// [`join_tcp_cluster_with_data_dir`](Self::join_tcp_cluster_with_data_dir)
+    /// anywhere a restart must not forget the log or vote.
+    ///
+    /// Like the echo backend's cluster constructors, this does **not**
+    /// wait for an election: the caller awaits leadership (e.g. by
+    /// polling [`role`](Self::role) / [`current_leader`](Self::current_leader)
+    /// with a bounded timeout). Must be called from within a tokio
+    /// runtime.
+    pub async fn join_tcp_cluster(node_id: u64, config: &ClusterConfig) -> Result<Self> {
+        Self::join_tcp(
+            node_id,
+            config,
+            InMemoryLogStore::default(),
+            MvccStateMachine::volatile(),
+            Bootstrap::Initialize,
+            RaftTuning::default(),
+        )
+        .await
+    }
+
+    /// Like [`join_tcp_cluster`](Self::join_tcp_cluster), but the node's
+    /// Raft log, vote, and snapshots are persisted under `dir` (created
+    /// if absent) and recovered on restart — snapshot first, then log
+    /// replay, with the same loss/tampering cross-checks as the echo
+    /// backend.
+    pub async fn join_tcp_cluster_with_data_dir(
+        node_id: u64,
+        config: &ClusterConfig,
+        dir: impl AsRef<Path>,
+    ) -> Result<Self> {
+        Self::join_tcp_cluster_with_data_dir_tuned(node_id, config, dir, RaftTuning::default())
+            .await
+    }
+
+    /// Like
+    /// [`join_tcp_cluster_with_data_dir`](Self::join_tcp_cluster_with_data_dir),
+    /// with explicit snapshot/retention/transfer tuning — see
+    /// [`RaftTuning`].
+    pub async fn join_tcp_cluster_with_data_dir_tuned(
+        node_id: u64,
+        config: &ClusterConfig,
+        dir: impl AsRef<Path>,
+        tuning: RaftTuning,
+    ) -> Result<Self> {
+        let (log_store, sm, bootstrap) = Self::open_durable(dir.as_ref())?;
+        Self::join_tcp(node_id, config, log_store, sm, bootstrap, tuning).await
+    }
+
+    /// Open (or create) the durable artifacts under `dir` and seed a
+    /// state machine from the latest durable snapshot, if any.
+    fn open_durable(dir: &Path) -> Result<(DurableLogStore, MvccStateMachine, Bootstrap)> {
+        let raw = RecoveredDurable::open(dir)?;
+        let sm = MvccStateMachine::durable(Arc::clone(&raw.snapshot_store), raw.log_store.clone());
+        if let Some(loaded) = raw.loaded {
+            sm.seed_from_loaded(loaded.meta, loaded.data).map_err(|e| {
+                ConsensusError::Backend(format!(
+                    "failed to recover durable MVCC snapshot in {}: {e}",
+                    dir.display()
+                ))
+            })?;
+        }
+        // Cluster members do not wait for local replay: convergence is a
+        // cluster-level outcome the caller awaits.
+        let bootstrap = if raw.log_has_state {
+            Bootstrap::Recover { last_log_index: None }
+        } else {
+            Bootstrap::Initialize
+        };
+        Ok((raw.log_store, sm, bootstrap))
+    }
+
+    async fn join_tcp<LS>(
+        node_id: u64,
+        config: &ClusterConfig,
+        log_store: LS,
+        sm: MvccStateMachine,
+        bootstrap: Bootstrap,
+        tuning: RaftTuning,
+    ) -> Result<Self>
+    where
+        LS: RaftLogStorage<TypeConfig>,
+    {
+        let listen_addr = config.addr(node_id).ok_or_else(|| {
+            ConsensusError::Config(format!("node {node_id} is not in the cluster config"))
+        })?;
+        // Bind before booting the core so a peer that initialized first
+        // can reach this node as soon as its Raft exists.
+        let listener = crate::tcp::bind_listener(listen_addr).await.map_err(|e| {
+            ConsensusError::Backend(format!(
+                "failed to bind consensus listener on {listen_addr}: {e}"
+            ))
+        })?;
+
+        let network = crate::tcp::TcpNetworkFactory::new(config);
+        let mut node = Self::boot(node_id, network, log_store, sm, tuning).await?;
+        node.listener_task = Some(crate::tcp::spawn_listener(node.raft.clone(), listener));
+
+        initialize_membership(&node.raft, config.membership(), bootstrap).await?;
+        Ok(node)
+    }
+
+    /// Spawn the Raft core over `sm`: storage + state machine + network,
+    /// no membership yet.
+    async fn boot<LS, NF>(
+        node_id: u64,
+        network: NF,
+        log_store: LS,
+        sm: MvccStateMachine,
+        tuning: RaftTuning,
+    ) -> Result<Self>
+    where
+        LS: RaftLogStorage<TypeConfig>,
+        NF: openraft::RaftNetworkFactory<TypeConfig>,
+    {
+        let config = Arc::new(tuning.raft_config()?);
+        let raft = Raft::new(node_id, config, network, log_store, sm.clone())
+            .await
+            .map_err(|e| ConsensusError::Backend(format!("failed to start raft core: {e}")))?;
+        let metrics = raft.metrics();
+        Ok(Self { raft, sm, metrics, listener_task: None })
+    }
+
+    /// Execute one autocommit write statement through consensus. See
+    /// [`execute_replicated_txn`](Self::execute_replicated_txn).
+    pub async fn execute_replicated(&self, sql: &str) -> Result<(LogIndex, ApplyOutcome)> {
+        self.execute_replicated_txn(&[sql]).await
+    }
+
+    /// Execute a multi-statement transaction through consensus: the
+    /// whole batch is proposed as **one** [`TxnEntry`] (one log entry
+    /// per committed transaction) and applied atomically on every voter
+    /// with commit_ts = the entry's dense log index.
+    ///
+    /// Non-deterministic expressions are **frozen here, at propose
+    /// time, on the leader** (#5377); statements whose nondeterminism
+    /// cannot be frozen fail before consuming a log index. On a
+    /// non-leader this fails fast with [`ConsensusError::NotLeader`]
+    /// (leader hint attached when known) before evaluating anything.
+    ///
+    /// Resolves once the entry is committed on a quorum **and applied
+    /// locally** — the caller can immediately read its own write. A
+    /// rejected entry (failed statement, rolled back identically on
+    /// every replica) is an `Ok` with [`ApplyOutcome::Rejected`].
+    pub async fn execute_replicated_txn(
+        &self,
+        statements: &[&str],
+    ) -> Result<(LogIndex, ApplyOutcome)> {
+        // Fast-path leader check: don't evaluate volatile expressions
+        // (freeze draws random values / reads the clock) on a node whose
+        // proposal is going to be refused anyway. Races are harmless —
+        // `client_write` itself enforces leadership authoritatively.
+        if self.role() != Role::Leader {
+            return Err(ConsensusError::NotLeader { leader_hint: self.current_leader() });
+        }
+        let mut frozen = Vec::with_capacity(statements.len());
+        for sql in statements {
+            frozen.push(freeze::freeze_statement(sql).map_err(|e| {
+                ConsensusError::Backend(format!("statement cannot be replicated: {e}"))
+            })?);
+        }
+        let entry =
+            TxnEntry::frozen_batch(statements.iter().map(|s| s.to_string()).collect(), frozen);
+        self.propose_entry(entry).await
+    }
+
+    /// Propose a pre-built entry. Internal: the public surface freezes
+    /// statements first (tests use this to exercise the apply-side
+    /// defenses with hand-crafted entries).
+    async fn propose_entry(&self, entry: TxnEntry) -> Result<(LogIndex, ApplyOutcome)> {
+        let payload =
+            serde_json::to_vec(&entry).map_err(|e| ConsensusError::Backend(e.to_string()))?;
+        let response =
+            self.raft.client_write(payload).await.map_err(|e| self.map_write_error(e))?;
+        match response.data {
+            AppResponse::Mvcc { index, outcome } => Ok((index, outcome)),
+            other => Err(ConsensusError::Backend(format!(
+                "client write resolved with an unexpected apply response: {other:?}"
+            ))),
+        }
+    }
+
+    fn map_write_error(
+        &self,
+        e: RaftError<u64, ClientWriteError<u64, BasicNode>>,
+    ) -> ConsensusError {
+        match e {
+            RaftError::APIError(ClientWriteError::ForwardToLeader(forward)) => {
+                ConsensusError::NotLeader { leader_hint: forward.leader_id }
+            }
+            other => {
+                // A halted node surfaces its fatal reason instead of the
+                // engine's shutdown noise: the write failed because this
+                // node must not apply anything further.
+                if let Some(reason) = self.fatal_reason() {
+                    ConsensusError::FatalApply(reason)
+                } else {
+                    ConsensusError::Backend(other.to_string())
+                }
+            }
+        }
+    }
+
+    /// Run a read-only SELECT against the locally applied state (reads
+    /// are local, not replicated — see [`VibesqlStateMachine::query`]).
+    pub fn query(&self, sql: &str) -> Result<Vec<Vec<vibesql_types::SqlValue>>> {
+        self.sm.machine.query(sql)
+    }
+
+    /// This node's current role in the consensus group.
+    pub fn role(&self) -> Role {
+        role_from_state(self.metrics.borrow().state)
+    }
+
+    /// The node this one currently believes leads the cluster (`None`
+    /// until it has heard from — or become — a leader).
+    pub fn current_leader(&self) -> Option<u64> {
+        self.metrics.borrow().current_leader
+    }
+
+    /// Dense application index of the last entry applied to the local
+    /// database (`0` if none) — also the MVCC commit timestamp of the
+    /// most recent committed transaction.
+    pub fn last_applied(&self) -> LogIndex {
+        self.sm.machine.last_applied()
+    }
+
+    /// The reason this node halted on a fatal apply, if it did. A halted
+    /// node acknowledges nothing further; restart it to resync via
+    /// snapshot install + log replay.
+    pub fn fatal_reason(&self) -> Option<String> {
+        self.sm.fatal_reason()
+    }
+
+    /// Raw raft index of the last snapshot this node knows of (built
+    /// locally or installed from the leader); `None` until one exists.
+    pub fn snapshot_log_index(&self) -> Option<u64> {
+        self.metrics.borrow().snapshot.map(|id| id.index)
+    }
+
+    /// Raw raft index through which this node's log has been purged
+    /// (`None` until the first purge). Never exceeds the durable
+    /// snapshot.
+    pub fn purged_log_index(&self) -> Option<u64> {
+        self.metrics.borrow().purged.map(|id| id.index)
+    }
+
+    /// Capture a snapshot through the engine's real pipeline (trigger →
+    /// builder → registration), returning the database-level artifact:
+    /// `last_included_index` is the **dense** application index and
+    /// `data` the machine's binary database payload — the same shape
+    /// [`VibesqlStateMachine::snapshot`] produces, so
+    /// [`VibesqlStateMachine::from_snapshot`] can restore it.
+    pub async fn snapshot(&self) -> Result<Snapshot> {
+        let Some(target) = self.metrics.borrow().last_applied else {
+            // Nothing applied (not even membership): nothing for the
+            // engine to build at. Unreachable through the public
+            // constructors once the cluster has initialized.
+            return self.sm.machine.snapshot();
+        };
+
+        self.raft
+            .trigger()
+            .snapshot()
+            .await
+            .map_err(|e| ConsensusError::Backend(format!("failed to trigger snapshot: {e}")))?;
+        self.raft
+            .wait(Some(Duration::from_secs(10)))
+            .metrics(move |m| m.snapshot >= Some(target), "snapshot build")
+            .await
+            .map_err(|e| ConsensusError::Backend(format!("snapshot build did not settle: {e}")))?;
+
+        let inner = self.sm.lock();
+        let stored = inner.current_snapshot.as_ref().ok_or_else(|| {
+            ConsensusError::Backend(
+                "snapshot build settled but no snapshot is registered".to_string(),
+            )
+        })?;
+        let (dense, db_payload) =
+            decode_mvcc_snapshot(&stored.data).map_err(ConsensusError::SnapshotCodec)?;
+        Ok(Snapshot { last_included_index: dense, data: db_payload.to_vec() })
+    }
+
+    /// Gracefully shut down the Raft core (and, for a TCP-clustered
+    /// node, its listener and inbound connections).
+    pub async fn shutdown(&self) -> Result<()> {
+        if let Some(task) = &self.listener_task {
+            task.abort();
+        }
+        self.raft.shutdown().await.map_err(|e| ConsensusError::Backend(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+impl MvccRaftNode {
+    /// Boot one member of an in-process channel-network cluster
+    /// (mirrors `OpenraftBackend::join_channel_cluster`).
+    pub(crate) async fn join_channel_cluster<LS>(
+        node_id: u64,
+        members: &BTreeMap<u64, BasicNode>,
+        router: &crate::network::ChannelRouter,
+        log_store: LS,
+        sm: MvccStateMachine,
+        bootstrap: Bootstrap,
+        tuning: RaftTuning,
+    ) -> Result<Self>
+    where
+        LS: RaftLogStorage<TypeConfig>,
+    {
+        let network = crate::network::ChannelNetworkFactory::new(router.clone());
+        let node = Self::boot(node_id, network, log_store, sm, tuning).await?;
+        // Register the inbound RPC loop *before* initializing, so peers
+        // that initialized first can already reach this node.
+        router.register(node_id, node.raft.clone());
+        initialize_membership(&node.raft, members.clone(), bootstrap).await?;
+        Ok(node)
+    }
+
+    /// A single-voter node with everything in memory, elected leader
+    /// before this returns — the cheapest way to exercise the mount
+    /// itself (apply plumbing, outcome surfacing, snapshot artifact).
+    pub(crate) async fn single_node() -> Result<Self> {
+        let node = Self::boot(
+            1,
+            crate::openraft_backend::NoopNetworkFactory,
+            InMemoryLogStore::default(),
+            MvccStateMachine::volatile(),
+            RaftTuning::default(),
+        )
+        .await?;
+        let members = BTreeMap::from([(1, BasicNode::default())]);
+        initialize_membership(&node.raft, members, Bootstrap::Initialize).await?;
+        node.raft
+            .wait(Some(Duration::from_secs(10)))
+            .state(ServerState::Leader, "single-node leader election")
+            .await
+            .map_err(|e| ConsensusError::Backend(format!("leader election did not settle: {e}")))?;
+        Ok(node)
+    }
+
+    /// The underlying MVCC machine, for storage-level assertions (only
+    /// the `mvcc_enabled`-gated tests inspect MVCC stamps).
+    #[cfg(feature = "mvcc_enabled")]
+    pub(crate) fn machine(&self) -> &VibesqlStateMachine {
+        &self.sm.machine
+    }
+
+    /// Arm the test-only fatal injection: the apply of the entry at this
+    /// **dense** index fails as if a node-local resource error occurred.
+    pub(crate) fn inject_fatal_at(&self, dense_index: LogIndex) {
+        *self.sm.inject_fatal_at.lock().expect("fatal injection mutex poisoned") =
+            Some(dense_index);
+    }
+
+    /// Raw raft index of the last applied entry per the **state
+    /// machine's own** bookkeeping (not the metrics channel) — what the
+    /// engine would resume from.
+    pub(crate) fn sm_raft_last_applied(&self) -> Option<u64> {
+        self.sm.lock().last_applied.map(|id| id.index)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests: the Phase B1 PR 2 multi-node acceptance scenarios
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::freeze::FrozenValue;
+    use crate::network::ChannelRouter;
+    use vibesql_types::SqlValue;
+
+    /// Upper bound for any single cluster-level wait (election, catch-up,
+    /// purge). Bounded polls only — every wait fails loudly, never hangs.
+    const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
+    const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+    /// Where a node keeps its Raft log + vote (and, when durable, its
+    /// snapshots) between `kill` and `restore`.
+    enum NodeStorage {
+        /// Shared handle to the killed node's in-memory store — models a
+        /// process that lost its (volatile) database but kept its log.
+        InMemory(InMemoryLogStore),
+        /// Data directory reopened on restore (durable log + snapshots).
+        Durable(TempDir),
+    }
+
+    struct TestNode {
+        /// `None` while the node is killed.
+        node: Option<MvccRaftNode>,
+        storage: NodeStorage,
+    }
+
+    /// An in-process MVCC Raft cluster wired by the channel transport.
+    struct MvccCluster {
+        router: ChannelRouter,
+        members: BTreeMap<u64, BasicNode>,
+        nodes: BTreeMap<u64, TestNode>,
+        tuning: RaftTuning,
+    }
+
+    impl MvccCluster {
+        /// Boot `n` voters with in-memory logs and fresh databases.
+        async fn new(n: u64) -> Self {
+            Self::build(n, false, RaftTuning::default()).await
+        }
+
+        /// Boot `n` voters each persisting log + snapshots in a tempdir.
+        async fn new_durable(n: u64, tuning: RaftTuning) -> Self {
+            Self::build(n, true, tuning).await
+        }
+
+        async fn build(n: u64, durable: bool, tuning: RaftTuning) -> Self {
+            let router = ChannelRouter::default();
+            let members: BTreeMap<u64, BasicNode> =
+                (1..=n).map(|id| (id, BasicNode::default())).collect();
+
+            let mut nodes = BTreeMap::new();
+            for id in 1..=n {
+                let node = if durable {
+                    let dir = TempDir::new().expect("create tempdir for durable node");
+                    let (log_store, sm, bootstrap) =
+                        MvccRaftNode::open_durable(dir.path()).expect("open durable storage");
+                    let node = MvccRaftNode::join_channel_cluster(
+                        id, &members, &router, log_store, sm, bootstrap, tuning,
+                    )
+                    .await
+                    .expect("boot durable mvcc node");
+                    TestNode { node: Some(node), storage: NodeStorage::Durable(dir) }
+                } else {
+                    let store = InMemoryLogStore::default();
+                    let node = MvccRaftNode::join_channel_cluster(
+                        id,
+                        &members,
+                        &router,
+                        store.clone(),
+                        MvccStateMachine::volatile(),
+                        Bootstrap::Initialize,
+                        tuning,
+                    )
+                    .await
+                    .expect("boot mvcc node");
+                    TestNode { node: Some(node), storage: NodeStorage::InMemory(store) }
+                };
+                nodes.insert(id, node);
+            }
+
+            Self { router, members, nodes, tuning }
+        }
+
+        fn node(&self, id: u64) -> &MvccRaftNode {
+            self.nodes
+                .get(&id)
+                .and_then(|n| n.node.as_ref())
+                .unwrap_or_else(|| panic!("node {id} is killed or unknown"))
+        }
+
+        fn live_ids(&self) -> Vec<u64> {
+            self.nodes.iter().filter(|(_, n)| n.node.is_some()).map(|(id, _)| *id).collect()
+        }
+
+        /// "Crash" a node: cut it off from the network and stop its core.
+        /// Shutdown errors are tolerated — a node that already halted on a
+        /// fatal apply has a dead core by design.
+        async fn kill(&mut self, id: u64) {
+            self.router.deregister(id);
+            let node = self
+                .nodes
+                .get_mut(&id)
+                .and_then(|n| n.node.take())
+                .unwrap_or_else(|| panic!("node {id} is already killed or unknown"));
+            let _ = node.shutdown().await;
+        }
+
+        /// Restart a killed node from its retained storage with a **fresh
+        /// database**: in-memory nodes replay the kept log from scratch;
+        /// durable nodes recover snapshot-first then replay the suffix.
+        async fn restore(&mut self, id: u64) {
+            let entry = self.nodes.get_mut(&id).expect("unknown node");
+            assert!(entry.node.is_none(), "node {id} is not killed");
+            let node = match &entry.storage {
+                NodeStorage::InMemory(store) => {
+                    MvccRaftNode::join_channel_cluster(
+                        id,
+                        &self.members,
+                        &self.router,
+                        store.clone(),
+                        MvccStateMachine::volatile(),
+                        Bootstrap::Recover { last_log_index: None },
+                        self.tuning,
+                    )
+                    .await
+                }
+                NodeStorage::Durable(dir) => {
+                    let (log_store, sm, bootstrap) =
+                        MvccRaftNode::open_durable(dir.path()).expect("reopen durable storage");
+                    MvccRaftNode::join_channel_cluster(
+                        id,
+                        &self.members,
+                        &self.router,
+                        log_store,
+                        sm,
+                        bootstrap,
+                        self.tuning,
+                    )
+                    .await
+                }
+            };
+            entry.node = Some(node.expect("restore killed node"));
+        }
+
+        async fn wait_for_leader(&self) -> u64 {
+            self.wait_until("a leader to be elected", || {
+                self.live_ids().into_iter().find(|id| self.node(*id).role() == Role::Leader)
+            })
+            .await
+        }
+
+        /// Wait until node `id` has applied the **dense** index `idx`.
+        async fn wait_for_apply(&self, id: u64, idx: LogIndex) {
+            self.wait_until(&format!("node {id} to apply dense index {idx}"), || {
+                (self.node(id).last_applied() >= idx).then_some(())
+            })
+            .await;
+        }
+
+        /// Execute on whoever currently leads, re-resolving leadership if
+        /// an election moved it mid-call.
+        async fn execute_on_leader(&self, sql: &str) -> (LogIndex, ApplyOutcome) {
+            let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+            loop {
+                let leader = self.wait_for_leader().await;
+                match self.node(leader).execute_replicated(sql).await {
+                    Ok(result) => return result,
+                    Err(ConsensusError::NotLeader { .. }) => {
+                        assert!(
+                            tokio::time::Instant::now() < deadline,
+                            "timed out executing {sql:?}: leadership never settled"
+                        );
+                    }
+                    Err(other) => panic!("execute of {sql:?} failed: {other:?}"),
+                }
+            }
+        }
+
+        /// Assert every live node returns identical rows for `sql`.
+        fn assert_converged(&self, sql: &str) -> Vec<Vec<SqlValue>> {
+            let ids = self.live_ids();
+            let reference = self.node(ids[0]).query(sql).expect("query reference node");
+            for id in &ids[1..] {
+                assert_eq!(
+                    self.node(*id).query(sql).expect("query node"),
+                    reference,
+                    "node {id} diverged from node {} on {sql:?}",
+                    ids[0]
+                );
+            }
+            reference
+        }
+
+        async fn wait_until<T>(&self, what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
+            let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+            loop {
+                if let Some(value) = probe() {
+                    return value;
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timed out after {WAIT_TIMEOUT:?} waiting for {what}"
+                );
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+        }
+    }
+
+    fn follower_of(cluster: &MvccCluster, leader: u64) -> u64 {
+        cluster
+            .live_ids()
+            .into_iter()
+            .find(|id| *id != leader)
+            .expect("cluster has at least one follower")
+    }
+
+    /// The mount itself, on a single voter: writes flow client_write →
+    /// commit → apply-inside-the-engine; outcomes (incl. deterministic
+    /// rejection) surface through the response; the snapshot artifact is
+    /// the machine's own codec.
+    #[tokio::test]
+    async fn single_node_mount_applies_rejects_and_snapshots() {
+        let node = MvccRaftNode::single_node().await.unwrap();
+
+        let (idx, outcome) = node
+            .execute_replicated("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+            .await
+            .unwrap();
+        assert_eq!((idx, outcome), (1, ApplyOutcome::Applied { rows_affected: 0 }));
+
+        let (idx, outcome) =
+            node.execute_replicated("INSERT INTO users VALUES (1, 'alice')").await.unwrap();
+        assert_eq!((idx, outcome), (2, ApplyOutcome::Applied { rows_affected: 1 }));
+
+        // The session reads its own write immediately after the propose.
+        assert_eq!(
+            node.query("SELECT name FROM users").unwrap(),
+            vec![vec![SqlValue::Varchar("alice".into())]]
+        );
+
+        // A deterministic failure is a *rejected entry*, not an error: it
+        // consumed dense index 3 and surfaced through the apply response.
+        let (idx, outcome) =
+            node.execute_replicated("INSERT INTO users VALUES (1, 'dupe')").await.unwrap();
+        assert_eq!(idx, 3);
+        assert!(matches!(outcome, ApplyOutcome::Rejected { .. }), "got: {outcome:?}");
+        assert_eq!(node.last_applied(), 3);
+
+        node.execute_replicated("INSERT INTO users VALUES (2, 'bob')").await.unwrap();
+
+        // The engine-built snapshot artifact restores into a standalone
+        // machine byte-identically.
+        let snapshot = node.snapshot().await.unwrap();
+        assert_eq!(snapshot.last_included_index, 4);
+        let restored = VibesqlStateMachine::from_snapshot(&snapshot).unwrap();
+        assert_eq!(
+            restored.query("SELECT id, name FROM users ORDER BY id").unwrap(),
+            node.query("SELECT id, name FROM users ORDER BY id").unwrap()
+        );
+        assert_eq!(restored.last_applied(), 4);
+    }
+
+    /// 3-node acceptance: leader INSERT/UPDATE/DELETE replicate to every
+    /// voter — same rows, and (with MVCC on) the same `xmin` stamps,
+    /// because commit_ts = dense log index on every replica.
+    #[tokio::test]
+    async fn three_node_dml_converges_with_identical_commit_timestamps() {
+        let cluster = MvccCluster::new(3).await;
+
+        for (expected_idx, sql) in [
+            (1, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"),
+            (2, "INSERT INTO users VALUES (1, 'alice')"),
+            (3, "INSERT INTO users VALUES (2, 'bob')"),
+            (4, "UPDATE users SET name = 'bobby' WHERE id = 2"),
+            (5, "DELETE FROM users WHERE id = 1"),
+        ] {
+            let (idx, outcome) = cluster.execute_on_leader(sql).await;
+            assert_eq!(idx, expected_idx, "{sql}");
+            assert!(matches!(outcome, ApplyOutcome::Applied { .. }), "{sql}: {outcome:?}");
+        }
+
+        for id in 1..=3 {
+            cluster.wait_for_apply(id, 5).await;
+        }
+        let rows = cluster.assert_converged("SELECT id, name FROM users ORDER BY id");
+        assert_eq!(rows, vec![vec![SqlValue::Integer(2), SqlValue::Varchar("bobby".into())]]);
+
+        // commit_ts = dense log index, identical on every node: bobby's
+        // live version was written by entry 4 everywhere.
+        #[cfg(feature = "mvcc_enabled")]
+        for id in 1..=3 {
+            cluster.node(id).machine().with_db(|db| {
+                let table = db.get_table("users").unwrap();
+                let bobby = table
+                    .scan()
+                    .iter()
+                    .find(|r| r.values[0] == SqlValue::Integer(2) && r.xmax.is_none())
+                    .expect("bobby's live version")
+                    .xmin;
+                assert_eq!(bobby, 4, "node {id}: xmin must equal the entry's dense log index");
+            });
+        }
+    }
+
+    /// Freeze determinism multi-node (#5377 end-to-end): volatile
+    /// expressions are evaluated once on the leader and every voter
+    /// stores the identical drawn values.
+    #[tokio::test]
+    async fn nondeterministic_sql_converges_identically_on_all_nodes() {
+        let cluster = MvccCluster::new(3).await;
+
+        cluster
+            .execute_on_leader(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, r INTEGER, b BLOB, ts TIMESTAMP, d DATE)",
+            )
+            .await;
+        let (_, outcome) = cluster
+            .execute_on_leader(
+                "INSERT INTO t VALUES (1, random(), randomblob(8), CURRENT_TIMESTAMP, curdate())",
+            )
+            .await;
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+        let (idx, outcome) =
+            cluster.execute_on_leader("INSERT INTO t (id, ts) VALUES (2, datetime('now'))").await;
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+
+        for id in 1..=3 {
+            cluster.wait_for_apply(id, idx).await;
+        }
+        let rows = cluster.assert_converged("SELECT id, r, b, ts, d FROM t ORDER BY id");
+        assert_eq!(rows.len(), 2);
+        assert_ne!(rows[0][1], SqlValue::Null, "random() must have been frozen to a value");
+        assert_ne!(rows[0][3], SqlValue::Null, "CURRENT_TIMESTAMP must have been frozen");
+    }
+
+    /// A deterministic statement failure (constraint violation) is a
+    /// *rejected entry*: it consumes its dense index on every voter, the
+    /// rejection is identical everywhere, and the cluster keeps going.
+    #[tokio::test]
+    async fn deterministic_rejection_is_identical_on_every_node() {
+        let cluster = MvccCluster::new(3).await;
+        cluster.execute_on_leader("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)").await;
+        cluster.execute_on_leader("INSERT INTO users VALUES (1, 'alice')").await;
+
+        let (idx, outcome) =
+            cluster.execute_on_leader("INSERT INTO users VALUES (1, 'dupe')").await;
+        assert_eq!(idx, 3);
+        assert!(matches!(outcome, ApplyOutcome::Rejected { .. }), "got: {outcome:?}");
+
+        // Every voter consumed the rejected entry's index...
+        for id in 1..=3 {
+            cluster.wait_for_apply(id, 3).await;
+        }
+        // ...and the log keeps numbering past it.
+        let (idx, outcome) =
+            cluster.execute_on_leader("INSERT INTO users VALUES (2, 'carol')").await;
+        assert_eq!(idx, 4);
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+
+        for id in 1..=3 {
+            cluster.wait_for_apply(id, 4).await;
+            assert_eq!(cluster.node(id).last_applied(), 4, "node {id}");
+        }
+        let rows = cluster.assert_converged("SELECT id, name FROM users ORDER BY id");
+        assert_eq!(rows.len(), 2, "the rejected entry must have applied nothing anywhere");
+    }
+
+    /// Kill the leader mid-stream: the survivors elect a new leader and
+    /// writes continue (dense indices stay contiguous — the new leader's
+    /// blank protocol entry consumes no dense index, so commit timestamps
+    /// stay aligned across replicas); the killed node restores and
+    /// converges via log replay.
+    #[tokio::test]
+    async fn killing_the_leader_keeps_writes_flowing_and_restored_node_converges() {
+        let mut cluster = MvccCluster::new(3).await;
+        let leader = cluster.wait_for_leader().await;
+
+        cluster.execute_on_leader("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)").await;
+        cluster.execute_on_leader("INSERT INTO users VALUES (1, 'alice')").await;
+        for id in 1..=3 {
+            cluster.wait_for_apply(id, 2).await;
+        }
+
+        cluster.kill(leader).await;
+        let new_leader = cluster.wait_for_leader().await;
+        assert_ne!(new_leader, leader, "the killed node cannot lead");
+
+        let (idx, _) = cluster.execute_on_leader("INSERT INTO users VALUES (2, 'bob')").await;
+        assert_eq!(idx, 3, "dense indices stay contiguous across the failover");
+        let (idx, _) = cluster.execute_on_leader("INSERT INTO users VALUES (3, 'carol')").await;
+        assert_eq!(idx, 4);
+
+        cluster.restore(leader).await;
+        cluster.wait_for_apply(leader, 4).await;
+        let rows = cluster.assert_converged("SELECT id, name FROM users ORDER BY id");
+        assert_eq!(rows.len(), 3);
+
+        // The restored node replayed the full log into a fresh database:
+        // its commit timestamps match everyone else's.
+        #[cfg(feature = "mvcc_enabled")]
+        cluster.node(leader).machine().with_db(|db| {
+            let table = db.get_table("users").unwrap();
+            let carol = table
+                .scan()
+                .iter()
+                .find(|r| r.values[0] == SqlValue::Integer(3) && r.xmax.is_none())
+                .expect("carol's live version")
+                .xmin;
+            assert_eq!(carol, 4, "replayed write keeps commit_ts = dense log index");
+        });
+    }
+
+    /// Leader-only writes: a follower fails fast with `NotLeader` and a
+    /// hint at who leads, before consuming any log index (and before
+    /// evaluating any volatile expression).
+    #[tokio::test]
+    async fn follower_writes_are_rejected_with_a_leader_hint() {
+        let cluster = MvccCluster::new(3).await;
+        let leader = cluster.wait_for_leader().await;
+        let follower = follower_of(&cluster, leader);
+
+        // Wait until the follower has heard from the leader, so the hint
+        // is deterministic rather than `None`.
+        cluster
+            .wait_until("the follower to learn who leads", || {
+                (cluster.node(follower).current_leader() == Some(leader)).then_some(())
+            })
+            .await;
+
+        let err = cluster
+            .node(follower)
+            .execute_replicated("INSERT INTO nowhere VALUES (random())")
+            .await
+            .unwrap_err();
+        match err {
+            ConsensusError::NotLeader { leader_hint } => assert_eq!(leader_hint, Some(leader)),
+            other => panic!("expected NotLeader with a hint, got: {other:?}"),
+        }
+        for id in 1..=3 {
+            assert_eq!(cluster.node(id).last_applied(), 0, "no log index may be consumed");
+        }
+    }
+
+    /// The FatalApply → halt obligation, end-to-end through the real
+    /// fatal path: an entry with a frozen-site/value count mismatch
+    /// (proposer/applier version skew) halts every node that applies it
+    /// — openraft never advances `last_applied` past it, nothing is
+    /// recorded as a rejection, and the fatal reason is retained.
+    #[tokio::test]
+    async fn poisoned_entry_halts_nodes_without_consuming_the_index() {
+        let cluster = MvccCluster::new(3).await;
+        cluster.execute_on_leader("CREATE TABLE t (id INTEGER PRIMARY KEY, r INTEGER)").await;
+        for id in 1..=3 {
+            cluster.wait_for_apply(id, 1).await;
+        }
+        let leader = cluster.wait_for_leader().await;
+        let raft_before = cluster.node(leader).sm_raft_last_applied();
+
+        // Version-skewed entry: one volatile site, two frozen values.
+        let poisoned = TxnEntry::frozen_batch(
+            vec!["INSERT INTO t VALUES (1, random())".to_string()],
+            vec![vec![FrozenValue::Integer(7), FrozenValue::Integer(8)]],
+        );
+        let err = cluster.node(leader).propose_entry(poisoned).await.unwrap_err();
+        assert!(
+            matches!(err, ConsensusError::FatalApply(_)),
+            "the write must surface the halt, got: {err:?}"
+        );
+
+        // The leader halted at apply; the surviving followers commit the
+        // entry (it reached a quorum), elect a new leader among
+        // themselves, and halt the same way when *they* apply it. The
+        // whole cluster stops — an outage, never divergence.
+        for id in 1..=3 {
+            cluster
+                .wait_until(&format!("node {id} to halt on the poisoned entry"), || {
+                    cluster.node(id).fatal_reason().map(|_| ())
+                })
+                .await;
+        }
+        for id in 1..=3 {
+            assert_eq!(
+                cluster.node(id).last_applied(),
+                1,
+                "node {id}: a fatal apply must not consume the dense index"
+            );
+            let reason = cluster.node(id).fatal_reason().unwrap();
+            assert!(reason.contains("halting this node"), "node {id}: {reason}");
+        }
+        assert_eq!(
+            cluster.node(leader).sm_raft_last_applied(),
+            raft_before,
+            "openraft must not advance last_applied past the fatal entry"
+        );
+
+        // A halted node acknowledges nothing further.
+        let err = cluster
+            .node(leader)
+            .execute_replicated("INSERT INTO t VALUES (2, 2)")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ConsensusError::FatalApply(_) | ConsensusError::NotLeader { .. }),
+            "writes after the halt must fail, got: {err:?}"
+        );
+    }
+
+    /// A *node-local* fatal failure (injected) halts only the node that
+    /// hit it; the quorum keeps committing. Restarting the halted node
+    /// resyncs it via log replay — the documented recovery path.
+    #[tokio::test]
+    async fn injected_fatal_halts_one_node_and_restart_resyncs_it() {
+        let mut cluster = MvccCluster::new(3).await;
+        cluster.execute_on_leader("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)").await;
+        for id in 1..=3 {
+            cluster.wait_for_apply(id, 1).await;
+        }
+        let leader = cluster.wait_for_leader().await;
+        let victim = follower_of(&cluster, leader);
+        cluster.node(victim).inject_fatal_at(2);
+
+        // The quorum (leader + the other follower) applies fine.
+        let (idx, outcome) = cluster.execute_on_leader("INSERT INTO t VALUES (1, 'alive')").await;
+        assert_eq!(idx, 2);
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+
+        cluster
+            .wait_until("the victim to halt on the injected failure", || {
+                cluster.node(victim).fatal_reason().map(|_| ())
+            })
+            .await;
+        assert_eq!(
+            cluster.node(victim).last_applied(),
+            1,
+            "the halted node must not have applied past the fatal entry"
+        );
+
+        // Writes keep flowing on the healthy majority.
+        let (idx, _) = cluster.execute_on_leader("INSERT INTO t VALUES (2, 'still alive')").await;
+        assert_eq!(idx, 3);
+
+        // Restart the halted node: fresh database, kept log → full
+        // replay → convergence (snapshot+replay is exercised separately).
+        cluster.kill(victim).await;
+        cluster.restore(victim).await;
+        cluster.wait_for_apply(victim, 3).await;
+        assert!(cluster.node(victim).fatal_reason().is_none(), "restarted node is healthy");
+        let rows = cluster.assert_converged("SELECT id, v FROM t ORDER BY id");
+        assert_eq!(rows.len(), 2);
+    }
+
+    /// The snapshot path end-to-end on durable nodes: policy-driven MVCC
+    /// snapshots + log purge run past a dead follower; the restored
+    /// follower heals via chunked MVCC snapshot install (its gap is
+    /// purged, so log replay alone cannot), converges, and a subsequent
+    /// restart recovers cleanly from its own durable snapshot.
+    #[tokio::test]
+    async fn purged_follower_heals_via_mvcc_snapshot_install_and_restarts_cleanly() {
+        let tuning =
+            RaftTuning { snapshot_after_entries: 4, keep_in_log: 1, ..RaftTuning::default() };
+        let mut cluster = MvccCluster::new_durable(3, tuning).await;
+
+        cluster.execute_on_leader("CREATE TABLE kv (id INTEGER PRIMARY KEY, v TEXT)").await;
+        cluster.execute_on_leader("INSERT INTO kv VALUES (1, 'one')").await;
+        for id in 1..=3 {
+            cluster.wait_for_apply(id, 2).await;
+        }
+
+        let leader = cluster.wait_for_leader().await;
+        let follower = follower_of(&cluster, leader);
+        let follower_raw =
+            cluster.node(follower).sm_raft_last_applied().expect("follower applied something");
+        cluster.kill(follower).await;
+
+        // Push enough writes for the snapshot/purge policy to discard the
+        // dead follower's catch-up gap.
+        let mut last_dense = 0;
+        for i in 2..=12u64 {
+            let (idx, outcome) =
+                cluster.execute_on_leader(&format!("INSERT INTO kv VALUES ({i}, 'v{i}')")).await;
+            assert!(matches!(outcome, ApplyOutcome::Applied { .. }));
+            last_dense = idx;
+        }
+        cluster
+            .wait_until("the leader to purge past the dead follower", || {
+                let leader = cluster
+                    .live_ids()
+                    .into_iter()
+                    .find(|id| cluster.node(*id).role() == Role::Leader)?;
+                cluster
+                    .node(leader)
+                    .purged_log_index()
+                    .is_some_and(|purged| purged > follower_raw)
+                    .then_some(())
+            })
+            .await;
+
+        // The restored follower cannot be backfilled by log replay (its
+        // gap is purged): it must heal via MVCC snapshot install.
+        cluster.restore(follower).await;
+        cluster.wait_for_apply(follower, last_dense).await;
+        assert!(
+            cluster.node(follower).snapshot_log_index().is_some_and(|snap| snap > follower_raw),
+            "the follower must have installed a snapshot covering its purged gap"
+        );
+        cluster.assert_converged("SELECT id, v FROM kv ORDER BY id");
+
+        // Post-install writes keep the commit_ts mapping on the healed
+        // node (snapshot install seeded the dense cursor + allocator).
+        let (idx, _) = cluster.execute_on_leader("INSERT INTO kv VALUES (99, 'post')").await;
+        cluster.wait_for_apply(follower, idx).await;
+        #[cfg(feature = "mvcc_enabled")]
+        cluster.node(follower).machine().with_db(|db| {
+            let table = db.get_table("kv").unwrap();
+            let post = table
+                .scan()
+                .iter()
+                .find(|r| r.values[0] == SqlValue::Integer(99))
+                .expect("post-install row")
+                .xmin;
+            assert_eq!(post, idx, "post-install applies keep commit_ts = dense log index");
+        });
+
+        // Subsequent restart is clean: the follower recovers from its own
+        // durable snapshot + log suffix and converges again.
+        cluster.kill(follower).await;
+        cluster.restore(follower).await;
+        cluster.wait_for_apply(follower, idx).await;
+        cluster.assert_converged("SELECT id, v FROM kv ORDER BY id");
+    }
+}
