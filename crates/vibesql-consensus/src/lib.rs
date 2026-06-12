@@ -41,11 +41,31 @@
 //!   election, failover, restart catch-up, minority partitions, and
 //!   torn/garbage frames over real sockets.
 //!
-//! Deliberately **not** here yet (later Raft phases): snapshot transfer and
-//! truncation *policy* (Phase A4; the storage-level truncate/purge hooks
-//! exist), applying entries to VibeSQL storage (Phase B1), TLS on the
-//! consensus port, production wiring into `vibesql-server`, and membership
-//! changes.
+//! Phase A4 (#5198), PR 1, makes snapshots real on a single node:
+//!
+//! - [`ConsensusBackend::snapshot`] on [`OpenraftBackend`] flows through
+//!   openraft's `RaftSnapshotBuilder` (the `snapshot` module holds the
+//!   payload codec and the durable [`SnapshotStore`](snapshot) machinery).
+//! - Durable configurations persist each built/installed snapshot to the
+//!   data directory (tmp/rename atomic, CRC-framed) and recover **snapshot
+//!   first, then log replay**; a corrupt snapshot file fails recovery
+//!   loudly rather than silently starting fresh.
+//! - Snapshot builds pin the MVCC vacuum horizon through a hook
+//!   (`SnapshotHorizonPin`) that is a no-op until Phase B1 wires the real
+//!   state machine.
+//! - Log purge is storage-enforced to never exceed the last durable
+//!   snapshot's index.
+//!
+//! Deliberately **not** here yet (later Raft phases): snapshot *transfer*
+//! between nodes and the purge *policy* (Phase A4 PR 2), applying entries
+//! to VibeSQL storage (Phase B1), TLS on the consensus port, production
+//! wiring into `vibesql-server`, and membership changes.
+//!
+//! Note on retention: the Raft log purge gated above is orthogonal to the
+//! pre-existing data-WAL checkpoint/truncation in `vibesql-storage::wal`
+//! (LSN-based, `DEFAULT_SAFETY_BUFFER`). On a replicated node the **Raft
+//! log is authoritative** (per the A2/B1 direction); the data WAL remains a
+//! local durability detail of the storage engine.
 //!
 //! [ADR-0004]: https://github.com/rjwalters/vibesql/blob/main/docs/decisions/0004-consensus-library.md
 
@@ -60,6 +80,7 @@ mod durable;
 mod network;
 mod openraft_backend;
 mod single_node;
+mod snapshot;
 mod tcp;
 
 pub use backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Role, Snapshot};
