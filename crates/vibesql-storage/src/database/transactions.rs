@@ -117,12 +117,36 @@ pub struct TransactionManager {
     transaction_state: TransactionState,
     /// Next transaction ID
     next_transaction_id: u64,
+    /// Externally-held GC horizon pins (Raft Phase B1, #5199).
+    ///
+    /// Each entry maps a pin id to the horizon value captured when the
+    /// pin was acquired. While any pin is held, [`compute_gc_horizon`]
+    /// never advances past the lowest pinned value, so a long-running
+    /// reader that is **not** a SQL transaction — concretely, a Raft
+    /// snapshot build serializing the database state — can prevent
+    /// `vacuum_mvcc` from reclaiming row versions it still needs.
+    ///
+    /// This is the same primitive as the active-transaction holdback
+    /// (an active txn pins the horizon at its snapshot's `xmin_active`),
+    /// generalized to non-transactional readers. A `BTreeMap` keeps the
+    /// "lowest pinned value" lookup simple; the map is tiny (one entry
+    /// per concurrent snapshot build).
+    ///
+    /// [`compute_gc_horizon`]: Self::compute_gc_horizon
+    horizon_pins: std::collections::BTreeMap<u64, TxnId>,
+    /// Next pin id to hand out from [`pin_gc_horizon`](Self::pin_gc_horizon).
+    next_pin_id: u64,
 }
 
 impl TransactionManager {
     /// Create a new transaction manager
     pub fn new() -> Self {
-        TransactionManager { transaction_state: TransactionState::None, next_transaction_id: 1 }
+        TransactionManager {
+            transaction_state: TransactionState::None,
+            next_transaction_id: 1,
+            horizon_pins: std::collections::BTreeMap::new(),
+            next_pin_id: 1,
+        }
     }
 
     /// Record a change in the current transaction (if any)
@@ -347,10 +371,76 @@ impl TransactionManager {
     /// [`Table::gc_old_versions`]: crate::Table::gc_old_versions
     /// [`crate::Database::vacuum_mvcc`]: crate::Database
     pub fn compute_gc_horizon(&self) -> TxnId {
-        match &self.transaction_state {
+        let base = match &self.transaction_state {
             TransactionState::Active { snapshot, .. } => snapshot.xmin_active,
             TransactionState::None => self.next_transaction_id,
+        };
+        // Raft Phase B1 (#5199): externally-held pins (snapshot builds)
+        // hold the horizon back exactly like an active transaction would.
+        match self.horizon_pins.values().min() {
+            Some(&pinned) => base.min(pinned),
+            None => base,
         }
+    }
+
+    /// Pin the GC horizon at its current value (Raft Phase B1, #5199).
+    ///
+    /// Returns a pin id that must be passed to
+    /// [`release_gc_horizon`](Self::release_gc_horizon) when the pinned
+    /// read completes. While the pin is held,
+    /// [`compute_gc_horizon`](Self::compute_gc_horizon) — and therefore
+    /// `vacuum_mvcc` — never advances past the value captured here, so
+    /// row versions visible at pin time cannot be physically reclaimed.
+    ///
+    /// This is how a Raft snapshot build registers itself "as (or
+    /// alongside) an active read transaction" per the Phase A4 design
+    /// (`vibesql-consensus`'s `SnapshotHorizonPin`): the build acquires
+    /// a pin before reading any state and releases it once the snapshot
+    /// blob is built and durable. Unlike `begin_transaction`, a pin does
+    /// not occupy the single-writer transaction slot, so applying
+    /// committed log entries can proceed while a snapshot is pinned.
+    pub fn pin_gc_horizon(&mut self) -> u64 {
+        let pin_id = self.next_pin_id;
+        self.next_pin_id += 1;
+        let horizon = self.compute_gc_horizon();
+        self.horizon_pins.insert(pin_id, horizon);
+        pin_id
+    }
+
+    /// Release a GC horizon pin acquired with
+    /// [`pin_gc_horizon`](Self::pin_gc_horizon). Releasing an unknown
+    /// (or already-released) pin id is a no-op.
+    pub fn release_gc_horizon(&mut self, pin_id: u64) {
+        self.horizon_pins.remove(&pin_id);
+    }
+
+    /// Override the next transaction id (Raft Phase B1, #5199).
+    ///
+    /// On a replicated node the MVCC commit timestamp is the Raft log
+    /// index ("apply index = commit order", ADR-0004): the state machine
+    /// calls this immediately before `begin_transaction` so the
+    /// transaction that applies log entry `N` is stamped with
+    /// `txn_id = N`. This keeps `xmin`/`xmax` stamps identical on every
+    /// replica and across snapshot-install + log-replay recovery, where
+    /// the local allocator's counter would otherwise restart from 1.
+    ///
+    /// # Caller contract
+    ///
+    /// Replication-apply use only. Must be called **outside** an active
+    /// transaction (the id of an in-flight transaction cannot change),
+    /// and `id` must be at least the highest id already stamped into
+    /// rows — moving the allocator backwards would let two different
+    /// transactions stamp the same id, corrupting MVCC visibility.
+    /// Single-node (non-replicated) databases never call this and keep
+    /// the sequential local allocator.
+    pub fn set_next_txn_id(&mut self, id: TxnId) -> Result<(), StorageError> {
+        if self.in_transaction() {
+            return Err(StorageError::TransactionError(
+                "set_next_txn_id cannot run while a transaction is active".to_string(),
+            ));
+        }
+        self.next_transaction_id = id;
+        Ok(())
     }
 
     /// Capture a fresh "commit-time" MVCC snapshot.
