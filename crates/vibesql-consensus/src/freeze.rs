@@ -26,19 +26,27 @@
 //! list (shared with the optimizer's push-down guard). Per category:
 //!
 //! - **Clock readings** (`CURRENT_TIMESTAMP`/`CURRENT_DATE`/ `CURRENT_TIME` keywords, `now()`,
-//!   `current_*()` call forms, and the SQLite date/time functions when they reference `'now'` —
-//!   explicitly, implicitly by omitting the time value, or via the timezone-dependent
-//!   `'localtime'`/`'utc'` modifiers): frozen **anywhere** in a write statement. SQLite already
-//!   fixes `'now'` per statement, so a single per-statement value is the correct semantics even in
-//!   per-row contexts like `SET ts = CURRENT_TIMESTAMP`.
+//!   `current_*()` call forms and their MySQL aliases `curdate()`/`curtime()`, the SQLite
+//!   date/time functions when they reference `'now'` — explicitly, implicitly by omitting the
+//!   time value, or via the timezone-dependent `'localtime'`/`'utc'` modifiers — the one-argument
+//!   PostgreSQL `age(x)` (which compares against the current date; the two-argument form is
+//!   pure), and `CAST(<TIME literal> AS TIMESTAMP)` (SQL:1999 stamps the current date)): frozen
+//!   **anywhere** in a write statement. SQLite already fixes `'now'` per statement, so a single
+//!   per-statement value is the correct semantics even in per-row contexts like
+//!   `SET ts = CURRENT_TIMESTAMP`. `CAST(<TIME column> AS TIMESTAMP)` is a per-row clock read
+//!   whose operand type is only known against the schema; it is rejected at apply by
+//!   [`time_cast_violation`] (see #5381 for operand shapes beyond literals and target-table
+//!   columns).
 //! - **Per-row volatile functions** (`random()`, `randomblob()`, `rand()`): frozen only where the
 //!   call site evaluates **exactly once** — expressions in `INSERT … VALUES` rows (and `DELETE`'s
 //!   `LIMIT`/`OFFSET`). In per-row contexts (`SET`, `WHERE`, `ORDER BY`) a single frozen value
 //!   would change semantics (every row would get the *same* draw), so the statement is rejected at
 //!   propose with an explanatory error.
-//! - **Session-state functions** (`last_insert_rowid()`, `changes()`, `total_changes()`): always
-//!   rejected. Their value depends on session history that is not part of replicated database state
-//!   (e.g. snapshots do not carry the rowid counter, so replay paths would disagree).
+//! - **Session-state functions** (`last_insert_rowid()`, `changes()`, `total_changes()`, and the
+//!   identity/server-information functions `user()`/`current_user()`/`database()`/`schema()`/
+//!   `version()`): always rejected. Their value depends on session/server state that is not part
+//!   of replicated database state (e.g. snapshots do not carry the rowid counter, so replay paths
+//!   would disagree; node versions differ during rolling upgrades).
 //! - **Deterministic date/time usage** (`strftime('%s', col)`, `datetime(col, '+1 day')`, …): pure
 //!   functions of their arguments — left untouched.
 //!
@@ -85,7 +93,7 @@ use vibesql_ast::{
     FromClause, IndexColumn, InsertSource, InsertStmt, OnConflictAction, SelectStmt, Statement,
     UpdateStmt, WhereClause,
 };
-use vibesql_types::{Date, SqlValue, StringValue, Time, Timestamp};
+use vibesql_types::{DataType, Date, SqlValue, StringValue, Time, Timestamp};
 
 // ---------------------------------------------------------------------------
 // Frozen values: the serializable closed set freezing can produce
@@ -413,6 +421,140 @@ pub fn volatile_default_violation_update(
     None
 }
 
+/// Does this write statement cast a TIME column of its target table to
+/// TIMESTAMP? SQL:1999 semantics stamp the **current date** onto the
+/// time value, so `CAST(time_col AS TIMESTAMP)` is a *per-row clock
+/// read* at apply time — invisible to the positional freeze pass (the
+/// operand's type is not statically known at propose) and unfixable by
+/// a single frozen value. Like the DEFAULT audit, this is checked at
+/// apply against the (replicated, hence identical) target-table schema,
+/// so the rejection is deterministic on every replica.
+///
+/// Scope: column references that bind to the target table — `SET` /
+/// `WHERE` / `ORDER BY` roots of UPDATE and DELETE, and the
+/// `ON CONFLICT DO UPDATE` / `ON DUPLICATE KEY UPDATE` parts of INSERT
+/// (including the `excluded.` alias, which carries the same schema).
+/// The literal-operand form is frozen at propose instead
+/// ([`is_time_to_timestamp_cast`]); TIME-typed operands that are
+/// neither literals nor direct columns of the target table (e.g.
+/// columns of other tables inside `INSERT … SELECT`) are tracked in
+/// #5381.
+pub fn time_cast_violation(
+    statement: &Statement,
+    schema: &vibesql_catalog::TableSchema,
+) -> Option<String> {
+    let mut detector = TimeCastDetector { schema, error: None };
+    let mut check = |expr: &Expression| {
+        if detector.error.is_none() {
+            let _ = walk_expression(&mut detector, expr);
+        }
+    };
+    match statement {
+        Statement::Insert(stmt) => {
+            if let Some(on_conflict) = &stmt.on_conflict {
+                if let OnConflictAction::DoUpdate { assignments, where_clause } =
+                    &on_conflict.action
+                {
+                    for assignment in assignments {
+                        check(&assignment.value);
+                    }
+                    if let Some(where_clause) = where_clause {
+                        check(where_clause);
+                    }
+                }
+            }
+            if let Some(assignments) = &stmt.on_duplicate_key_update {
+                for assignment in assignments {
+                    check(&assignment.value);
+                }
+            }
+        }
+        Statement::Update(stmt) => {
+            for assignment in &stmt.assignments {
+                check(&assignment.value);
+            }
+            if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
+                check(expr);
+            }
+        }
+        Statement::Delete(stmt) => {
+            if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
+                check(expr);
+            }
+            if let Some(order_by) = &stmt.order_by {
+                for item in order_by {
+                    check(&item.expr);
+                }
+            }
+            if let Some(limit) = &stmt.limit {
+                check(limit);
+            }
+            if let Some(offset) = &stmt.offset {
+                check(offset);
+            }
+        }
+        _ => {}
+    }
+    detector.error
+}
+
+/// Flags `CAST(<target-table TIME column> AS TIMESTAMP)`. Subqueries
+/// are skipped: their columns bind to other tables, whose schemas this
+/// audit does not resolve (#5381).
+struct TimeCastDetector<'a> {
+    schema: &'a vibesql_catalog::TableSchema,
+    error: Option<String>,
+}
+
+impl ExpressionVisitor for TimeCastDetector<'_> {
+    fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        if self.error.is_some() {
+            return VisitResult::Stop;
+        }
+        match expr {
+            Expression::ScalarSubquery(_) | Expression::Exists { .. } => VisitResult::Skip,
+            Expression::In { expr: operand, .. }
+            | Expression::QuantifiedComparison { expr: operand, .. } => {
+                // Check the non-subquery operand; skip the subquery.
+                if walk_expression(self, operand).should_stop() {
+                    return VisitResult::Stop;
+                }
+                VisitResult::Skip
+            }
+            Expression::Cast { expr: operand, data_type: DataType::Timestamp { .. } } => {
+                let Expression::ColumnRef(col) = operand.as_ref() else {
+                    return VisitResult::Continue;
+                };
+                // Unqualified references and references qualified with
+                // the target table (or the ON CONFLICT `excluded` alias,
+                // which shares its schema) bind to the target table.
+                let binds_to_target = col.table_canonical().is_none_or(|t| {
+                    t.eq_ignore_ascii_case(&self.schema.name) || t.eq_ignore_ascii_case("excluded")
+                });
+                let is_time_column = binds_to_target
+                    && self.schema.columns.iter().any(|c| {
+                        c.name.eq_ignore_ascii_case(col.column_canonical())
+                            && matches!(c.data_type, DataType::Time { .. })
+                    });
+                if is_time_column {
+                    self.error = Some(format!(
+                        "CAST({} AS TIMESTAMP) on TIME column '{}' of table '{}' stamps the \
+                         current date per row at apply time (SQL:1999) and cannot be replicated \
+                         deterministically; combine the column with an explicit date instead \
+                         (#5377)",
+                        col.column_display(),
+                        col.column_display(),
+                        self.schema.name
+                    ));
+                    return VisitResult::Stop;
+                }
+                VisitResult::Continue
+            }
+            _ => VisitResult::Continue,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Site classification (shared by validation, capture and substitution)
 // ---------------------------------------------------------------------------
@@ -426,6 +568,9 @@ pub fn volatile_default_violation_update(
 /// transformable root either matches here (and gets a frozen value) or
 /// is deterministic.
 fn is_freeze_site(expr: &Expression) -> bool {
+    if is_time_to_timestamp_cast(expr) {
+        return true;
+    }
     match expr {
         Expression::CurrentDate
         | Expression::CurrentTime { .. }
@@ -450,6 +595,14 @@ fn is_freeze_site(expr: &Expression) -> bool {
 /// or any literal string argument is `'now'`, `'localtime'`, or
 /// `'utc'`.
 fn datetime_uses_clock(canonical_name: &str, args: &[Expression]) -> bool {
+    // PostgreSQL `age(x)` compares its argument against the current
+    // date; the two-argument form is a pure function of its arguments.
+    // age() takes DATE/TIMESTAMP values (string arguments are a
+    // deterministic executor error), so the SQLite 'now'/'localtime'
+    // string-modifier scan below does not apply to it.
+    if canonical_name == "age" {
+        return args.len() == 1;
+    }
     let implicit_now = match canonical_name {
         // strftime(format[, time-value, ...]): one argument means the
         // time value defaults to 'now'.
@@ -471,10 +624,31 @@ fn datetime_uses_clock(canonical_name: &str, args: &[Expression]) -> bool {
         })
 }
 
+/// Is this `CAST(<TIME literal> AS TIMESTAMP)`? SQL:1999 semantics
+/// stamp the **current date** onto the time value (see the executor's
+/// `evaluator/casting.rs`), so this cast is a clock read. With a
+/// literal operand it freezes like the other clock readings (post-order
+/// literalization also covers `CAST(CURRENT_TIME AS TIMESTAMP)`). The
+/// column-operand form is a *per-row* clock read whose operand type is
+/// only known against the schema, so it is rejected at apply by
+/// [`time_cast_violation`]; TIME-typed operands that are neither
+/// literals nor direct columns of the target table are tracked in
+/// #5381.
+fn is_time_to_timestamp_cast(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::Cast { expr: operand, data_type: DataType::Timestamp { .. } }
+            if matches!(**operand, Expression::Literal(SqlValue::Time(_)))
+    )
+}
+
 /// Will this expression be a literal after the freeze pass replaces
 /// nested freezable sites? (Const-ness check used by validation, which
 /// runs *before* the transform.)
 fn will_be_literal(expr: &Expression) -> bool {
+    if is_time_to_timestamp_cast(expr) {
+        return true;
+    }
     match expr {
         Expression::Literal(_) => true,
         Expression::CurrentDate
@@ -496,6 +670,9 @@ fn will_be_literal(expr: &Expression) -> bool {
 /// function-call forms the parser stores for DEFAULT clauses
 /// (`Expression::Function { name: "CURRENT_TIMESTAMP" }`).
 fn default_expr_is_volatile(expr: &Expression) -> bool {
+    if is_time_to_timestamp_cast(expr) {
+        return true;
+    }
     match expr {
         Expression::CurrentDate
         | Expression::CurrentTime { .. }
@@ -804,6 +981,9 @@ impl ExpressionVisitor for StrictDetector<'_> {
             return VisitResult::Stop;
         }
         let volatile = match expr {
+            e if is_time_to_timestamp_cast(e) => {
+                Some("CAST(TIME AS TIMESTAMP) clock reading (stamps the current date)".to_string())
+            }
             Expression::CurrentDate
             | Expression::CurrentTime { .. }
             | Expression::CurrentTimestamp { .. } => Some("CURRENT_* clock reading".to_string()),
@@ -1088,6 +1268,81 @@ mod tests {
         assert_eq!(frozen.len(), 1);
     }
 
+    /// The MySQL clock aliases dispatch to the same executor
+    /// implementations as `CURRENT_DATE`/`CURRENT_TIME` (PR #5382 review:
+    /// they previously froze to zero sites and diverged replicas).
+    #[test]
+    fn mysql_clock_aliases_freeze() {
+        let frozen = freeze_statement("INSERT INTO t VALUES (curdate(), curtime())").unwrap();
+        assert_eq!(frozen.len(), 2);
+        assert!(matches!(frozen[0], FrozenValue::Date { .. }), "curdate() -> {:?}", frozen[0]);
+        assert!(matches!(frozen[1], FrozenValue::Time { .. }), "curtime() -> {:?}", frozen[1]);
+
+        // ... including in per-row contexts (clock semantics).
+        let frozen = freeze_statement("UPDATE t SET d = curdate() WHERE id = 1").unwrap();
+        assert_eq!(frozen.len(), 1);
+    }
+
+    /// PostgreSQL `age(x)` compares against the current date — a clock
+    /// read; the two-argument form is a pure function of its arguments.
+    #[test]
+    fn one_arg_age_freezes_and_two_arg_age_is_deterministic() {
+        let sql = "INSERT INTO t VALUES (age(DATE '2020-01-02'))";
+        let frozen = freeze_statement(sql).unwrap();
+        assert_eq!(frozen.len(), 1);
+        assert!(matches!(&frozen[0], FrozenValue::Varchar(_)), "age(x) -> {:?}", frozen[0]);
+        substitute_statement(parse(sql), &frozen).unwrap();
+
+        let frozen =
+            freeze_statement("INSERT INTO t VALUES (age(DATE '2024-06-11', DATE '2020-01-02'))")
+                .unwrap();
+        assert_eq!(frozen, vec![], "two-argument age() is deterministic");
+
+        // age(col): a per-row clock read whose result depends on the
+        // row — cannot be frozen to one value.
+        let err = freeze_statement("UPDATE t SET x = age(d)").unwrap_err();
+        assert!(matches!(&err, FreezeError::NotReplicable(m) if m.contains("clock")), "{err:?}");
+    }
+
+    /// SQL:1999 `CAST(TIME AS TIMESTAMP)` stamps the *current date*: the
+    /// literal-operand form freezes like other clock reads (including
+    /// the nested `CAST(CURRENT_TIME AS TIMESTAMP)` via post-order
+    /// literalization); inside query-bearing parts it is rejected.
+    #[test]
+    fn time_literal_cast_to_timestamp_freezes() {
+        let sql = "INSERT INTO t VALUES (CAST(TIME '12:34:56' AS TIMESTAMP))";
+        let frozen = freeze_statement(sql).unwrap();
+        assert_eq!(frozen.len(), 1);
+        assert!(
+            matches!(frozen[0], FrozenValue::Timestamp { hour: 12, minute: 34, second: 56, .. }),
+            "the frozen timestamp must carry the literal's time part: {:?}",
+            frozen[0]
+        );
+        substitute_statement(parse(sql), &frozen).unwrap();
+
+        // Deterministic casts to TIMESTAMP are untouched.
+        let frozen =
+            freeze_statement("INSERT INTO t VALUES (CAST('2026-06-11 12:00:00' AS TIMESTAMP))")
+                .unwrap();
+        assert_eq!(frozen, vec![]);
+
+        // Post-order: CURRENT_TIME freezes to a TIME literal first, which
+        // then makes the cast itself a (second) freeze site.
+        let sql = "INSERT INTO t VALUES (CAST(CURRENT_TIME AS TIMESTAMP))";
+        let frozen = freeze_statement(sql).unwrap();
+        assert_eq!(frozen.len(), 2, "inner clock read + the cast's date stamp");
+        assert!(matches!(frozen[0], FrozenValue::Time { .. }), "got {:?}", frozen[0]);
+        assert!(matches!(frozen[1], FrozenValue::Timestamp { .. }), "got {:?}", frozen[1]);
+        substitute_statement(parse(sql), &frozen).unwrap();
+
+        // Inside query-bearing parts the evaluation count is
+        // data-dependent: rejected, like the other clock reads.
+        let err =
+            freeze_statement("INSERT INTO t SELECT CAST(TIME '12:34:56' AS TIMESTAMP) FROM s")
+                .unwrap_err();
+        assert!(matches!(err, FreezeError::NotReplicable(_)), "{err:?}");
+    }
+
     #[test]
     fn per_row_random_is_rejected() {
         for sql in [
@@ -1109,6 +1364,13 @@ mod tests {
             "INSERT INTO t VALUES (last_insert_rowid())",
             "UPDATE t SET x = changes()",
             "INSERT INTO t VALUES (total_changes())",
+            // Identity / server-information functions: deterministic
+            // today only via the session-defaults invariant; rejected so
+            // the freeze pass stays robust if that invariant weakens.
+            "INSERT INTO t VALUES (user())",
+            "INSERT INTO t VALUES (current_user())",
+            "UPDATE t SET x = database()",
+            "INSERT INTO t VALUES (version())",
         ] {
             let err = freeze_statement(sql).unwrap_err();
             assert!(
@@ -1302,5 +1564,54 @@ mod tests {
             panic!("not an update");
         };
         assert_eq!(volatile_default_violation_update(&stmt, &schema), None);
+    }
+
+    // -- TIME-column cast audit ----------------------------------------------
+
+    fn sched_schema_with_time_column() -> vibesql_catalog::TableSchema {
+        let Statement::CreateTable(stmt) =
+            parse("CREATE TABLE sched (id INTEGER PRIMARY KEY, t TIME, s TEXT)")
+        else {
+            panic!("not a create table");
+        };
+        let mut db = vibesql_storage::Database::new();
+        vibesql_executor::CreateTableExecutor::execute(&stmt, &mut db).unwrap();
+        db.get_table("sched").unwrap().schema.clone()
+    }
+
+    #[test]
+    fn time_column_cast_to_timestamp_is_flagged() {
+        let schema = sched_schema_with_time_column();
+        for sql in [
+            "UPDATE sched SET s = CAST(t AS TIMESTAMP) WHERE id = 1",
+            "UPDATE sched SET s = 'x' WHERE CAST(t AS TIMESTAMP) > '2026-01-01 00:00:00'",
+            "UPDATE sched SET s = CAST(sched.t AS TIMESTAMP)",
+            "DELETE FROM sched WHERE CAST(t AS TIMESTAMP) < '2026-01-01 00:00:00'",
+            "INSERT INTO sched VALUES (1, '12:00:00', 'x') \
+             ON CONFLICT (id) DO UPDATE SET s = CAST(excluded.t AS TIMESTAMP)",
+        ] {
+            let violation = time_cast_violation(&parse(sql), &schema);
+            assert!(
+                violation.as_deref().is_some_and(|m| m.contains("TIME column")),
+                "{sql} must be flagged, got: {violation:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_time_casts_and_other_tables_are_not_flagged() {
+        let schema = sched_schema_with_time_column();
+        for sql in [
+            // TEXT column: CAST to TIMESTAMP is a deterministic parse.
+            "UPDATE sched SET s = CAST(s AS TIMESTAMP)",
+            // Casting the TIME column to something other than TIMESTAMP.
+            "UPDATE sched SET s = CAST(t AS TEXT)",
+            // Qualified with a different table: binds elsewhere.
+            "UPDATE sched SET s = CAST(other.t AS TIMESTAMP)",
+            // Subqueries are skipped (their columns bind to other tables).
+            "DELETE FROM sched WHERE id IN (SELECT id FROM x WHERE CAST(t AS TIMESTAMP) > y)",
+        ] {
+            assert_eq!(time_cast_violation(&parse(sql), &schema), None, "{sql}");
+        }
     }
 }

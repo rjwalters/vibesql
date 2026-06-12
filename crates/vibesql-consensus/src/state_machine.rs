@@ -617,20 +617,34 @@ fn execute_write_statement(
         SubstituteError::FrozenSiteMismatch(_) => StatementFailure::Fatal(e.to_string()),
     })?;
 
-    // Non-deterministic column DEFAULTs (`DEFAULT CURRENT_TIMESTAMP`)
-    // would be evaluated by the executor at apply time; reject any
-    // statement that fires one. The schema is replicated state, so this
-    // rejection is identical on every replica.
-    let default_violation = match &statement {
+    // Schema-dependent nondeterminism the positional freeze pass cannot
+    // see: non-deterministic column DEFAULTs (`DEFAULT
+    // CURRENT_TIMESTAMP`) that the statement would fire, and
+    // `CAST(<TIME column> AS TIMESTAMP)` (SQL:1999 stamps the current
+    // date per row). Both would be evaluated by the executor at apply
+    // time; reject any statement containing one. The schema is
+    // replicated state, so these rejections are identical on every
+    // replica.
+    let schema_violation = match &statement {
         Statement::Insert(stmt) => {
-            lookup_table_schema(db, stmt.schema_name.as_deref(), &stmt.table_name)
-                .and_then(|schema| freeze::volatile_default_violation(stmt, schema))
+            lookup_table_schema(db, stmt.schema_name.as_deref(), &stmt.table_name).and_then(
+                |schema| {
+                    freeze::volatile_default_violation(stmt, schema)
+                        .or_else(|| freeze::time_cast_violation(&statement, schema))
+                },
+            )
         }
-        Statement::Update(stmt) => lookup_table_schema(db, None, &stmt.table_name)
-            .and_then(|schema| freeze::volatile_default_violation_update(stmt, schema)),
+        Statement::Update(stmt) => {
+            lookup_table_schema(db, None, &stmt.table_name).and_then(|schema| {
+                freeze::volatile_default_violation_update(stmt, schema)
+                    .or_else(|| freeze::time_cast_violation(&statement, schema))
+            })
+        }
+        Statement::Delete(stmt) => lookup_table_schema(db, None, &stmt.table_name)
+            .and_then(|schema| freeze::time_cast_violation(&statement, schema)),
         _ => None,
     };
-    if let Some(reason) = default_violation {
+    if let Some(reason) = schema_violation {
         return Err(StatementFailure::Rejected(reason));
     }
 
@@ -957,6 +971,76 @@ mod tests {
 
         let outcome = machine
             .apply(3, &TxnEntry::single("INSERT INTO events VALUES (1, '2026-06-11 12:00:00')"))
+            .unwrap();
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+    }
+
+    /// The PR #5382 review probes: unfrozen `curdate()`/`curtime()`/
+    /// 1-arg `age()` entries previously slipped past both the freeze
+    /// pass and the apply-side validation (the volatility list missed
+    /// them) and were applied with the apply-time wall clock. They must
+    /// now be rejected — identically on a second machine.
+    #[test]
+    fn unfrozen_clock_alias_entries_are_rejected_not_applied() {
+        let a = VibesqlStateMachine::new();
+        let b = VibesqlStateMachine::new();
+        let ddl = TxnEntry::single("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+        a.apply(1, &ddl).unwrap();
+        b.apply(1, &ddl).unwrap();
+        for (i, sql) in [
+            "INSERT INTO t VALUES (1, curdate())",
+            "INSERT INTO t VALUES (2, curtime())",
+            "INSERT INTO t VALUES (3, age(DATE '2020-01-02'))",
+            "INSERT INTO t VALUES (4, CAST(TIME '12:34:56' AS TIMESTAMP))",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let entry = TxnEntry::single(*sql);
+            let index = (i + 2) as LogIndex;
+            let outcome = a.apply(index, &entry).unwrap();
+            assert!(
+                matches!(&outcome, ApplyOutcome::Rejected { reason }
+                    if reason.contains("frozen") || reason.contains("non-deterministic")),
+                "{sql} must be rejected as unfrozen, got: {outcome:?}"
+            );
+            assert_eq!(outcome, b.apply(index, &entry).unwrap(), "{sql} must reject identically");
+        }
+        assert!(a.query("SELECT * FROM t").unwrap().is_empty(), "nothing may have applied");
+    }
+
+    /// `CAST(<TIME column> AS TIMESTAMP)` stamps the current date per
+    /// row at apply time (SQL:1999) — invisible to the positional freeze
+    /// pass, so the apply path rejects it against the replicated schema
+    /// (like the DEFAULT audit). Deterministic casts keep working.
+    #[test]
+    fn time_column_casts_to_timestamp_are_rejected() {
+        let machine = VibesqlStateMachine::new();
+        machine
+            .apply(
+                1,
+                &TxnEntry::single("CREATE TABLE sched (id INTEGER PRIMARY KEY, t TIME, s TEXT)"),
+            )
+            .unwrap();
+        machine
+            .apply(2, &TxnEntry::single("INSERT INTO sched VALUES (1, '12:34:56', 'x')"))
+            .unwrap();
+
+        for (index, sql) in [
+            (3, "UPDATE sched SET s = CAST(t AS TIMESTAMP) WHERE id = 1"),
+            (4, "DELETE FROM sched WHERE CAST(t AS TIMESTAMP) < '2026-01-01 00:00:00'"),
+        ] {
+            let outcome = machine.apply(index, &TxnEntry::single(sql)).unwrap();
+            assert!(
+                matches!(&outcome, ApplyOutcome::Rejected { reason }
+                    if reason.contains("TIME column")),
+                "{sql} must be rejected, got: {outcome:?}"
+            );
+        }
+
+        // A deterministic cast of a TEXT column still applies.
+        let outcome = machine
+            .apply(5, &TxnEntry::single("UPDATE sched SET s = CAST(id AS TEXT) WHERE id = 1"))
             .unwrap();
         assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
     }

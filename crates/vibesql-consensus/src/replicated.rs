@@ -318,6 +318,41 @@ mod tests {
             .unwrap();
         assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
 
+        // The clock aliases and arity-dependent clock reads from the PR
+        // #5382 review (curdate/curtime/1-arg age/CAST(TIME AS
+        // TIMESTAMP)) freeze at propose like the rest.
+        let (alias_index, outcome) = db
+            .execute_replicated(
+                "CREATE TABLE clk (id INTEGER PRIMARY KEY, d DATE, t TIME, a TEXT, c TIMESTAMP)",
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 0 });
+        let (alias_index, outcome) = db
+            .execute_replicated(
+                "INSERT INTO clk VALUES (1, curdate(), curtime(), age(DATE '2020-01-02'), \
+                 CAST(TIME '12:34:56' AS TIMESTAMP))",
+            )
+            .await
+            .unwrap_or_else(|e| {
+                panic!("clock aliases must freeze at propose: {e} ({alias_index})")
+            });
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+        let alias_entry = db.backend().read_committed(alias_index).await.unwrap();
+        assert_eq!(
+            alias_entry.frozen[0].len(),
+            4,
+            "curdate, curtime, age, CAST(TIME AS TIMESTAMP) must all freeze"
+        );
+        let rows = db.query("SELECT d, t, a, c FROM clk WHERE id = 1").unwrap();
+        for (got, frozen) in rows[0].iter().zip(&alias_entry.frozen[0]) {
+            assert_eq!(
+                *got,
+                SqlValue::from(frozen.clone()),
+                "applied value must equal the proposer-frozen value"
+            );
+        }
+
         // The logged entry carries the proposer-drawn values, and the
         // applied row equals them (the determinism proof: apply did not
         // re-evaluate the volatile calls).
@@ -335,6 +370,11 @@ mod tests {
             recovered.query("SELECT id, r, b, ts FROM t ORDER BY id").unwrap(),
             db.query("SELECT id, r, b, ts FROM t ORDER BY id").unwrap(),
             "replicas must converge on identical rows despite non-deterministic SQL"
+        );
+        assert_eq!(
+            recovered.query("SELECT id, d, t, a, c FROM clk ORDER BY id").unwrap(),
+            db.query("SELECT id, d, t, a, c FROM clk ORDER BY id").unwrap(),
+            "clock-alias rows must converge (curdate/curtime/age/CAST)"
         );
 
         // ... and replaying the already-applied log again changes nothing

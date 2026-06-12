@@ -14,6 +14,14 @@
 //! Names are matched against [`FunctionIdentifier::canonical`] output
 //! (lowercase for unquoted identifiers).
 //!
+//! **Keep this module in lockstep with the executor's dispatch table**
+//! (`vibesql-executor::evaluator::functions::eval_scalar_function`):
+//! every alias the executor routes to a clock / RNG / session-state
+//! implementation must be classified here, or the replication freeze
+//! pass silently misses it and replicas diverge. The cross-check test
+//! `dispatch_volatility` in the executor's `functions` module pins the
+//! two lists against each other.
+//!
 //! [`FunctionIdentifier::canonical`]: crate::FunctionIdentifier::canonical
 
 /// Functions whose value differs on every call: `random()`,
@@ -23,31 +31,50 @@ pub fn is_random_function(canonical_name: &str) -> bool {
     matches!(canonical_name, "rand" | "random" | "randomblob")
 }
 
-/// Functions that read connection/session state: `changes()`,
-/// `total_changes()`, `last_insert_rowid()`. Deterministic within one
-/// session's view, but the value depends on session history that is not
-/// part of replicated database state.
+/// Functions that read connection/session/server state: `changes()`,
+/// `total_changes()`, `last_insert_rowid()`, plus the identity and
+/// server-information functions (`user()`, `current_user()`,
+/// `database()`, `schema()`, `version()`). Deterministic within one
+/// session's view, but the value depends on session/server state that is
+/// not part of replicated database state, so replication rejects them
+/// rather than relying on every node sharing identical session defaults.
 pub fn is_session_state_function(canonical_name: &str) -> bool {
-    matches!(canonical_name, "changes" | "total_changes" | "last_insert_rowid")
+    matches!(
+        canonical_name,
+        "changes"
+            | "total_changes"
+            | "last_insert_rowid"
+            | "user"
+            | "current_user"
+            | "database"
+            | "schema"
+            | "version"
+    )
 }
 
-/// Zero-argument clock readings: `now()` and the function-call forms of
-/// `current_date`/`current_time`/`current_timestamp`. Always
-/// non-deterministic (wall clock), but stable within a statement under
-/// SQLite semantics.
+/// Zero-argument clock readings: `now()`, the function-call forms of
+/// `current_date`/`current_time`/`current_timestamp`, and the MySQL
+/// aliases `curdate()`/`curtime()`. Always non-deterministic (wall
+/// clock), but stable within a statement under SQLite semantics.
 pub fn is_clock_function(canonical_name: &str) -> bool {
-    matches!(canonical_name, "now" | "current_date" | "current_time" | "current_timestamp")
+    matches!(
+        canonical_name,
+        "now" | "current_date" | "current_time" | "current_timestamp" | "curdate" | "curtime"
+    )
 }
 
-/// SQLite date/time functions that are non-deterministic **only when
-/// invoked with `'now'`** (explicitly, or implicitly by omitting the
-/// time-value argument) or with the timezone-dependent
-/// `'localtime'`/`'utc'` modifiers. With an explicit time value and no
-/// timezone modifier they are pure functions of their arguments.
+/// Date/time functions that are non-deterministic **only for some
+/// argument shapes**: the SQLite family when invoked with `'now'`
+/// (explicitly, or implicitly by omitting the time-value argument) or
+/// with the timezone-dependent `'localtime'`/`'utc'` modifiers, and the
+/// PostgreSQL-style `age()`, whose one-argument form compares against
+/// the current date (the two-argument form is pure). With an explicit
+/// time value and no timezone modifier they are pure functions of their
+/// arguments.
 pub fn is_datetime_family_function(canonical_name: &str) -> bool {
     matches!(
         canonical_name,
-        "date" | "time" | "datetime" | "julianday" | "unixepoch" | "strftime" | "timediff"
+        "date" | "time" | "datetime" | "julianday" | "unixepoch" | "strftime" | "timediff" | "age"
     )
 }
 
@@ -74,10 +101,17 @@ mod tests {
             "changes",
             "total_changes",
             "last_insert_rowid",
+            "user",
+            "current_user",
+            "database",
+            "schema",
+            "version",
             "now",
             "current_date",
             "current_time",
             "current_timestamp",
+            "curdate",
+            "curtime",
             "date",
             "time",
             "datetime",
@@ -85,6 +119,7 @@ mod tests {
             "unixepoch",
             "strftime",
             "timediff",
+            "age",
         ];
         for name in all {
             assert!(is_volatile_function(name), "{name} must be volatile");
