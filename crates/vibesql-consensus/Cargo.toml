@@ -21,11 +21,17 @@ openraft = { version = "0.9.24", features = ["serde", "storage-v2"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
-tokio = { version = "1.0", features = ["sync"] }
+# `rt`/`net`/`io-util` power the TCP transport (Phase A3, PR 2): the
+# per-node listener task and length-prefix framed connections. `time` bounds
+# each outbound RPC by openraft's hard TTL. `sync` predates this (metrics
+# watch channel, oneshots).
+tokio = { version = "1.0", features = ["sync", "rt", "net", "io-util", "time"] }
+# Static `cluster.toml` membership parsing (Phase A3, PR 2). Same version
+# the server crate already uses for its config file.
+toml = "1.1"
 
 [dev-dependencies]
 tempfile = "3.19"
-# `rt` also unlocks `tokio::spawn` for the in-process channel network's
-# per-node server loops (Phase A3, PR 1); `time` provides the bounded waits
-# in the multi-node cluster tests.
+# `macros` for #[tokio::test]; everything else the tests need (rt, net,
+# io-util, time) is already enabled on the main dependency above.
 tokio = { version = "1.0", features = ["rt", "macros", "time"] }

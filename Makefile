@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-bg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-all-bg benchmark-logs benchmark-status benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb benchmark-cli benchmark-cli-prep benchmark-cli-quick fmt fmt-check clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
+.PHONY: all all-bg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status test-cluster fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-all-bg benchmark-logs benchmark-status benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb benchmark-cli benchmark-cli-prep benchmark-cli-quick fmt fmt-check clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
 
 # Default target: show help
 .DEFAULT_GOAL := help
@@ -109,6 +109,7 @@ help:
 	@echo "  make test-tcl-all       - Run all SQLite TCL tests (1174 files)"
 	@echo "  make test-tcl-file FILE=X - Run specific TCL test file"
 	@echo "  make test-tcl-status    - Show TCL test status"
+	@echo "  make test-cluster       - Run 3-node TCP consensus cluster smoke tests"
 	@echo ""
 	@echo "Fuzzing targets:"
 	@echo "  make fuzz               - Run all fuzz targets (5 min each)"
@@ -296,6 +297,14 @@ test-tcl-file:
 # Show TCL test status
 test-tcl-status:
 	./scripts/tcltest status
+
+# Run the multi-node consensus cluster smoke tests (Raft Phase A3, #5197).
+# Boots 3-voter clusters on localhost (ephemeral ports, durable Raft logs)
+# wired by the TCP transport and exercises election, replication, leader
+# kill -> re-election, restart -> catch-up, a 2-1 minority partition, and
+# garbage frames on the wire. Exits nonzero on any failure.
+test-cluster:
+	cargo test --release -p vibesql-consensus --test tcp_cluster -- --nocapture
 
 #
 # Fuzzing Targets

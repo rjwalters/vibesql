@@ -51,6 +51,9 @@ pub enum ConsensusError {
     /// Snapshot serialization or deserialization failed.
     #[error("snapshot encode/decode failed: {0}")]
     SnapshotCodec(String),
+    /// The cluster configuration is invalid or could not be loaded.
+    #[error("cluster configuration error: {0}")]
+    Config(String),
     /// Catch-all for backend-internal failures.
     #[error("consensus backend error: {0}")]
     Backend(String),
