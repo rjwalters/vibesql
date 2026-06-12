@@ -217,28 +217,40 @@ impl TestCluster {
         .await;
     }
 
-    /// Propose on whoever currently leads, re-resolving leadership if a
-    /// spurious election deposed the previous leader mid-call.
+    /// Propose on whoever currently leads, re-resolving leadership —
+    /// preferring a `NotLeader` rejection's leader hint — if a spurious
+    /// election deposed the previous leader mid-call. Returns the accepting
+    /// leader and the entry's index.
     ///
     /// The durable nodes fsync inline on their core task (see
     /// `crate::durable`), so when the whole test suite runs in parallel an
     /// fsync stall can exceed the 200ms election timeout and trigger a
-    /// re-election a cached leader id would not survive. Committed results
-    /// are identical either way — only the door the write goes through
-    /// moves — so tests that don't specifically assert *which* node leads
-    /// propose through this helper. Bounded like every other wait.
-    async fn propose_on_leader(&self, value: &str) -> LogIndex {
+    /// re-election a cached leader id would not survive; release-mode
+    /// timing also compresses the window between the leadership observation
+    /// and the propose (#5385). The typed rejection means the entry was
+    /// **not** committed, so retrying is safe: committed results are
+    /// identical either way — only the door the write goes through moves —
+    /// so every propose that doesn't specifically assert a *rejection* goes
+    /// through this helper. Bounded like every other wait.
+    async fn propose_on_leader(&self, value: &str) -> (u64, LogIndex) {
         let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+        let mut hint: Option<u64> = None;
         loop {
-            let leader = self.wait_for_leader().await;
+            let live = self.live_ids();
+            let leader = match hint.take().filter(|id| live.contains(id)) {
+                Some(hinted) => hinted,
+                None => self.wait_for_leader().await,
+            };
             match self.node(leader).propose(value.to_string()).await {
-                Ok(idx) => return idx,
-                Err(ConsensusError::NotLeader { .. }) => {
+                Ok(idx) => return (leader, idx),
+                Err(ConsensusError::NotLeader { leader_hint }) => {
                     assert!(
                         tokio::time::Instant::now() < deadline,
                         "timed out after {WAIT_TIMEOUT:?} proposing {value:?}: leadership \
                          never settled"
                     );
+                    hint = leader_hint;
+                    tokio::time::sleep(POLL_INTERVAL).await;
                 }
                 Err(other) => panic!("propose of {value:?} failed: {other:?}"),
             }
@@ -281,9 +293,8 @@ fn follower_of(cluster: &TestCluster, leader: u64) -> u64 {
 #[tokio::test]
 async fn boot_elects_leader_and_replicates_to_all() {
     let cluster = TestCluster::new(3).await;
-    let leader = cluster.wait_for_leader().await;
 
-    let idx = cluster.node(leader).propose("write-1".to_string()).await.unwrap();
+    let (_, idx) = cluster.propose_on_leader("write-1").await;
     assert_eq!(idx, 1, "first application entry gets the first dense index");
 
     for id in 1..=3 {
@@ -296,9 +307,18 @@ async fn boot_elects_leader_and_replicates_to_all() {
     }
 
     // With replication settled and heartbeats healthy, leadership is
-    // unique: exactly the elected node reports `Role::Leader`.
-    let leaders: Vec<u64> = (1..=3).filter(|id| cluster.node(*id).role() == Role::Leader).collect();
-    assert_eq!(leaders, vec![leader]);
+    // unique: exactly one node reports `Role::Leader` and everyone
+    // acknowledges it. A bounded wait, not a one-shot snapshot — sampling
+    // roles non-atomically can catch an election in flight (#5385).
+    cluster
+        .wait_until("leadership to settle on a unique acknowledged leader", || {
+            let leaders: Vec<u64> =
+                (1..=3).filter(|id| cluster.node(*id).role() == Role::Leader).collect();
+            let [only] = leaders.as_slice() else { return None };
+            let only = *only;
+            (1..=3).all(|id| cluster.node(id).current_leader() == Some(only)).then_some(())
+        })
+        .await;
 }
 
 /// Kill the leader: the two survivors elect a new leader and writes resume,
@@ -306,9 +326,9 @@ async fn boot_elects_leader_and_replicates_to_all() {
 #[tokio::test]
 async fn killing_the_leader_elects_a_new_one_and_writes_resume() {
     let mut cluster = TestCluster::new(3).await;
-    let leader = cluster.wait_for_leader().await;
 
-    let idx = cluster.node(leader).propose("before-failover".to_string()).await.unwrap();
+    // The accepting leader is by construction the leader at write time.
+    let (leader, idx) = cluster.propose_on_leader("before-failover").await;
     for id in cluster.live_ids() {
         cluster.wait_for_apply(id, idx).await;
     }
@@ -318,7 +338,7 @@ async fn killing_the_leader_elects_a_new_one_and_writes_resume() {
     let new_leader = cluster.wait_for_leader().await;
     assert_ne!(new_leader, leader, "the killed node cannot be the new leader");
 
-    let idx2 = cluster.node(new_leader).propose("after-failover".to_string()).await.unwrap();
+    let (_, idx2) = cluster.propose_on_leader("after-failover").await;
     assert_eq!(idx2, 2, "application indices stay dense across the failover");
 
     for id in cluster.live_ids() {
@@ -334,11 +354,12 @@ async fn killing_the_leader_elects_a_new_one_and_writes_resume() {
 #[tokio::test]
 async fn restored_follower_catches_up_via_log_replication() {
     let mut cluster = TestCluster::new(3).await;
-    let leader = cluster.wait_for_leader().await;
 
+    let mut leader = cluster.wait_for_leader().await;
     for i in 1..=5u64 {
-        let idx = cluster.node(leader).propose(format!("entry-{i}")).await.unwrap();
+        let (l, idx) = cluster.propose_on_leader(&format!("entry-{i}")).await;
         assert_eq!(idx, i);
+        leader = l;
     }
     let follower = follower_of(&cluster, leader);
     cluster.wait_for_apply(follower, 5).await;
@@ -347,7 +368,7 @@ async fn restored_follower_catches_up_via_log_replication() {
 
     // The two survivors are still a majority: writes keep committing.
     for i in 6..=10u64 {
-        let idx = cluster.node(leader).propose(format!("entry-{i}")).await.unwrap();
+        let (_, idx) = cluster.propose_on_leader(&format!("entry-{i}")).await;
         assert_eq!(idx, i);
     }
 
@@ -398,15 +419,16 @@ async fn propose_on_follower_surfaces_not_leader_with_hint() {
 #[tokio::test]
 async fn durable_node_recovers_from_disk_and_rejoins() {
     let mut cluster = TestCluster::new_durable(3).await;
-    let leader = cluster.wait_for_leader().await;
 
     // Proposes go through `propose_on_leader`: with inline fsyncs on every
     // node, parallel-suite disk stalls can trigger spurious re-elections
     // this test does not care about (it asserts durability + catch-up, not
     // leadership stability).
+    let mut leader = cluster.wait_for_leader().await;
     for i in 1..=3u64 {
-        let idx = cluster.propose_on_leader(&format!("entry-{i}")).await;
+        let (l, idx) = cluster.propose_on_leader(&format!("entry-{i}")).await;
         assert_eq!(idx, i);
+        leader = l;
     }
     let follower = follower_of(&cluster, leader);
     cluster.wait_for_apply(follower, 3).await;
@@ -414,7 +436,7 @@ async fn durable_node_recovers_from_disk_and_rejoins() {
     cluster.kill(follower).await;
 
     for i in 4..=5u64 {
-        let idx = cluster.propose_on_leader(&format!("entry-{i}")).await;
+        let (_, idx) = cluster.propose_on_leader(&format!("entry-{i}")).await;
         assert_eq!(idx, i);
     }
 
