@@ -115,11 +115,28 @@
 //!   binary database payload heals followers that fell behind a purge,
 //!   with the Phase A4 durability order (persist before acknowledge).
 //!
+//! Phase B2 (#5200) adds the **read paths** on [`MvccRaftNode`] (see the
+//! `mvcc_raft` module docs' read-path sections for the full contracts):
+//!
+//! - PR 1: `query_linearizable` — openraft's ReadIndex protocol
+//!   (clock-free quorum confirmation), with stale-leader fencing and
+//!   no-self-hint discipline; plain `query` stays local/stale-allowed.
+//! - PR 2: `query_at_least` — clock-free **read-your-writes** via the
+//!   dense application index a propose returns, served on any node once
+//!   it catches up; and `query_bounded_staleness` — follower reads
+//!   bounded by the leader wall-clock stamp piggybacked on every
+//!   proposed entry ([`TxnEntry::leader_time_ms`], serde-compatible both
+//!   ways), refusing whenever the bound cannot be proven. Idle clusters
+//!   either age out of bounded reads (default) or stay fresh via the
+//!   opt-in staleness beacon ([`RaftTuning::staleness_beacon_ms`]).
+//!
 //! Deliberately **not** here yet (later Raft phases): TLS on the
 //! consensus port, production wiring into `vibesql-server` (PostgreSQL
 //! sessions do not yet route writes through [`MvccRaftNode`]; surfacing
-//! `NotLeader` as a SQL error is follow-on work), and membership
-//! changes.
+//! `NotLeader` as a SQL error and mapping the `max_staleness_ms` PG
+//! option onto `query_bounded_staleness` is follow-on work, #5383), the
+//! lease fast path for linearizable reads (needs openraft 0.10's
+//! `ReadPolicy::LeaseRead`), and membership changes.
 //!
 //! Note on retention: the Raft log purge gated above is orthogonal to the
 //! pre-existing data-WAL checkpoint/truncation in `vibesql-storage::wal`

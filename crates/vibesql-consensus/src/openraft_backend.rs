@@ -169,13 +169,38 @@ pub struct RaftTuning {
     /// expansion; values outside `1..=MAX` are a typed
     /// [`ConsensusError::Config`] at construction.
     pub snapshot_chunk_bytes: u64,
+    /// App-level **staleness beacon** for bounded-staleness follower
+    /// reads (Raft Phase B2, #5200, PR 2 — only meaningful on
+    /// [`MvccRaftNode`](crate::MvccRaftNode)): when non-zero, a node
+    /// that believes it leads proposes an empty no-op transaction
+    /// entry — stamped with its wall clock, consuming a dense
+    /// application index like any other entry — whenever no stamped
+    /// entry has been applied within this many milliseconds. An *idle*
+    /// cluster then keeps refreshing follower staleness, so
+    /// `query_bounded_staleness` stays serviceable without writes; a
+    /// healthy idle follower sees a fresh stamp at least every
+    /// ~2×`staleness_beacon_ms`, so set this to at most half the
+    /// smallest staleness bound you intend to serve (minus a margin for
+    /// replication latency and clock skew).
+    ///
+    /// `0` (the default) disables the beacon: an idle cluster's last
+    /// stamp simply ages, and bounded-staleness reads refuse once it
+    /// exceeds the caller's bound (falling back to
+    /// linearizable/leader reads) until the next write arrives.
+    pub staleness_beacon_ms: u64,
 }
 
 impl Default for RaftTuning {
     /// openraft's own defaults: snapshot every 5000 entries, keep a
-    /// 1000-entry catch-up tail, 3 MiB transfer chunks.
+    /// 1000-entry catch-up tail, 3 MiB transfer chunks. The staleness
+    /// beacon is off.
     fn default() -> Self {
-        Self { snapshot_after_entries: 5000, keep_in_log: 1000, snapshot_chunk_bytes: 3 << 20 }
+        Self {
+            snapshot_after_entries: 5000,
+            keep_in_log: 1000,
+            snapshot_chunk_bytes: 3 << 20,
+            staleness_beacon_ms: 0,
+        }
     }
 }
 

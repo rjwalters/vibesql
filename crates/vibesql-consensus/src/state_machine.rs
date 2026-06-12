@@ -150,6 +150,20 @@ pub struct TxnEntry {
     /// statement found to contain one.
     #[serde(default)]
     pub frozen: Vec<Vec<FrozenValue>>,
+    /// The proposing leader's wall clock at propose time, in
+    /// milliseconds since the UNIX epoch (Raft Phase B2, #5200, PR 2).
+    ///
+    /// **Bookkeeping only** — never consulted by the apply path's SQL
+    /// execution (it is not an HLC and assigns no visibility): replicas
+    /// record the stamp of the last applied stamped entry so a
+    /// bounded-staleness read can prove "my applied state is no staler
+    /// than `now - stamp`". Serde-compatible in both directions:
+    /// entries encoded before #5200 decode as `None` (unknown
+    /// staleness — bounded reads refuse until a stamped entry arrives),
+    /// and `None` skips serialization so unstamped entries keep the
+    /// pre-#5200 byte encoding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leader_time_ms: Option<u64>,
 }
 
 impl TxnEntry {
@@ -159,13 +173,17 @@ impl TxnEntry {
     /// (as [`ReplicatedDb`](crate::ReplicatedDb) does) to replicate
     /// non-deterministic SQL.
     pub fn single(sql: impl Into<String>) -> Self {
-        Self { statements: vec![sql.into()], frozen: Vec::new() }
+        Self { statements: vec![sql.into()], frozen: Vec::new(), leader_time_ms: None }
     }
 
     /// Entry for a multi-statement transaction (no frozen values — see
     /// [`single`](Self::single)).
     pub fn batch<S: Into<String>>(statements: impl IntoIterator<Item = S>) -> Self {
-        Self { statements: statements.into_iter().map(Into::into).collect(), frozen: Vec::new() }
+        Self {
+            statements: statements.into_iter().map(Into::into).collect(),
+            frozen: Vec::new(),
+            leader_time_ms: None,
+        }
     }
 
     /// Entry whose non-deterministic call sites were frozen at propose
@@ -173,7 +191,14 @@ impl TxnEntry {
     /// `statements[i]`.
     pub fn frozen_batch(statements: Vec<String>, frozen: Vec<Vec<FrozenValue>>) -> Self {
         debug_assert_eq!(statements.len(), frozen.len());
-        Self { statements, frozen }
+        Self { statements, frozen, leader_time_ms: None }
+    }
+
+    /// Stamp this entry with the proposing leader's wall clock (ms since
+    /// the UNIX epoch) — see [`leader_time_ms`](Self::leader_time_ms).
+    pub fn stamp_leader_time(mut self, ms: u64) -> Self {
+        self.leader_time_ms = Some(ms);
+        self
     }
 }
 
@@ -770,15 +795,35 @@ mod tests {
         );
         let bytes = serde_json::to_vec(&entry).unwrap();
         assert_eq!(serde_json::from_slice::<TxnEntry>(&bytes).unwrap(), entry);
+
+        let entry = TxnEntry::single("INSERT INTO t VALUES (1)").stamp_leader_time(1_700_000_000);
+        let bytes = serde_json::to_vec(&entry).unwrap();
+        assert_eq!(serde_json::from_slice::<TxnEntry>(&bytes).unwrap(), entry);
     }
 
-    /// Entries encoded before #5377 (no `frozen` field) still decode.
+    /// Entries encoded before #5377 (no `frozen` field) / #5200 (no
+    /// `leader_time_ms` field) still decode: unknown staleness, no
+    /// frozen sites.
     #[test]
     fn entry_decode_without_frozen_field_is_backward_compatible() {
         let json = br#"{"statements":["INSERT INTO t VALUES (1)"]}"#;
         let entry: TxnEntry = serde_json::from_slice(json).unwrap();
         assert_eq!(entry.statements.len(), 1);
         assert!(entry.frozen.is_empty());
+        assert_eq!(entry.leader_time_ms, None);
+    }
+
+    /// An unstamped entry keeps the pre-#5200 byte encoding (the stamp
+    /// field is skipped, not serialized as null), so proposers that do
+    /// not stamp emit entries old appliers decode unchanged.
+    #[test]
+    fn unstamped_entry_keeps_pre_5200_encoding() {
+        let entry = TxnEntry::single("INSERT INTO t VALUES (1)");
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            !json.contains("leader_time_ms"),
+            "unstamped entries must not mention the stamp field, got: {json}"
+        );
     }
 
     #[test]
@@ -834,10 +879,7 @@ mod tests {
         let machine = VibesqlStateMachine::new();
         create_users(&machine, 1);
         let entry = TxnEntry::single("INSERT INTO users VALUES (1, 'alice')");
-        assert_eq!(
-            machine.apply(2, &entry).unwrap(),
-            ApplyOutcome::Applied { rows_affected: 1 }
-        );
+        assert_eq!(machine.apply(2, &entry).unwrap(), ApplyOutcome::Applied { rows_affected: 1 });
 
         // Re-applying the same index must not duplicate effects — this is
         // what makes snapshot+log-replay overlap safe.
@@ -1138,8 +1180,7 @@ mod tests {
         #[cfg(feature = "mvcc_enabled")]
         restored.with_db(|db| {
             let table = db.get_table("users").unwrap();
-            let carol =
-                table.scan().iter().find(|r| r.values[0] == SqlValue::Integer(3)).unwrap();
+            let carol = table.scan().iter().find(|r| r.values[0] == SqlValue::Integer(3)).unwrap();
             assert_eq!(carol.xmin, 4, "post-install applies keep commit_ts = log index");
         });
     }
