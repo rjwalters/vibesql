@@ -26,16 +26,25 @@
 //! (the `conformance` test module), so consumers written against the trait
 //! behave identically on any of them.
 //!
-//! Phase A3 (PR 1 of #5197) adds **in-process multi-node replication for
-//! tests**: a channel-based implementation of openraft's network traits
-//! (the `network` module) plus a cluster harness with kill/restore failure
-//! injection (the `cluster` module). Both are test-only; nothing about them
-//! is public API.
+//! Phase A3 (#5197) adds **multi-node replication**:
 //!
-//! Deliberately **not** here yet (later Raft phases): a real TCP transport
-//! and process-level clusters (Phase A3, PR 2), snapshot transfer and
+//! - PR 1: a channel-based implementation of openraft's network traits (the
+//!   `network` module) plus an in-process cluster harness with kill/restore
+//!   failure injection (the `cluster` module). Both are test-only.
+//! - PR 2: the **TCP transport** (the `tcp` module — length-prefixed frames
+//!   on a dedicated consensus port, default [`DEFAULT_CONSENSUS_PORT`]),
+//!   static membership via [`ClusterConfig`] (`cluster.toml`), and the
+//!   cluster-level constructors
+//!   [`OpenraftBackend::join_tcp_cluster`] /
+//!   [`OpenraftBackend::join_tcp_cluster_with_data_dir`]. The
+//!   `tcp_cluster` integration test (run by `make test-cluster`) exercises
+//!   election, failover, restart catch-up, minority partitions, and
+//!   torn/garbage frames over real sockets.
+//!
+//! Deliberately **not** here yet (later Raft phases): snapshot transfer and
 //! truncation *policy* (Phase A4; the storage-level truncate/purge hooks
-//! exist), applying entries to VibeSQL storage (Phase B1), and membership
+//! exist), applying entries to VibeSQL storage (Phase B1), TLS on the
+//! consensus port, production wiring into `vibesql-server`, and membership
 //! changes.
 //!
 //! [ADR-0004]: https://github.com/rjwalters/vibesql/blob/main/docs/decisions/0004-consensus-library.md
@@ -43,6 +52,7 @@
 mod backend;
 #[cfg(test)]
 mod cluster;
+mod cluster_config;
 #[cfg(test)]
 mod conformance;
 mod durable;
@@ -50,7 +60,9 @@ mod durable;
 mod network;
 mod openraft_backend;
 mod single_node;
+mod tcp;
 
 pub use backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Role, Snapshot};
+pub use cluster_config::{ClusterConfig, DEFAULT_CONSENSUS_PORT};
 pub use openraft_backend::OpenraftBackend;
 pub use single_node::SingleNodeBackend;

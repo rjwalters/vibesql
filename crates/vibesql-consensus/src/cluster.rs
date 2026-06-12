@@ -20,8 +20,13 @@
 //!
 //! Deliberately out of scope here (matching the issue): snapshot-based
 //! catch-up (Phase A4, #5198 — these tests stay far below any log-purge
-//! threshold so catch-up always happens via plain AppendEntries backfill),
-//! TCP transport and process-level clusters (PR 2), and dynamic membership.
+//! threshold so catch-up always happens via plain AppendEntries backfill)
+//! and dynamic membership. **Network partitions** are also not testable
+//! with this harness: the shared router only gates a node's *inbound*
+//! queue, so a live "partitioned" node's outbound RPCs would still reach
+//! peers — true partition needs per-edge severing, which the TCP cluster
+//! tests provide (`tests/tcp_cluster.rs`, via per-edge proxies; Phase A3,
+//! PR 2). The TCP transport itself lives in `crate::tcp`.
 
 use std::collections::BTreeMap;
 use std::time::Duration;

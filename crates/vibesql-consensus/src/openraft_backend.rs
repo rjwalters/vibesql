@@ -9,10 +9,14 @@
 //!
 //! Raft Phase A3 (PR 1 of #5197) adds `join_channel_cluster` (test-only):
 //! the same backend booted as one voter of an in-process multi-node cluster
-//! whose RPCs travel over the channel transport in `crate::network`. The
-//! TCP transport is PR 2. The single-node constructors keep the no-op
-//! network factory, which is never exercised because a single-voter cluster
-//! sends no RPCs.
+//! whose RPCs travel over the channel transport in `crate::network`. PR 2
+//! adds the production-shaped equivalents over real sockets —
+//! [`join_tcp_cluster`](OpenraftBackend::join_tcp_cluster) /
+//! [`join_tcp_cluster_with_data_dir`](OpenraftBackend::join_tcp_cluster_with_data_dir)
+//! — wiring the TCP transport in `crate::tcp` to a static
+//! [`ClusterConfig`]. The single-node constructors keep the no-op network
+//! factory, which is never exercised because a single-voter cluster sends
+//! no RPCs.
 //!
 //! ## Log index mapping
 //!
@@ -51,6 +55,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Role, Snapshot};
+use crate::cluster_config::ClusterConfig;
 use crate::durable::DurableLogStore;
 
 openraft::declare_raft_types!(
@@ -428,9 +433,25 @@ pub struct OpenraftBackend<E> {
     raft: Raft<TypeConfig>,
     state_machine: InMemoryStateMachine,
     metrics: tokio::sync::watch::Receiver<openraft::RaftMetrics<u64, BasicNode>>,
+    /// Accept-loop task of the TCP transport (`None` for the single-node
+    /// and channel-network configurations). Aborted on [`shutdown`] and on
+    /// drop; the loop owns its accepted connections through a `JoinSet`, so
+    /// aborting it also severs every inbound socket — a dropped backend
+    /// looks like a crashed process to its peers.
+    ///
+    /// [`shutdown`]: Self::shutdown
+    listener_task: Option<tokio::task::JoinHandle<()>>,
     /// `fn() -> E` keeps the backend `Send + Sync` independent of `E` while
     /// still tying the entry type to the instance.
     _entry: PhantomData<fn() -> E>,
+}
+
+impl<E> Drop for OpenraftBackend<E> {
+    fn drop(&mut self) {
+        if let Some(task) = &self.listener_task {
+            task.abort();
+        }
+    }
 }
 
 impl<E> Debug for OpenraftBackend<E> {
@@ -475,9 +496,25 @@ impl<E> OpenraftBackend<E> {
         self.state_machine.lock().entries.len() as LogIndex
     }
 
-    /// Gracefully shut down the underlying Raft core tasks.
+    /// Gracefully shut down the underlying Raft core tasks (and, for a
+    /// TCP-clustered node, its listener and every inbound connection).
     pub async fn shutdown(&self) -> Result<()> {
+        // Abort the listener first so no new inbound RPC is dispatched into
+        // a core that is going down; peers see dead sockets and retry.
+        if let Some(task) = &self.listener_task {
+            task.abort();
+        }
         self.raft.shutdown().await.map_err(|e| ConsensusError::Backend(e.to_string()))
+    }
+
+    /// The node this backend currently believes leads the cluster, per its
+    /// metrics (`None` until it has heard from — or become — a leader).
+    ///
+    /// Callers that get [`ConsensusError::NotLeader`] without a hint can
+    /// poll this to discover where to retry; B2 (#5200) builds leader-aware
+    /// routing on it.
+    pub fn current_leader(&self) -> Option<u64> {
+        self.metrics.borrow().current_leader
     }
 
     fn current_role(&self) -> Role {
@@ -559,7 +596,106 @@ impl<E> OpenraftBackend<E> {
             .map_err(|e| ConsensusError::Backend(format!("failed to start raft core: {e}")))?;
 
         let metrics = raft.metrics();
-        Ok(Self { raft, state_machine, metrics, _entry: PhantomData })
+        Ok(Self { raft, state_machine, metrics, listener_task: None, _entry: PhantomData })
+    }
+
+    /// With [`Bootstrap::Initialize`], write the static membership into the
+    /// fresh log ([`Raft::initialize`]); with [`Bootstrap::Recover`] do
+    /// nothing (the membership entry and vote are already in the recovered
+    /// log, and re-running `initialize` would be rejected).
+    ///
+    /// openraft documents that multiple nodes initializing with the *same*
+    /// membership is safe; a node that already voted for (or received the
+    /// membership entry from) a faster peer rejects its own initialize with
+    /// `NotAllowed`. Both paths converge on the same membership, so that
+    /// rejection is tolerated.
+    async fn establish_membership(
+        &self,
+        members: BTreeMap<u64, BasicNode>,
+        bootstrap: Bootstrap,
+    ) -> Result<()> {
+        if !matches!(bootstrap, Bootstrap::Initialize) {
+            return Ok(());
+        }
+        match self.raft.initialize(members).await {
+            Ok(()) | Err(RaftError::APIError(openraft::error::InitializeError::NotAllowed(_))) => {
+                Ok(())
+            }
+            Err(e) => Err(ConsensusError::Backend(format!("failed to initialize cluster: {e}"))),
+        }
+    }
+
+    /// Boot one voter of a **TCP-connected cluster** with an in-memory Raft
+    /// log (Raft Phase A3, PR 2 of #5197). Prefer
+    /// [`join_tcp_cluster_with_data_dir`](Self::join_tcp_cluster_with_data_dir)
+    /// anywhere a restart must not forget the log or vote.
+    ///
+    /// Binds this node's listener at its own `config` address (consensus
+    /// port convention: [`crate::DEFAULT_CONSENSUS_PORT`]) and dials peers
+    /// at theirs. Like `join_channel_cluster`, this does **not** wait for an
+    /// election: which node wins is a cluster-level outcome the caller
+    /// awaits (e.g. by polling [`role`](ConsensusBackend::role) /
+    /// [`current_leader`](Self::current_leader) with a bounded timeout).
+    ///
+    /// Must be called from within a tokio runtime.
+    pub async fn join_tcp_cluster(node_id: u64, config: &ClusterConfig) -> Result<Self> {
+        Self::join_tcp(node_id, config, InMemoryLogStore::default(), Bootstrap::Initialize).await
+    }
+
+    /// Like [`join_tcp_cluster`](Self::join_tcp_cluster), but the node's
+    /// Raft log and vote are persisted under `dir` (created if absent) and
+    /// recovered on restart — a restarted node rebinds its address, rejoins
+    /// the cluster with its pre-crash log and vote, and catches up via log
+    /// replication.
+    pub async fn join_tcp_cluster_with_data_dir(
+        node_id: u64,
+        config: &ClusterConfig,
+        dir: impl AsRef<Path>,
+    ) -> Result<Self> {
+        let dir = dir.as_ref();
+        let log_store = DurableLogStore::open(dir).map_err(|e| {
+            ConsensusError::Backend(format!(
+                "failed to open durable raft log in {}: {e}",
+                dir.display()
+            ))
+        })?;
+        let (has_state, _) = log_store.recovery_summary();
+        // Cluster members do not wait for local replay (`last_log_index:
+        // None`): convergence is a cluster-level outcome the caller awaits.
+        let bootstrap = if has_state {
+            Bootstrap::Recover { last_log_index: None }
+        } else {
+            Bootstrap::Initialize
+        };
+        Self::join_tcp(node_id, config, log_store, bootstrap).await
+    }
+
+    async fn join_tcp<LS>(
+        node_id: u64,
+        config: &ClusterConfig,
+        log_store: LS,
+        bootstrap: Bootstrap,
+    ) -> Result<Self>
+    where
+        LS: RaftLogStorage<TypeConfig>,
+    {
+        let listen_addr = config.addr(node_id).ok_or_else(|| {
+            ConsensusError::Config(format!("node {node_id} is not in the cluster config"))
+        })?;
+        // Bind before booting the core so a peer that initialized first can
+        // reach this node as soon as its Raft exists.
+        let listener = crate::tcp::bind_listener(listen_addr).await.map_err(|e| {
+            ConsensusError::Backend(format!(
+                "failed to bind consensus listener on {listen_addr}: {e}"
+            ))
+        })?;
+
+        let network = crate::tcp::TcpNetworkFactory::new(config);
+        let mut backend = Self::boot(node_id, network, log_store, Vec::new()).await?;
+        backend.listener_task = Some(crate::tcp::spawn_listener(backend.raft.clone(), listener));
+
+        backend.establish_membership(config.membership(), bootstrap).await?;
+        Ok(backend)
     }
 
     async fn start<LS>(log_store: LS, entries: Vec<Vec<u8>>, bootstrap: Bootstrap) -> Result<Self>
@@ -643,29 +779,8 @@ impl<E> OpenraftBackend<E> {
         // initialized first can already send this node vote/append RPCs.
         router.register(node_id, backend.raft.clone());
 
-        if matches!(bootstrap, Bootstrap::Initialize) {
-            match backend.raft.initialize(members.clone()).await {
-                Ok(()) => {}
-                // openraft documents that multiple nodes initializing with
-                // the *same* membership is safe; a node that already voted
-                // for (or received the membership entry from) a faster peer
-                // rejects its own initialize with `NotAllowed`. Both paths
-                // converge on the same membership, so tolerate it.
-                Err(RaftError::APIError(openraft::error::InitializeError::NotAllowed(_))) => {}
-                Err(e) => {
-                    return Err(ConsensusError::Backend(format!(
-                        "failed to initialize cluster: {e}"
-                    )))
-                }
-            }
-        }
-
+        backend.establish_membership(members.clone(), bootstrap).await?;
         Ok(backend)
-    }
-
-    /// The node this backend currently believes is leader, per its metrics.
-    pub(crate) fn current_leader(&self) -> Option<u64> {
-        self.metrics.borrow().current_leader
     }
 }
 
