@@ -91,7 +91,7 @@ repository = "https://github.com/rjwalters/vibesql"
 
 [workspace.dependencies]
 # Will add dependencies as needed for each phase
-pyo3 = { version = "0.28", features = ["extension-module", "abi3-py39"] }
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py39"] }
 
 # Centralized so dependabot's grouped cargo updates touch a single declaration
 # — historically the root Cargo.toml drifted from the crates whenever dependabot
