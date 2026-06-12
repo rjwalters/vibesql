@@ -56,3 +56,8 @@ tempfile = "3.19"
 # `macros` for #[tokio::test]; everything else the tests need (rt, net,
 # io-util, time) is already enabled on the main dependency above.
 tokio = { version = "1.0", features = ["rt", "macros", "time"] }
+# Row-value assertions in the integration tests (tests/leader_reads.rs):
+# `MvccRaftNode::query*` returns `Vec<Vec<SqlValue>>`, and integration
+# test binaries only see dev-dependencies. Same crate the library itself
+# depends on above.
+vibesql-types = { version = "0.1.4", path = "../vibesql-types" }

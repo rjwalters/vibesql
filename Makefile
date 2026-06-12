@@ -302,9 +302,10 @@ test-tcl-status:
 # Boots 3-voter clusters on localhost (ephemeral ports, durable Raft logs)
 # wired by the TCP transport and exercises election, replication, leader
 # kill -> re-election, restart -> catch-up, a 2-1 minority partition, and
-# garbage frames on the wire. Exits nonzero on any failure.
+# garbage frames on the wire — plus the Raft Phase B2 (#5200) linearizable
+# leader-read / stale-leader fencing scenarios. Exits nonzero on any failure.
 test-cluster:
-	cargo test --release -p vibesql-consensus --test tcp_cluster -- --nocapture
+	cargo test --release -p vibesql-consensus --test tcp_cluster --test leader_reads -- --nocapture
 
 #
 # Fuzzing Targets

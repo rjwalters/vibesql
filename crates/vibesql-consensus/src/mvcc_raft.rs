@@ -69,13 +69,64 @@
 //! same crash-safety order as the echo machine, including the deferred
 //! post-install log purge (`DurableLogStore::purge_compacted`).
 //!
+//! # Read paths (Raft Phase B2, #5200, PR 1 of 2)
+//!
+//! Two read modes, one guarantee each:
+//!
+//! - [`MvccRaftNode::query`] — **local, stale-allowed**: runs against
+//!   whatever this node has applied, with no leadership check or network
+//!   round. Available on every node — including a leader partitioned
+//!   into a minority — and may therefore trail the cluster's committed
+//!   state arbitrarily.
+//! - [`MvccRaftNode::query_linearizable`] — **linearizable**: confirms
+//!   this node's leadership through openraft's ReadIndex protocol
+//!   ([`Raft::ensure_linearizable`]: one empty-AppendEntries heartbeat
+//!   round acknowledged by a quorum, then a wait until the local state
+//!   machine reaches the confirmed read index) before running the same
+//!   local query. A node that knows it is not the leader fails with
+//!   [`ConsensusError::NotLeader`] and a leader hint; a node that still
+//!   believes it leads but cannot confirm a quorum (partitioned into a
+//!   minority, deposed but not yet aware) fails with
+//!   [`ConsensusError::NotLeader`] carrying **no** hint — its own view
+//!   is exactly what could not be confirmed, so hinting at itself would
+//!   route callers straight back to a possibly-stale node.
+//!
+//! ## Clock skew: what it can and cannot affect
+//!
+//! The ReadIndex path above is **clock-free**: its correctness rests
+//! solely on a quorum acknowledging the leader's term, never on
+//! wall-clock or monotonic time, so no amount of clock skew or NTP
+//! stepping can make `query_linearizable` return stale data. Clocks
+//! influence only *liveness* (heartbeat and election timeouts run on
+//! each node's local clock).
+//!
+//! The **lease fast path** — serving linearizable reads inside a
+//! quorum-acked time window without a per-read heartbeat round — is
+//! deliberately **not** implemented in this PR. openraft 0.9.24 keeps a
+//! leader lease internally, but only to suppress elections (its
+//! `docs::protocol::leader_lease`); it exposes no lease-based read
+//! policy — `ensure_linearizable` always runs the quorum round
+//! (`ReadPolicy::LeaseRead` arrives with openraft 0.10's
+//! `Raft::ensure_linearizable(read_policy)`). Hand-rolling lease timing
+//! outside the engine would re-introduce the classic lease failure
+//! mode — a deposed leader serving reads past lease expiry under clock
+//! *rate* drift — so the fast path is deferred to an openraft upgrade
+//! (or a follow-on) rather than approximated here. When it lands, the
+//! standard requirements apply: lease duration < election timeout minus
+//! a safety margin, monotonic clock only, warn on NTP step. Follower
+//! reads with bounded staleness (leader wall-clock piggyback, sensitive
+//! to leader↔follower skew within a documented bound, plus a clock-free
+//! index-based read-your-writes session token) are PR 2 of #5200.
+//!
 //! Out of scope here (deliberately): server/CLI wiring of replicated
-//! writes (PostgreSQL-protocol sessions still execute against the local
-//! engine; surfacing `NotLeader` as a SQL error with redirect info is
-//! follow-on work) and leases/follower reads (B2, #5200).
+//! writes and reads (PostgreSQL-protocol sessions still execute against
+//! the local engine; surfacing `NotLeader` as a SQL error with redirect
+//! info is follow-on work, #5383) and follower reads / staleness bounds
+//! (PR 2 of #5200).
 //!
 //! [`RaftStateMachine`]: openraft::storage::RaftStateMachine
 //! [`StorageError`]: openraft::StorageError
+//! [`ConsensusError::NotLeader`]: crate::backend::ConsensusError::NotLeader
 
 #[cfg(test)]
 use std::collections::BTreeMap;
@@ -85,7 +136,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use openraft::error::{ClientWriteError, RaftError};
+use openraft::error::{CheckIsLeaderError, ClientWriteError, RaftError};
 use openraft::storage::{RaftLogStorage, RaftStateMachine};
 #[cfg(test)]
 use openraft::ServerState;
@@ -482,8 +533,10 @@ impl RaftStateMachine<TypeConfig> for MvccStateMachine {
 /// accepted only on the leader — anywhere else they fail fast with
 /// [`ConsensusError::NotLeader`] and a leader hint — and resolve only
 /// after the entry is committed and applied locally, so a session can
-/// read its own write. Reads ([`query`](Self::query)) are local
-/// (leader-lease/follower-read semantics are B2, #5200).
+/// read its own write. Reads come in two modes (Raft Phase B2, #5200,
+/// PR 1): [`query`](Self::query) is local and stale-allowed;
+/// [`query_linearizable`](Self::query_linearizable) confirms leadership
+/// with a quorum first (see the module docs' read-path section).
 ///
 /// This is the multi-node successor of the PR 1 harness
 /// (`ReplicatedDb`): same entry type, same freeze-at-propose, same
@@ -721,10 +774,69 @@ impl MvccRaftNode {
         }
     }
 
-    /// Run a read-only SELECT against the locally applied state (reads
-    /// are local, not replicated — see [`VibesqlStateMachine::query`]).
+    /// Run a read-only SELECT against the locally applied state —
+    /// **local, stale-allowed** (see [`VibesqlStateMachine::query`]).
+    ///
+    /// No leadership check, no network round: this is available on every
+    /// node, including a leader partitioned into a minority, and may
+    /// trail the cluster's committed state arbitrarily. For reads that
+    /// must observe every committed write, use
+    /// [`query_linearizable`](Self::query_linearizable).
     pub fn query(&self, sql: &str) -> Result<Vec<Vec<vibesql_types::SqlValue>>> {
         self.sm.machine.query(sql)
+    }
+
+    /// Run a read-only SELECT with **linearizable** semantics (Raft
+    /// Phase B2, #5200, PR 1): openraft's ReadIndex protocol
+    /// ([`Raft::ensure_linearizable`]) first confirms this node's
+    /// leadership with a quorum heartbeat round and waits for the local
+    /// state machine to reach the confirmed read index; only then does
+    /// the query run locally. The whole path is clock-free — see the
+    /// module docs' read-path section, including why the lease fast path
+    /// is deferred. Costs one heartbeat round-trip per read (bounded by
+    /// the heartbeat-interval RPC TTL), which is still far cheaper than
+    /// the full log-append round a replicated write pays.
+    ///
+    /// Fails with [`ConsensusError::NotLeader`]:
+    /// - carrying a leader hint when this node knows it is not the
+    ///   leader (route the read there);
+    /// - carrying **no** hint when this node still believes it leads but
+    ///   could not confirm a quorum (e.g. partitioned into a minority) —
+    ///   its own view is exactly what could not be confirmed, so hinting
+    ///   at itself would route callers back to a possibly-stale node.
+    pub async fn query_linearizable(&self, sql: &str) -> Result<Vec<Vec<vibesql_types::SqlValue>>> {
+        self.raft.ensure_linearizable().await.map_err(|e| self.map_read_error(e))?;
+        self.sm.machine.query(sql)
+    }
+
+    /// Map a failed leadership confirmation onto the adapter error,
+    /// mirroring [`map_write_error`](Self::map_write_error).
+    fn map_read_error(
+        &self,
+        e: RaftError<u64, CheckIsLeaderError<u64, BasicNode>>,
+    ) -> ConsensusError {
+        match e {
+            RaftError::APIError(CheckIsLeaderError::ForwardToLeader(forward)) => {
+                ConsensusError::NotLeader { leader_hint: forward.leader_id }
+            }
+            // Still nominally the leader, but a quorum did not answer the
+            // confirmation heartbeat: serving the read could violate
+            // linearizability (a majority may have elected someone else).
+            // Deliberately no hint — this node's own leadership is what
+            // could not be confirmed.
+            RaftError::APIError(CheckIsLeaderError::QuorumNotEnough(_)) => {
+                ConsensusError::NotLeader { leader_hint: None }
+            }
+            other => {
+                // A halted node surfaces its fatal reason instead of the
+                // engine's shutdown noise (same as the write path).
+                if let Some(reason) = self.fatal_reason() {
+                    ConsensusError::FatalApply(reason)
+                } else {
+                    ConsensusError::Backend(other.to_string())
+                }
+            }
+        }
     }
 
     /// This node's current role in the consensus group.
@@ -1517,5 +1629,61 @@ mod tests {
         cluster.restore(follower).await;
         cluster.wait_for_apply(follower, idx).await;
         cluster.assert_converged("SELECT id, v FROM kv ORDER BY id");
+    }
+
+    // -----------------------------------------------------------------
+    // Raft Phase B2, PR 1 (#5200): linearizable leader reads
+    // (the partition/fencing acceptance runs over real sockets in
+    // tests/leader_reads.rs; these cover the read path's plumbing)
+    // -----------------------------------------------------------------
+
+    /// Read-your-writes through the linearizable path on a single voter
+    /// (quorum of one): a just-acknowledged write is visible, and the
+    /// linearizable result matches the local read exactly.
+    #[tokio::test]
+    async fn single_node_linearizable_read_sees_own_write() {
+        let node = MvccRaftNode::single_node().await.unwrap();
+        node.execute_replicated("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)").await.unwrap();
+        node.execute_replicated("INSERT INTO t VALUES (1, 'one')").await.unwrap();
+
+        let rows = node.query_linearizable("SELECT id, v FROM t").await.unwrap();
+        assert_eq!(rows, vec![vec![SqlValue::Integer(1), SqlValue::Varchar("one".into())]]);
+        assert_eq!(rows, node.query("SELECT id, v FROM t").unwrap());
+    }
+
+    /// A follower never serves a linearizable read: it redirects with a
+    /// leader hint, while its plain local read keeps working
+    /// (stale-allowed by contract).
+    #[tokio::test]
+    async fn linearizable_read_on_follower_redirects_to_the_leader() {
+        let cluster = MvccCluster::new(3).await;
+        let (idx, _) = cluster.execute_on_leader("CREATE TABLE t (id INTEGER PRIMARY KEY)").await;
+
+        let leader = cluster.wait_for_leader().await;
+        let follower = follower_of(&cluster, leader);
+        // Wait until the follower has heard from the leader, so the hint
+        // is deterministic rather than `None`.
+        cluster
+            .wait_until("the follower to learn who leads", || {
+                (cluster.node(follower).current_leader() == Some(leader)).then_some(())
+            })
+            .await;
+
+        let err = cluster.node(follower).query_linearizable("SELECT id FROM t").await.unwrap_err();
+        match err {
+            ConsensusError::NotLeader { leader_hint } => assert_eq!(leader_hint, Some(leader)),
+            other => panic!("expected NotLeader with a hint, got: {other:?}"),
+        }
+
+        // The stale-allowed local read stays available on the follower.
+        cluster.wait_for_apply(follower, idx).await;
+        assert_eq!(
+            cluster.node(follower).query("SELECT id FROM t").unwrap(),
+            Vec::<Vec<SqlValue>>::new()
+        );
+
+        // And the leader serves the linearizable read it just confirmed.
+        let rows = cluster.node(leader).query_linearizable("SELECT id FROM t").await.unwrap();
+        assert!(rows.is_empty(), "no rows inserted yet, got: {rows:?}");
     }
 }
