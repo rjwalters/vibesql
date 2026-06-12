@@ -359,9 +359,10 @@ fn test_outer_order_by_over_flattened_view_keeps_temp_btree() {
 // - SQLite uses `SCAN t3 USING COVERING INDEX i3x` for covering-index-only
 //   bodies; VibeSQL's pre-existing base-scan rendering shows `SCAN t3`
 //   (same for bare bodies — unrelated to view expansion, see #5355 notes).
-// - SQLite shows `USE TEMP B-TREE FOR GROUP BY` / `FOR DISTINCT` lines for
-//   unindexed grouping/dedup; VibeSQL's EQP has no GROUP BY/DISTINCT temp
-//   B-tree rendering anywhere yet (follow-on).
+// - `USE TEMP B-TREE FOR GROUP BY` / `FOR DISTINCT` lines render like
+//   SQLite's since #5367 (suppressed here because the i3x index delivers
+//   x-order for the grouping/dedup keys below — sqlite3 suppresses too;
+//   see explain_temp_btree_annotation_tests.rs for the emitted cases).
 
 // Aggregate + GROUP BY view. sqlite3:
 //   |--CO-ROUTINE av
@@ -457,9 +458,10 @@ fn test_limit_offset_view_renders_coroutine() {
     );
 }
 
-// DISTINCT view. sqlite3 (with the index, dedup rides the covering index;
-// without it, a `USE TEMP B-TREE FOR DISTINCT` line appears — VibeSQL has
-// no DISTINCT temp B-tree rendering yet, follow-on):
+// DISTINCT view. sqlite3 (with the index, dedup rides the covering index
+// and the `USE TEMP B-TREE FOR DISTINCT` line is suppressed — VibeSQL
+// suppresses too since #5367; the unindexed emitted case is covered in
+// explain_temp_btree_annotation_tests.rs):
 //   |--CO-ROUTINE dv
 //   |  `--SEARCH t3 USING COVERING INDEX i3x (x=?)
 //   `--SCAN dv
@@ -478,7 +480,8 @@ fn test_distinct_view_renders_coroutine() {
 }
 
 // Compound (UNION) view: the body's COMPOUND QUERY block nests inside the
-// CO-ROUTINE. sqlite3:
+// CO-ROUTINE, and the dedup branch is labeled `UNION USING TEMP B-TREE`
+// (#5367 — truthful: the runtime dedups via a temp hash structure). sqlite3:
 //   |--CO-ROUTINE cv
 //   |  `--COMPOUND QUERY
 //   |     |--LEFT-MOST SUBQUERY
@@ -486,9 +489,7 @@ fn test_distinct_view_renders_coroutine() {
 //   |     `--UNION USING TEMP B-TREE
 //   |        `--SCAN t3
 //   `--SCAN cv
-// Divergences: no fabricated outer-WHERE probe (see above), and VibeSQL's
-// pre-existing compound rendering labels the dedup branch `UNION` rather
-// than `UNION USING TEMP B-TREE` (follow-on).
+// Divergence: no fabricated outer-WHERE probe (see above).
 #[test]
 fn test_compound_union_view_renders_coroutine() {
     let db = setup_plain_view_db();
@@ -501,7 +502,7 @@ fn test_compound_union_view_renders_coroutine() {
          |  `--COMPOUND QUERY\n\
          |     |--LEFT-MOST SUBQUERY\n\
          |     |  `--SCAN t3\n\
-         |     `--UNION\n\
+         |     `--UNION USING TEMP B-TREE\n\
          |        `--SCAN t3\n\
          `--SCAN cv\n"
     );
@@ -567,8 +568,9 @@ fn test_with_view_renders_coroutine_divergence() {
 }
 
 // A blocked body with its own ORDER BY: the body's temp B-tree line renders
-// INSIDE the CO-ROUTINE block, exactly once. sqlite3 (the GROUP BY temp
-// B-tree line is the documented gap above):
+// INSIDE the CO-ROUTINE block, exactly once. No GROUP BY line: the i3x
+// index delivers GROUP BY x order (sqlite3 suppresses too), and ORDER BY c
+// does not match the group key, so the ORDER BY line renders. sqlite3:
 //   |--CO-ROUTINE aov
 //   |  |--SCAN t3 USING COVERING INDEX i3x
 //   |  `--USE TEMP B-TREE FOR ORDER BY

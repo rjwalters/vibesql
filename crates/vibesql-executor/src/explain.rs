@@ -71,6 +71,22 @@ pub struct PlanNode {
     pub index_predicates: Vec<IndexPredicate>,
     /// Whether this query requires a temp B-tree for ORDER BY
     pub needs_temp_btree_for_order_by: bool,
+    /// Whether this query requires a temp structure for GROUP BY — rendered
+    /// as SQLite's `USE TEMP B-TREE FOR GROUP BY`. VibeSQL's runtime always
+    /// groups via a hash table and then sorts the groups by key
+    /// (select/grouping/hash.rs), so the line truthfully describes the temp
+    /// grouping structure; it is suppressed when an index delivers group
+    /// order, mirroring SQLite's EQP (same permissive EQP-level convention
+    /// as the ORDER BY stabilization-sort suppression in
+    /// `needs_temp_btree_for_order_by_eqp`).
+    pub needs_temp_btree_for_group_by: bool,
+    /// Whether this query requires a temp structure for DISTINCT — rendered
+    /// as SQLite's `USE TEMP B-TREE FOR DISTINCT`. VibeSQL's runtime dedups
+    /// via a hash set preserving input order (select/helpers.rs
+    /// `apply_distinct`); the line truthfully describes the temp dedup
+    /// structure and is suppressed when an index delivers the SELECT-list
+    /// order, mirroring SQLite's EQP.
+    pub needs_temp_btree_for_distinct: bool,
     /// Number of distinct window-function sorting passes (PARTITION BY +
     /// ORDER BY keys) not satisfied by an index. Each contributes one
     /// `USE TEMP B-TREE FOR ORDER BY` entry in EQP output.
@@ -98,6 +114,8 @@ impl PlanNode {
             index_name: None,
             index_predicates: Vec::new(),
             needs_temp_btree_for_order_by: false,
+            needs_temp_btree_for_group_by: false,
+            needs_temp_btree_for_distinct: false,
             window_sort_count: 0,
             set_operation_type: None,
             is_compound_query: false,
@@ -561,8 +579,10 @@ fn append_scan_entries(node: &PlanNode, entries: &mut Vec<EqpEntry>) {
 
 /// Build the `COMPOUND QUERY` entry tree for a compound-query plan root:
 /// a `LEFT-MOST SUBQUERY` child for the first branch, then one child per
-/// set operation (`UNION`, `UNION ALL`, `INTERSECT`, `EXCEPT`, ...), each
-/// containing that branch's scan entries.
+/// set operation (`UNION USING TEMP B-TREE`, `UNION ALL`, ...), each
+/// containing that branch's full EQP entries — including the branch's own
+/// `USE TEMP B-TREE FOR GROUP BY` / `FOR DISTINCT` lines, which sqlite3
+/// renders inside the branch block (verified live).
 fn compound_eqp_entry(node: &PlanNode) -> EqpEntry {
     let mut children = Vec::new();
     for (i, branch) in node.children.iter().enumerate() {
@@ -571,11 +591,7 @@ fn compound_eqp_entry(node: &PlanNode) -> EqpEntry {
         } else {
             branch.set_operation_type.clone().unwrap_or_else(|| "UNION ALL".to_string())
         };
-        let scans = collect_scan_nodes(branch)
-            .into_iter()
-            .map(|scan| EqpEntry::leaf(format_sqlite_eqp_node(scan)))
-            .collect();
-        children.push(EqpEntry { text: label, children: scans });
+        children.push(EqpEntry { text: label, children: collect_eqp_entries(branch) });
     }
     EqpEntry { text: "COMPOUND QUERY".to_string(), children }
 }
@@ -597,11 +613,22 @@ fn subtree_needs_order_by_temp_btree(node: &PlanNode) -> bool {
 }
 
 /// Collect all EQP entries from the plan tree, including TEMP B-TREE entries
+///
+/// Line order matches sqlite3 3.51.0: scans, then `... FOR GROUP BY`, then
+/// window sorting passes, then `... FOR DISTINCT`, then `... FOR ORDER BY`
+/// (GROUP BY-before-DISTINCT and DISTINCT/GROUP BY-before-ORDER BY verified
+/// live; windows restructure SQLite's plan entirely, so their relative slot
+/// follows the grouping-before-dedup pipeline order).
 fn collect_eqp_entries(node: &PlanNode) -> Vec<EqpEntry> {
     let mut entries = Vec::new();
 
     // Collect scan entries first (co-routine blocks nest their inner plan)
     append_scan_entries(node, &mut entries);
+
+    // Add TEMP B-TREE entry if needed for GROUP BY
+    if node.needs_temp_btree_for_group_by {
+        entries.push(EqpEntry::leaf("USE TEMP B-TREE FOR GROUP BY".to_string()));
+    }
 
     // Add one TEMP B-TREE entry per distinct window sort key not satisfied
     // by an index. Window sorting passes run before the statement-level
@@ -609,6 +636,11 @@ fn collect_eqp_entries(node: &PlanNode) -> Vec<EqpEntry> {
     // separate passes.
     for _ in 0..node.window_sort_count {
         entries.push(EqpEntry::leaf("USE TEMP B-TREE FOR ORDER BY".to_string()));
+    }
+
+    // Add TEMP B-TREE entry if needed for DISTINCT
+    if node.needs_temp_btree_for_distinct {
+        entries.push(EqpEntry::leaf("USE TEMP B-TREE FOR DISTINCT".to_string()));
     }
 
     // Add TEMP B-TREE entry if needed for ORDER BY
@@ -849,6 +881,68 @@ impl ExplainExecutor {
             root.add_child(constant_node);
         }
 
+        // Temp-structure annotations for GROUP BY and DISTINCT (#5367).
+        //
+        // SQLite emits `USE TEMP B-TREE FOR GROUP BY` / `FOR DISTINCT` when
+        // grouping/dedup is not satisfied by the scan's delivery order, and
+        // suppresses the line when an index delivers it (verified against
+        // sqlite3 3.51.0). VibeSQL's runtime always hash-groups then sorts
+        // groups by key, and always hash-dedups DISTINCT — the emitted lines
+        // truthfully describe those temp structures; the index suppression
+        // mirrors the established permissive EQP-level convention (see
+        // `needs_temp_btree_for_order_by_eqp`).
+        //
+        // The simple GROUP BY key (ordinals and output aliases resolved like
+        // SQLite) is also reused below to suppress the ORDER BY line when the
+        // statement-level ORDER BY matches the grouping output order.
+        let group_key: Option<Vec<&Expression>> =
+            stmt.group_by.as_ref().map(|g| g.as_simple()).and_then(|simple| {
+                simple.map(|exprs| {
+                    exprs
+                        .iter()
+                        .map(|e| Self::resolve_output_expr(e, &stmt.select_list))
+                        .collect()
+                })
+            });
+        if stmt.group_by.is_some() {
+            root.needs_temp_btree_for_group_by = match &group_key {
+                // ROLLUP/CUBE/GROUPING SETS always build temp structures.
+                None => true,
+                Some(key) => !Self::group_key_satisfied_by_index(
+                    stmt.from.as_ref(),
+                    stmt.where_clause.as_ref(),
+                    key,
+                    database,
+                ),
+            };
+        }
+
+        // The DISTINCT key is the SELECT list. SQLite suppresses the line
+        // when an index delivers the SELECT-list order — but never when a
+        // GROUP BY intervenes (`SELECT DISTINCT a FROM t GROUP BY a` with an
+        // index on `a` still shows the DISTINCT line; verified live).
+        let distinct_key: Option<Vec<&Expression>> = if stmt.distinct {
+            Self::distinct_key_exprs(&stmt.select_list)
+        } else {
+            None
+        };
+        if stmt.distinct {
+            root.needs_temp_btree_for_distinct = stmt.group_by.is_some()
+                || match &distinct_key {
+                    // Wildcard SELECT lists never suppress.
+                    None => true,
+                    Some(key) => {
+                        let items = Self::exprs_as_asc_order_items(key);
+                        Self::needs_temp_btree_for_order_by(
+                            stmt.from.as_ref(),
+                            stmt.where_clause.as_ref(),
+                            &items,
+                            database,
+                        )
+                    }
+                };
+        }
+
         // Check if we need a temp B-tree for ORDER BY
         // This happens when ORDER BY cannot be satisfied by an index. The WHERE
         // clause is passed through so the planner can pin leading index columns
@@ -863,6 +957,16 @@ impl ExplainExecutor {
         // B-tree (verified against sqlite3 3.51.0). An empty key (`OVER ()`)
         // never suppresses; extensions, direction/COLLATE mismatches, and
         // matches against later windows do not suppress.
+        //
+        // With GROUP BY, the grouping pass replaces the scan as the order
+        // source: SQLite suppresses the ORDER BY line exactly when the ORDER
+        // BY terms equal the GROUP BY terms — same expressions, same
+        // sequence, same length, directions ignored (the group structure is
+        // traversed in either direction); a bare prefix does NOT suppress
+        // (all verified against sqlite3 3.51.0). With DISTINCT, the dedup
+        // structure delivers SELECT-list order: an exact all-ASC match
+        // suppresses; otherwise the line renders unless the dedup itself
+        // rode an index (in which case the index check applies as usual).
         if let Some(ref order_by) = stmt.order_by {
             let satisfied_by_window_sort =
                 Self::first_window_combined_key(stmt).is_some_and(|key| {
@@ -870,13 +974,51 @@ impl ExplainExecutor {
                         && order_by.len() <= key.len()
                         && key[..order_by.len()] == order_by[..]
                 });
-            root.needs_temp_btree_for_order_by = !satisfied_by_window_sort
-                && Self::needs_temp_btree_for_order_by(
+            root.needs_temp_btree_for_order_by = if satisfied_by_window_sort {
+                false
+            } else if stmt.group_by.is_some() {
+                match &group_key {
+                    Some(key) => !Self::order_by_matches_exprs(
+                        order_by,
+                        key,
+                        &stmt.select_list,
+                        false, // directions ignored
+                    ),
+                    // ROLLUP/CUBE/GROUPING SETS output order is unspecified.
+                    None => true,
+                }
+            } else if stmt.distinct {
+                let matches_distinct = distinct_key.as_ref().is_some_and(|key| {
+                    Self::order_by_matches_exprs(
+                        order_by,
+                        key,
+                        &stmt.select_list,
+                        true, // exact ASC match required (verified live)
+                    )
+                });
+                if matches_distinct {
+                    false
+                } else if root.needs_temp_btree_for_distinct {
+                    // Hash/b-tree dedup does not deliver the requested order.
+                    true
+                } else {
+                    // Dedup rode the index; the scan's delivery order may
+                    // still satisfy the ORDER BY (e.g. reverse traversal).
+                    Self::needs_temp_btree_for_order_by(
+                        stmt.from.as_ref(),
+                        stmt.where_clause.as_ref(),
+                        order_by,
+                        database,
+                    )
+                }
+            } else {
+                Self::needs_temp_btree_for_order_by(
                     stmt.from.as_ref(),
                     stmt.where_clause.as_ref(),
                     order_by,
                     database,
-                );
+                )
+            };
         }
 
         // Count window-function sorting passes for EQP output. SQLite emits
@@ -940,13 +1082,19 @@ impl ExplainExecutor {
         // Add subsequent set operations
         let mut current_set_op = stmt.set_operation.as_ref();
         while let Some(set_op) = current_set_op {
+            // Dedup branches are labeled `<OP> USING TEMP B-TREE` like
+            // sqlite3 3.51.0 (verified live for UNION/INTERSECT/EXCEPT).
+            // Truthful: the runtime dedups via temp hash structures
+            // (select/set_operations.rs). `ALL` variants stay bare; the
+            // non-standard INTERSECT ALL / EXCEPT ALL have no SQLite
+            // reference output and keep their bare labels.
             let op_label = match (&set_op.op, set_op.all) {
                 (vibesql_ast::SetOperator::Union, true) => "UNION ALL",
-                (vibesql_ast::SetOperator::Union, false) => "UNION",
+                (vibesql_ast::SetOperator::Union, false) => "UNION USING TEMP B-TREE",
                 (vibesql_ast::SetOperator::Intersect, true) => "INTERSECT ALL",
-                (vibesql_ast::SetOperator::Intersect, false) => "INTERSECT",
+                (vibesql_ast::SetOperator::Intersect, false) => "INTERSECT USING TEMP B-TREE",
                 (vibesql_ast::SetOperator::Except, true) => "EXCEPT ALL",
-                (vibesql_ast::SetOperator::Except, false) => "EXCEPT",
+                (vibesql_ast::SetOperator::Except, false) => "EXCEPT USING TEMP B-TREE",
             };
 
             // Create plan for right side of set operation
@@ -1172,6 +1320,163 @@ impl ExplainExecutor {
         needs_temp_btree_for_order_by_eqp(table_name, where_clause, order_by, database)
     }
 
+    /// Resolve an ORDER BY / GROUP BY term against the SELECT list the way
+    /// SQLite does for EQP purposes: an integer literal is a 1-based output
+    /// ordinal, and a bare (unqualified) column reference matching an output
+    /// alias resolves to that output expression. Anything else (including
+    /// out-of-range ordinals) is returned unchanged. Verified live:
+    /// `GROUP BY b ORDER BY 1` and `SELECT b AS z ... GROUP BY b ORDER BY z`
+    /// both suppress the ORDER BY temp B-tree line.
+    fn resolve_output_expr<'a>(
+        expr: &'a Expression,
+        select_list: &'a [SelectItem],
+    ) -> &'a Expression {
+        use vibesql_types::SqlValue;
+
+        let ordinal = match expr {
+            Expression::Literal(SqlValue::Integer(n)) | Expression::Literal(SqlValue::Bigint(n)) => {
+                Some(*n)
+            }
+            Expression::Literal(SqlValue::Smallint(n)) => Some(i64::from(*n)),
+            _ => None,
+        };
+        if let Some(n) = ordinal {
+            if n >= 1 && (n as usize) <= select_list.len() {
+                if let SelectItem::Expression { expr: target, .. } = &select_list[n as usize - 1] {
+                    return target;
+                }
+            }
+            return expr;
+        }
+
+        if let Expression::ColumnRef(col_id) = expr {
+            if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() {
+                for item in select_list {
+                    if let SelectItem::Expression { expr: target, alias: Some(alias), .. } = item {
+                        if alias.eq_ignore_ascii_case(col_id.column_canonical()) {
+                            return target;
+                        }
+                    }
+                }
+            }
+        }
+
+        expr
+    }
+
+    /// The DISTINCT key: the SELECT-list expressions in order, or `None`
+    /// when the list contains wildcards (which never suppress the DISTINCT
+    /// temp-structure line).
+    fn distinct_key_exprs(select_list: &[SelectItem]) -> Option<Vec<&Expression>> {
+        select_list
+            .iter()
+            .map(|item| match item {
+                SelectItem::Expression { expr, .. } => Some(expr),
+                SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. } => None,
+            })
+            .collect()
+    }
+
+    /// Wrap key expressions as ASC ORDER BY items for the index-delivery
+    /// checks (grouping and dedup keys have no inherent direction).
+    fn exprs_as_asc_order_items(exprs: &[&Expression]) -> Vec<vibesql_ast::OrderByItem> {
+        exprs
+            .iter()
+            .map(|e| vibesql_ast::OrderByItem {
+                expr: (*e).clone(),
+                direction: vibesql_ast::OrderDirection::Asc,
+                nulls_order: None,
+            })
+            .collect()
+    }
+
+    /// True when the statement-level ORDER BY matches `exprs` exactly: same
+    /// expressions (output ordinals/aliases resolved), same sequence, same
+    /// length, no explicit NULLS ordering. With `require_asc`, every term
+    /// must also be ASC (the DISTINCT rule); otherwise directions are
+    /// ignored (the GROUP BY rule — sqlite3 suppresses for DESC and even
+    /// mixed-direction matches, verified live). Bare prefixes and
+    /// permutations never match (verified live).
+    fn order_by_matches_exprs(
+        order_by: &[vibesql_ast::OrderByItem],
+        exprs: &[&Expression],
+        select_list: &[SelectItem],
+        require_asc: bool,
+    ) -> bool {
+        order_by.len() == exprs.len()
+            && order_by.iter().zip(exprs).all(|(item, expr)| {
+                item.nulls_order.is_none()
+                    && (!require_asc
+                        || item.direction == vibesql_ast::OrderDirection::Asc)
+                    && Self::resolve_output_expr(&item.expr, select_list) == *expr
+            })
+    }
+
+    /// True when an index delivers the rows in GROUP BY order, suppressing
+    /// the `USE TEMP B-TREE FOR GROUP BY` line.
+    ///
+    /// Grouping is order-insensitive, so SQLite reorders the GROUP BY terms
+    /// to match a candidate index (`GROUP BY b, a` with index `(a, b)`
+    /// suppresses — verified live). We first try the key as written, then
+    /// retry with the terms permuted into each index's column order.
+    fn group_key_satisfied_by_index(
+        from: Option<&vibesql_ast::FromClause>,
+        where_clause: Option<&vibesql_ast::Expression>,
+        group_key: &[&Expression],
+        database: &Database,
+    ) -> bool {
+        let items = Self::exprs_as_asc_order_items(group_key);
+        if !Self::needs_temp_btree_for_order_by(from, where_clause, &items, database) {
+            return true;
+        }
+
+        // Order-insensitive retry: only bare column references can be
+        // realigned to an index's column order.
+        let Some(vibesql_ast::FromClause::Table { name, .. }) = from else {
+            return false;
+        };
+        let col_names: Option<Vec<&str>> = group_key
+            .iter()
+            .map(|e| match e {
+                Expression::ColumnRef(col_id) => Some(col_id.column_canonical()),
+                _ => None,
+            })
+            .collect();
+        let Some(col_names) = col_names else {
+            return false;
+        };
+
+        for index_name in database.list_indexes_for_table(name) {
+            let Some(index) = database.get_index(&index_name) else { continue };
+            // Permute the group terms into this index's column order; every
+            // term must appear as an index column for the realignment to be
+            // meaningful.
+            let positions: Option<Vec<usize>> = col_names
+                .iter()
+                .map(|col| {
+                    index.columns.iter().position(|ic| {
+                        ic.column_name().is_some_and(|n| n.eq_ignore_ascii_case(col))
+                    })
+                })
+                .collect();
+            let Some(positions) = positions else { continue };
+
+            let mut order: Vec<usize> = (0..group_key.len()).collect();
+            order.sort_by_key(|&i| positions[i]);
+            if order.iter().zip(0..group_key.len()).all(|(&a, b)| a == b) {
+                continue; // Same as the as-written key already checked.
+            }
+            let permuted: Vec<&Expression> = order.iter().map(|&i| group_key[i]).collect();
+            let permuted_items = Self::exprs_as_asc_order_items(&permuted);
+            if !Self::needs_temp_btree_for_order_by(from, where_clause, &permuted_items, database)
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
     /// True when the SELECT list (or named WINDOW clause) of `stmt` contains
     /// window functions — such subqueries/views render as CO-ROUTINE blocks
     /// in EQP output because SQLite cannot flatten them.
@@ -1194,10 +1499,7 @@ impl ExplainExecutor {
     /// materializes every view body. Window functions take the same
     /// CO-ROUTINE path (#5347).
     fn view_body_is_flattenable(stmt: &SelectStmt) -> bool {
-        let select_list_has_aggregate = stmt.select_list.iter().any(|item| match item {
-            SelectItem::Expression { expr, .. } => contains_aggregate_function(expr),
-            SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. } => false,
-        });
+        let select_list_has_aggregate = Self::select_list_has_aggregate(stmt);
 
         stmt.set_operation.is_none()
             && !stmt.distinct
@@ -1208,6 +1510,29 @@ impl ExplainExecutor {
             && stmt.values.is_none()
             && stmt.with_clause.is_none()
             && !select_list_has_aggregate
+    }
+
+    /// True when any SELECT-list expression contains an aggregate function.
+    fn select_list_has_aggregate(stmt: &SelectStmt) -> bool {
+        stmt.select_list.iter().any(|item| match item {
+            SelectItem::Expression { expr, .. } => contains_aggregate_function(expr),
+            SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. } => false,
+        })
+    }
+
+    /// True when a compound body contains any deduplicating set operation
+    /// (UNION/INTERSECT/EXCEPT without ALL). SQLite cannot flatten such
+    /// derived tables and renders them as CO-ROUTINE blocks; UNION-ALL-only
+    /// chains flatten into a top-level COMPOUND QUERY (verified live).
+    fn compound_has_dedup(stmt: &SelectStmt) -> bool {
+        let mut set_op = stmt.set_operation.as_ref();
+        while let Some(op) = set_op {
+            if !op.all {
+                return true;
+            }
+            set_op = op.right.set_operation.as_ref();
+        }
+        false
     }
 
     /// Generate plan node for FROM clause
@@ -1362,12 +1687,22 @@ impl ExplainExecutor {
                 let mut subquery_node = PlanNode::new("Subquery");
                 subquery_node.object = Some(format!("AS {}", alias));
 
-                // Window-function subqueries cannot be flattened; SQLite
-                // runs them as co-routines and EQP nests the inner plan
-                // under a `CO-ROUTINE <alias>` entry (#5347). Plain derived
-                // tables keep the existing flat rendering, matching
-                // SQLite's query flattening.
-                if Self::select_has_window_functions(query) {
+                // Derived tables SQLite cannot flatten render as a
+                // `CO-ROUTINE <alias>` block: window functions (#5347),
+                // aggregates, GROUP BY/HAVING, DISTINCT, and compounds with
+                // a deduplicating set operation (#5367 — sqlite3 3.51.0
+                // shows `CO-ROUTINE q` around the COMPOUND QUERY for dedup
+                // UNION/INTERSECT/EXCEPT bodies, verified live). Truthful:
+                // the runtime materializes derived tables. UNION-ALL-only
+                // compounds, LIMIT-only, and plain bodies keep the existing
+                // flat rendering, matching SQLite's flattener exactly.
+                if Self::select_has_window_functions(query)
+                    || query.group_by.is_some()
+                    || query.distinct
+                    || query.having.is_some()
+                    || Self::select_list_has_aggregate(query)
+                    || Self::compound_has_dedup(query)
+                {
                     subquery_node.coroutine = Some(alias.clone());
                 }
 
