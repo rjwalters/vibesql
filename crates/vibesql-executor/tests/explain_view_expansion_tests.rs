@@ -192,6 +192,12 @@ fn setup_plain_view_db() -> Database {
     run_ddl(&mut db, "CREATE VIEW ov AS SELECT x, y FROM t3 ORDER BY y");
     run_ddl(&mut db, "CREATE VIEW ovx AS SELECT x, y FROM t3 ORDER BY x");
     run_ddl(&mut db, "CREATE VIEW ov2 AS SELECT x, y FROM ov");
+    run_ddl(&mut db, "CREATE VIEW lov AS SELECT x FROM t3 LIMIT 5 OFFSET 2");
+    run_ddl(&mut db, "CREATE VIEW uav AS SELECT x FROM t3 UNION ALL SELECT y FROM t3");
+    run_ddl(&mut db, "CREATE VIEW vv AS VALUES(1,2),(3,4)");
+    run_ddl(&mut db, "CREATE VIEW wv AS WITH c AS (SELECT x FROM t3) SELECT * FROM c");
+    run_ddl(&mut db, "CREATE VIEW aov AS SELECT x, count(*) AS c FROM t3 GROUP BY x ORDER BY c");
+    run_ddl(&mut db, "CREATE VIEW pav AS SELECT c FROM av");
     db
 }
 
@@ -340,55 +346,304 @@ fn test_outer_order_by_over_flattened_view_keeps_temp_btree() {
 }
 
 // ---------------------------------------------------------------------------
-// Blocked view bodies keep the opaque rendering (#5355)
+// Blocked view bodies render CO-ROUTINE blocks (#5361)
 // ---------------------------------------------------------------------------
-// SQLite renders all of these as `CO-ROUTINE <view>` blocks; VibeSQL
-// conservatively keeps the pre-existing opaque `SCAN <view>` line rather
-// than guessing (follow-on work can add the CO-ROUTINE shape per case).
+// View bodies that block flattening (aggregates, GROUP BY/HAVING, DISTINCT,
+// LIMIT/OFFSET, compound, VALUES, WITH) render as a `CO-ROUTINE <view>`
+// block containing the body's inner plan, followed by `SCAN <view>` of the
+// co-routine output. VibeSQL's runtime materializes every view body, so the
+// block + inner plan is the truthful access path for all of these.
+//
+// Expected shapes verified against sqlite3 3.51.0 per category; divergences
+// are noted on each test:
+// - SQLite uses `SCAN t3 USING COVERING INDEX i3x` for covering-index-only
+//   bodies; VibeSQL's pre-existing base-scan rendering shows `SCAN t3`
+//   (same for bare bodies — unrelated to view expansion, see #5355 notes).
+// - SQLite shows `USE TEMP B-TREE FOR GROUP BY` / `FOR DISTINCT` lines for
+//   unindexed grouping/dedup; VibeSQL's EQP has no GROUP BY/DISTINCT temp
+//   B-tree rendering anywhere yet (follow-on).
 
+// Aggregate + GROUP BY view. sqlite3:
+//   |--CO-ROUTINE av
+//   |  `--SEARCH t3 USING COVERING INDEX i3x (x=?)   [outer WHERE pushed]
+//   `--SCAN av
+// VibeSQL materializes the body and post-filters the outer WHERE, so the
+// inner plan truthfully shows the body's own scan (no fabricated probe).
 #[test]
-fn test_aggregate_group_by_view_not_flattened() {
+fn test_aggregate_group_by_view_renders_coroutine() {
     let db = setup_plain_view_db();
     let output = eqp(&db, "SELECT * FROM av WHERE x = 1");
 
-    assert!(output.contains("SCAN av"), "expected opaque view scan:\n{}", output);
-    assert!(!output.contains("SCAN t3"), "blocked body must not inline:\n{}", output);
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE av\n\
+         |  `--SCAN t3\n\
+         `--SCAN av\n"
+    );
 }
 
+// Scalar aggregate view (no GROUP BY). sqlite3 (modulo covering index):
+//   |--CO-ROUTINE sv
+//   |  `--SCAN t3
+//   `--SCAN sv
 #[test]
-fn test_scalar_aggregate_view_not_flattened() {
+fn test_scalar_aggregate_view_renders_coroutine() {
     let db = setup_plain_view_db();
     let output = eqp(&db, "SELECT * FROM sv");
 
-    assert!(output.contains("SCAN sv"), "expected opaque view scan:\n{}", output);
-    assert!(!output.contains("SCAN t3"), "blocked body must not inline:\n{}", output);
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE sv\n\
+         |  `--SCAN t3\n\
+         `--SCAN sv\n"
+    );
 }
 
+// LIMIT view under an outer WHERE. sqlite3 agrees (the outer WHERE blocks
+// its LIMIT-only flattening):
+//   |--CO-ROUTINE lv
+//   |  `--SCAN t3 USING COVERING INDEX i3x
+//   `--SCAN lv
 #[test]
-fn test_limit_view_not_flattened() {
+fn test_limit_view_renders_coroutine() {
     let db = setup_plain_view_db();
     let output = eqp(&db, "SELECT * FROM lv WHERE x = 1");
 
-    assert!(output.contains("SCAN lv"), "expected opaque view scan:\n{}", output);
-    assert!(!output.contains("SCAN t3"), "blocked body must not inline:\n{}", output);
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE lv\n\
+         |  `--SCAN t3\n\
+         `--SCAN lv\n"
+    );
 }
 
+// Bare LIMIT-only view: sqlite3 flattens this specific shape (`SCAN t3`,
+// no co-routine) when nothing else blocks. VibeSQL materializes the body
+// regardless, so the CO-ROUTINE block is the truthful rendering —
+// documented divergence (#5361, same precedent as the #5355 outer-WHERE
+// divergence).
 #[test]
-fn test_distinct_view_not_flattened() {
+fn test_bare_limit_view_renders_coroutine_divergence() {
+    let db = setup_plain_view_db();
+    let output = eqp(&db, "SELECT * FROM lv");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE lv\n\
+         |  `--SCAN t3\n\
+         `--SCAN lv\n"
+    );
+}
+
+// LIMIT + OFFSET view. sqlite3 (modulo covering index):
+//   |--CO-ROUTINE lov
+//   |  `--SCAN t3
+//   `--SCAN lov
+#[test]
+fn test_limit_offset_view_renders_coroutine() {
+    let db = setup_plain_view_db();
+    let output = eqp(&db, "SELECT * FROM lov");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE lov\n\
+         |  `--SCAN t3\n\
+         `--SCAN lov\n"
+    );
+}
+
+// DISTINCT view. sqlite3 (with the index, dedup rides the covering index;
+// without it, a `USE TEMP B-TREE FOR DISTINCT` line appears — VibeSQL has
+// no DISTINCT temp B-tree rendering yet, follow-on):
+//   |--CO-ROUTINE dv
+//   |  `--SEARCH t3 USING COVERING INDEX i3x (x=?)
+//   `--SCAN dv
+#[test]
+fn test_distinct_view_renders_coroutine() {
     let db = setup_plain_view_db();
     let output = eqp(&db, "SELECT * FROM dv WHERE x = 1");
 
-    assert!(output.contains("SCAN dv"), "expected opaque view scan:\n{}", output);
-    assert!(!output.contains("SCAN t3"), "blocked body must not inline:\n{}", output);
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE dv\n\
+         |  `--SCAN t3\n\
+         `--SCAN dv\n"
+    );
 }
 
+// Compound (UNION) view: the body's COMPOUND QUERY block nests inside the
+// CO-ROUTINE. sqlite3:
+//   |--CO-ROUTINE cv
+//   |  `--COMPOUND QUERY
+//   |     |--LEFT-MOST SUBQUERY
+//   |     |  `--SEARCH t3 USING COVERING INDEX i3x (x=?)
+//   |     `--UNION USING TEMP B-TREE
+//   |        `--SCAN t3
+//   `--SCAN cv
+// Divergences: no fabricated outer-WHERE probe (see above), and VibeSQL's
+// pre-existing compound rendering labels the dedup branch `UNION` rather
+// than `UNION USING TEMP B-TREE` (follow-on).
 #[test]
-fn test_compound_view_not_flattened() {
+fn test_compound_union_view_renders_coroutine() {
     let db = setup_plain_view_db();
     let output = eqp(&db, "SELECT * FROM cv WHERE x = 1");
 
-    assert!(output.contains("SCAN cv"), "expected opaque view scan:\n{}", output);
-    assert!(!output.contains("SCAN t3"), "blocked body must not inline:\n{}", output);
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE cv\n\
+         |  `--COMPOUND QUERY\n\
+         |     |--LEFT-MOST SUBQUERY\n\
+         |     |  `--SCAN t3\n\
+         |     `--UNION\n\
+         |        `--SCAN t3\n\
+         `--SCAN cv\n"
+    );
+}
+
+// UNION ALL view: sqlite3 flattens the branches into a top-level COMPOUND
+// QUERY (no co-routine, no view name). VibeSQL materializes the body, so
+// the CO-ROUTINE block around the COMPOUND QUERY is the truthful rendering
+// — documented divergence (#5361).
+#[test]
+fn test_union_all_view_renders_coroutine_divergence() {
+    let db = setup_plain_view_db();
+    let output = eqp(&db, "SELECT * FROM uav");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE uav\n\
+         |  `--COMPOUND QUERY\n\
+         |     |--LEFT-MOST SUBQUERY\n\
+         |     |  `--SCAN t3\n\
+         |     `--UNION ALL\n\
+         |        `--SCAN t3\n\
+         `--SCAN uav\n"
+    );
+}
+
+// VALUES view. sqlite3 — identical shape:
+//   |--CO-ROUTINE vv
+//   |  `--SCAN 2 CONSTANT ROWS
+//   `--SCAN vv
+#[test]
+fn test_values_view_renders_coroutine() {
+    let db = setup_plain_view_db();
+    let output = eqp(&db, "SELECT * FROM vv");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE vv\n\
+         |  `--SCAN 2 CONSTANT ROWS\n\
+         `--SCAN vv\n"
+    );
+}
+
+// WITH-bearing view: sqlite3 inlines a single-use plain CTE all the way
+// down (`SCAN t3`, no co-routine, no view or CTE name). VibeSQL
+// materializes the view body and renders its plan inside the CO-ROUTINE
+// block; the CTE keeps its pre-existing opaque `SCAN c` rendering inside
+// the body — documented divergence (#5361).
+#[test]
+fn test_with_view_renders_coroutine_divergence() {
+    let db = setup_plain_view_db();
+    let output = eqp(&db, "SELECT * FROM wv");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE wv\n\
+         |  `--SCAN c\n\
+         `--SCAN wv\n"
+    );
+}
+
+// A blocked body with its own ORDER BY: the body's temp B-tree line renders
+// INSIDE the CO-ROUTINE block, exactly once. sqlite3 (the GROUP BY temp
+// B-tree line is the documented gap above):
+//   |--CO-ROUTINE aov
+//   |  |--SCAN t3 USING COVERING INDEX i3x
+//   |  `--USE TEMP B-TREE FOR ORDER BY
+//   `--SCAN aov
+#[test]
+fn test_blocked_view_order_by_temp_btree_inside_coroutine_once() {
+    let db = setup_plain_view_db();
+    let output = eqp(&db, "SELECT * FROM aov");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE aov\n\
+         |  |--SCAN t3\n\
+         |  `--USE TEMP B-TREE FOR ORDER BY\n\
+         `--SCAN aov\n"
+    );
+}
+
+// Plain view over a blocked view: the outer view flattens away (#5355) and
+// the inner blocked view renders its CO-ROUTINE block. sqlite3 — identical
+// shape (modulo covering index):
+//   |--CO-ROUTINE av
+//   |  `--SCAN t3
+//   `--SCAN av
+#[test]
+fn test_plain_view_over_blocked_view() {
+    let db = setup_plain_view_db();
+    let output = eqp(&db, "SELECT * FROM pav");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE av\n\
+         |  `--SCAN t3\n\
+         `--SCAN av\n"
+    );
+    assert!(!output.contains("pav"), "outer plain view must flatten away:\n{}", output);
+}
+
+// Outer ORDER BY over a blocked view: the outer sort's temp B-tree line
+// renders OUTSIDE the CO-ROUTINE block. sqlite3 — identical shape:
+//   |--CO-ROUTINE av
+//   |  `--SCAN t3 USING COVERING INDEX i3x
+//   |--SCAN av
+//   `--USE TEMP B-TREE FOR ORDER BY
+#[test]
+fn test_outer_order_by_over_blocked_view() {
+    let db = setup_plain_view_db();
+    let output = eqp(&db, "SELECT * FROM av ORDER BY c");
+
+    assert_eq!(
+        output,
+        "QUERY PLAN\n\
+         |--CO-ROUTINE av\n\
+         |  `--SCAN t3\n\
+         |--SCAN av\n\
+         `--USE TEMP B-TREE FOR ORDER BY\n"
+    );
+}
+
+// A blocked view referenced twice: sqlite3 renders a single
+// `MATERIALIZE av` block plus `SCAN a1` / `SCAN a2`. VibeSQL's runtime
+// executes the view body once per reference (no sharing), so one
+// CO-ROUTINE block per reference is the truthful rendering — documented
+// divergence (#5361).
+#[test]
+fn test_blocked_view_referenced_twice_renders_two_coroutines() {
+    let db = setup_plain_view_db();
+    let output = eqp(&db, "SELECT * FROM av AS a1, av AS a2");
+
+    assert!(output.contains("CO-ROUTINE a1"), "missing first block:\n{}", output);
+    assert!(output.contains("CO-ROUTINE a2"), "missing second block:\n{}", output);
+    assert!(output.contains("SCAN a1"), "missing first outer scan:\n{}", output);
+    assert!(output.contains("SCAN a2"), "missing second outer scan:\n{}", output);
 }
 
 // A WITH-clause CTE shadows a same-named plain view: the view body must NOT
@@ -399,6 +654,27 @@ fn test_cte_shadowing_plain_view_not_flattened() {
     let output = eqp(&db, "WITH pv AS (SELECT 1 AS x, 2 AS y) SELECT * FROM pv WHERE x = 1");
 
     assert!(!output.contains("SCAN t3"), "view body must not be planned:\n{}", output);
+}
+
+// Window views are unaffected by the blocked-body CO-ROUTINE path (#5361):
+// exactly one CO-ROUTINE block, no double rendering.
+#[test]
+fn test_window_view_single_coroutine_block_unchanged() {
+    let db = setup_section1_db();
+    let output = eqp(&db, "SELECT * FROM lll WHERE grp_id = 2");
+
+    assert_eq!(
+        output.matches("CO-ROUTINE").count(),
+        1,
+        "window view must render exactly one CO-ROUTINE block:\n{}",
+        output
+    );
+    assert_eq!(
+        output.matches("SCAN lll").count(),
+        1,
+        "window view must render exactly one outer scan:\n{}",
+        output
+    );
 }
 
 // ---------------------------------------------------------------------------
