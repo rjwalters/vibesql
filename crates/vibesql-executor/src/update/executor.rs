@@ -191,6 +191,7 @@ pub(super) fn execute_internal(
             has_triggers,
             &pk_indices,
             trigger_context,
+            cte_results.as_ref(),
         );
     }
 
@@ -1236,6 +1237,7 @@ fn execute_update_from(
     has_triggers: bool,
     pk_indices: &Option<Vec<usize>>,
     trigger_context: Option<&crate::trigger_execution::TriggerContext<'_>>,
+    cte_results: Option<&std::collections::HashMap<String, crate::select::cte::CteResult>>,
 ) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
     // Execute the join and get matched rows with computed SET values
     // Issue #5082: pass trigger_context so the synthetic SELECT can resolve
@@ -1272,7 +1274,7 @@ fn execute_update_from(
                 vibesql_ast::TriggerEvent::Update(None),
             )?;
         }
-        return Ok((0, empty_returning(stmt, schema, database)?));
+        return Ok((0, empty_returning(stmt, schema, database, cte_results)?));
     }
 
     // Validate constraints for each update.
@@ -1549,7 +1551,7 @@ fn execute_update_from(
                 vibesql_ast::TriggerEvent::Update(None),
             )?;
         }
-        return Ok((0, empty_returning(stmt, schema, database)?));
+        return Ok((0, empty_returning(stmt, schema, database, cte_results)?));
     }
 
     // Cross-update uniqueness validation: catches multiple updates landing on the
@@ -1691,9 +1693,9 @@ fn execute_update_from(
     // Mark pk_indices as used (it's available for future enhancements)
     let _ = pk_indices;
 
-    // Project RETURNING items against the NEW rows (SQLite 3.35.0+).
-    // UPDATE ... FROM does not currently thread WITH-clause CTEs into this
-    // path, so no CTE context is available here.
+    // Project RETURNING items against the NEW rows (SQLite 3.35.0+), with
+    // the statement's WITH-clause CTEs (if any) visible to subqueries in
+    // RETURNING expressions (issue #5363).
     let returning = if let Some(items) = &stmt.returning {
         let new_rows: Vec<&Row> = updates.iter().map(|u| &u.new_row).collect();
         Some(crate::dml_returning::project_returning(
@@ -1702,7 +1704,7 @@ fn execute_update_from(
             database,
             stmt.alias.as_deref(),
             &new_rows,
-            None,
+            cte_results,
         )?)
     } else {
         None
@@ -1718,6 +1720,7 @@ fn empty_returning(
     stmt: &UpdateStmt,
     schema: &vibesql_catalog::TableSchema,
     database: &Database,
+    cte_results: Option<&std::collections::HashMap<String, crate::select::cte::CteResult>>,
 ) -> Result<Option<crate::select::SelectResult>, ExecutorError> {
     stmt.returning
         .as_ref()
@@ -1728,7 +1731,7 @@ fn empty_returning(
                 database,
                 stmt.alias.as_deref(),
                 &[],
-                None,
+                cte_results,
             )
         })
         .transpose()
