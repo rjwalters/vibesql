@@ -73,9 +73,35 @@
 //!   restarts cleanly (recovery repairs the log from the snapshot); a
 //!   snapshot next to a log with no state at all still fails loudly.
 //!
-//! Deliberately **not** here yet (later Raft phases): applying entries
-//! to VibeSQL storage (Phase B1), TLS on the consensus port, production
-//! wiring into `vibesql-server`, and membership changes.
+//! Phase B1 (#5199), PR 1, applies committed entries to **real storage**:
+//!
+//! - [`TxnEntry`]: the replicated entry type — one committed transaction
+//!   per log entry, as a deterministic SQL statement batch (see the
+//!   `state_machine` module docs for why the statement-batch form was
+//!   chosen over a row-level write-set in PR 1, and the tradeoff).
+//! - [`VibesqlStateMachine`]: applies committed entries to a real
+//!   `vibesql-storage` database with **commit_ts = log index** (the
+//!   transaction applying entry `N` is stamped `TxnId = N`, per
+//!   ADR-0004's "apply index = commit order"); apply is idempotent per
+//!   index, so snapshot-install + log-replay overlap is safe. Its
+//!   snapshots serialize the database state with the binary persistence
+//!   codec, and builds pin the MVCC vacuum horizon through the real
+//!   storage-layer holdback (`Database::pin_gc_horizon`) — the
+//!   `SnapshotHorizonPin` seam from Phase A4, no longer a no-op.
+//! - [`ReplicatedDb`]: the PR 1 propose path (test harness, not server
+//!   wiring) — whole transactions proposed through a
+//!   [`ConsensusBackend`] and applied on commit.
+//!
+//! The generic byte-echo configurations above remain unchanged (and keep
+//! their conformance suite); the MVCC machine is a new configuration on
+//! top of them. PR 2 of #5199 mounts [`VibesqlStateMachine`] behind
+//! openraft's `RaftStateMachine` for multi-node replication with
+//! leader-only writes.
+//!
+//! Deliberately **not** here yet (later Raft phases): multi-node MVCC
+//! replication and leader-only write enforcement (Phase B1 PR 2), TLS
+//! on the consensus port, production wiring into `vibesql-server`, and
+//! membership changes.
 //!
 //! Note on retention: the Raft log purge gated above is orthogonal to the
 //! pre-existing data-WAL checkpoint/truncation in `vibesql-storage::wal`
@@ -95,11 +121,15 @@ mod durable;
 #[cfg(test)]
 mod network;
 mod openraft_backend;
+mod replicated;
 mod single_node;
 mod snapshot;
+mod state_machine;
 mod tcp;
 
 pub use backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Role, Snapshot};
 pub use cluster_config::{ClusterConfig, DEFAULT_CONSENSUS_PORT};
 pub use openraft_backend::{OpenraftBackend, RaftTuning};
+pub use replicated::ReplicatedDb;
 pub use single_node::SingleNodeBackend;
+pub use state_machine::{ApplyOutcome, TxnEntry, VibesqlStateMachine};

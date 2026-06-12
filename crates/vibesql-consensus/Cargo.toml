@@ -13,7 +13,24 @@ categories = ["database"]
 # crates depend on the engine-agnostic `ConsensusBackend` trait and must
 # never see openraft types, so the consensus engine stays swappable.
 
+[features]
+# MVCC machinery toggle, forwarded to the storage/executor stack (see
+# `crates/vibesql-storage/Cargo.toml` for full documentation). Off by
+# default, matching the workspace. The replicated state machine works in
+# both states; commit-timestamp stamping (`xmin` = Raft log index) and the
+# vacuum-horizon interlock only have observable effects with this ON, so
+# the tests asserting them are gated on it.
+mvcc_enabled = ["vibesql-storage/mvcc_enabled", "vibesql-executor/mvcc_enabled"]
+
 [dependencies]
+# Raft Phase B1 (#5199): the replicated state machine applies committed
+# log entries to a real database. Dependency direction is consensus →
+# executor → storage (never the reverse), per ADR-0004's layering rule.
+vibesql-ast = { version = "0.1.4", path = "../vibesql-ast" }
+vibesql-executor = { version = "0.1.4", path = "../vibesql-executor" }
+vibesql-parser = { version = "0.1.4", path = "../vibesql-parser" }
+vibesql-storage = { version = "0.1.4", path = "../vibesql-storage" }
+vibesql-types = { version = "0.1.4", path = "../vibesql-types" }
 # `storage-v2` unseals the RaftLogStorage/RaftStateMachine traits (the v2
 # storage API) so this crate can implement them; `serde` because our log
 # entry payloads and vote state will be serialized for durability in PR 2.

@@ -88,14 +88,14 @@ const SNAPSHOT_HEADER_SIZE: usize = 8;
 // ---------------------------------------------------------------------------
 //
 // The snapshot *payload* is the serialized applied state of the state
-// machine. Until Phase B1 (#5199) wires the real MVCC-backed state machine,
-// that state is the echo machine's ordered list of applied entry payloads,
-// and serde_json is its (test-scale) encoding. B1 replaces this codec with a
-// streamed database-state encoding reusing the writers in
-// `vibesql-storage::persistence::binary` — those writers serialize *tables*,
-// which the echo machine does not have, so coupling to them now would be
-// premature (see the curator re-scope on #5198). Keeping the codec isolated
-// here means only this seam changes when B1 lands.
+// machine. For the generic echo machine (`openraft_backend`) that state is
+// the ordered list of applied entry payloads, and serde_json is its
+// (test-scale) encoding. Phase B1 (#5199) swapped this seam for the real
+// MVCC-backed machine: `crate::state_machine::VibesqlStateMachine` encodes
+// its snapshots with the binary database codec from
+// `vibesql-storage::persistence::binary` instead. The JSON codec below
+// remains for the generic byte-echo configurations (and their conformance
+// suite), which have no tables to serialize.
 
 /// Encode the state machine's applied entries into a snapshot payload blob.
 pub(crate) fn encode_payload(entries: &[Vec<u8>]) -> serde_json::Result<Vec<u8>> {
@@ -120,15 +120,18 @@ pub(crate) fn decode_payload(data: &[u8]) -> serde_json::Result<Vec<Vec<u8>>> {
 /// snapshot is built, durably persisted, and registered — dropping the guard
 /// is what releases the horizon.
 ///
-/// The state machine is not MVCC-wired until Phase B1 (#5199), so the only
-/// production implementation today is the no-op [`NoopHorizonPin`]. B1
-/// implements this by registering the snapshot build as (or alongside) an
-/// active read transaction in
-/// `vibesql-storage::database::transaction_api` — the existing
-/// `compute_gc_horizon` holdback for active transactions then covers the
-/// build with no new watermark type (see
-/// `vacuum_mvcc_horizon_held_back_by_active_transaction` in the storage
-/// crate's vacuum tests).
+/// Two implementations exist:
+///
+/// - [`NoopHorizonPin`] for the generic echo state machine (nothing to
+///   hold back: its state is an in-memory `Vec` read under the
+///   state-machine mutex).
+/// - `MvccHorizonPin` (`crate::state_machine`, Phase B1 of #5199): the
+///   real thing, registering the build alongside the active-transaction
+///   holdback in `vibesql-storage::database::transaction_api` via
+///   `Database::pin_gc_horizon` — while held, `compute_gc_horizon` (and
+///   therefore `vacuum_mvcc`) cannot advance past the build's view (see
+///   `vacuum_mvcc_held_back_by_gc_horizon_pin` in the storage crate's
+///   vacuum tests).
 ///
 /// [`RaftSnapshotBuilder::build_snapshot`]: openraft::RaftSnapshotBuilder::build_snapshot
 pub(crate) trait SnapshotHorizonPin: Send + Sync + Debug {

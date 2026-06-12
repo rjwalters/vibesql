@@ -143,6 +143,39 @@ impl Database {
         self.lifecycle.transaction_manager().compute_gc_horizon()
     }
 
+    /// Pin the MVCC GC horizon at its current value (Raft Phase B1, #5199).
+    ///
+    /// See [`TransactionManager::pin_gc_horizon`]: while the returned pin
+    /// is held, [`Self::vacuum_mvcc`] cannot reclaim row versions visible
+    /// at pin time. Used by `vibesql-consensus` to keep a Raft snapshot
+    /// build's view of the database stable without occupying the
+    /// single-writer transaction slot.
+    ///
+    /// [`TransactionManager::pin_gc_horizon`]: crate::database::transactions::TransactionManager::pin_gc_horizon
+    pub fn pin_gc_horizon(&mut self) -> u64 {
+        self.lifecycle.transaction_manager_mut().pin_gc_horizon()
+    }
+
+    /// Release a GC horizon pin acquired with [`Self::pin_gc_horizon`].
+    /// Releasing an unknown (or already-released) pin id is a no-op.
+    pub fn release_gc_horizon(&mut self, pin_id: u64) {
+        self.lifecycle.transaction_manager_mut().release_gc_horizon(pin_id);
+    }
+
+    /// Override the next transaction id (Raft Phase B1, #5199).
+    ///
+    /// Replication-apply use only — see
+    /// [`TransactionManager::set_next_txn_id`] for the full caller
+    /// contract (must be outside a transaction; must never move the
+    /// allocator backwards past stamped rows). This is how the
+    /// replicated state machine derives the MVCC commit timestamp from
+    /// the Raft log index.
+    ///
+    /// [`TransactionManager::set_next_txn_id`]: crate::database::transactions::TransactionManager::set_next_txn_id
+    pub fn set_next_txn_id(&mut self, id: crate::row::TxnId) -> Result<(), StorageError> {
+        self.lifecycle.transaction_manager_mut().set_next_txn_id(id)
+    }
+
     /// MVCC vacuum: reclaim space from row versions whose deletion is
     /// provably invisible to every active and future transaction.
     ///

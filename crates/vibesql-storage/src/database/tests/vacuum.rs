@@ -170,6 +170,140 @@ fn vacuum_mvcc_preserves_subsequent_query_correctness() {
     );
 }
 
+// ============================================================================
+// GC horizon pins (Raft Phase B1, #5199)
+// ============================================================================
+//
+// A horizon pin holds `compute_gc_horizon` back exactly like an active
+// transaction would, but without occupying the single-writer transaction
+// slot. The consensus layer acquires one for the duration of a Raft
+// snapshot build (see `vibesql-consensus`'s `SnapshotHorizonPin`).
+
+#[test]
+fn gc_horizon_pin_holds_horizon_and_release_restores_it() {
+    // Feature-independent: the pin operates on `compute_gc_horizon`
+    // arithmetic, which exists in both feature states.
+    let mut db = Database::new();
+    assert_eq!(db.compute_gc_horizon(), 1);
+
+    let pin = db.pin_gc_horizon();
+
+    // Advance the allocator watermark with two no-op transactions.
+    for _ in 0..2 {
+        db.begin_transaction().unwrap();
+        db.commit_transaction().unwrap();
+    }
+    // Unpinned, the horizon would now be next_transaction_id = 3; the
+    // pin holds it at the value captured at acquire time.
+    assert_eq!(db.compute_gc_horizon(), 1, "pin must hold the horizon back");
+
+    db.release_gc_horizon(pin);
+    assert_eq!(db.compute_gc_horizon(), 3, "release must let the horizon advance");
+
+    // Releasing an unknown pin is a no-op.
+    db.release_gc_horizon(9999);
+    assert_eq!(db.compute_gc_horizon(), 3);
+}
+
+#[test]
+fn gc_horizon_pins_combine_to_the_minimum() {
+    let mut db = Database::new();
+    let early_pin = db.pin_gc_horizon(); // pinned at 1
+
+    db.begin_transaction().unwrap();
+    db.commit_transaction().unwrap();
+    let late_pin = db.pin_gc_horizon(); // pinned at min(2, early pin 1) = 1
+
+    db.begin_transaction().unwrap();
+    db.commit_transaction().unwrap();
+    assert_eq!(db.compute_gc_horizon(), 1, "lowest pin wins");
+
+    db.release_gc_horizon(early_pin);
+    // The late pin captured the horizon *while the early pin was held*,
+    // so it pinned the still-held-back value.
+    assert_eq!(db.compute_gc_horizon(), 1);
+
+    db.release_gc_horizon(late_pin);
+    assert_eq!(db.compute_gc_horizon(), 3);
+}
+
+#[test]
+fn gc_horizon_pin_does_not_block_transactions() {
+    // Unlike an active transaction, a pin leaves the single-writer
+    // transaction slot free: begin/commit while pinned must work. This
+    // is the property that lets a Raft snapshot build coexist with
+    // applying committed log entries (Phase B1, #5199).
+    let mut db = Database::new();
+    make_users_table(&mut db);
+
+    let pin = db.pin_gc_horizon();
+    db.begin_transaction().unwrap();
+    db.insert_row("users", user_row(1, "Alice")).unwrap();
+    db.commit_transaction().unwrap();
+    db.release_gc_horizon(pin);
+
+    assert_eq!(db.get_table("users").unwrap().row_count(), 1);
+}
+
+#[cfg(feature = "mvcc_enabled")]
+#[test]
+fn vacuum_mvcc_held_back_by_gc_horizon_pin() {
+    // The end-to-end property the consensus layer relies on: while a
+    // pin is held, `vacuum_mvcc` must not reclaim row versions that
+    // were visible when the pin was acquired — even though the
+    // allocator watermark has advanced past their tombstones.
+    let mut db = Database::new();
+    make_users_table(&mut db);
+    db.insert_row("users", user_row(1, "Alice")).unwrap();
+    db.insert_row("users", user_row(2, "Bob")).unwrap();
+
+    // Tombstone row 0 with a committed xmax, as in
+    // `vacuum_mvcc_reclaims_committed_deletions`.
+    {
+        let table = db.get_table_mut("users").unwrap();
+        table.stamp_row_xmax_inplace(0, 1);
+    }
+
+    // Pin while the horizon is still 1 (nothing reclaimable yet).
+    let pin = db.pin_gc_horizon();
+
+    // Advance the watermark past the tombstone.
+    db.begin_transaction().unwrap();
+    db.commit_transaction().unwrap();
+
+    // Pinned: the sweep must reclaim nothing.
+    assert_eq!(db.vacuum_mvcc().unwrap(), 0, "pinned horizon must block reclamation");
+    assert_eq!(db.get_table("users").unwrap().row_count(), 2);
+
+    // Released: the tombstoned version becomes reclaimable.
+    db.release_gc_horizon(pin);
+    assert_eq!(db.vacuum_mvcc().unwrap(), 1, "released pin must allow reclamation");
+    assert_eq!(db.get_table("users").unwrap().row_count(), 1);
+}
+
+// ============================================================================
+// Replication txn-id override (Raft Phase B1, #5199)
+// ============================================================================
+
+#[test]
+fn set_next_txn_id_controls_allocation_and_rejects_active_txn() {
+    let mut db = Database::new();
+
+    db.set_next_txn_id(42).unwrap();
+    db.begin_transaction().unwrap();
+    assert_eq!(db.transaction_id(), Some(42), "next BEGIN must use the overridden id");
+
+    // The id of an in-flight transaction cannot change.
+    let err = db.set_next_txn_id(99).expect_err("must refuse inside a transaction");
+    assert!(format!("{err}").contains("set_next_txn_id"), "unexpected error: {err}");
+
+    db.commit_transaction().unwrap();
+    db.set_next_txn_id(99).unwrap();
+    db.begin_transaction().unwrap();
+    assert_eq!(db.transaction_id(), Some(99));
+    db.rollback_transaction().unwrap();
+}
+
 #[cfg(feature = "mvcc_enabled")]
 #[test]
 fn vacuum_mvcc_horizon_held_back_by_active_transaction() {
