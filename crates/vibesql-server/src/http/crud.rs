@@ -48,7 +48,7 @@ use serde_json::{json, Value as JsonValue};
 use tracing::{debug, error};
 
 use super::{
-    rest::{get_database_name, HttpState},
+    rest::{execution_error_response, get_database_name, HttpState},
     types::*,
 };
 use crate::registry::SharedDatabase;
@@ -395,20 +395,17 @@ pub async fn list_rows(
 ) -> impl IntoResponse {
     debug!("CRUD: GET /api/tables/{}/rows with params: {:?}", table_name, params);
 
-    // The CRUD surface executes against the local registry database, which
-    // receives no replicated writes — gate it in replicated mode (#5393).
-    if let Some((code, body)) = state.replicated_gate("the CRUD API") {
-        return (code, body).into_response();
-    }
-
     // Get the database name from headers
     let db_name = get_database_name(&headers);
 
     // Get or create the shared database from the registry
     let shared_db = state.registry.get_or_create(&db_name).await;
 
-    // Check if table exists
-    {
+    // Table-existence pre-check reads the local registry schema, which is only
+    // populated in standalone mode. In replicated mode the schema lives in the
+    // consensus state machine, so skip the local check and let the read against
+    // the state machine report a missing table (#5410).
+    if !state.is_replicated() {
         let db = shared_db.read().await;
         let table_names = db.list_tables();
         if !table_names.iter().any(|t| t.eq_ignore_ascii_case(&table_name)) {
@@ -424,8 +421,9 @@ pub async fn list_rows(
     let sql = build_select_sql(&table_name, &params);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session =
-        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
+    // Replicated session in replicated mode (read runs against the state
+    // machine per the session's read-consistency mode); local otherwise.
+    let mut session = state.session(&db_name, shared_db);
 
     match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Select { rows, columns }) => {
@@ -444,8 +442,7 @@ pub async fn list_rows(
             .into_response(),
         Err(e) => {
             error!("Query execution failed: {}", e);
-            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Query failed: {}", e))))
-                .into_response()
+            execution_error_response(&e)
         }
     }
 }
@@ -459,7 +456,7 @@ pub async fn get_row(
 ) -> impl IntoResponse {
     debug!("CRUD: GET /api/tables/{}/rows/{}", table_name, id);
 
-    if let Some((code, body)) = state.replicated_gate("the CRUD API") {
+    if let Some((code, body)) = state.replicated_gate("the CRUD by-id API (resolving the primary key needs schema introspection through consensus)") {
         return (code, body).into_response();
     }
 
@@ -531,10 +528,6 @@ pub async fn create_row(
 ) -> impl IntoResponse {
     debug!("CRUD: POST /api/tables/{}/rows with body: {:?}", table_name, body);
 
-    if let Some((code, gate_body)) = state.replicated_gate("the CRUD API") {
-        return (code, gate_body).into_response();
-    }
-
     if body.values.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -549,8 +542,11 @@ pub async fn create_row(
     // Get or create the shared database from the registry
     let shared_db = state.registry.get_or_create(&db_name).await;
 
-    // Check if table exists
-    {
+    // The table-existence pre-check reads the local registry schema (only
+    // populated in standalone mode). In replicated mode the schema lives in
+    // the consensus state machine, so skip it and let the consensus INSERT
+    // report a missing table deterministically (#5410).
+    if !state.is_replicated() {
         let db = shared_db.read().await;
         let table_names = db.list_tables();
         if !table_names.iter().any(|t| t.eq_ignore_ascii_case(&table_name)) {
@@ -566,8 +562,10 @@ pub async fn create_row(
     let sql = build_insert_sql(&table_name, &body.values);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session =
-        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
+    // Replicated session in replicated mode: the INSERT proposes through
+    // consensus (leader-only); a write on a follower surfaces as 421 with a
+    // leader hint. Local session otherwise.
+    let mut session = state.session(&db_name, shared_db);
 
     match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Insert { rows_affected }) => {
@@ -580,8 +578,7 @@ pub async fn create_row(
             .into_response(),
         Err(e) => {
             error!("Insert failed: {}", e);
-            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Insert failed: {}", e))))
-                .into_response()
+            execution_error_response(&e)
         }
     }
 }
@@ -595,7 +592,7 @@ pub async fn update_row(
 ) -> impl IntoResponse {
     debug!("CRUD: PUT /api/tables/{}/rows/{} with body: {:?}", table_name, id, body);
 
-    if let Some((code, gate_body)) = state.replicated_gate("the CRUD API") {
+    if let Some((code, gate_body)) = state.replicated_gate("the CRUD by-id API (resolving the primary key needs schema introspection through consensus)") {
         return (code, gate_body).into_response();
     }
 
@@ -669,7 +666,7 @@ pub async fn patch_row(
 ) -> impl IntoResponse {
     debug!("CRUD: PATCH /api/tables/{}/rows/{} with body: {:?}", table_name, id, body);
 
-    if let Some((code, gate_body)) = state.replicated_gate("the CRUD API") {
+    if let Some((code, gate_body)) = state.replicated_gate("the CRUD by-id API (resolving the primary key needs schema introspection through consensus)") {
         return (code, gate_body).into_response();
     }
 
@@ -742,7 +739,7 @@ pub async fn delete_row(
 ) -> impl IntoResponse {
     debug!("CRUD: DELETE /api/tables/{}/rows/{}", table_name, id);
 
-    if let Some((code, body)) = state.replicated_gate("the CRUD API") {
+    if let Some((code, body)) = state.replicated_gate("the CRUD by-id API (resolving the primary key needs schema introspection through consensus)") {
         return (code, body).into_response();
     }
 

@@ -1140,33 +1140,248 @@ async fn http_health_reports_leader_and_follower() {
     assert_eq!(body["replication"]["leader_id"], handles[leader].node_id());
 }
 
-/// In replicated mode the HTTP query/CRUD/subscription surface is gated to
-/// a clear 503 (it would otherwise execute against the unreplicated local
-/// database) — never silent wrong behavior.
+/// In replicated mode the HTTP `/api/query` endpoint routes writes through
+/// consensus (#5410): a `POST /api/query` INSERT on the leader lands in the
+/// consensus state machine and a subsequent SELECT reads it back from there
+/// (not the unreplicated local database).
 #[tokio::test]
-async fn http_query_surface_gated_in_replicated_mode() {
+async fn http_query_writes_route_through_consensus() {
     let (handles, _dir) = boot_cluster(1).await;
     wait_for_leader(&handles).await;
     let (base, _tx) = start_http(Some(Arc::clone(&handles[0]))).await;
-
     let client = reqwest::Client::new();
+
+    let post_sql = |sql: &str| {
+        let client = client.clone();
+        let base = base.clone();
+        let body = serde_json::json!({ "sql": sql }).to_string();
+        async move {
+            client
+                .post(format!("{base}/api/query"))
+                .header("content-type", "application/json")
+                .body(body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+
+    // DDL + DML route through consensus.
+    assert!(post_sql("CREATE TABLE http_t (id INT, name VARCHAR(100))")
+        .await
+        .status()
+        .is_success());
+    let resp = post_sql("INSERT INTO http_t VALUES (1, 'Alice')").await;
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // The write is in the consensus state machine, not the local database.
+    assert_eq!(
+        handles[0].node().query("SELECT COUNT(*) FROM http_t").unwrap()[0][0].to_string(),
+        "1"
+    );
+
+    // A SELECT reads it back through the replicated state machine.
+    let resp = post_sql("SELECT id, name FROM http_t").await;
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    assert_eq!(body["row_count"], 1, "the replicated read must see the row");
+}
+
+/// A deterministic SQL rejection over `/api/query` in replicated mode (one
+/// that every replica rejects identically, e.g. inserting into a missing
+/// table) surfaces as HTTP 400 — not a 503/421 consensus refusal (#5410).
+#[tokio::test]
+async fn http_query_deterministic_rejection_is_400() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[0]))).await;
+    let client = reqwest::Client::new();
+
     let resp = client
         .post(format!("{base}/api/query"))
         .header("content-type", "application/json")
-        .body(r#"{"sql":"SELECT 1"}"#)
+        .body(r#"{"sql":"INSERT INTO no_such_table VALUES (1)"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+}
+
+/// A CRUD collection write (`POST /api/tables/{t}/rows`) routes through
+/// consensus in replicated mode (#5410): the row lands in the state machine.
+#[tokio::test]
+async fn http_crud_create_routes_through_consensus() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[0]))).await;
+    let client = reqwest::Client::new();
+
+    // Schema via /api/query (also replicated).
+    let resp = client
+        .post(format!("{base}/api/query"))
+        .header("content-type", "application/json")
+        .body(r#"{"sql":"CREATE TABLE crud_t (id INT, name VARCHAR(100))"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    // CRUD create proposes through consensus.
+    let resp = client
+        .post(format!("{base}/api/tables/crud_t/rows"))
+        .header("content-type", "application/json")
+        .body(r#"{"id":7,"name":"Carol"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // The row is in the consensus state machine.
+    assert_eq!(
+        handles[0].node().query("SELECT name FROM crud_t WHERE id = 7").unwrap()[0][0].to_string(),
+        "Carol"
+    );
+}
+
+/// An HTTP write on a **follower** is refused with `421 Misdirected Request`
+/// carrying the leader hint in the `X-VibeSQL-Leader` header — the HTTP
+/// equivalent of the wire path's NOT_LEADER redirect (#5410). It must never
+/// be executed against the follower's local database.
+#[tokio::test]
+async fn http_write_on_follower_redirects_with_leader_hint() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+
+    // Create the table through the leader.
+    replicated_session(&handles[leader]).execute("CREATE TABLE redir (id INT)").await.unwrap();
+    let leader_id = handles[leader].node_id();
+
+    // Pick a follower that knows who leads (so the hint is populated).
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let follower = loop {
+        if let Some(i) = handles
+            .iter()
+            .position(|h| h.role() == Role::Follower && h.node().current_leader().is_some())
+        {
+            break i;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "timed out waiting for a follower");
+        tokio::time::sleep(POLL_INTERVAL).await;
+    };
+
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[follower]))).await;
+    let client = reqwest::Client::new();
+
+    // /api/query write on the follower → 421 + leader hint header.
+    let resp = client
+        .post(format!("{base}/api/query"))
+        .header("content-type", "application/json")
+        .body(r#"{"sql":"INSERT INTO redir VALUES (1)"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::MISDIRECTED_REQUEST);
+    let leader_hint = resp
+        .headers()
+        .get("X-VibeSQL-Leader")
+        .expect("leader-hint header")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(leader_hint.contains(&format!("node {leader_id}")), "{leader_hint}");
+    let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    assert_eq!(body["code"], "25006", "the body carries the NOT_LEADER SQLSTATE");
+
+    // CRUD create on the follower → same 421 contract.
+    let resp = client
+        .post(format!("{base}/api/tables/redir/rows"))
+        .header("content-type", "application/json")
+        .body(r#"{"id":2}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::MISDIRECTED_REQUEST);
+}
+
+/// An HTTP write replicates to a second node (#5410): after a `POST /api/query`
+/// INSERT on the leader's HTTP port, every follower converges to the row.
+#[tokio::test]
+async fn http_write_replicates_to_followers() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[leader]))).await;
+    let client = reqwest::Client::new();
+
+    for sql in [
+        "CREATE TABLE repl_http (id INT)",
+        "INSERT INTO repl_http VALUES (1)",
+        "INSERT INTO repl_http VALUES (2)",
+    ] {
+        let resp = client
+            .post(format!("{base}/api/query"))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({ "sql": sql }).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success(), "{sql}: {}", resp.status());
+    }
+
+    // Every follower converges to both rows.
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    for (i, h) in handles.iter().enumerate() {
+        if i == leader {
+            continue;
+        }
+        loop {
+            let count = h
+                .node()
+                .query("SELECT COUNT(*) FROM repl_http")
+                .ok()
+                .and_then(|r| r.first().and_then(|row| row.first()).map(ToString::to_string));
+            if count.as_deref() == Some("2") {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "follower {i} did not converge to 2 rows (saw {count:?})"
+            );
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
+}
+
+/// In replicated mode the CRUD by-id, GraphQL, subscription, and blob-storage
+/// surfaces remain gated to a clear 503 (they depend on local-database schema
+/// /state introspection that is not yet wired through consensus — follow-ons
+/// to #5410). They must never silently execute against the local database.
+#[tokio::test]
+async fn http_unwired_surfaces_still_gated_in_replicated_mode() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[0]))).await;
+    let client = reqwest::Client::new();
+
+    // CRUD by-id (needs primary-key schema introspection).
+    let resp = client.get(format!("{base}/api/tables/t/rows/1")).send().await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+
+    // GraphQL.
+    let resp = client
+        .post(format!("{base}/api/graphql"))
+        .header("content-type", "application/json")
+        .body(r#"{"query":"{ __typename }"}"#)
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
 
-    // CRUD writes are gated too.
-    let resp = client
-        .post(format!("{base}/api/tables/t/rows"))
-        .header("content-type", "application/json")
-        .body(r#"{"id":1}"#)
-        .send()
-        .await
-        .unwrap();
+    // Subscriptions.
+    let resp = client.get(format!("{base}/api/subscribe?query=SELECT%201")).send().await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+
+    // Blob storage.
+    let resp = client.get(format!("{base}/api/storage/anything")).send().await.unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
 }
 

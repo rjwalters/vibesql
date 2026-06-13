@@ -19,11 +19,18 @@ use super::{graphql, types::*};
 use crate::{
     observability::ServerMetrics,
     registry::DatabaseRegistry,
-    replication::{role_str, ReplicationHandle},
+    replication::{
+        role_str, ReplicationHandle, SqlError, SQLSTATE_FATAL, SQLSTATE_NOT_LEADER, SQLSTATE_RETRY,
+    },
+    session::Session,
     subscription::{
         detect_pk_columns_from_stmt, SelectiveColumnConfig, SubscriptionManager, SubscriptionUpdate,
     },
 };
+
+/// Response header carrying the leader hint on a `421 Misdirected Request`
+/// (the HTTP equivalent of the wire path's NOT_LEADER redirect, #5410).
+pub const LEADER_HINT_HEADER: &str = "X-VibeSQL-Leader";
 
 /// Pagination configuration
 #[derive(Debug, Clone)]
@@ -67,18 +74,53 @@ pub struct HttpState {
     pub metrics: Option<ServerMetrics>,
     /// Consensus handle when the server runs in replicated mode (#5393).
     ///
-    /// Present only in replicated mode. The HTTP REST/GraphQL/subscription
-    /// surface executes against the local registry database, which does NOT
-    /// receive replicated writes — so in replicated mode those paths are
-    /// gated (see [`replicated_gate`]) to refuse with a clear error rather
-    /// than silently read stale data or accept a write that never
-    /// replicates. `/health` uses it to report node role/writability. Full
-    /// routing of HTTP writes/subscriptions through consensus is follow-on
-    /// #5410.
+    /// Present only in replicated mode. Surfaces that have been wired through
+    /// consensus (#5410 — the `/api/query` endpoint and the CRUD collection
+    /// endpoints) build a **replicated** session via [`Self::session`], so
+    /// writes propose through this handle (leader-only, freeze-at-propose)
+    /// and reads run against the replicated state machine — never against the
+    /// unreplicated local registry database. Surfaces that still depend on
+    /// local-database schema/state introspection (CRUD by-id, GraphQL,
+    /// subscriptions, blob storage) remain gated (see [`Self::replicated_gate`])
+    /// to a clear error rather than silently reading stale data or accepting a
+    /// write that never replicates; those are tracked as follow-ons to #5410.
+    /// `/health` uses the handle to report node role/writability.
     pub replication: Option<StdArc<ReplicationHandle>>,
 }
 
 impl HttpState {
+    /// Whether this server runs in replicated mode.
+    pub(crate) fn is_replicated(&self) -> bool {
+        self.replication.is_some()
+    }
+
+    /// Build the session for an HTTP request against `db_name`.
+    ///
+    /// In replicated mode this returns a **replicated** session
+    /// ([`Session::new_replicated`]): writes propose through consensus
+    /// (leader-only, freeze-at-propose) and reads run against the replicated
+    /// state machine per the session's read-consistency mode — the local
+    /// `shared_db` is retained only for API compatibility and is never
+    /// executed against. In standalone mode it returns the ordinary
+    /// local-executor session, leaving standalone behavior untouched. This is
+    /// the single choke point that keeps every replicated HTTP write going
+    /// through consensus (the split-brain invariant, #5410).
+    pub(crate) fn session(
+        &self,
+        db_name: &str,
+        shared_db: crate::registry::SharedDatabase,
+    ) -> Session {
+        match &self.replication {
+            Some(handle) => Session::new_replicated(
+                db_name.to_string(),
+                "http_user".to_string(),
+                shared_db,
+                StdArc::clone(handle),
+            ),
+            None => Session::new(db_name.to_string(), "http_user".to_string(), shared_db),
+        }
+    }
+
     /// `Some(error_response)` when this request hits a surface that is not
     /// yet coherent in replicated mode and must be refused; `None` in
     /// standalone mode (where every path is sound). Returning a `503` with
@@ -102,6 +144,78 @@ impl HttpState {
             )
         })
     }
+}
+
+/// Map an execution error to an HTTP response, translating a structured
+/// consensus [`SqlError`] (the replicated-write path's NOT_LEADER / staleness
+/// / FATAL surface) onto idiomatic HTTP semantics (#5410). The mapping mirrors
+/// the wire path's SQLSTATEs:
+///
+/// - **NotLeader** (`25006`) → **421 Misdirected Request** with the leader hint
+///   in the [`LEADER_HINT_HEADER`] response header (and the detail/hint in the
+///   body). 421 is the HTTP "you reached the wrong node, retarget" status — the
+///   HTTP-shaped equivalent of the wire redirect contract. The leader address
+///   lets a client redirect without re-probing the cluster.
+/// - **StalenessExceeded / ReadTimeout** (`57P03`) → **503 Service Unavailable**
+///   with `Retry-After: 1` — a retryable "can't serve this right now".
+/// - **FatalApply** (`58000`) → **503 Service Unavailable** — this node halted
+///   and must be restarted to resync.
+/// - **Any other structured SqlError** → **500 Internal Server Error**.
+/// - **A plain (non-structured) executor error** — e.g. a deterministic
+///   constraint/SQL rejection, identical on every replica — → **400 Bad
+///   Request** with the SQL error message, the same status standalone uses.
+pub(crate) fn execution_error_response(err: &anyhow::Error) -> axum::response::Response {
+    use axum::http::HeaderValue;
+
+    let Some(sql_error) = err.downcast_ref::<SqlError>() else {
+        // Not a consensus refusal: a deterministic SQL/constraint error (or
+        // any standalone executor error). 400, exactly like standalone.
+        return (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(err.to_string())))
+            .into_response();
+    };
+
+    let body = Json(ErrorResponse {
+        error: sql_error_message(sql_error),
+        code: Some(sql_error.code.to_string()),
+    });
+
+    match sql_error.code {
+        SQLSTATE_NOT_LEADER => {
+            // 421 Misdirected Request: wrong node, retarget to the leader.
+            let mut resp = (StatusCode::MISDIRECTED_REQUEST, body).into_response();
+            if let Some(detail) = &sql_error.detail {
+                if let Ok(value) = HeaderValue::from_str(detail) {
+                    resp.headers_mut().insert(LEADER_HINT_HEADER, value);
+                }
+            }
+            resp
+        }
+        // Retryable: staleness/RYW timeout or a halted node.
+        SQLSTATE_RETRY | SQLSTATE_FATAL => {
+            let mut resp = (StatusCode::SERVICE_UNAVAILABLE, body).into_response();
+            resp.headers_mut().insert("Retry-After", HeaderValue::from_static("1"));
+            resp
+        }
+        // Any other structured error (internal_error catch-all, etc.).
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, body).into_response(),
+    }
+}
+
+/// Flatten a [`SqlError`]'s message + detail + hint into one human-readable
+/// string for the JSON error body (HTTP has no separate DETAIL/HINT fields
+/// the way the PostgreSQL wire protocol does).
+fn sql_error_message(e: &SqlError) -> String {
+    let mut msg = e.message.clone();
+    if let Some(detail) = &e.detail {
+        msg.push_str(" — ");
+        msg.push_str(detail);
+    }
+    if let Some(hint) = &e.hint {
+        msg.push_str(" (");
+        msg.push_str(hint);
+        msg.push(')');
+    }
+    msg
 }
 
 /// Create the HTTP API router
@@ -549,13 +663,11 @@ async fn execute_query(
 ) -> impl IntoResponse {
     debug!("Executing query: {} (limit: {:?}, offset: {:?})", req.sql, req.limit, req.offset);
 
-    // The /api/query surface executes against the local registry database,
-    // which receives no replicated writes — a write would never replicate
-    // and a read would silently return stale/empty data. Gate it in
-    // replicated mode and point clients at the wire protocol (#5393).
-    if let Some((code, body)) = state.replicated_gate("the /api/query endpoint") {
-        return (code, body).into_response();
-    }
+    // In replicated mode this builds a replicated session (#5410): writes
+    // propose through consensus (leader-only, freeze-at-propose), reads run
+    // against the replicated state machine, and a write on a follower surfaces
+    // as 421 with a leader hint — never executed against the unreplicated
+    // local database. In standalone mode it is the ordinary local session.
 
     // Convert JSON parameters to SqlValue
     let params = match req.to_sql_values() {
@@ -576,9 +688,8 @@ async fn execute_query(
     // Get or create the shared database from the registry
     let shared_db = state.registry.get_or_create(&db_name).await;
 
-    // Create a session with the shared database
-    let mut session =
-        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
+    // Create a session — replicated when the server is in replicated mode.
+    let mut session = state.session(&db_name, shared_db);
 
     // Execute the query
     let result = if params.is_empty() {
@@ -636,11 +747,10 @@ async fn execute_query(
         }
         Err(e) => {
             error!("Query execution failed: {}", e);
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse::new(format!("Query execution failed: {}", e))),
-            )
-                .into_response()
+            // Map a consensus refusal (NotLeader → 421 + leader hint, staleness
+            // / FATAL → 503) or a deterministic SQL rejection (→ 400) to the
+            // right HTTP status (#5410).
+            execution_error_response(&e)
         }
     }
 }
