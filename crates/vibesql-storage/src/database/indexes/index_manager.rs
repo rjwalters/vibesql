@@ -1049,4 +1049,203 @@ mod tests {
         assert!(disk_lookup(&manager, "idx_t_id", 20).is_empty());
         assert!(disk_lookup(&manager, "idx_t_id", 30).is_empty());
     }
+
+    // ========================================================================
+    // Vector-index (IVFFlat / HNSW) rebuild after compaction (issue #5446)
+    // ========================================================================
+
+    use vibesql_ast::VectorDistanceMetric;
+
+    /// Schema for a table `v` with an id column and a 2-D vector column `vec`.
+    fn vector_schema() -> TableSchema {
+        TableSchema::new(
+            "v".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("vec".to_string(), DataType::Vector { dimensions: 2 }, true),
+            ],
+        )
+    }
+
+    /// Build a table row `(id, vec)` where `vec` is a 2-D vector.
+    fn vrow(id: i64, x: f32, y: f32) -> Row {
+        Row::new(vec![SqlValue::Integer(id), SqlValue::Vector(vec![x, y])])
+    }
+
+    /// `(row_id, vector)` pairs the create path expects, for the given table rows.
+    fn vectors_from(rows: &[Row]) -> Vec<(usize, Vec<f64>)> {
+        rows.iter()
+            .enumerate()
+            .map(|(i, r)| match &r.values[1] {
+                SqlValue::Vector(v) => (i, v.iter().map(|&f| f as f64).collect::<Vec<f64>>()),
+                other => panic!("expected vector, got {:?}", other),
+            })
+            .collect()
+    }
+
+    /// #5446: after a compacting DELETE renumbers rows, `rebuild_indexes` must
+    /// rebuild an IVFFlat index from the post-compaction rows so its row_id
+    /// references point at the *new* positions, not the stale pre-compaction
+    /// ones.
+    #[test]
+    fn ivfflat_index_rebuilt_after_compaction() {
+        let schema = vector_schema();
+        let mut manager = IndexManager::new();
+
+        // Pre-compaction table: 4 rows at positions 0..3.
+        let pre_rows =
+            vec![vrow(1, 0.0, 0.0), vrow(2, 10.0, 10.0), vrow(3, 0.1, 0.0), vrow(4, 10.0, 9.9)];
+
+        manager
+            .create_ivfflat_index_with_vectors(
+                "idx_vec".to_string(),
+                "v".to_string(),
+                "vec".to_string(),
+                2,
+                2,
+                VectorDistanceMetric::L2,
+                vectors_from(&pre_rows),
+            )
+            .unwrap();
+        manager.set_ivfflat_probes("idx_vec", 2).unwrap();
+
+        // Simulate a DELETE that compacts away the two "far" rows (old positions
+        // 1 and 3). The surviving rows (old ids 1 and 3) are renumbered to
+        // positions 0 and 1.
+        let post_rows = vec![vrow(1, 0.0, 0.0), vrow(3, 0.1, 0.0)];
+        manager.rebuild_indexes("v", &schema, &post_rows);
+
+        // Search near the origin: results must be the new positions {0, 1},
+        // never the stale pre-compaction positions {2, 3}.
+        let results = manager.search_ivfflat_index("idx_vec", &[0.05, 0.0], 2).unwrap();
+        let mut ids: Vec<usize> = results.iter().map(|(id, _)| *id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![0, 1], "IVFFlat rebuild must map to compacted positions");
+
+        // The index must hold exactly the two surviving vectors.
+        match manager.index_data.get("idx_vec").unwrap() {
+            IndexData::IVFFlat { index } => assert_eq!(index.len(), 2),
+            other => panic!("expected IVFFlat, got {:?}", other),
+        }
+    }
+
+    /// #5446: same as above for HNSW.
+    #[test]
+    fn hnsw_index_rebuilt_after_compaction() {
+        let schema = vector_schema();
+        let mut manager = IndexManager::new();
+
+        let pre_rows =
+            vec![vrow(1, 0.0, 0.0), vrow(2, 10.0, 10.0), vrow(3, 0.1, 0.0), vrow(4, 10.0, 9.9)];
+
+        manager
+            .create_hnsw_index_with_vectors(
+                "idx_vec".to_string(),
+                "v".to_string(),
+                "vec".to_string(),
+                2,
+                16,
+                64,
+                VectorDistanceMetric::L2,
+                vectors_from(&pre_rows),
+            )
+            .unwrap();
+
+        let post_rows = vec![vrow(1, 0.0, 0.0), vrow(3, 0.1, 0.0)];
+        manager.rebuild_indexes("v", &schema, &post_rows);
+
+        let results = manager.search_hnsw_index("idx_vec", &[0.05, 0.0], 2).unwrap();
+        let mut ids: Vec<usize> = results.iter().map(|(id, _)| *id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![0, 1], "HNSW rebuild must map to compacted positions");
+
+        match manager.index_data.get("idx_vec").unwrap() {
+            IndexData::Hnsw { index } => assert_eq!(index.len(), 2),
+            other => panic!("expected Hnsw, got {:?}", other),
+        }
+    }
+
+    /// #5446: vector indexes are in-memory and part of the COW snapshot of
+    /// `Operations` (#5419/#5425). A rebuild that runs inside a transaction and
+    /// then ROLLBACKs must restore the pre-rebuild index. This is modeled the
+    /// same way the in-memory leg of `mixed_in_memory_and_disk_backed_indexes_*`
+    /// is: clone the manager before the rebuild (the COW snapshot), then restore
+    /// the clone on ROLLBACK.
+    #[test]
+    fn ivfflat_rebuild_in_txn_rolls_back_via_snapshot() {
+        let schema = vector_schema();
+        let mut manager = IndexManager::new();
+
+        let pre_rows =
+            vec![vrow(1, 0.0, 0.0), vrow(2, 10.0, 10.0), vrow(3, 0.1, 0.0), vrow(4, 10.0, 9.9)];
+        manager
+            .create_ivfflat_index_with_vectors(
+                "idx_vec".to_string(),
+                "v".to_string(),
+                "vec".to_string(),
+                2,
+                2,
+                VectorDistanceMetric::L2,
+                vectors_from(&pre_rows),
+            )
+            .unwrap();
+        manager.set_ivfflat_probes("idx_vec", 2).unwrap();
+
+        // BEGIN: COW snapshot (deep clone of the whole manager, incl. the
+        // in-memory vector index).
+        let snapshot = manager.clone();
+
+        // A compacting DELETE rebuilds the index mid-transaction.
+        let post_rows = vec![vrow(1, 0.0, 0.0), vrow(3, 0.1, 0.0)];
+        manager.rebuild_indexes("v", &schema, &post_rows);
+        match manager.index_data.get("idx_vec").unwrap() {
+            IndexData::IVFFlat { index } => assert_eq!(index.len(), 2, "rebuilt mid-txn"),
+            other => panic!("expected IVFFlat, got {:?}", other),
+        }
+
+        // ROLLBACK: restore the snapshot clone.
+        manager = snapshot;
+        match manager.index_data.get("idx_vec").unwrap() {
+            IndexData::IVFFlat { index } => {
+                assert_eq!(index.len(), 4, "ROLLBACK restores the pre-rebuild vector index");
+            }
+            other => panic!("expected IVFFlat, got {:?}", other),
+        }
+    }
+
+    /// #5446: COMMIT of a transaction whose vector index was rebuilt persists the
+    /// rebuilt contents (the COW snapshot is simply dropped on COMMIT).
+    #[test]
+    fn ivfflat_rebuild_in_txn_commits() {
+        let schema = vector_schema();
+        let mut manager = IndexManager::new();
+
+        let pre_rows =
+            vec![vrow(1, 0.0, 0.0), vrow(2, 10.0, 10.0), vrow(3, 0.1, 0.0), vrow(4, 10.0, 9.9)];
+        manager
+            .create_ivfflat_index_with_vectors(
+                "idx_vec".to_string(),
+                "v".to_string(),
+                "vec".to_string(),
+                2,
+                2,
+                VectorDistanceMetric::L2,
+                vectors_from(&pre_rows),
+            )
+            .unwrap();
+
+        // BEGIN + rebuild; on COMMIT the snapshot is dropped (modeled by not
+        // restoring it).
+        let _snapshot = manager.clone();
+        let post_rows = vec![vrow(1, 0.0, 0.0), vrow(3, 0.1, 0.0)];
+        manager.rebuild_indexes("v", &schema, &post_rows);
+        drop(_snapshot);
+
+        match manager.index_data.get("idx_vec").unwrap() {
+            IndexData::IVFFlat { index } => {
+                assert_eq!(index.len(), 2, "COMMIT persists the rebuilt vector index");
+            }
+            other => panic!("expected IVFFlat, got {:?}", other),
+        }
+    }
 }

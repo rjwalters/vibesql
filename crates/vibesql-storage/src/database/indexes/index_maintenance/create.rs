@@ -484,7 +484,7 @@ impl IndexManager {
     ///
     /// Note: SqlValue::Vector stores f32 for storage efficiency,
     /// but IVFFlat uses f64 for precision in k-means clustering.
-    fn extract_vector(value: &vibesql_types::SqlValue) -> Option<Vec<f64>> {
+    pub(crate) fn extract_vector(value: &vibesql_types::SqlValue) -> Option<Vec<f64>> {
         match value {
             vibesql_types::SqlValue::Vector(data) => {
                 // Convert f32 vector to f64 for IVFFlat processing

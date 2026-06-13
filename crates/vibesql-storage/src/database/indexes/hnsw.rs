@@ -166,6 +166,11 @@ impl HnswIndex {
         self.metric
     }
 
+    /// Get the number of dimensions of vectors in this index
+    pub fn dimensions(&self) -> usize {
+        self.dimensions
+    }
+
     /// Build the index from a set of vectors
     ///
     /// This inserts all vectors into the HNSW graph structure.
