@@ -2,12 +2,19 @@
 
 use super::builder::SelectExecutor;
 
-/// Check if an expression references a column (which requires FROM clause)
-fn expression_references_column(expr: &vibesql_ast::Expression) -> bool {
+/// Check if an expression references a column (which requires FROM clause).
+///
+/// `count_pseudo` controls whether NEW/OLD pseudo-variables (`NEW.x`, `OLD.x`)
+/// count as column references. They do for a plain from-less SELECT (which has
+/// no row to resolve them from), but inside a trigger body (#5445) the firing
+/// row's NEW/OLD context resolves them, so callers there pass `false`.
+fn expression_references_column_inner(expr: &vibesql_ast::Expression, count_pseudo: bool) -> bool {
+    let expression_references_column =
+        |e: &vibesql_ast::Expression| expression_references_column_inner(e, count_pseudo);
     match expr {
         vibesql_ast::Expression::ColumnRef(_) => true,
-        vibesql_ast::Expression::PseudoVariable { .. } => true, /* Pseudo-variables reference */
-        // columns (OLD.x, NEW.x)
+        vibesql_ast::Expression::PseudoVariable { .. } => count_pseudo, /* Pseudo-variables */
+        // reference columns (OLD.x, NEW.x)
         vibesql_ast::Expression::Default => false, // DEFAULT doesn't reference columns
         vibesql_ast::Expression::DuplicateKeyValue { .. } => false, /* DuplicateKeyValue doesn't */
         // reference columns
@@ -144,9 +151,24 @@ fn expression_references_column(expr: &vibesql_ast::Expression) -> bool {
 }
 
 impl SelectExecutor<'_> {
-    /// Check if an expression references a column (which requires FROM clause)
+    /// Check if an expression references a column (which requires FROM clause).
+    ///
+    /// NEW/OLD pseudo-variables count as column references here.
     pub(super) fn expression_references_column(&self, expr: &vibesql_ast::Expression) -> bool {
-        expression_references_column(expr)
+        expression_references_column_inner(expr, true)
+    }
+
+    /// Check if an expression references a *non-pseudo* column (i.e. a real
+    /// `ColumnRef` that requires a FROM clause), ignoring NEW/OLD pseudo-variables.
+    ///
+    /// Used by the from-less SELECT path inside a trigger body (#5445): there the
+    /// firing row's NEW/OLD context resolves pseudo-variables, so only a real
+    /// column reference (which has nothing to bind to) still requires a FROM clause.
+    pub(super) fn expression_references_non_pseudo_column(
+        &self,
+        expr: &vibesql_ast::Expression,
+    ) -> bool {
+        expression_references_column_inner(expr, false)
     }
 
     /// Evaluate a LIMIT or OFFSET expression and convert to usize

@@ -168,18 +168,21 @@ fn case_in_where_clause_does_not_truncate_body() {
 }
 
 #[test]
-fn instead_of_insert_case_raise_ignore_body_parses_at_create_time() {
-    // #5439 (filed by the #5436 judge): the direct repro. Before the fix this
-    // CREATE TRIGGER failed with `incomplete input` because the CASE's `END`
-    // was treated as the body terminator, dropping the trailing base INSERT.
-    // The trigger must now CREATE successfully with the full body retained.
+fn instead_of_insert_case_raise_ignore_body_fires_and_resolves_new() {
+    // #5439 (parse) + #5445 (fire): the direct repro, now asserted end-to-end.
     //
-    // NOTE: This is a *create-time* assertion. Actually *firing* this trigger
-    // additionally requires resolving `NEW.id` inside a from-less
-    // `SELECT CASE WHEN NEW.id = 1 THEN raise(IGNORE) END` — a separate
-    // executor limitation ("Column reference requires FROM clause") that PR
-    // #5436 worked around and that is out of scope for #5439. See the filed
-    // follow-on.
+    // Parse side (#5439/#5444): before the fix the CREATE TRIGGER failed with
+    // `incomplete input` because the CASE's `END` was treated as the body
+    // terminator, dropping the trailing base INSERT. The body must retain BOTH
+    // statements.
+    //
+    // Fire side (#5445): firing additionally requires resolving `NEW.id` inside
+    // a from-less `SELECT CASE WHEN NEW.id = 1 THEN raise(IGNORE) END`. Before
+    // #5445 this failed at fire time with "Column reference requires FROM clause"
+    // (the from-less SELECT path did not receive the trigger's NEW/OLD context).
+    //
+    // sqlite3 3.51.0: inserting (1, 100) is skipped by raise(IGNORE); inserting
+    // (2, 200) reaches the base table.
     let mut db = vibesql_storage::Database::new();
     exec_ok(&mut db, "CREATE TABLE base (id INTEGER, v INTEGER)");
     exec_ok(&mut db, "CREATE VIEW vw AS SELECT id, v FROM base");
@@ -206,6 +209,84 @@ fn instead_of_insert_case_raise_ignore_body_parses_at_create_time() {
         }
         other => panic!("expected CreateTrigger, got {:?}", other),
     }
+
+    // Fire the INSTEAD OF INSERT trigger for both rows.
+    exec_ok(&mut db, "INSERT INTO vw (id, v) VALUES (1, 100)");
+    exec_ok(&mut db, "INSERT INTO vw (id, v) VALUES (2, 200)");
+
+    // raise(IGNORE) skipped the NEW.id = 1 row; only the NEW.id = 2 row reached base.
+    assert_eq!(ints(&db, "base", "id"), vec![2]);
+    assert_eq!(ints(&db, "base", "v"), vec![200]);
+}
+
+#[test]
+fn from_less_select_new_resolves_in_trigger_body() {
+    // #5445: a standalone from-less `SELECT NEW.col` body statement (no CASE)
+    // resolves the firing row's NEW context and runs without error. sqlite3
+    // 3.51.0 accepts this; the trailing INSERT logs NEW.v + 1.
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "CREATE TABLE log (val INTEGER)");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER tr AFTER INSERT ON t BEGIN \
+         SELECT NEW.id; \
+         INSERT INTO log VALUES (NEW.v + 1); \
+         END",
+    );
+
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (5, 99)");
+
+    assert_eq!(ints(&db, "log", "val"), vec![100]);
+}
+
+#[test]
+fn from_less_select_old_raise_ignore_in_delete_trigger() {
+    // #5445: OLD pseudo-variable in a from-less SELECT CASE inside an AFTER
+    // DELETE trigger. sqlite3 3.51.0: raise(IGNORE) abandons the trigger program
+    // for the OLD.id = 1 row (so it is not logged) but does not undo the delete;
+    // the OLD.id = 2 row is logged.
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE d (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "CREATE TABLE dlog (val INTEGER)");
+    exec_ok(&mut db, "INSERT INTO d (id, v) VALUES (1, 10)");
+    exec_ok(&mut db, "INSERT INTO d (id, v) VALUES (2, 20)");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trd AFTER DELETE ON d BEGIN \
+         SELECT CASE WHEN OLD.id = 1 THEN raise(IGNORE) END; \
+         INSERT INTO dlog VALUES (OLD.v); \
+         END",
+    );
+
+    exec_ok(&mut db, "DELETE FROM d");
+
+    // Only the OLD.id = 2 row was logged; both rows were still deleted.
+    assert_eq!(ints(&db, "dlog", "val"), vec![20]);
+    assert!(column_values(&db, "d", "id").is_empty(), "all rows should be deleted");
+}
+
+#[test]
+fn from_less_select_expression_over_new_and_old() {
+    // #5445: an expression combining NEW and OLD in a from-less SELECT CASE
+    // inside an AFTER UPDATE trigger. sqlite3 3.51.0: when NEW.v - OLD.v > 5 the
+    // row is ignored (not logged); otherwise NEW.v is logged.
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "CREATE TABLE log (val INTEGER)");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10)");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER tr AFTER UPDATE ON t BEGIN \
+         SELECT CASE WHEN NEW.v - OLD.v > 5 THEN raise(IGNORE) END; \
+         INSERT INTO log VALUES (NEW.v); \
+         END",
+    );
+
+    exec_ok(&mut db, "UPDATE t SET v = 12 WHERE id = 1"); // delta 2, not ignored
+    exec_ok(&mut db, "UPDATE t SET v = 100 WHERE id = 1"); // delta 88, ignored
+
+    assert_eq!(ints(&db, "log", "val"), vec![12]);
 }
 
 #[test]

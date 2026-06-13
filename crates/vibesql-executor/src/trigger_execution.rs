@@ -468,10 +468,21 @@ impl TriggerFirer {
                 Ok(())
             }
             Statement::Select(select_stmt) => {
-                // Execute SELECT but ignore results (useful for side effects)
-                // Note: SELECT doesn't need special trigger context handling since
-                // it can reference OLD/NEW through normal expression evaluation
-                let executor = crate::SelectExecutor::new(db);
+                // Execute SELECT but ignore results (useful for side effects, e.g.
+                // a body statement of the form `SELECT CASE WHEN NEW.x ... THEN
+                // raise(IGNORE) END`).
+                //
+                // The SELECT must be evaluated with the trigger's NEW/OLD
+                // pseudo-row context (#5445): a from-less SELECT that references
+                // NEW/OLD has no FROM clause to resolve them from, so the
+                // evaluator needs the firing row's context — exactly as the WHEN
+                // clause and the body's DML statements already receive it. Before
+                // this, the SELECT was executed with a plain `SelectExecutor::new`
+                // and a body like `SELECT CASE WHEN NEW.id = 1 THEN raise(IGNORE)
+                // END` failed at fire time with "Column reference requires FROM
+                // clause".
+                let executor =
+                    crate::SelectExecutor::new_with_trigger_context(db, trigger_context);
                 executor.execute_with_columns(select_stmt)?;
                 Ok(())
             }
