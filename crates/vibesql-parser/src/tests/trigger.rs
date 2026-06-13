@@ -385,3 +385,91 @@ fn test_create_temp_table_and_view_still_parse() {
     let view = Parser::parse_sql("CREATE TEMP VIEW v1 AS SELECT 1;");
     assert!(matches!(view, Ok(Statement::CreateView(_))), "CREATE TEMP VIEW failed: {:?}", view);
 }
+
+// --- Create-time trigger body validation (#5399) ---
+//
+// SQLite parses every trigger-body statement at CREATE TRIGGER time and
+// rejects create-time errors then, rather than deferring them to fire
+// time. VibeSQL stores the body as `RawSql` but now re-parses each body
+// statement at create time so the same errors surface.
+
+#[test]
+fn test_create_trigger_body_nulls_in_conflict_target_rejected() {
+    // nulls1.test 3.1.12: `NULLS FIRST/LAST` in an upsert ON CONFLICT target
+    // is rejected for a direct statement, and must also be rejected inside a
+    // trigger body at create time. SQLite: `unsupported use of NULLS FIRST`.
+    let trigger_sql = "CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN \
+                 INSERT INTO t1 VALUES(1, 2, 3, 4) \
+                 ON CONFLICT (b DESC NULLS FIRST) DO UPDATE SET a = a+1; \
+               END;";
+    let result = Parser::parse_sql(trigger_sql);
+    let err = result.expect_err("trigger with NULLS in conflict target should be rejected");
+    assert_eq!(
+        err.message, "unsupported use of NULLS FIRST",
+        "expected SQLite-compatible NULLS error, got: {}",
+        err.message
+    );
+}
+
+#[test]
+fn test_create_trigger_body_unparseable_construct_tolerated() {
+    // VibeSQL's parser does not yet support every construct valid inside a
+    // SQLite trigger body (e.g. `RAISE(ABORT, …)`), and SQLite accepts those
+    // at CREATE TRIGGER time. Create-time validation must NOT hard-reject a
+    // body it merely cannot parse — the body is preserved as RawSql and
+    // re-parsed at fire time, exactly as before this validation existed.
+    // (Regression guard for upsert1-1300, whose trigger body uses RAISE.)
+    let sql = "CREATE TRIGGER tr2 BEFORE UPDATE ON t1 BEGIN \
+               SELECT raise(ABORT, 'boom') WHERE old.y != new.y; \
+               END;";
+    let result = Parser::parse_sql(sql);
+    assert!(
+        result.is_ok(),
+        "trigger body using a construct VibeSQL cannot parse (RAISE) should be \
+         tolerated at create time (SQLite accepts it): {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_create_trigger_valid_body_still_parses() {
+    // A valid body must still parse and be stored as RawSql.
+    let sql = "CREATE TRIGGER tr3 AFTER INSERT ON t1 BEGIN \
+               INSERT INTO log VALUES('one'); \
+               UPDATE t1 SET a = a + 1; \
+               END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "valid trigger body should parse: {:?}", result.err());
+    match result.unwrap() {
+        Statement::CreateTrigger(trigger) => match &trigger.triggered_action {
+            vibesql_ast::TriggerAction::RawSql(body) => {
+                assert!(body.to_uppercase().contains("INSERT INTO LOG"));
+                assert!(body.to_uppercase().contains("UPDATE T1"));
+            }
+        },
+        other => panic!("Expected CreateTrigger, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_trigger_body_referencing_unknown_table_still_parses() {
+    // SQLite does NOT perform name resolution at CREATE TRIGGER time: a body
+    // referencing a not-yet-created table is accepted. Create-time validation
+    // is parse-only, so this must still parse successfully.
+    let sql = "CREATE TRIGGER tr4 AFTER INSERT ON t1 BEGIN \
+               INSERT INTO not_yet_created_table VALUES(1); \
+               END;";
+    let result = Parser::parse_sql(sql);
+    assert!(
+        result.is_ok(),
+        "trigger body referencing an unknown table should parse (no name resolution): {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_create_trigger_empty_body_parses() {
+    // An empty BEGIN/END body must remain valid (no statements to validate).
+    let result = Parser::parse_sql("CREATE TRIGGER tr5 AFTER INSERT ON t1 BEGIN END;");
+    assert!(result.is_ok(), "empty trigger body should parse: {:?}", result.err());
+}
