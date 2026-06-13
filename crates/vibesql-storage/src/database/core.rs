@@ -132,6 +132,29 @@ impl Database {
         self.metadata.clear_routine_cache();
     }
 
+    /// Capture the copy-on-write `Operations` rollback snapshot before a
+    /// mutation, if a transaction is active (#5419).
+    ///
+    /// This is the **single chokepoint** for index/spatial-index mutation:
+    /// every code path that mutates `self.operations` must call this first
+    /// (it is invoked implicitly by [`Self::operations_mut`]). The lazy
+    /// `Operations` rollback snapshot (see
+    /// [`TransactionManager::ensure_operations_snapshot`]) is taken before
+    /// the *first* mutation inside a transaction, so it captures committed,
+    /// pre-mutation state and ROLLBACK restores it exactly — preserving the
+    /// #5413 correctness fix while skipping the clone entirely for
+    /// read-only transactions. Outside a transaction it is a cheap no-op.
+    ///
+    /// `ensure_operations_snapshot` borrows `self.operations` immutably and
+    /// `self.lifecycle` mutably; these are disjoint fields, so the call
+    /// compiles even though both are reached through `self`.
+    ///
+    /// [`TransactionManager::ensure_operations_snapshot`]: crate::database::transactions::TransactionManager::ensure_operations_snapshot
+    #[inline]
+    pub(super) fn snapshot_operations_for_mutation(&mut self) {
+        self.lifecycle.transaction_manager_mut().ensure_operations_snapshot(&self.operations);
+    }
+
     // NOTE: Other method groups are defined in their respective modules:
     // - Transaction methods: transaction_api.rs
     // - Table methods: table_api.rs

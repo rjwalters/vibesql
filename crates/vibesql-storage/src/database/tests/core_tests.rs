@@ -854,3 +854,118 @@ fn commit_keeps_index_manager_state() {
 
     assert!(db.index_exists("idx_t_id"), "COMMIT must keep the index created in the txn");
 }
+
+// ============================================================================
+// Copy-on-write Operations snapshot (#5419)
+// ============================================================================
+
+/// #5419: a read-only transaction must NOT deep-clone the `Operations`
+/// (IndexManager + spatial indexes) at BEGIN. Before #5419 the snapshot was
+/// eager, so every BEGIN — including the per-read scratch txn used by
+/// replicated read-your-own-writes — paid an O(index-keys) clone. With the
+/// copy-on-write snapshot, a transaction that only reads triggers zero
+/// clones. Asserted deterministically via the clone counter (no timing).
+#[test]
+fn read_only_transaction_does_not_clone_operations_snapshot() {
+    use vibesql_ast::IndexColumn;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::DataType;
+
+    let mut db = Database::new();
+    let schema = TableSchema::new(
+        "t".to_string(),
+        vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+    );
+    db.create_table(schema).unwrap();
+
+    // Build a non-trivial index so an eager clone would be observable work.
+    db.create_index(
+        "idx_t_id".to_string(),
+        "t".to_string(),
+        false,
+        vec![IndexColumn::new_column("id".to_string(), vibesql_ast::OrderDirection::Asc)],
+    )
+    .unwrap();
+    for i in 0..256 {
+        db.insert_row("t", crate::Row::new(vec![SqlValue::Integer(i)])).unwrap();
+    }
+
+    let before = db.operations_snapshot_clones();
+
+    // A purely read-only transaction: BEGIN, observe index state, ROLLBACK.
+    db.begin_transaction().unwrap();
+    assert!(db.index_exists("idx_t_id"), "index visible inside the read-only txn");
+    let _ = db.list_indexes();
+    db.rollback_transaction().unwrap();
+
+    assert_eq!(
+        db.operations_snapshot_clones(),
+        before,
+        "a read-only transaction must not deep-clone the Operations snapshot (#5419)"
+    );
+}
+
+/// #5419: a transaction that DOES mutate an index lazily clones the
+/// `Operations` snapshot exactly once (on the first mutation), and that
+/// snapshot still fully restores index state on ROLLBACK — i.e. the #5413
+/// correctness fix is preserved, just deferred. Also verifies the clone is
+/// taken once even across multiple index mutations.
+#[test]
+fn mutating_transaction_clones_operations_snapshot_once_and_rolls_back() {
+    use vibesql_ast::IndexColumn;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::DataType;
+
+    let mut db = Database::new();
+    let schema = TableSchema::new(
+        "t".to_string(),
+        vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+    );
+    db.create_table(schema).unwrap();
+    db.create_index(
+        "idx_t_id".to_string(),
+        "t".to_string(),
+        false,
+        vec![IndexColumn::new_column("id".to_string(), vibesql_ast::OrderDirection::Asc)],
+    )
+    .unwrap();
+
+    let before = db.operations_snapshot_clones();
+
+    db.begin_transaction().unwrap();
+    // First index mutation triggers exactly one lazy clone.
+    db.insert_row("t", crate::Row::new(vec![SqlValue::Integer(1)])).unwrap();
+    assert_eq!(
+        db.operations_snapshot_clones(),
+        before + 1,
+        "first index mutation must take exactly one snapshot clone"
+    );
+    // Further mutations do not re-clone.
+    db.insert_row("t", crate::Row::new(vec![SqlValue::Integer(2)])).unwrap();
+    db.create_index(
+        "idx_t_id2".to_string(),
+        "t".to_string(),
+        false,
+        vec![IndexColumn::new_column("id".to_string(), vibesql_ast::OrderDirection::Asc)],
+    )
+    .unwrap();
+    assert_eq!(
+        db.operations_snapshot_clones(),
+        before + 1,
+        "subsequent mutations must reuse the existing snapshot, not re-clone"
+    );
+
+    db.rollback_transaction().unwrap();
+
+    // The lazily-captured snapshot must fully restore index state: the
+    // index created in the txn is gone, and the pre-existing index survives.
+    assert!(
+        !db.index_exists("idx_t_id2"),
+        "ROLLBACK must restore Operations: index created in the txn is removed (#5413 preserved)"
+    );
+    assert!(
+        db.index_exists("idx_t_id"),
+        "the pre-transaction index must survive ROLLBACK"
+    );
+    assert_eq!(db.get_table("t").map(|t| t.row_count()), Some(0), "rolled-back rows are gone");
+}

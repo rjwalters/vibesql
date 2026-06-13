@@ -81,7 +81,7 @@ pub enum TransactionState {
         original_catalog: vibesql_catalog::Catalog,
         /// Original table snapshots for full rollback
         original_tables: HashMap<String, Table>,
-        /// Original index/spatial-index snapshot for full rollback.
+        /// Lazily-captured index/spatial-index snapshot for full rollback.
         ///
         /// The B-tree `IndexManager` and spatial indexes live in
         /// [`Operations`], which is *not* part of the `catalog`/`tables`
@@ -90,10 +90,20 @@ pub enum TransactionState {
         /// otherwise a rolled-back key survives in the unique index and a
         /// later legitimate write spuriously fails the uniqueness check
         /// (the row itself is hidden by MVCC visibility, masking the leak
-        /// from `SELECT`). Snapshotting `Operations` at BEGIN and
-        /// restoring it on ROLLBACK keeps all indexes bit-for-bit
-        /// identical to their pre-transaction state.
-        original_operations: Operations,
+        /// from `SELECT`). Restoring this snapshot on ROLLBACK keeps all
+        /// indexes bit-for-bit identical to their pre-transaction state
+        /// (the #5413 fix).
+        ///
+        /// **Copy-on-write (#5419):** this is `None` until the first time
+        /// the transaction takes a *mutable* borrow of `Operations`
+        /// (see [`Self::ensure_operations_snapshot`]). A read-only
+        /// transaction — including the per-read scratch transaction used
+        /// by replicated read-your-own-writes — never mutates the index
+        /// manager, so it never pays the deep clone. The clone, when it
+        /// does happen, captures committed (pre-transaction) state because
+        /// it is taken *before* the mutation is applied, preserving the
+        /// exact restore semantics #5413 established.
+        original_operations: Option<Operations>,
         /// Stack of savepoints (newest at end)
         savepoints: Vec<Savepoint>,
         /// All changes made since transaction start (for incremental undo)
@@ -150,6 +160,16 @@ pub struct TransactionManager {
     horizon_pins: std::collections::BTreeMap<u64, TxnId>,
     /// Next pin id to hand out from [`pin_gc_horizon`](Self::pin_gc_horizon).
     next_pin_id: u64,
+    /// Number of times an `Operations` snapshot has been deep-cloned for a
+    /// transaction (copy-on-write instrumentation, #5419).
+    ///
+    /// Incremented exactly once per transaction that mutates the index
+    /// manager — the first mutable borrow of `Operations` triggers the
+    /// lazy clone. A read-only transaction leaves this counter untouched.
+    /// Exposed via [`Self::operations_snapshot_clones`] so tests can
+    /// assert deterministically that the read-only / speculative-read
+    /// path does not pay the deep clone, without relying on timing.
+    operations_snapshot_clones: u64,
 }
 
 impl TransactionManager {
@@ -160,6 +180,7 @@ impl TransactionManager {
             next_transaction_id: 1,
             horizon_pins: std::collections::BTreeMap::new(),
             next_pin_id: 1,
+            operations_snapshot_clones: 0,
         }
     }
 
@@ -175,14 +196,40 @@ impl TransactionManager {
         &mut self,
         catalog: &vibesql_catalog::Catalog,
         tables: &HashMap<String, Table>,
-        operations: &Operations,
     ) -> Result<(), StorageError> {
-        self.begin_transaction_with_durability(
-            catalog,
-            tables,
-            operations,
-            TransactionDurability::Default,
-        )
+        self.begin_transaction_with_durability(catalog, tables, TransactionDurability::Default)
+    }
+
+    /// Ensure the `Operations` rollback snapshot has been captured for the
+    /// active transaction (copy-on-write, #5419).
+    ///
+    /// Called by the [`Database`](crate::Database) just *before* it takes a
+    /// mutable borrow of `Operations` to perform an index/table mutation.
+    /// The first such call inside a transaction deep-clones `operations`
+    /// (capturing committed, pre-mutation state) and stashes it for
+    /// ROLLBACK; subsequent calls are no-ops. Outside a transaction this
+    /// is a no-op.
+    ///
+    /// This preserves the exact restore semantics of the #5413 eager
+    /// snapshot — the only change is *when* the clone happens. Read-only
+    /// transactions never call a mutating `Operations` method, so they
+    /// never trigger the clone.
+    ///
+    /// [`Database`]: crate::Database
+    pub fn ensure_operations_snapshot(&mut self, operations: &Operations) {
+        if let TransactionState::Active { original_operations, .. } = &mut self.transaction_state {
+            if original_operations.is_none() {
+                *original_operations = Some(operations.clone());
+                self.operations_snapshot_clones += 1;
+            }
+        }
+    }
+
+    /// Number of `Operations` deep-clones taken for transaction rollback
+    /// snapshots since this manager was created (copy-on-write
+    /// instrumentation, #5419). See [`Self::ensure_operations_snapshot`].
+    pub fn operations_snapshot_clones(&self) -> u64 {
+        self.operations_snapshot_clones
     }
 
     /// Begin a new transaction with a specific durability hint
@@ -190,17 +237,19 @@ impl TransactionManager {
         &mut self,
         catalog: &vibesql_catalog::Catalog,
         tables: &HashMap<String, Table>,
-        operations: &Operations,
         durability: TransactionDurability,
     ) -> Result<(), StorageError> {
         match self.transaction_state {
             TransactionState::None => {
-                // Create snapshots of catalog, all current tables, and the
+                // Snapshot catalog and all current tables eagerly. The
                 // index/spatial-index state (which lives in `Operations`,
-                // outside the catalog/tables snapshot).
+                // outside the catalog/tables snapshot) is captured lazily
+                // on the first mutation — see `ensure_operations_snapshot`
+                // and `original_operations` (#5419). A read-only / mid-txn
+                // speculative-read transaction therefore never pays the
+                // index-manager deep clone.
                 let original_catalog = catalog.clone();
                 let original_tables = tables.clone();
-                let original_operations = operations.clone();
 
                 let transaction_id = self.next_transaction_id;
                 self.next_transaction_id += 1;
@@ -219,7 +268,7 @@ impl TransactionManager {
                     id: transaction_id,
                     original_catalog,
                     original_tables,
-                    original_operations,
+                    original_operations: None,
                     savepoints: Vec::new(),
                     changes: Vec::new(),
                     durability,
@@ -312,15 +361,24 @@ impl TransactionManager {
                 original_operations,
                 ..
             } => {
-                // Restore catalog, all tables, AND the index/spatial-index
-                // state from snapshots. Restoring `operations` is required
-                // for correctness: PK/UNIQUE index keys inserted during the
-                // transaction must be undone, otherwise a later legitimate
-                // write spuriously fails the uniqueness check against a
-                // stale, rolled-back key.
+                // Restore catalog and all tables from their snapshots.
                 *catalog = original_catalog.clone();
                 *tables = original_tables.clone();
-                *operations = original_operations.clone();
+
+                // Restore the index/spatial-index state *only if* a snapshot
+                // was taken (#5419 copy-on-write). The snapshot is captured
+                // lazily on the first mutating borrow of `Operations`
+                // (`ensure_operations_snapshot`); if the transaction never
+                // mutated an index — e.g. a read-only / speculative-read
+                // scratch txn — there is nothing to restore and `operations`
+                // is already in its committed state. When a snapshot exists,
+                // restoring it is required for correctness: PK/UNIQUE index
+                // keys inserted during the transaction must be undone,
+                // otherwise a later legitimate write spuriously fails the
+                // uniqueness check against a stale, rolled-back key (#5413).
+                if let Some(snapshot) = original_operations {
+                    *operations = snapshot.clone();
+                }
                 self.transaction_state = TransactionState::None;
                 Ok(())
             }
@@ -648,7 +706,7 @@ mod snapshot_capture_tests {
         //   - xmin_active = 2 (one past self)
         let (catalog, tables) = empty_catalog_and_tables();
         let mut mgr = TransactionManager::new();
-        mgr.begin_transaction(&catalog, &tables, &Operations::new()).unwrap();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
 
         let snap = mgr.current_snapshot().expect("snapshot present after BEGIN");
         assert_eq!(snap.xmin_active, 2);
@@ -663,10 +721,10 @@ mod snapshot_capture_tests {
         let (catalog, tables) = empty_catalog_and_tables();
         let mut mgr = TransactionManager::new();
 
-        mgr.begin_transaction(&catalog, &tables, &Operations::new()).unwrap();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
         mgr.commit_transaction().unwrap();
 
-        mgr.begin_transaction(&catalog, &tables, &Operations::new()).unwrap();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
         let snap = mgr.current_snapshot().expect("second snapshot present");
         // #5207: xmax_committed = self (= 2), xmin_active = self + 1 (= 3)
         assert_eq!(snap.xmin_active, 3);
@@ -680,7 +738,7 @@ mod snapshot_capture_tests {
         // return the same data. This is the snapshot-isolation contract.
         let (catalog, tables) = empty_catalog_and_tables();
         let mut mgr = TransactionManager::new();
-        mgr.begin_transaction(&catalog, &tables, &Operations::new()).unwrap();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
 
         let snap1 = mgr.current_snapshot().cloned().unwrap();
         let snap2 = mgr.current_snapshot().cloned().unwrap();
@@ -710,10 +768,10 @@ mod snapshot_capture_tests {
         let (mut catalog, mut tables) = empty_catalog_and_tables();
         let mut mgr = TransactionManager::new();
 
-        mgr.begin_transaction(&catalog, &tables, &Operations::new()).unwrap();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
         mgr.rollback_transaction(&mut catalog, &mut tables, &mut Operations::new()).unwrap();
 
-        mgr.begin_transaction(&catalog, &tables, &Operations::new()).unwrap();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
         let snap = mgr.current_snapshot().unwrap();
         // First txn id was 1 (rolled back). Second txn id is 2.
         // #5207: xmax_committed = self (= 2), xmin_active = self + 1 (= 3).
@@ -729,7 +787,7 @@ mod snapshot_capture_tests {
         // "see-your-own-writes" invariant.
         let (catalog, tables) = empty_catalog_and_tables();
         let mut mgr = TransactionManager::new();
-        mgr.begin_transaction(&catalog, &tables, &Operations::new()).unwrap();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
         let my_id = mgr.transaction_id().unwrap();
         let snap = mgr.current_snapshot().unwrap();
 
@@ -764,7 +822,7 @@ mod snapshot_capture_tests {
         // safe to reclaim. Horizon = 2.
         let (catalog, tables) = empty_catalog_and_tables();
         let mut mgr = TransactionManager::new();
-        mgr.begin_transaction(&catalog, &tables, &Operations::new()).unwrap();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
         mgr.commit_transaction().unwrap();
         assert_eq!(mgr.compute_gc_horizon(), 2);
     }
@@ -777,7 +835,7 @@ mod snapshot_capture_tests {
         // Single-writer: snapshot.xmin_active = txn_id + 1 = 2.
         let (catalog, tables) = empty_catalog_and_tables();
         let mut mgr = TransactionManager::new();
-        mgr.begin_transaction(&catalog, &tables, &Operations::new()).unwrap();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
         let horizon = mgr.compute_gc_horizon();
         let snap = mgr.current_snapshot().unwrap();
         assert_eq!(horizon, snap.xmin_active);
@@ -790,7 +848,7 @@ mod snapshot_capture_tests {
         let (catalog, tables) = empty_catalog_and_tables();
         let mut mgr = TransactionManager::new();
         for _ in 0..2 {
-            mgr.begin_transaction(&catalog, &tables, &Operations::new()).unwrap();
+            mgr.begin_transaction(&catalog, &tables).unwrap();
             mgr.commit_transaction().unwrap();
         }
         assert_eq!(mgr.compute_gc_horizon(), 3);
@@ -803,11 +861,11 @@ mod snapshot_capture_tests {
         let (catalog, tables) = empty_catalog_and_tables();
         let mut mgr = TransactionManager::new();
         for _ in 0..2 {
-            mgr.begin_transaction(&catalog, &tables, &Operations::new()).unwrap();
+            mgr.begin_transaction(&catalog, &tables).unwrap();
             mgr.commit_transaction().unwrap();
         }
         // Third txn begins (txn_id = 3), and stays active.
-        mgr.begin_transaction(&catalog, &tables, &Operations::new()).unwrap();
+        mgr.begin_transaction(&catalog, &tables).unwrap();
         let horizon = mgr.compute_gc_horizon();
         // Snapshot's xmin_active = txn_id + 1 = 4 under single-writer
         // self-write widening (#5207).

@@ -1234,6 +1234,40 @@ mod tests {
         assert_eq!(machine.last_applied(), 1);
     }
 
+    /// #5419: a speculative read whose buffer contains no index-mutating
+    /// statements must NOT deep-clone the `Operations` (IndexManager)
+    /// rollback snapshot. Before #5419 the snapshot was eager, so the
+    /// scratch transaction every `speculative_query` opens cloned the
+    /// entire index manager per read — O(index-keys) per mid-txn read on a
+    /// replicated session. With copy-on-write the read-only scratch txn
+    /// triggers zero clones. Asserted deterministically via the clone
+    /// counter (no timing).
+    #[test]
+    fn read_only_speculative_query_does_not_clone_operations_snapshot() {
+        let machine = VibesqlStateMachine::new();
+        // Seed a committed row so the index manager is non-empty (an eager
+        // clone would be observable work).
+        create_users(&machine, 1);
+        machine.apply(2, &TxnEntry::single("INSERT INTO users VALUES (1, 'alice')")).unwrap();
+
+        let before = machine.inspect_db(|db| db.operations_snapshot_clones());
+
+        // Empty buffer => the scratch transaction only reads; it never
+        // mutates an index, so the COW snapshot is never taken.
+        let empty: [&str; 0] = [];
+        let rows = machine
+            .speculative_query(&TxnEntry::batch(empty), "SELECT name FROM users ORDER BY id")
+            .unwrap();
+        let seen: Vec<String> = rows.into_iter().map(|r| r[0].to_string()).collect();
+        assert_eq!(seen, vec!["alice"], "read-only speculative read sees committed state");
+
+        let after = machine.inspect_db(|db| db.operations_snapshot_clones());
+        assert_eq!(
+            after, before,
+            "a read-only speculative query must not deep-clone the Operations snapshot (#5419)"
+        );
+    }
+
     /// commit_ts = log index: every MVCC stamp written by entry `N`
     /// carries `xmin = N`. Only observable with the MVCC feature on
     /// (stamping is compiled out otherwise).

@@ -326,6 +326,7 @@ impl Database {
 
         // Invalidate columnar cache before dropping
         self.columnar_cache.invalidate(name);
+        self.snapshot_operations_for_mutation();
         self.operations.drop_table(&mut self.catalog, &mut self.tables, name)
     }
 
@@ -346,6 +347,7 @@ impl Database {
         let txn_id = self.transaction_id();
         crate::mvcc::stamp_xmin_for_write(&mut row, txn_id);
 
+        self.snapshot_operations_for_mutation();
         let row_index =
             self.operations.insert_row(&self.catalog, &mut self.tables, table_name, row.clone())?;
 
@@ -426,6 +428,7 @@ impl Database {
             crate::mvcc::stamp_xmin_for_write(row, txn_id);
         }
 
+        self.snapshot_operations_for_mutation();
         let row_indices = self.operations.insert_rows_batch(
             &self.catalog,
             &mut self.tables,
@@ -623,6 +626,7 @@ impl Database {
         table_mut.update_row_selective(row_index, new_row.clone(), &changed_columns)?;
 
         // Update user-defined indexes (pass changed_columns to skip unaffected indexes)
+        self.snapshot_operations_for_mutation();
         self.operations.update_indexes_for_update(
             &self.catalog,
             &resolved_name,
