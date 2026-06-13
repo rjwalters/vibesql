@@ -142,6 +142,60 @@ impl IndexManager {
         self.resource_tracker = ResourceTracker::new();
     }
 
+    // ========================================================================
+    // Disk-backed index transaction undo-logging (issue #5425)
+    // ========================================================================
+    //
+    // `IndexData::DiskBacked` clones as a shallow `Arc<Mutex<BTreeIndex>>` bump,
+    // so the copy-on-write `Operations` rollback snapshot (#5413/#5419) shares
+    // the *same* live B+ tree as the transaction — restoring the shallow clone
+    // does not undo spilled-index mutations. Instead, when a mutating
+    // transaction begins we arm a per-tree undo-log; ROLLBACK reverses it and
+    // COMMIT discards it. Cost is proportional to the transaction's own
+    // mutations, not to the (by definition large) spilled index size.
+
+    /// Arm transaction undo-logging on every disk-backed B+ tree.
+    ///
+    /// Called at the copy-on-write snapshot chokepoint, just before the first
+    /// index mutation inside a transaction. In-memory / vector indexes are
+    /// unaffected (they are restored by the snapshot clone as before).
+    pub fn begin_disk_undo_logging(&mut self) {
+        for index_data in self.index_data.values_mut() {
+            if let IndexData::DiskBacked { btree, .. } = index_data {
+                if let Ok(mut guard) = acquire_btree_lock(btree) {
+                    guard.begin_undo_logging();
+                }
+            }
+        }
+    }
+
+    /// Reverse and disable the undo-log on every disk-backed B+ tree
+    /// (ROLLBACK path), restoring each spilled index to its pre-transaction
+    /// state.
+    pub fn rollback_disk_undo_logs(&mut self) {
+        for index_data in self.index_data.values_mut() {
+            if let IndexData::DiskBacked { btree, .. } = index_data {
+                if let Ok(mut guard) = acquire_btree_lock(btree) {
+                    if let Err(e) = guard.rollback_undo_log() {
+                        log::warn!("Failed to roll back disk-backed index undo-log: {:?}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Disable and discard the undo-log on every disk-backed B+ tree
+    /// (COMMIT path — the mutations are already persisted in the trees).
+    pub fn clear_disk_undo_logs(&mut self) {
+        for index_data in self.index_data.values_mut() {
+            if let IndexData::DiskBacked { btree, .. } = index_data {
+                if let Ok(mut guard) = acquire_btree_lock(btree) {
+                    guard.clear_undo_log();
+                }
+            }
+        }
+    }
+
     /// Check if an index exists
     pub fn index_exists(&self, index_name: &str) -> bool {
         let normalized = normalize_index_name(index_name);
@@ -644,5 +698,248 @@ mod tests {
                 other => panic!("expected DiskBacked after spill, got {:?}", other),
             }
         }
+    }
+
+    // ========================================================================
+    // Spilled-index transaction rollback / commit (issue #5425)
+    // ========================================================================
+
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+
+    use crate::database::indexes::index_operations::normalize_for_comparison;
+
+    /// Normalize an integer key the same way the insert/maintenance path does.
+    fn normalize_int(k: i64) -> SqlValue {
+        normalize_for_comparison(&SqlValue::Integer(k))
+    }
+
+    /// Build a manager holding a single-column integer index on table `t`,
+    /// seeded with `(key, row_id)` entries, then spill it to disk. Returns the
+    /// manager, the table schema, and the TempDir backing the index file.
+    fn spilled_index_manager(
+        index_name: &str,
+        seed: &[(i64, usize)],
+    ) -> (IndexManager, TableSchema, TempDir) {
+        let temp_dir = TempDir::new().unwrap();
+        let mut manager = IndexManager::new();
+        manager.set_database_path(temp_dir.path().to_path_buf());
+
+        let schema = TableSchema::new(
+            "t".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+        );
+
+        // Seed with normalized keys, matching how the real insert/maintenance
+        // path stores them (integers normalize to Double — see
+        // `normalize_for_comparison`). This keeps the seeded B+ tree, its
+        // inferred key schema, and the maintenance-path mutations consistent.
+        let mut data: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
+        for (k, row_id) in seed {
+            data.entry(vec![normalize_int(*k)]).or_default().push(*row_id);
+        }
+
+        manager.indexes.insert(
+            index_name.to_string(),
+            IndexMetadata {
+                index_name: index_name.to_string(),
+                table_name: "t".to_string(),
+                unique: false,
+                columns: vec![vibesql_ast::IndexColumn::new_column(
+                    "id".to_string(),
+                    vibesql_ast::OrderDirection::Asc,
+                )],
+                where_clause: None,
+            },
+        );
+        manager
+            .index_data
+            .insert(index_name.to_string(), IndexData::InMemory { data, pending_deletions: vec![] });
+
+        manager.spill_index_to_disk(index_name).unwrap();
+        match manager.index_data.get(index_name).unwrap() {
+            IndexData::DiskBacked { .. } => {}
+            other => panic!("expected DiskBacked after spill, got {:?}", other),
+        }
+
+        (manager, schema, temp_dir)
+    }
+
+    /// Read the row_ids stored under `key` in a disk-backed index.
+    fn disk_lookup(manager: &IndexManager, index_name: &str, key: i64) -> Vec<usize> {
+        match manager.index_data.get(index_name).unwrap() {
+            IndexData::DiskBacked { btree, .. } => {
+                let guard = acquire_btree_lock(btree).unwrap();
+                let mut rows = guard.lookup(&vec![normalize_int(key)]).unwrap();
+                rows.sort_unstable();
+                rows
+            }
+            other => panic!("expected DiskBacked, got {:?}", other),
+        }
+    }
+
+    fn row(id: i64) -> Row {
+        Row::new(vec![SqlValue::Integer(id)])
+    }
+
+    /// #5425 core: a transaction that mutates a *spilled* (disk-backed) index
+    /// and then ROLLBACKs must leave the index identical to its pre-transaction
+    /// state. Before the undo-log fix the shallow `Arc<Mutex<BTreeIndex>>` clone
+    /// meant rollback was a no-op for spilled indexes and these mutations
+    /// survived.
+    #[test]
+    fn spilled_index_rollback_restores_state() {
+        let (mut manager, schema, _dir) =
+            spilled_index_manager("idx_t_id", &[(10, 0), (20, 1)]);
+
+        // Begin the (simulated) transaction: arm undo-logging on disk-backed
+        // indexes — exactly what the COW snapshot chokepoint does on the first
+        // index mutation.
+        manager.begin_disk_undo_logging();
+
+        // Mutate the spilled index through the real maintenance entry points.
+        manager.add_to_indexes_for_insert("t", &schema, &row(30), 2);
+        manager.add_to_indexes_for_insert("t", &schema, &row(10), 3); // duplicate key
+        manager.update_indexes_for_delete_with_values(
+            "t",
+            &schema,
+            &[SqlValue::Integer(20)],
+            1,
+        );
+
+        // Sanity: mutations are visible mid-transaction.
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 30), vec![2]);
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 10), vec![0, 3]);
+        assert!(disk_lookup(&manager, "idx_t_id", 20).is_empty());
+
+        // ROLLBACK.
+        manager.rollback_disk_undo_logs();
+
+        assert!(
+            disk_lookup(&manager, "idx_t_id", 30).is_empty(),
+            "inserted key must be undone on ROLLBACK"
+        );
+        assert_eq!(
+            disk_lookup(&manager, "idx_t_id", 10),
+            vec![0],
+            "duplicate row inserted in txn must be undone, original preserved"
+        );
+        assert_eq!(
+            disk_lookup(&manager, "idx_t_id", 20),
+            vec![1],
+            "deleted key must be restored on ROLLBACK"
+        );
+    }
+
+    /// #5425: COMMIT of a spilled-index transaction must persist the mutations
+    /// (clearing the undo-log must not reverse anything).
+    #[test]
+    fn spilled_index_commit_persists_state() {
+        let (mut manager, schema, _dir) =
+            spilled_index_manager("idx_t_id", &[(10, 0), (20, 1)]);
+
+        manager.begin_disk_undo_logging();
+        manager.add_to_indexes_for_insert("t", &schema, &row(30), 2);
+        manager.update_indexes_for_delete_with_values(
+            "t",
+            &schema,
+            &[SqlValue::Integer(20)],
+            1,
+        );
+
+        // COMMIT: discard the undo-log without reversing.
+        manager.clear_disk_undo_logs();
+
+        assert_eq!(
+            disk_lookup(&manager, "idx_t_id", 30),
+            vec![2],
+            "committed insert must persist on a spilled index"
+        );
+        assert!(
+            disk_lookup(&manager, "idx_t_id", 20).is_empty(),
+            "committed delete must persist on a spilled index"
+        );
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 10), vec![0]);
+    }
+
+    /// #5425 + #5413/#5419: a transaction that mutates BOTH an in-memory index
+    /// and a spilled (disk-backed) index on the same table must restore both on
+    /// ROLLBACK. The in-memory index is restored by the copy-on-write snapshot
+    /// clone (modeled here by cloning before mutating and restoring after);
+    /// the disk-backed index is restored by the undo-log. This mirrors the
+    /// `rollback_transaction` sequence (reverse disk undo-log, then restore the
+    /// snapshot clone).
+    #[test]
+    fn mixed_in_memory_and_disk_backed_indexes_both_roll_back() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut manager = IndexManager::new();
+        manager.set_database_path(temp_dir.path().to_path_buf());
+
+        let schema = TableSchema::new(
+            "t".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+        );
+
+        let mk_meta = |name: &str| IndexMetadata {
+            index_name: name.to_string(),
+            table_name: "t".to_string(),
+            unique: false,
+            columns: vec![vibesql_ast::IndexColumn::new_column(
+                "id".to_string(),
+                vibesql_ast::OrderDirection::Asc,
+            )],
+            where_clause: None,
+        };
+
+        // In-memory index (normalized keys, matching the maintenance path).
+        let mut mem_data: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
+        mem_data.entry(vec![normalize_int(10)]).or_default().push(0);
+        manager.indexes.insert("idx_mem".to_string(), mk_meta("idx_mem"));
+        manager
+            .index_data
+            .insert("idx_mem".to_string(), IndexData::InMemory { data: mem_data, pending_deletions: vec![] });
+
+        // Disk-backed (spilled) index.
+        let mut disk_data: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
+        disk_data.entry(vec![normalize_int(10)]).or_default().push(0);
+        manager.indexes.insert("idx_disk".to_string(), mk_meta("idx_disk"));
+        manager
+            .index_data
+            .insert("idx_disk".to_string(), IndexData::InMemory { data: disk_data, pending_deletions: vec![] });
+        manager.spill_index_to_disk("idx_disk").unwrap();
+
+        // BEGIN: copy-on-write snapshot of the whole manager (restores in-memory
+        // indexes), and arm undo-logging on disk-backed indexes.
+        let snapshot = manager.clone();
+        manager.begin_disk_undo_logging();
+
+        // Mutate both indexes (one insert hits every matching index for the table).
+        manager.add_to_indexes_for_insert("t", &schema, &row(30), 1);
+
+        // Mid-txn both are mutated.
+        match manager.index_data.get("idx_mem").unwrap() {
+            IndexData::InMemory { data, .. } => {
+                assert!(data.contains_key(&vec![normalize_int(30)]), "in-memory mutated");
+            }
+            other => panic!("expected InMemory, got {:?}", other),
+        }
+        assert_eq!(disk_lookup(&manager, "idx_disk", 30), vec![1], "disk-backed mutated");
+
+        // ROLLBACK: reverse the disk-backed undo-log first, then restore the
+        // snapshot clone (this is exactly what `rollback_transaction` does).
+        manager.rollback_disk_undo_logs();
+        manager = snapshot;
+
+        // In-memory index restored by the snapshot clone.
+        match manager.index_data.get("idx_mem").unwrap() {
+            IndexData::InMemory { data, .. } => {
+                assert!(!data.contains_key(&vec![normalize_int(30)]), "in-memory rolled back");
+                assert!(data.contains_key(&vec![normalize_int(10)]));
+            }
+            other => panic!("expected InMemory, got {:?}", other),
+        }
+        // Disk-backed index restored by the undo-log (the snapshot clone shares
+        // the same now-reverted B+ tree Arc).
+        assert!(disk_lookup(&manager, "idx_disk", 30).is_empty(), "disk-backed rolled back");
+        assert_eq!(disk_lookup(&manager, "idx_disk", 10), vec![0]);
     }
 }

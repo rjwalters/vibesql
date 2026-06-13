@@ -229,8 +229,15 @@ impl BTreeIndex {
         // 3. Root is the single remaining node
         let root_page_id = current_level[0];
 
-        let index =
-            BTreeIndex { root_page_id, key_schema, degree, height, page_manager, metadata_page_id };
+        let index = BTreeIndex {
+            root_page_id,
+            key_schema,
+            degree,
+            height,
+            page_manager,
+            metadata_page_id,
+            undo_log: None,
+        };
 
         // Save metadata without syncing (we'll sync once at the end)
         index.save_metadata_no_sync()?;

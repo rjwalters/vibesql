@@ -1515,6 +1515,31 @@ impl Operations {
         }
     }
 
+    // ========================================================================
+    // Disk-backed index transaction undo-logging (issue #5425)
+    // ========================================================================
+
+    /// Arm transaction undo-logging on all disk-backed (spilled) indexes.
+    ///
+    /// Disk-backed indexes are not undone by the copy-on-write `Operations`
+    /// rollback snapshot (the snapshot shares the same `Arc<Mutex<BTreeIndex>>`),
+    /// so a per-tree undo-log is recorded for the duration of a mutating
+    /// transaction. See [`super::indexes::IndexManager::begin_disk_undo_logging`].
+    pub fn begin_disk_undo_logging(&mut self) {
+        self.index_manager.begin_disk_undo_logging();
+    }
+
+    /// Reverse the disk-backed index undo-logs (ROLLBACK path), restoring each
+    /// spilled index to its pre-transaction state.
+    pub fn rollback_disk_undo_logs(&mut self) {
+        self.index_manager.rollback_disk_undo_logs();
+    }
+
+    /// Discard the disk-backed index undo-logs (COMMIT path — already persisted).
+    pub fn clear_disk_undo_logs(&mut self) {
+        self.index_manager.clear_disk_undo_logs();
+    }
+
     /// Reset the operations manager to empty state (clears all indexes).
     ///
     /// Clears all index data but preserves configuration (database path, storage backend, config).

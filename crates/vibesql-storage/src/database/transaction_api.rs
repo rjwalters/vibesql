@@ -57,6 +57,12 @@ impl Database {
 
         self.lifecycle.transaction_manager_mut().commit_transaction()?;
 
+        // #5425: Discard the disk-backed index undo-logs armed during this
+        // transaction. The spilled-index mutations are already persisted in
+        // their B+ trees, so COMMIT simply stops recording and drops the log.
+        // No-op when nothing spilled or the transaction never mutated an index.
+        self.operations.clear_disk_undo_logs();
+
         // SQLite: PRAGMA defer_foreign_keys is automatically reset to OFF at
         // every COMMIT (R-21752-26913, fkey6-1.10.1). This is a session-level
         // flag, so reset it here regardless of FK enforcement state.
