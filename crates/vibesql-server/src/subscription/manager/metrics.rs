@@ -31,6 +31,13 @@ impl SubscriptionManager {
         self.result_set_exceeded_count.load(Ordering::Relaxed)
     }
 
+    /// Get the number of replicated subscription re-queries saved by coalescing
+    /// apply-path change events (#5456). A larger value means more redundant
+    /// re-queries were collapsed (e.g. a busy table or large multi-row write).
+    pub fn replicated_requeries_coalesced(&self) -> usize {
+        self.replicated_requeries_coalesced.load(Ordering::Relaxed)
+    }
+
     /// Get metrics for a specific subscription
     ///
     /// Returns metrics including updates sent, dropped, and channel health.
