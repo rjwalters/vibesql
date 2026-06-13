@@ -397,11 +397,17 @@ fn raise_fail_keeps_partial_statement_changes_with_after_trigger() {
 
     // FAIL keeps the rows applied before the trigger fired: row 1 (earlier
     // statement), row 2 ('okA'), and row 3 ('BAD' — inserted before its AFTER
-    // trigger raised). Row 4 ('okB') was never reached.
-    assert_eq!(ints(&db, "t", "id"), vec![1, 2, 3]);
+    // trigger raised). Row 4 ('okB') was never reached. Asserted through the
+    // live SELECT path (not raw `Table::scan()`): the offending 'BAD' row must
+    // be genuinely live, not a bitmap tombstone (#5474). sqlite3 3.51.0:
+    // `1|before, 2|okA, 3|BAD`.
     assert_eq!(
-        texts(&db, "t", "v"),
-        vec!["before".to_string(), "okA".to_string(), "BAD".to_string()]
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![
+            vec![ipk(1), SqlValue::Varchar("before".into())],
+            vec![ipk(2), SqlValue::Varchar("okA".into())],
+            vec![ipk(3), SqlValue::Varchar("BAD".into())],
+        ],
     );
 }
 
@@ -464,23 +470,22 @@ fn autocommit_after_insert_abort_rolls_back_whole_statement() {
 /// RAISE(FAIL) keeps the rows the statement applied before the abort, even in
 /// auto-commit — the implicit transaction commits (rather than rolls back) for
 /// FAIL. This is the FAIL-vs-ABORT distinction made observable in auto-commit by
-/// #5464.
+/// #5464, with the offending-row visibility corrected in #5474.
 ///
 /// sqlite3 3.51.0 (live read):
 ///   INSERT INTO t VALUES (2,'okA'),(3,'BAD'),(4,'okB');  -- Error: boom
 ///   SELECT id FROM t;  -- 2, 3  (okA + the BAD row inserted before its AFTER
 ///                                trigger raised; okB never reached)
 ///
-/// VibeSQL keeps the pre-offending row (okA) — the #5464 deliverable: FAIL does
-/// NOT roll back the whole statement (contrast ABORT, which does). The offending
-/// row (BAD) itself is *not* surfaced through the live SELECT path: VibeSQL's
-/// per-row AFTER-trigger handler unconditionally tombstones the offending row
-/// when its trigger errors (a pre-existing executor quirk independent of #5464 —
-/// see the FAIL section of raise_scope.rs / follow-on issue). What #5464 fixes is
-/// that okA survives at all (previously the distinction was unobservable in
-/// auto-commit, where FAIL behaved like ABORT only by accident of read path).
+/// Both rows must be present through the live SELECT path: okA (the row applied
+/// before the offending one) AND BAD (the offending row itself — an AFTER INSERT
+/// trigger fires *after* the row is inserted, so SQLite keeps it under FAIL).
+/// Before #5474 the per-row AFTER-trigger handler unconditionally tombstoned the
+/// offending row on any trigger error, so a live SELECT saw only okA; #5474
+/// removes that ad-hoc tombstone and lets `run_top_level_dml` keep the FAIL
+/// changes intact.
 #[test]
-fn autocommit_after_insert_fail_keeps_pre_offending_rows() {
+fn autocommit_after_insert_fail_keeps_pre_offending_and_offending_rows() {
     let mut db = db_with_trigger("AFTER INSERT", "FAIL");
 
     match exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (2, 'okA'), (3, 'BAD'), (4, 'okB')") {
@@ -491,13 +496,17 @@ fn autocommit_after_insert_fail_keeps_pre_offending_rows() {
     }
 
     assert!(!db.in_transaction(), "auto-commit must not leak an open transaction");
-    // FAIL keeps the row applied before the offending row (okA); okB was never
+    // FAIL keeps the row applied before the offending row (okA) AND the offending
+    // row itself (BAD — inserted before its AFTER trigger fired); okB was never
     // reached. Crucially this is NOT empty — FAIL did not roll back the whole
     // statement the way ABORT does (see
     // `autocommit_after_insert_abort_rolls_back_whole_statement`).
     assert_eq!(
         select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
-        vec![vec![ipk(2), SqlValue::Varchar("okA".into())]],
+        vec![
+            vec![ipk(2), SqlValue::Varchar("okA".into())],
+            vec![ipk(3), SqlValue::Varchar("BAD".into())],
+        ],
     );
 }
 
@@ -523,6 +532,36 @@ fn autocommit_before_insert_abort_rolls_back_whole_statement() {
         select_rows(&db, "SELECT id FROM t ORDER BY id"),
         Vec::<Vec<SqlValue>>::new(),
         "ABORT undoes okA (applied before the BAD row's BEFORE trigger raised)"
+    );
+}
+
+/// BEFORE INSERT trigger that RAISE(FAIL)s on a later row of a multi-row INSERT,
+/// in auto-commit: rows applied before the offending row are KEPT, but the
+/// offending row itself is NOT — a BEFORE trigger fires *before* the row is
+/// inserted, so the FAILing row never lands. This is the BEFORE/AFTER contrast
+/// of #5474: under FAIL an AFTER trigger keeps the offending row, a BEFORE
+/// trigger does not.
+///
+/// sqlite3 3.51.0 (live read):
+///   INSERT INTO t VALUES (2,'okA'),(3,'BAD'),(4,'okB');  -- Error: boom
+///   SELECT id,v FROM t;  -- 2|okA  (okB never reached; BAD never inserted)
+#[test]
+fn autocommit_before_insert_fail_keeps_pre_offending_rows_only() {
+    let mut db = db_with_trigger("BEFORE INSERT", "FAIL");
+
+    match exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (2, 'okA'), (3, 'BAD'), (4, 'okB')") {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Fail);
+        }
+        other => panic!("expected RAISE(FAIL), got {:?}", other),
+    }
+
+    assert!(!db.in_transaction());
+    // Only okA survives: the BEFORE trigger raised before the BAD row was
+    // inserted, so unlike the AFTER case the offending row is absent.
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![vec![ipk(2), SqlValue::Varchar("okA".into())]],
     );
 }
 
