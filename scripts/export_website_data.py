@@ -132,6 +132,20 @@ class BenchmarkData:
             return None
         return max(suite_runs, key=lambda x: x[0])  # Max by RUN_ID
 
+    def table_exists(self, table: str) -> bool:
+        """Check whether a table exists in the database.
+
+        Some result DBs (e.g. environments where a particular benchmark has
+        never run) may not have every table. Callers should use this before
+        querying optional tables so a missing table degrades gracefully rather
+        than raising.
+        """
+        self.cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        )
+        return self.cursor.fetchone() is not None
+
     def get_table_results(self, table: str) -> List[tuple]:
         """Get all results from a table (cached)."""
         if table not in self._results_cache:
@@ -263,6 +277,61 @@ def export_sysbench_benchmarks(data: BenchmarkData) -> Optional[Dict]:
     return {
         "benchmarks": benchmarks,
         "metadata": {"suite": "sysbench", "timestamp": latest_timestamp, "git_commit": latest_commit, "table_size": latest_scale}
+    }
+
+
+def export_hnsw_recall_benchmarks(data: BenchmarkData) -> Optional[Dict]:
+    """Export HNSW recall@k results to JSON format.
+
+    Surfaces the latest HNSW recall benchmark run: recall@k measured across
+    index states (fresh / degraded-by-lazy-deletes / compacted) over a sweep of
+    ef_search and delete ratio. This is a *quality* metric (fraction of true
+    k-nearest neighbours returned vs brute-force ground truth), distinct from
+    the latency-oriented suites. See #5466 / #5480.
+
+    Returns a valid (possibly empty) payload so the web demo can render
+    gracefully even when no recall data has been collected. Returns None only
+    when the optional results table does not exist at all.
+    """
+    if not data.table_exists('hnsw_recall_results'):
+        return None
+
+    columns = data.get_table_columns('hnsw_recall_results')
+    col = {name: idx for idx, name in enumerate(columns)}
+
+    run = data.get_latest_run('hnsw')
+    if not run:
+        # Table exists but no run recorded yet — emit a valid empty payload.
+        return {
+            "measurements": [],
+            "metadata": {"suite": "hnsw_recall", "timestamp": None, "git_commit": None},
+        }
+
+    run_id, timestamp, commit = run[0], run[1], run[2]
+    results = data.get_results_for_run('hnsw_recall_results', run_id)
+
+    measurements = []
+    for row in results:
+        def field(name: str) -> Any:
+            idx = col.get(name)
+            return row[idx] if idx is not None and idx < len(row) else None
+
+        recall = field('recall')
+        measurements.append({
+            "k": field('k'),
+            "dataset_size": field('dataset_size'),
+            "dimensions": field('dimensions'),
+            "ef_search": field('ef_search_param'),
+            "delete_ratio": field('delete_ratio'),
+            "live_count": field('live_count'),
+            "deleted_count": field('deleted_count'),
+            "index_state": field('index_state'),
+            "recall": round(recall, 4) if recall is not None else None,
+        })
+
+    return {
+        "measurements": measurements,
+        "metadata": {"suite": "hnsw_recall", "timestamp": timestamp, "git_commit": commit},
     }
 
 
@@ -535,6 +604,55 @@ def export_trends(data: BenchmarkData) -> Dict:
             trends["sysbench"] = {
                 "suite": "sysbench", "display_name": "Sysbench",
                 "description": "OLTP micro-benchmarks", "data": sysbench_data
+            }
+
+    # HNSW recall@k trends (vector index quality under delete-heavy workloads)
+    # Stored in the optional hnsw_recall_results table (see #5466 / #5480).
+    # Each run records recall@k across index states (fresh / degraded /
+    # compacted) over a sweep of ef_search and delete ratio. We surface, per
+    # run, the mean recall for each index state so the headline regression
+    # — recall collapse under lazy deletes ("degraded") and its recovery via
+    # compaction — is visible over time next to the TPC / sysbench suites.
+    if data.table_exists('hnsw_recall_results'):
+        hnsw_runs = data.get_runs_by_suite('hnsw')
+        hnsw_columns = data.get_table_columns('hnsw_recall_results')
+        state_idx = hnsw_columns.index('index_state')
+        recall_idx = hnsw_columns.index('recall')
+
+        hnsw_data = []
+        for run in hnsw_runs:
+            run_id, timestamp, commit = run[0], run[1], run[2]
+            results = data.get_results_for_run('hnsw_recall_results', run_id)
+
+            # Bucket recall measurements by index state for this run.
+            state_recalls: Dict[str, List[float]] = {}
+            for row in results:
+                state = row[state_idx]
+                recall = row[recall_idx]
+                if state is None or recall is None:
+                    continue
+                state_recalls.setdefault(state, []).append(recall)
+
+            if not state_recalls:
+                continue
+
+            point: Dict[str, Any] = {
+                "date": timestamp[:10] if timestamp else "",
+                "timestamp": timestamp or "",
+                "commit": commit or "",
+            }
+            for state in ('fresh', 'degraded', 'compacted'):
+                vals = state_recalls.get(state)
+                if vals:
+                    point[f"recall_{state}"] = round(sum(vals) / len(vals), 4)
+            hnsw_data.append(point)
+
+        if hnsw_data:
+            trends["hnsw_recall"] = {
+                "suite": "hnsw_recall", "display_name": "HNSW Recall@k",
+                "description": "Vector index recall under delete-heavy workloads",
+                "metric": "recall", "metric_label": "Recall@k",
+                "data": hnsw_data
             }
 
     commit, _ = get_git_info()
@@ -1007,6 +1125,14 @@ def main():
             sqlite_count = tpcds['metadata']['sqlite_queries']
             duckdb_count = tpcds['metadata']['duckdb_queries']
             print(f"  TPC-DS: {len(tpcds['benchmarks'])} benchmarks (V:{vibesql_count} S:{sqlite_count} D:{duckdb_count}) -> {path.name}")
+            exported.append(path)
+
+        hnsw_recall = export_hnsw_recall_benchmarks(data)
+        if hnsw_recall is not None:
+            path = benchmarks_dir / "hnsw_recall_results.json"
+            with open(path, 'w') as f:
+                json.dump(hnsw_recall, f, indent=2)
+            print(f"  HNSW Recall: {len(hnsw_recall['measurements'])} measurements -> {path.name}")
             exported.append(path)
 
         tpch = export_tpch_benchmarks(data)
