@@ -44,7 +44,8 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use vibesql_consensus::{
-    ApplyOutcome, ClusterConfig, ConsensusError, LogIndex, MvccRaftNode, RaftTuning, Role, TxnEntry,
+    ApplyOutcome, ClusterConfig, ConsensusError, LogIndex, MvccRaftNode, QueryResult, RaftTuning,
+    Role, TxnEntry,
 };
 
 use crate::config::ReplicationConfig;
@@ -269,7 +270,7 @@ impl ReplicationHandle {
         &self,
         entry: &TxnEntry,
         select_sql: &str,
-    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>, SqlError> {
+    ) -> Result<QueryResult, SqlError> {
         self.node.speculative_query(entry, select_sql).map_err(|e| self.sql_error("the query", e))
     }
 
@@ -285,7 +286,7 @@ impl ReplicationHandle {
     }
 
     /// Local, stale-allowed read (the default read mode).
-    pub fn query_local(&self, sql: &str) -> Result<Vec<Vec<vibesql_types::SqlValue>>, SqlError> {
+    pub fn query_local(&self, sql: &str) -> Result<QueryResult, SqlError> {
         self.node.query(sql).map_err(|e| self.sql_error("the query", e))
     }
 
@@ -293,7 +294,7 @@ impl ReplicationHandle {
     pub async fn query_linearizable(
         &self,
         sql: &str,
-    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>, SqlError> {
+    ) -> Result<QueryResult, SqlError> {
         self.node.query_linearizable(sql).await.map_err(|e| self.sql_error("the query", e))
     }
 
@@ -302,7 +303,7 @@ impl ReplicationHandle {
         &self,
         max_staleness: Duration,
         sql: &str,
-    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>, SqlError> {
+    ) -> Result<QueryResult, SqlError> {
         self.node
             .query_bounded_staleness(max_staleness, sql)
             .await
@@ -315,7 +316,7 @@ impl ReplicationHandle {
         min_index: LogIndex,
         sql: &str,
         wait: Duration,
-    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>, SqlError> {
+    ) -> Result<QueryResult, SqlError> {
         self.node
             .query_at_least(min_index, sql, wait)
             .await

@@ -34,7 +34,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 
 use vibesql_consensus::{
-    ApplyOutcome, ClusterConfig, ConsensusError, LogIndex, MvccRaftNode, Role,
+    ApplyOutcome, ClusterConfig, ConsensusError, LogIndex, MvccRaftNode, QueryResult, Role,
 };
 use vibesql_types::SqlValue;
 
@@ -297,7 +297,7 @@ async fn linearizable(
     cluster: &MvccTcpCluster,
     id: u64,
     sql: &str,
-) -> Result<Vec<Vec<SqlValue>>, ConsensusError> {
+) -> Result<QueryResult, ConsensusError> {
     tokio::time::timeout(WAIT_TIMEOUT, cluster.node(id).query_linearizable(sql))
         .await
         .expect("query_linearizable must resolve within the bounded wait")
@@ -329,7 +329,7 @@ async fn leader_serves_linearizable_reads_and_followers_redirect() {
     let rows = linearizable(&cluster, leader, "SELECT id, v FROM accounts")
         .await
         .expect("the node that just acknowledged the write must serve a linearizable read");
-    assert_eq!(rows, vec![vec![SqlValue::Integer(1), SqlValue::Varchar("one".into())]]);
+    assert_eq!(rows.rows, vec![vec![SqlValue::Integer(1), SqlValue::Varchar("one".into())]]);
 
     // A follower that knows who leads redirects with that hint.
     let follower = all.iter().copied().find(|id| *id != leader).expect("a follower exists");
@@ -375,7 +375,7 @@ async fn partitioned_stale_leader_is_fenced_from_linearizable_reads() {
     // Pre-partition sanity: the leader serves linearizable reads.
     let seeded = vec![vec![SqlValue::Integer(1), SqlValue::Varchar("one".into())]];
     assert_eq!(
-        linearizable(&cluster, old_leader, "SELECT id, v FROM t ORDER BY id").await.unwrap(),
+        linearizable(&cluster, old_leader, "SELECT id, v FROM t ORDER BY id").await.unwrap().rows,
         seeded
     );
 
@@ -396,7 +396,7 @@ async fn partitioned_stale_leader_is_fenced_from_linearizable_reads() {
 
     // ...while its plain local read stays available (stale-allowed).
     assert_eq!(
-        cluster.node(old_leader).query("SELECT id, v FROM t ORDER BY id").unwrap(),
+        cluster.node(old_leader).query("SELECT id, v FROM t ORDER BY id").unwrap().rows,
         seeded,
         "the minority leader's local read must keep serving the stale prefix"
     );
@@ -417,14 +417,14 @@ async fn partitioned_stale_leader_is_fenced_from_linearizable_reads() {
         vec![SqlValue::Integer(2), SqlValue::Varchar("two".into())],
     ];
     assert_eq!(
-        linearizable(&cluster, new_leader, "SELECT id, v FROM t ORDER BY id").await.unwrap(),
+        linearizable(&cluster, new_leader, "SELECT id, v FROM t ORDER BY id").await.unwrap().rows,
         both
     );
 
     // The minority leader is provably stale now (it cannot have applied
     // the majority write) — its local read still shows only the prefix,
     // and the linearizable path still refuses to serve it.
-    assert_eq!(cluster.node(old_leader).query("SELECT id, v FROM t ORDER BY id").unwrap(), seeded);
+    assert_eq!(cluster.node(old_leader).query("SELECT id, v FROM t ORDER BY id").unwrap().rows, seeded);
     assert!(
         matches!(
             linearizable(&cluster, old_leader, "SELECT id, v FROM t").await,
@@ -454,12 +454,12 @@ async fn partitioned_stale_leader_is_fenced_from_linearizable_reads() {
 
     // ...the leader serves them, and everyone's local state converged.
     assert_eq!(
-        linearizable(&cluster, new_leader, "SELECT id, v FROM t ORDER BY id").await.unwrap(),
+        linearizable(&cluster, new_leader, "SELECT id, v FROM t ORDER BY id").await.unwrap().rows,
         both
     );
     for id in &all {
         assert_eq!(
-            cluster.node(*id).query("SELECT id, v FROM t ORDER BY id").unwrap(),
+            cluster.node(*id).query("SELECT id, v FROM t ORDER BY id").unwrap().rows,
             both,
             "node {id} diverged after the heal"
         );

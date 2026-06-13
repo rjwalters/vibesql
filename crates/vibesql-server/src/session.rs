@@ -5,7 +5,7 @@ use vibesql_executor::{
     CursorExecutor, CursorStore, FetchResult as CursorFetchResult, PreparedStatement,
     PreparedStatementCache, PreparedStatementCacheStats,
 };
-use vibesql_consensus::TxnEntry;
+use vibesql_consensus::{QueryResult, TxnEntry};
 use vibesql_types::SqlValue;
 
 use crate::{
@@ -252,6 +252,18 @@ pub struct Row {
     pub values: Vec<vibesql_types::SqlValue>,
 }
 
+/// Map a replicated-read [`QueryResult`] onto an [`ExecutionResult::Select`],
+/// carrying the executor-resolved column names through to the wire
+/// `RowDescription` and HTTP JSON keys (#5427). The consensus query path
+/// resolves names exactly as standalone does, so a replicated SELECT
+/// labels its columns identically — real names, aliases, derived
+/// expression names, `*`-expansion — instead of `col0`/`col1` placeholders.
+fn select_result(result: QueryResult) -> ExecutionResult {
+    let columns = result.columns.into_iter().map(|name| Column { name }).collect();
+    let rows = result.rows.into_iter().map(|values| Row { values }).collect();
+    ExecutionResult::Select { rows, columns }
+}
+
 impl Session {
     /// Create a new session with a shared database
     ///
@@ -461,7 +473,7 @@ impl Session {
             // Reads: dispatch on the session's read-consistency mode.
             Statement::Select(_) => {
                 let handle = Arc::clone(&state.handle);
-                let rows = match state.read_consistency {
+                let result = match state.read_consistency {
                     ReadConsistency::Local => handle.query_local(sql)?,
                     ReadConsistency::Linearizable => handle.query_linearizable(sql).await?,
                     ReadConsistency::BoundedStaleness => {
@@ -482,15 +494,7 @@ impl Session {
                             .await?
                     }
                 };
-                // Placeholder column names, matching the standalone
-                // SELECT path (which also does not resolve real names
-                // yet — see the TODO there).
-                let columns = rows
-                    .first()
-                    .map(|r| (0..r.len()).map(|i| Column { name: format!("col{i}") }).collect())
-                    .unwrap_or_default();
-                let rows = rows.into_iter().map(|values| Row { values }).collect();
-                Ok(ExecutionResult::Select { rows, columns })
+                Ok(select_result(result))
             }
 
             // Writes: one autocommit statement = one replicated entry.
@@ -860,7 +864,7 @@ impl Session {
                 let handle = Arc::clone(
                     &self.replication.as_ref().expect("execute_in_open_txn without state").handle,
                 );
-                let rows = if buffer_has_writes {
+                let result = if buffer_has_writes {
                     // Read-your-own-writes: replay the frozen buffer into a
                     // discardable leader-local scratch transaction, then read.
                     let entry = self
@@ -874,12 +878,7 @@ impl Session {
                     // No buffered writes yet: serve against committed state.
                     handle.query_local(sql)?
                 };
-                let columns = rows
-                    .first()
-                    .map(|r| (0..r.len()).map(|i| Column { name: format!("col{i}") }).collect())
-                    .unwrap_or_default();
-                let rows = rows.into_iter().map(|values| Row { values }).collect();
-                Ok(ExecutionResult::Select { rows, columns })
+                Ok(select_result(result))
             }
 
             // Writes: freeze + buffer for the COMMIT batch, ack optimistically.
@@ -1042,20 +1041,23 @@ impl Session {
             Statement::Select(select_stmt) => {
                 let db = self.db.read().await;
                 let executor = vibesql_executor::SelectExecutor::new(&db);
-                let rows = executor.execute(select_stmt)?;
+                // Resolve real column names from the SELECT list (aliases,
+                // derived expression names, schema-expanded `*`), matching
+                // the executor's standalone behavior, instead of `col{i}`
+                // placeholders (#5427). The replicated read path resolves
+                // the same way, keeping the two label-for-label identical.
+                let select_result = executor.execute_with_columns(select_stmt)?;
 
-                // Convert to our result format
-                let result_rows: Vec<Row> =
-                    rows.iter().map(|r| Row { values: r.values.to_vec() }).collect();
-
-                // TODO: Get actual column names from select statement
-                let columns = if !rows.is_empty() {
-                    (0..rows[0].values.len())
-                        .map(|i| Column { name: format!("col{}", i) })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+                let result_rows: Vec<Row> = select_result
+                    .rows
+                    .into_iter()
+                    .map(|r| Row { values: r.values.to_vec() })
+                    .collect();
+                let columns = select_result
+                    .columns
+                    .into_iter()
+                    .map(|name| Column { name })
+                    .collect();
 
                 Ok(ExecutionResult::Select { rows: result_rows, columns })
             }
