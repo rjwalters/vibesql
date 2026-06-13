@@ -38,7 +38,6 @@ impl Database {
         self.lifecycle.transaction_manager_mut().begin_transaction_with_durability(
             catalog,
             &self.tables,
-            &self.operations,
             durability,
         )?;
 
@@ -111,6 +110,22 @@ impl Database {
     /// Check if we're currently in a transaction
     pub fn in_transaction(&self) -> bool {
         self.lifecycle.transaction_manager().in_transaction()
+    }
+
+    /// Number of `Operations` (IndexManager) deep-clones taken for
+    /// transaction rollback snapshots since this database was created
+    /// (copy-on-write instrumentation, #5419).
+    ///
+    /// Read-only transactions — including the per-read scratch transaction
+    /// used by replicated read-your-own-writes — never mutate the index
+    /// manager, so they never trigger the lazy clone and leave this counter
+    /// unchanged. A transaction that mutates an index increments it exactly
+    /// once. Exposed so tests can assert deterministically (no timing) that
+    /// the read-only path avoids the deep clone.
+    ///
+    /// See [`crate::database::transactions::TransactionManager::ensure_operations_snapshot`].
+    pub fn operations_snapshot_clones(&self) -> u64 {
+        self.lifecycle.transaction_manager().operations_snapshot_clones()
     }
 
     /// Get current transaction ID (for debugging)

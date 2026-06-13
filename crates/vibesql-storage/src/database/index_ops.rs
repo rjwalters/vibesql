@@ -139,6 +139,7 @@ impl Database {
         unique: bool,
         columns: Vec<IndexColumn>,
     ) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
         self.operations.create_index(
             &self.catalog,
             &self.tables,
@@ -169,6 +170,7 @@ impl Database {
         where_clause: Box<vibesql_ast::Expression>,
         included_row_indices: &std::collections::HashSet<usize>,
     ) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
         self.operations.create_index(
             &self.catalog,
             &self.tables,
@@ -201,6 +203,7 @@ impl Database {
         columns: Vec<IndexColumn>,
         keys: Vec<(Vec<vibesql_types::SqlValue>, usize)>,
     ) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
         self.operations.create_index_with_keys(
             &self.catalog,
             index_name,
@@ -243,6 +246,7 @@ impl Database {
         row_index: usize,
         changed_columns: Option<&std::collections::HashSet<usize>>,
     ) {
+        self.snapshot_operations_for_mutation();
         self.operations.update_indexes_for_update(
             &self.catalog,
             table_name,
@@ -255,6 +259,7 @@ impl Database {
 
     /// Update user-defined indexes for delete operation
     pub fn update_indexes_for_delete(&mut self, table_name: &str, row: &Row, row_index: usize) {
+        self.snapshot_operations_for_mutation();
         self.operations.update_indexes_for_delete(&self.catalog, table_name, row, row_index);
     }
 
@@ -267,11 +272,13 @@ impl Database {
         table_name: &str,
         rows_to_delete: &[(usize, &Row)],
     ) {
+        self.snapshot_operations_for_mutation();
         self.operations.batch_update_indexes_for_delete(&self.catalog, table_name, rows_to_delete);
     }
 
     /// Rebuild user-defined indexes after bulk operations that change row indices
     pub fn rebuild_indexes(&mut self, table_name: &str) {
+        self.snapshot_operations_for_mutation();
         self.operations.rebuild_indexes(&self.catalog, &self.tables, table_name);
     }
 
@@ -284,11 +291,13 @@ impl Database {
     /// * `table_name` - Name of the table whose indexes need adjustment
     /// * `deleted_indices` - Sorted list of deleted row indices (ascending order)
     pub fn adjust_indexes_after_delete(&mut self, table_name: &str, deleted_indices: &[usize]) {
+        self.snapshot_operations_for_mutation();
         self.operations.adjust_indexes_after_delete(table_name, deleted_indices);
     }
 
     /// Drop an index
     pub fn drop_index(&mut self, index_name: &str) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
         self.operations.drop_index(index_name)
     }
 
@@ -301,6 +310,7 @@ impl Database {
         index_name: &str,
         where_clause: Option<Box<vibesql_ast::Expression>>,
     ) -> bool {
+        self.snapshot_operations_for_mutation();
         self.operations.set_index_where_clause(index_name, where_clause)
     }
 
@@ -339,6 +349,7 @@ impl Database {
         row_index: usize,
         included_partial_indexes: &std::collections::HashSet<String>,
     ) {
+        self.snapshot_operations_for_mutation();
         self.operations.add_to_partial_indexes_for_insert(
             &self.catalog,
             table_name,
@@ -358,6 +369,7 @@ impl Database {
         old_included: &std::collections::HashSet<String>,
         new_included: &std::collections::HashSet<String>,
     ) {
+        self.snapshot_operations_for_mutation();
         self.operations.update_partial_indexes_for_update(
             &self.catalog,
             table_name,
@@ -377,6 +389,7 @@ impl Database {
         row_index: usize,
         included_partial_indexes: &std::collections::HashSet<String>,
     ) {
+        self.snapshot_operations_for_mutation();
         self.operations.update_partial_indexes_for_delete_with_values(
             &self.catalog,
             table_name,
@@ -426,6 +439,7 @@ impl Database {
         row_index: usize,
         expression_keys: &std::collections::HashMap<String, Vec<vibesql_types::SqlValue>>,
     ) {
+        self.snapshot_operations_for_mutation();
         self.operations.add_to_expression_indexes_for_insert(
             table_name,
             row_index,
@@ -441,6 +455,7 @@ impl Database {
         old_expression_keys: &std::collections::HashMap<String, Vec<vibesql_types::SqlValue>>,
         new_expression_keys: &std::collections::HashMap<String, Vec<vibesql_types::SqlValue>>,
     ) {
+        self.snapshot_operations_for_mutation();
         self.operations.update_expression_indexes_for_update(
             table_name,
             row_index,
@@ -456,6 +471,7 @@ impl Database {
         row_index: usize,
         expression_keys: &std::collections::HashMap<String, Vec<vibesql_types::SqlValue>>,
     ) {
+        self.snapshot_operations_for_mutation();
         self.operations.update_expression_indexes_for_delete(
             table_name,
             row_index,
@@ -481,6 +497,7 @@ impl Database {
 
     /// Clear expression index data for a table (for rebuilding after compaction)
     pub fn clear_expression_index_data(&mut self, table_name: &str) {
+        self.snapshot_operations_for_mutation();
         self.operations.clear_expression_index_data(table_name);
     }
 
@@ -492,6 +509,7 @@ impl Database {
     /// partial index's WHERE predicate against the post-compaction rows and
     /// repopulates the body via `add_to_partial_indexes_for_insert`.
     pub fn clear_partial_index_data(&mut self, table_name: &str) {
+        self.snapshot_operations_for_mutation();
         self.operations.clear_partial_index_data(table_name);
     }
 
@@ -505,6 +523,7 @@ impl Database {
         metadata: SpatialIndexMetadata,
         spatial_index: crate::index::SpatialIndex,
     ) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
         self.operations.create_spatial_index(metadata, spatial_index)
     }
 
@@ -532,6 +551,7 @@ impl Database {
         lists: usize,
         metric: vibesql_ast::VectorDistanceMetric,
     ) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
         self.operations.create_ivfflat_index(
             &self.catalog,
             &self.tables,
@@ -578,6 +598,7 @@ impl Database {
         index_name: &str,
         probes: usize,
     ) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
         self.operations.set_ivfflat_probes(index_name, probes)
     }
 
@@ -611,6 +632,7 @@ impl Database {
         ef_construction: u32,
         metric: vibesql_ast::VectorDistanceMetric,
     ) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
         self.operations.create_hnsw_index(
             &self.catalog,
             &self.tables,
@@ -658,6 +680,7 @@ impl Database {
         index_name: &str,
         ef_search: usize,
     ) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
         self.operations.set_hnsw_ef_search(index_name, ef_search)
     }
 
@@ -677,10 +700,15 @@ impl Database {
     }
 
     /// Get spatial index (mutable)
+    ///
+    /// Returns a mutable borrow that a caller can use to mutate the spatial
+    /// index out of band, so the copy-on-write rollback snapshot (#5419)
+    /// must be captured here before the borrow escapes.
     pub fn get_spatial_index_mut(
         &mut self,
         index_name: &str,
     ) -> Option<&mut crate::index::SpatialIndex> {
+        self.snapshot_operations_for_mutation();
         self.operations.get_spatial_index_mut(index_name)
     }
 
@@ -693,20 +721,26 @@ impl Database {
     }
 
     /// Get all spatial indexes for a specific table (mutable)
+    ///
+    /// Returns mutable borrows usable for out-of-band mutation, so the
+    /// copy-on-write rollback snapshot (#5419) must be captured here.
     pub fn get_spatial_indexes_for_table_mut(
         &mut self,
         table_name: &str,
     ) -> Vec<(&SpatialIndexMetadata, &mut crate::index::SpatialIndex)> {
+        self.snapshot_operations_for_mutation();
         self.operations.get_spatial_indexes_for_table_mut(table_name)
     }
 
     /// Drop a spatial index
     pub fn drop_spatial_index(&mut self, index_name: &str) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
         self.operations.drop_spatial_index(index_name)
     }
 
     /// Drop all spatial indexes associated with a table (CASCADE behavior)
     pub fn drop_spatial_indexes_for_table(&mut self, table_name: &str) -> Vec<String> {
+        self.snapshot_operations_for_mutation();
         self.operations.drop_spatial_indexes_for_table(table_name)
     }
 
@@ -1179,6 +1213,7 @@ impl Database {
         // Update user-defined indexes first (using reference to values)
         // This must happen before we move ownership of values to WAL
         let phase_start = start.map(|_| Instant::now());
+        self.snapshot_operations_for_mutation();
         self.operations.update_indexes_for_delete_with_values(
             &self.catalog,
             table_name,
