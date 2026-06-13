@@ -131,8 +131,8 @@ use vibesql_ast::{
         ExpressionVisitor, VisitResult,
     },
     volatility, Assignment, CommonTableExpr, ConflictTargetItem, CreateTriggerStmt, DeleteStmt,
-    Expression, FromClause, IndexColumn, InsertSource, InsertStmt, OnConflictAction, SelectStmt,
-    Statement, TriggerAction, UpdateStmt, WhereClause,
+    Expression, FromClause, IndexColumn, InsertSource, InsertStmt, OnConflictAction, SelectItem,
+    SelectStmt, Statement, TriggerAction, UpdateStmt, WhereClause,
 };
 use vibesql_types::{DataType, Date, SqlValue, StringValue, Time, Timestamp};
 
@@ -1020,143 +1020,410 @@ pub fn time_cast_violation(
     detector.error
 }
 
-/// Apply-side audit for the #5398 residual *inside query-bearing parts*:
-/// a TIME→TIMESTAMP cast in an `INSERT … SELECT` body (or any subquery)
-/// over an operand that could be TIME. [`time_cast_violation`] resolves
-/// only the target-table schema and does not descend into query bodies,
-/// and the propose-side guard ([`StrictDetector`]) only runs at propose;
-/// an entry crafted around the freeze pass therefore needs this
-/// deterministic apply-time backstop. No schema is available for the
-/// queried tables, so the check is the conservative schema-free one
-/// ([`cast_operand_could_be_time_no_schema`]) — sound: a per-row clock
-/// read that cannot be ruled out is rejected on every replica alike.
-pub fn time_cast_query_violation(statement: &Statement) -> Option<String> {
-    // The SET / WHERE / ORDER BY roots of UPDATE/DELETE and the
-    // ON CONFLICT parts of INSERT are already audited *with* the target
-    // schema by [`time_cast_violation`] — including the other-table /
-    // computed-TIME residual at those roots — so this pass only covers
-    // the query-bearing parts that audit skips, where no schema is in
-    // scope: the `INSERT … SELECT` body, and any subquery nested in an
-    // UPDATE/DELETE root (which `TimeCastDetector` skips).
+/// Precise apply-side audit for the #5398 residual, **resolved against
+/// the replicated catalog** (#5406).
+///
+/// The earlier schema-free guard was sound but with no
+/// catalog in scope it treats *every* column reference inside a query
+/// body as possibly-TIME, so it over-rejects always-safe casts such as
+/// `INSERT INTO t SELECT CAST(s.text_col AS TIMESTAMP) FROM s` (an
+/// other-table column that is actually TEXT). At apply time the whole
+/// replicated [`Database`](vibesql_storage::Database) is available — and
+/// it is identical on every replica — so we can resolve each in-scope
+/// table/alias to its schema and type column references precisely:
+///
+/// * a `CAST(<provably-non-TIME expression> AS TIMESTAMP)` is **accepted**
+///   (no over-rejection), and
+/// * only a genuinely-TIME (or unresolvable) operand is rejected — the
+///   same deterministic rejection on every replica.
+///
+/// Falls back to the conservative schema-free classifier wherever the
+/// scope cannot be resolved precisely (a derived table / VALUES / CTE
+/// whose output column types are not in the catalog, or a referenced
+/// table absent from the catalog), so soundness is never traded for
+/// precision: an operand that cannot be *proven* non-TIME is still
+/// rejected.
+pub fn time_cast_query_violation_with_db(
+    statement: &Statement,
+    db: &vibesql_storage::Database,
+) -> Option<String> {
     match statement {
         Statement::Insert(stmt) => {
             if let InsertSource::Select(query) = &stmt.source {
-                // The whole SELECT is a schema-free query body.
-                let mut detector = QueryTimeCastDetector::active();
-                walk_select(&mut detector, query);
-                return detector.error;
+                return query_body_time_cast_violation(query, db);
             }
-            // ON CONFLICT … values are deterministic literals/refs to the
-            // target schema, already covered by (2).
             None
         }
         Statement::Update(stmt) => {
-            let mut detector = QueryTimeCastDetector::subqueries_only();
+            // The SET/WHERE roots bind to the target table and are
+            // audited with that schema by [`time_cast_violation`]; here we
+            // only descend into nested subqueries, each resolved against
+            // its own FROM scope.
             for assignment in &stmt.assignments {
-                if detector.error.is_some() {
-                    break;
-                }
-                let _ = walk_expression(&mut detector, &assignment.value);
-            }
-            if detector.error.is_none() {
-                if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
-                    let _ = walk_expression(&mut detector, expr);
+                if let Some(reason) = subqueries_time_cast_violation(&assignment.value, db) {
+                    return Some(reason);
                 }
             }
-            detector.error
+            if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
+                if let Some(reason) = subqueries_time_cast_violation(expr, db) {
+                    return Some(reason);
+                }
+            }
+            None
         }
         Statement::Delete(stmt) => {
-            let mut detector = QueryTimeCastDetector::subqueries_only();
             if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
-                let _ = walk_expression(&mut detector, expr);
+                return subqueries_time_cast_violation(expr, db);
             }
-            detector.error
+            None
         }
         _ => None,
     }
 }
 
-/// Flags `CAST(<possibly-TIME expression> AS TIMESTAMP)` inside a
-/// schema-free query body (#5398). Schema-free, so it errs toward
-/// rejection ([`cast_operand_could_be_time_no_schema`]).
-///
-/// Two modes: `active` flags casts everywhere it walks (the whole
-/// `INSERT … SELECT` body is a query body); `subqueries_only` walks an
-/// UPDATE/DELETE root but flags casts *only* inside nested subqueries —
-/// the root SET/WHERE operands are already audited with the schema by
-/// [`time_cast_violation`], and re-flagging them schema-free would
-/// wrongly reject a provably non-TIME column cast.
-struct QueryTimeCastDetector {
-    error: Option<String>,
-    /// When false, casts are flagged only after descending into a
-    /// subquery; the immediate root is left to the schema-aware audit.
-    active: bool,
+/// A column-resolution scope: the tables/aliases visible to expressions
+/// at one query level, each resolved to its catalog schema. A scope is
+/// *opaque* when any FROM item cannot be resolved to a concrete schema
+/// (a derived table, VALUES constructor, or CTE whose per-column types
+/// are not in the catalog); inside an opaque scope an unqualified column
+/// reference could bind to the un-typed source, so it is treated
+/// conservatively as possibly-TIME.
+struct Scope<'a> {
+    /// `(alias_or_table_name, schema)` for each base table in scope.
+    tables: Vec<(String, &'a vibesql_catalog::TableSchema)>,
+    /// True when some FROM item (derived table / VALUES / CTE) has no
+    /// catalog schema, so unqualified references cannot be proven
+    /// non-TIME.
+    opaque: bool,
 }
 
-impl QueryTimeCastDetector {
-    fn active() -> Self {
-        Self { error: None, active: true }
-    }
-
-    fn subqueries_only() -> Self {
-        Self { error: None, active: false }
-    }
-
-    fn flag(&mut self) -> VisitResult {
-        self.error = Some(
-            "CAST(<TIME-typed expression> AS TIMESTAMP) inside a query body stamps the apply-time \
-             current date per row (SQL:1999) and cannot be replicated deterministically; the \
-             replicated path conservatively rejects any TIME→TIMESTAMP cast whose operand is not \
-             provably non-TIME (#5398)"
-            .to_string(),
-        );
-        VisitResult::Stop
-    }
-
-    /// Walk a nested subquery with casts fully active, propagating any
-    /// hit back to `self`.
-    fn descend_subquery(&mut self, query: &SelectStmt) -> VisitResult {
-        let mut inner = QueryTimeCastDetector::active();
-        walk_select(&mut inner, query);
-        if let Some(reason) = inner.error {
-            self.error = Some(reason);
-            return VisitResult::Stop;
+impl<'a> Scope<'a> {
+    fn from_select(query: &SelectStmt, db: &'a vibesql_storage::Database) -> Self {
+        let mut scope = Scope { tables: Vec::new(), opaque: false };
+        // A WITH clause introduces names whose column types are not in the
+        // catalog; any unqualified reference might bind to one, so be
+        // conservative for the whole level.
+        if query.with_clause.is_some() {
+            scope.opaque = true;
         }
-        VisitResult::Skip
+        if let Some(from) = &query.from {
+            scope.add_from(from, db);
+        }
+        scope
+    }
+
+    fn add_from(&mut self, from: &FromClause, db: &'a vibesql_storage::Database) {
+        match from {
+            FromClause::Table { name, alias, .. } => {
+                match db.get_table(name) {
+                    Some(table) => {
+                        let key = alias.clone().unwrap_or_else(|| name.clone());
+                        self.tables.push((key, &table.schema));
+                    }
+                    // Unknown table: the executor will error
+                    // deterministically, but until then any reference to it
+                    // is unresolvable.
+                    None => self.opaque = true,
+                }
+            }
+            FromClause::Join { left, right, .. } => {
+                self.add_from(left, db);
+                self.add_from(right, db);
+            }
+            // Derived tables and VALUES constructors expose columns whose
+            // types are not in the catalog.
+            FromClause::Subquery { .. } | FromClause::Values { .. } => self.opaque = true,
+        }
+    }
+
+    /// Resolve a column reference's data type, or `None` when it cannot be
+    /// pinned to a concrete catalog column (unknown / ambiguous / opaque
+    /// scope).
+    fn column_type(&self, col: &vibesql_ast::ColumnIdentifier) -> Option<&DataType> {
+        let name = col.column_canonical();
+        match col.table_canonical() {
+            Some(qualifier) => self
+                .tables
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(qualifier))
+                .and_then(|(_, schema)| {
+                    schema.columns.iter().find(|c| c.name.eq_ignore_ascii_case(name))
+                })
+                .map(|c| &c.data_type),
+            None => {
+                if self.opaque {
+                    return None;
+                }
+                let mut found: Option<&DataType> = None;
+                for (_, schema) in &self.tables {
+                    if let Some(c) =
+                        schema.columns.iter().find(|c| c.name.eq_ignore_ascii_case(name))
+                    {
+                        if found.is_some() {
+                            // Ambiguous across tables: cannot pin a type.
+                            return None;
+                        }
+                        found = Some(&c.data_type);
+                    }
+                }
+                found
+            }
+        }
     }
 }
 
-impl ExpressionVisitor for QueryTimeCastDetector {
+/// Walk a query body (and its subqueries), flagging any
+/// `CAST(<could-be-TIME> AS TIMESTAMP)` resolved against the per-level
+/// FROM scope. Returns the first violation, or `None` if every such cast
+/// is provably non-TIME.
+fn query_body_time_cast_violation(
+    query: &SelectStmt,
+    db: &vibesql_storage::Database,
+) -> Option<String> {
+    let scope = Scope::from_select(query, db);
+    // SELECT-list, WHERE, HAVING, ORDER BY, GROUP BY expressions all bind
+    // against this level's FROM scope.
+    for item in &query.select_list {
+        if let SelectItem::Expression { expr, .. } = item {
+            if let Some(reason) = scoped_expr_time_cast_violation(expr, &scope, db) {
+                return Some(reason);
+            }
+        }
+    }
+    if let Some(expr) = &query.where_clause {
+        if let Some(reason) = scoped_expr_time_cast_violation(expr, &scope, db) {
+            return Some(reason);
+        }
+    }
+    if let Some(expr) = &query.having {
+        if let Some(reason) = scoped_expr_time_cast_violation(expr, &scope, db) {
+            return Some(reason);
+        }
+    }
+    if let Some(group_by) = &query.group_by {
+        for expr in group_by.all_expressions() {
+            if let Some(reason) = scoped_expr_time_cast_violation(expr, &scope, db) {
+                return Some(reason);
+            }
+        }
+    }
+    if let Some(order_by) = &query.order_by {
+        for item in order_by {
+            if let Some(reason) = scoped_expr_time_cast_violation(&item.expr, &scope, db) {
+                return Some(reason);
+            }
+        }
+    }
+    // Derived tables in FROM are their own query bodies with their own
+    // scope; CTEs likewise.
+    if let Some(ctes) = &query.with_clause {
+        for cte in ctes {
+            if let Some(reason) = query_body_time_cast_violation(&cte.query, db) {
+                return Some(reason);
+            }
+        }
+    }
+    if let Some(from) = &query.from {
+        if let Some(reason) = from_subquery_time_cast_violation(from, db) {
+            return Some(reason);
+        }
+    }
+    if let Some(set_op) = &query.set_operation {
+        if let Some(reason) = query_body_time_cast_violation(&set_op.right, db) {
+            return Some(reason);
+        }
+    }
+    None
+}
+
+/// Descend the derived tables of a FROM clause (each its own query body).
+fn from_subquery_time_cast_violation(
+    from: &FromClause,
+    db: &vibesql_storage::Database,
+) -> Option<String> {
+    match from {
+        FromClause::Table { .. } | FromClause::Values { .. } => None,
+        FromClause::Subquery { query, .. } => query_body_time_cast_violation(query, db),
+        FromClause::Join { left, right, condition, .. } => from_subquery_time_cast_violation(left, db)
+            .or_else(|| from_subquery_time_cast_violation(right, db))
+            .or_else(|| {
+                // A join condition binds against the surrounding scope; it
+                // is checked at that level by the caller via the WHERE/
+                // SELECT walk only if it surfaces there. ON conditions are
+                // their own expressions, so walk them with no scope-precise
+                // typing of correlated refs would be unsound — but they
+                // rarely carry casts; resolve them against the empty scope
+                // (conservative).
+                condition.as_ref().and_then(|cond| {
+                    scoped_expr_time_cast_violation(
+                        cond,
+                        &Scope { tables: Vec::new(), opaque: true },
+                        db,
+                    )
+                })
+            }),
+    }
+}
+
+/// Audit only the *subqueries* nested inside an UPDATE/DELETE SET/WHERE
+/// root expression. The root casts themselves bind to the target table
+/// and are already audited with that schema by [`time_cast_violation`];
+/// re-checking them here would need the target scope. Each nested
+/// subquery is resolved against its own FROM scope (#5406).
+fn subqueries_time_cast_violation(
+    expr: &Expression,
+    db: &vibesql_storage::Database,
+) -> Option<String> {
+    let mut visitor = SubqueryTimeCastVisitor { db, error: None };
+    let _ = walk_expression(&mut visitor, expr);
+    visitor.error
+}
+
+struct SubqueryTimeCastVisitor<'a> {
+    db: &'a vibesql_storage::Database,
+    error: Option<String>,
+}
+
+impl ExpressionVisitor for SubqueryTimeCastVisitor<'_> {
     fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
         if self.error.is_some() {
             return VisitResult::Stop;
         }
         match expr {
-            // In `subqueries_only` mode, enter nested subqueries with
-            // casts active; in `active` mode `walk_select` already
-            // descends, so just continue.
-            Expression::ScalarSubquery(query) | Expression::Exists { subquery: query, .. }
-                if !self.active =>
-            {
-                self.descend_subquery(query)
+            Expression::ScalarSubquery(query) | Expression::Exists { subquery: query, .. } => {
+                if let Some(reason) = query_body_time_cast_violation(query, self.db) {
+                    self.error = Some(reason);
+                    return VisitResult::Stop;
+                }
+                VisitResult::Skip
             }
             Expression::In { expr: operand, subquery, .. }
-            | Expression::QuantifiedComparison { expr: operand, subquery, .. }
-                if !self.active =>
-            {
+            | Expression::QuantifiedComparison { expr: operand, subquery, .. } => {
                 if walk_expression(self, operand).should_stop() {
                     return VisitResult::Stop;
                 }
-                self.descend_subquery(subquery)
-            }
-            Expression::Cast { expr: operand, data_type: DataType::Timestamp { .. } }
-                if self.active && cast_operand_could_be_time_no_schema(operand) =>
-            {
-                self.flag()
+                if let Some(reason) = query_body_time_cast_violation(subquery, self.db) {
+                    self.error = Some(reason);
+                    return VisitResult::Stop;
+                }
+                VisitResult::Skip
             }
             _ => VisitResult::Continue,
         }
     }
+}
+
+/// Walk one expression at a known scope, flagging TIME→TIMESTAMP casts by
+/// precise type and descending into any nested subqueries (each resolved
+/// against its own FROM scope).
+fn scoped_expr_time_cast_violation(
+    expr: &Expression,
+    scope: &Scope<'_>,
+    db: &vibesql_storage::Database,
+) -> Option<String> {
+    // Reuse the shared expression walker for the in-scope sub-tree, but
+    // stop it at every subquery boundary (returning `Skip`) and re-enter
+    // each subquery with its own FROM scope via
+    // [`query_body_time_cast_violation`]. This keeps the precise scope
+    // associated with the level the column reference actually binds to.
+    let mut visitor = ScopedTimeCastVisitor { scope, db, error: None };
+    let _ = walk_expression(&mut visitor, expr);
+    visitor.error
+}
+
+struct ScopedTimeCastVisitor<'a, 'b> {
+    scope: &'a Scope<'b>,
+    db: &'a vibesql_storage::Database,
+    error: Option<String>,
+}
+
+impl ExpressionVisitor for ScopedTimeCastVisitor<'_, '_> {
+    fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        if self.error.is_some() {
+            return VisitResult::Stop;
+        }
+        match expr {
+            Expression::Cast { expr: operand, data_type: DataType::Timestamp { .. } }
+                if cast_operand_could_be_time_scoped(operand, self.scope) =>
+            {
+                self.error = Some(query_time_cast_message());
+                VisitResult::Stop
+            }
+            // A nested subquery opens a fresh FROM scope; audit it there
+            // and stop the generic walker from descending (it would lose
+            // the scope).
+            Expression::ScalarSubquery(query) | Expression::Exists { subquery: query, .. } => {
+                if let Some(reason) = query_body_time_cast_violation(query, self.db) {
+                    self.error = Some(reason);
+                    return VisitResult::Stop;
+                }
+                VisitResult::Skip
+            }
+            Expression::In { expr: operand, subquery, .. }
+            | Expression::QuantifiedComparison { expr: operand, subquery, .. } => {
+                if walk_expression(self, operand).should_stop() {
+                    return VisitResult::Stop;
+                }
+                if let Some(reason) = query_body_time_cast_violation(subquery, self.db) {
+                    self.error = Some(reason);
+                    return VisitResult::Stop;
+                }
+                VisitResult::Skip
+            }
+            _ => VisitResult::Continue,
+        }
+    }
+}
+
+/// Scope-precise variant of [`cast_operand_could_be_time_inner`]: a
+/// column reference is provably non-TIME when the scope resolves it to a
+/// concrete non-TIME catalog column; an unresolvable reference (opaque
+/// scope, unknown / ambiguous column) is conservatively possibly-TIME.
+fn cast_operand_could_be_time_scoped(operand: &Expression, scope: &Scope<'_>) -> bool {
+    match operand {
+        Expression::Literal(v) => matches!(v, SqlValue::Time(_)),
+        Expression::CurrentTime { .. } => true,
+        Expression::CurrentDate | Expression::CurrentTimestamp { .. } => false,
+        Expression::ColumnRef(col) => match scope.column_type(col) {
+            Some(data_type) => matches!(data_type, DataType::Time { .. }),
+            None => true,
+        },
+        Expression::Cast { data_type, .. } => matches!(data_type, DataType::Time { .. }),
+        Expression::Case { when_clauses, else_result, .. } => {
+            when_clauses.iter().any(|w| cast_operand_could_be_time_scoped(&w.result, scope))
+                || else_result
+                    .as_ref()
+                    .is_some_and(|e| cast_operand_could_be_time_scoped(e, scope))
+        }
+        Expression::BinaryOp { .. }
+        | Expression::UnaryOp { .. }
+        | Expression::Conjunction(_)
+        | Expression::Disjunction(_)
+        | Expression::IsNull { .. }
+        | Expression::IsDistinctFrom { .. }
+        | Expression::IsTruthValue { .. }
+        | Expression::In { .. }
+        | Expression::InList { .. }
+        | Expression::Between { .. }
+        | Expression::Like { .. }
+        | Expression::Glob { .. }
+        | Expression::Exists { .. }
+        | Expression::QuantifiedComparison { .. }
+        | Expression::Position { .. }
+        | Expression::Trim { .. }
+        | Expression::Extract { .. } => false,
+        // Function calls (may return TIME), window functions, scalar
+        // subqueries, sequences, etc. — not provably non-TIME.
+        _ => true,
+    }
+}
+
+fn query_time_cast_message() -> String {
+    "CAST(<TIME-typed expression> AS TIMESTAMP) inside a query body stamps the apply-time \
+     current date per row (SQL:1999) and cannot be replicated deterministically; the operand \
+     resolves to a TIME value (or cannot be proven non-TIME) against the replicated catalog \
+     (#5406)"
+        .to_string()
 }
 
 /// Flags `CAST(<target-table TIME column> AS TIMESTAMP)`. Subqueries
@@ -1276,17 +1543,38 @@ fn cast_operand_could_be_time(
     cast_operand_could_be_time_inner(operand, Some(schema))
 }
 
-/// Schema-free variant for query-bearing parts (`INSERT … SELECT`,
-/// subqueries, CTEs) that the **propose** pass validates without any
-/// catalog access (#5398). Without a schema, every column reference is
-/// unresolvable and so treated as possibly-TIME — a conservative
-/// rejection that keeps `INSERT INTO t SELECT CAST(s.time_col AS
-/// TIMESTAMP) FROM s` from slipping past both the propose pass (its
-/// operand is not a literal, so the literal-only freeze does not fire)
-/// and the apply audit (which resolves only the target-table schema and
-/// does not walk the SELECT body).
-fn cast_operand_could_be_time_no_schema(operand: &Expression) -> bool {
-    cast_operand_could_be_time_inner(operand, None)
+/// Is this operand **provably TIME without any schema** — i.e. known to
+/// be a TIME value from its syntax alone (#5406)?
+///
+/// This is the schema-free dual of [`cast_operand_could_be_time`] used by
+/// the *propose-side* query-body validator ([`StrictDetector`]), which
+/// has no catalog access. The propose pass should reject a
+/// `CAST(... AS TIMESTAMP)` in a query body only when the operand is
+/// *certainly* a TIME value with no schema needed to prove it — a TIME
+/// literal, `CURRENT_TIME`, `CAST(... AS TIME)`, or a `CASE` all of whose
+/// branches are provably TIME. Schema-*dependent* operands (column
+/// references, function calls) are left to the precise, catalog-resolved
+/// apply-side audit ([`time_cast_query_violation_with_db`]), so that an
+/// `INSERT … SELECT CAST(<other-table non-TIME column> AS TIMESTAMP)` is
+/// no longer over-rejected at propose. Soundness is preserved: a
+/// genuinely-TIME column operand that slips past propose is rejected
+/// deterministically at apply.
+fn cast_operand_is_provably_time(operand: &Expression) -> bool {
+    match operand {
+        Expression::Literal(SqlValue::Time(_)) => true,
+        Expression::CurrentTime { .. } => true,
+        Expression::Cast { data_type: DataType::Time { .. }, .. } => true,
+        Expression::Case { when_clauses, else_result, .. } => {
+            // Provably TIME only if *every* possible result is provably
+            // TIME (including the implicit NULL else, which is not TIME) —
+            // so an else-less CASE is never provably TIME.
+            else_result
+                .as_ref()
+                .is_some_and(|e| cast_operand_is_provably_time(e))
+                && when_clauses.iter().all(|w| cast_operand_is_provably_time(&w.result))
+        }
+        _ => false,
+    }
 }
 
 fn cast_operand_could_be_time_inner(
@@ -1921,12 +2209,19 @@ impl ExpressionVisitor for StrictDetector<'_> {
         }
         let volatile = match expr {
             // A TIME→TIMESTAMP cast stamps the apply-time current date
-            // (SQL:1999). In a query-bearing part there is no schema to
-            // resolve the operand's type, so reject any such cast whose
-            // operand is not provably non-TIME — the literal-operand form
-            // and the other-table/computed-TIME residual alike (#5398).
+            // (SQL:1999). In a query-bearing part the evaluation count is
+            // data-dependent, so it cannot be frozen at propose. With no
+            // catalog in scope here, reject only the operands that are
+            // *provably* TIME from their syntax alone (TIME literal,
+            // CURRENT_TIME, CAST(... AS TIME)); schema-dependent operands
+            // (column refs, function calls) are resolved precisely against
+            // the replicated catalog by the apply-side audit
+            // ([`time_cast_query_violation_with_db`], #5406), so a cast
+            // over a provably-non-TIME other-table column is no longer
+            // over-rejected at propose. A genuinely-TIME column operand
+            // that slips past here is rejected deterministically at apply.
             Expression::Cast { expr: operand, data_type: DataType::Timestamp { .. } }
-                if cast_operand_could_be_time_no_schema(operand) =>
+                if cast_operand_is_provably_time(operand) =>
             {
                 Some("CAST(<TIME-typed expression> AS TIMESTAMP) clock reading (stamps the current date)".to_string())
             }
@@ -2610,6 +2905,111 @@ mod tests {
             assert!(
                 violation.as_deref().is_some_and(|m| m.contains("#5398")),
                 "{sql} must be rejected as a residual TIME cast, got: {violation:?}"
+            );
+        }
+    }
+
+    // -- Precise query-body cast disposition (#5406) -------------------------
+
+    /// A catalog with the target `sched(id, t TIME, s TEXT)` plus a
+    /// source table `src(id, txt TEXT, tm TIME)` used to exercise
+    /// schema-resolved (multi-table) cast disposition.
+    fn db_with_target_and_source() -> vibesql_storage::Database {
+        let mut db = vibesql_storage::Database::new();
+        for sql in [
+            "CREATE TABLE sched (id INTEGER PRIMARY KEY, t TIME, s TEXT)",
+            "CREATE TABLE src (id INTEGER PRIMARY KEY, txt TEXT, tm TIME)",
+        ] {
+            let Statement::CreateTable(stmt) = parse(sql) else { panic!("not create table") };
+            vibesql_executor::CreateTableExecutor::execute(&stmt, &mut db).unwrap();
+        }
+        db
+    }
+
+    /// #5406: TIME→TIMESTAMP casts in a query body whose operand is
+    /// **provably non-TIME** once resolved against every in-scope table
+    /// are now *accepted* — no over-rejection. These were all rejected by
+    /// the old schema-free guard.
+    #[test]
+    fn provably_non_time_query_body_casts_are_accepted() {
+        let db = db_with_target_and_source();
+        for sql in [
+            // Other-table TEXT column inside INSERT … SELECT (the headline
+            // #5406 case): resolvable to TEXT → accepted.
+            "INSERT INTO sched (id, s) SELECT id, CAST(src.txt AS TIMESTAMP) FROM src",
+            // Same, via an alias.
+            "INSERT INTO sched (id, s) SELECT id, CAST(x.txt AS TIMESTAMP) FROM src AS x",
+            // Unqualified, unambiguous non-TIME column resolved across the
+            // single FROM table.
+            "INSERT INTO sched (id, s) SELECT id, CAST(txt AS TIMESTAMP) FROM src",
+            // Non-TIME column inside a nested subquery.
+            "UPDATE sched SET s = 'x' WHERE id IN \
+             (SELECT id FROM src WHERE CAST(src.txt AS TIMESTAMP) > '2026-01-01 00:00:00')",
+            // WHERE of the SELECT body.
+            "INSERT INTO sched (id, s) SELECT id, txt FROM src \
+             WHERE CAST(txt AS TIMESTAMP) IS NOT NULL",
+            // Structurally non-TIME computed expression over a TIME column.
+            "INSERT INTO sched (id, s) SELECT id, CAST(EXTRACT(HOUR FROM tm) AS TIMESTAMP) FROM src",
+        ] {
+            assert_eq!(
+                time_cast_query_violation_with_db(&parse(sql), &db),
+                None,
+                "{sql} must be accepted (operand is provably non-TIME)"
+            );
+        }
+    }
+
+    /// #5406: genuinely-TIME query-body cast operands stay rejected, now
+    /// resolved precisely against the catalog (not over-broadly).
+    #[test]
+    fn genuinely_time_query_body_casts_are_rejected() {
+        let db = db_with_target_and_source();
+        for sql in [
+            // Other-table TIME column resolved to TIME → rejected.
+            "INSERT INTO sched (id, s) SELECT id, CAST(src.tm AS TIMESTAMP) FROM src",
+            "INSERT INTO sched (id, s) SELECT id, CAST(x.tm AS TIMESTAMP) FROM src AS x",
+            // Unqualified TIME column resolved across the FROM table.
+            "INSERT INTO sched (id, s) SELECT id, CAST(tm AS TIMESTAMP) FROM src",
+            // CURRENT_TIME in the body (provably TIME, schema-free).
+            "INSERT INTO sched (id, s) SELECT id, CAST(CURRENT_TIME AS TIMESTAMP) FROM src",
+            // TIME column inside a nested subquery.
+            "UPDATE sched SET s = 'x' WHERE id IN \
+             (SELECT id FROM src WHERE CAST(src.tm AS TIMESTAMP) > '2026-01-01 00:00:00')",
+            // time(...) call: not provably non-TIME, unresolvable → rejected.
+            "INSERT INTO sched (id, s) SELECT id, CAST(time(tm) AS TIMESTAMP) FROM src",
+        ] {
+            let violation = time_cast_query_violation_with_db(&parse(sql), &db);
+            assert!(
+                violation.as_deref().is_some_and(|m| m.contains("#5406")),
+                "{sql} must be rejected, got: {violation:?}"
+            );
+        }
+    }
+
+    /// #5406: when the scope cannot be resolved precisely (an unknown
+    /// table, a derived table / VALUES / CTE whose column types are not in
+    /// the catalog), the audit falls back to conservative rejection so
+    /// soundness is never traded for precision.
+    #[test]
+    fn unresolvable_scopes_fall_back_to_conservative_rejection() {
+        let db = db_with_target_and_source();
+        for sql in [
+            // Unknown source table: cannot prove the operand non-TIME.
+            "INSERT INTO sched (id, s) SELECT id, CAST(c AS TIMESTAMP) FROM unknown_tbl",
+            // Derived table: its column types are not in the catalog.
+            "INSERT INTO sched (id, s) SELECT id, CAST(d.c AS TIMESTAMP) \
+             FROM (SELECT id, tm AS c FROM src) AS d",
+            // CTE: column types not in the catalog.
+            "INSERT INTO sched (id, s) WITH c AS (SELECT id, tm AS v FROM src) \
+             SELECT id, CAST(v AS TIMESTAMP) FROM c",
+            // Ambiguous unqualified column across a join.
+            "INSERT INTO sched (id, s) SELECT a.id, CAST(id AS TIMESTAMP) \
+             FROM src a JOIN src b ON a.id = b.id",
+        ] {
+            let violation = time_cast_query_violation_with_db(&parse(sql), &db);
+            assert!(
+                violation.is_some(),
+                "{sql} must fall back to conservative rejection, got: {violation:?}"
             );
         }
     }

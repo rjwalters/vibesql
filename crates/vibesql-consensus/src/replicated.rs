@@ -417,6 +417,58 @@ mod tests {
         assert_eq!(db.backend().last_index(), 1, "no log index may be consumed");
     }
 
+    /// #5406: the propose path resolves TIME→TIMESTAMP cast operands in a
+    /// query body against the leader's applied catalog. A provably-non-TIME
+    /// operand (an other-table TEXT column inside `INSERT … SELECT`) is
+    /// *accepted* — the schema-free propose validator used to over-reject
+    /// it — and replays identically on a second machine; a genuinely-TIME
+    /// operand is rejected at propose before consuming a log index.
+    #[tokio::test]
+    async fn query_body_time_cast_disposition_is_schema_resolved_at_propose() {
+        let db = replicated();
+        db.execute_replicated("CREATE TABLE sched (id INTEGER PRIMARY KEY, ts TIMESTAMP)")
+            .await
+            .unwrap();
+        db.execute_replicated("CREATE TABLE src (id INTEGER PRIMARY KEY, txt TEXT, tm TIME)")
+            .await
+            .unwrap();
+        db.execute_replicated(
+            "INSERT INTO src (id, txt, tm) VALUES (1, '2026-06-13 09:00:00', '09:00:00')",
+        )
+        .await
+        .unwrap();
+
+        // Provably-non-TIME other-table column → accepted at propose.
+        let (_, outcome) = db
+            .execute_replicated(
+                "INSERT INTO sched (id, ts) SELECT id, CAST(src.txt AS TIMESTAMP) FROM src",
+            )
+            .await
+            .expect("provably-non-TIME query-body cast must be accepted at propose (#5406)");
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+
+        // Genuinely-TIME other-table column → rejected at propose, no index.
+        let before = db.backend().last_index();
+        let err = db
+            .execute_replicated(
+                "INSERT INTO sched (id, ts) SELECT id, CAST(src.tm AS TIMESTAMP) FROM src",
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ConsensusError::Backend(_)), "got: {err:?}");
+        assert_eq!(db.backend().last_index(), before, "rejected cast consumes no log index");
+
+        // A second machine replaying the committed log converges exactly —
+        // the accepted cast applied deterministically.
+        let recovered = ReplicatedDb::new(clone_log(&db).await);
+        recovered.catch_up_to(db.backend().last_index()).await.unwrap();
+        assert_eq!(
+            recovered.query("SELECT id, ts FROM sched ORDER BY id").unwrap(),
+            db.query("SELECT id, ts FROM sched ORDER BY id").unwrap(),
+            "replicas must converge on the accepted cast's row"
+        );
+    }
+
     /// A rejected entry (constraint violation) rejects identically on a
     /// second machine replaying the log: rejection is part of the
     /// deterministic history.
