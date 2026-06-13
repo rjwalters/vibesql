@@ -1,6 +1,9 @@
 //! Change event handling and notification for subscriptions.
 
-use std::sync::Arc;
+use std::{
+    collections::HashSet,
+    sync::{atomic::Ordering, Arc},
+};
 
 use tracing::{debug, trace, warn};
 use vibesql_storage::{change_events::RecvError, Database};
@@ -132,6 +135,92 @@ impl SubscriptionManager {
         }
     }
 
+    /// Handle a **batch** of apply-path change events in replicated mode,
+    /// re-querying each affected subscription **at most once** (#5456).
+    ///
+    /// This is the coalesced counterpart to
+    /// [`handle_change_replicated`](Self::handle_change_replicated). A single
+    /// committed write (or a burst of committed entries) emits one
+    /// [`ChangeEvent`](vibesql_storage::ChangeEvent) per mutated row, so the
+    /// apply-path feed produces many events back-to-back. Re-querying a
+    /// subscription once per event is correct but redundant: the result is the
+    /// same applied state whether we re-query after the first changed row or the
+    /// last. Here we collect the union of affected subscription IDs across all
+    /// `events`, then re-query each once.
+    ///
+    /// Correctness is preserved exactly: every subscription affected by *any*
+    /// event in the batch is re-queried against the applied state and diffed via
+    /// [`notify_with_rows`](Self::notify_with_rows), so no change is missed and
+    /// none is over-delivered — identical end state to the per-event path, just
+    /// fewer re-queries. The count of saved re-queries is recorded for metrics.
+    pub async fn handle_changes_coalesced<F>(
+        &self,
+        events: &[vibesql_storage::ChangeEvent],
+        query_fn: &F,
+    ) where
+        F: Fn(&str) -> Result<Vec<vibesql_storage::Row>, String>,
+    {
+        if events.is_empty() {
+            return;
+        }
+
+        // Union of affected subscription IDs across every event in the batch.
+        // `seen` dedupes so each subscription is re-queried once; `total_hits`
+        // counts how many event→subscription matches occurred so we can report
+        // how many re-queries coalescing saved.
+        let mut affected: Vec<SubscriptionId> = Vec::new();
+        let mut seen: HashSet<SubscriptionId> = HashSet::new();
+        let mut total_hits: usize = 0;
+
+        for event in events {
+            for id in self.find_affected_subscriptions(event.table_name()) {
+                total_hits += 1;
+                if seen.insert(id) {
+                    affected.push(id);
+                }
+            }
+        }
+
+        if affected.is_empty() {
+            return;
+        }
+
+        // Re-queries saved = (matches that would each trigger a re-query) minus
+        // (the unique re-queries we actually run).
+        let saved = total_hits.saturating_sub(affected.len());
+        if saved > 0 {
+            self.replicated_requeries_coalesced.fetch_add(saved, Ordering::Relaxed);
+            trace!(
+                batch_events = events.len(),
+                unique_subscriptions = affected.len(),
+                requeries_saved = saved,
+                "Coalesced replicated apply-path change events"
+            );
+        }
+
+        for id in affected {
+            let query = match self.subscriptions.get(&id) {
+                Some(sub) => sub.query.clone(),
+                None => continue,
+            };
+
+            match query_fn(&query) {
+                Ok(rows) => {
+                    if let Some(mut sub_ref) = self.subscriptions.get_mut(&id) {
+                        self.notify_with_rows(sub_ref.value_mut(), id, rows);
+                    }
+                }
+                Err(error_msg) => {
+                    warn!(
+                        subscription_id = %id,
+                        error = %error_msg,
+                        "Replicated subscription query failed; skipping this change batch"
+                    );
+                }
+            }
+        }
+    }
+
     /// Run the **replicated** subscription event loop (#5422).
     ///
     /// Drains the consensus apply-path change feed (`change_rx`, from
@@ -139,6 +228,14 @@ impl SubscriptionManager {
     /// subscriptions against the applied state machine using `query_fn`. Runs
     /// until the feed closes — which happens when the state machine is replaced
     /// by a snapshot install or the node shuts down.
+    ///
+    /// When [`SubscriptionConfig::replicated_coalesce`] is enabled (the
+    /// default), the loop drains every event currently available and re-queries
+    /// each affected subscription **at most once per batch** (#5456) — a fan-out
+    /// optimization that collapses the per-row events of a committed write into
+    /// a single re-query per subscription. With it disabled, the loop re-queries
+    /// strictly once per event. Both modes deliver identical updates; only the
+    /// number of redundant re-queries differs.
     pub async fn run_replicated_event_loop<F>(
         &self,
         mut change_rx: vibesql_storage::ChangeEventReceiver,
@@ -146,10 +243,40 @@ impl SubscriptionManager {
     ) where
         F: Fn(&str) -> Result<Vec<vibesql_storage::Row>, String>,
     {
+        let coalesce = self.config.replicated_coalesce;
         loop {
             match change_rx.try_recv() {
                 Ok(event) => {
-                    self.handle_change_replicated(event, &query_fn).await;
+                    if coalesce {
+                        // Drain the rest of the currently-available burst, then
+                        // re-query each affected subscription once for the batch.
+                        let mut batch = vec![event];
+                        let closed = loop {
+                            match change_rx.try_recv() {
+                                Ok(next) => batch.push(next),
+                                Err(RecvError::Lagged(n)) => {
+                                    warn!(
+                                        lagged_count = n,
+                                        "Replicated SubscriptionManager lagged behind \
+                                         apply-path change events"
+                                    );
+                                    // Keep draining; re-query rebuilds full state anyway.
+                                }
+                                Err(RecvError::Empty) => break false,
+                                Err(RecvError::Closed) => break true,
+                            }
+                        };
+                        self.handle_changes_coalesced(&batch, &query_fn).await;
+                        if closed {
+                            debug!(
+                                "Apply-path change feed closed (snapshot install or shutdown); \
+                                 stopping replicated subscription loop"
+                            );
+                            break;
+                        }
+                    } else {
+                        self.handle_change_replicated(event, &query_fn).await;
+                    }
                 }
                 Err(RecvError::Lagged(n)) => {
                     warn!(

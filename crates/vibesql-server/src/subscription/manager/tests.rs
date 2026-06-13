@@ -544,6 +544,7 @@ fn test_subscription_with_config_backpressure() {
         channel_buffer_size: 128,
         slow_consumer_threshold_percent: 90,
         selective_updates: Default::default(),
+        replicated_coalesce: true,
     };
 
     let sub = Subscription::with_config("SELECT * FROM users".to_string(), tables, tx, &config);
@@ -936,4 +937,291 @@ fn test_update_pk_columns_with_eligibility_not_confident() {
     // Unsubscribe should return false (was not selective eligible)
     let was_eligible = manager.unsubscribe(id);
     assert!(!was_eligible);
+}
+
+// ============================================================================
+// Replicated apply-path coalescing (#5456)
+// ============================================================================
+//
+// In replicated mode the subscription loop drives off the consensus apply-path
+// change feed, which emits one `ChangeEvent` per mutated row. These tests
+// exercise `handle_changes_coalesced` directly: a `query_fn` closure runs the
+// subscription's SELECT against a local `Database` (standing in for the applied
+// state machine via `with_applied_db` in production). They assert:
+//   - the subscriber receives the row-precise delta on insert/update/delete,
+//   - a change to a non-matching row (filtered out by WHERE) is NOT delivered,
+//   - a multi-row burst is coalesced into a single re-query per subscription,
+//   - disabling coalescing falls back to per-event re-query (same delivery).
+
+/// Insert one user row into the test db.
+fn insert_user(db: &mut Database, id: i64, name: &str, active: bool) {
+    let sql = format!("INSERT INTO users VALUES ({id}, '{name}', {active})");
+    if let vibesql_ast::Statement::Insert(stmt) =
+        vibesql_parser::Parser::parse_sql(&sql).unwrap()
+    {
+        vibesql_executor::InsertExecutor::execute(db, &stmt).unwrap();
+    }
+}
+
+/// Build the synchronous `query_fn` the coalesced handler expects, bound to a
+/// snapshot reference of `db` (mirrors `with_applied_db` + `execute_query_against`).
+fn query_against(db: &Database) -> impl Fn(&str) -> Result<Vec<vibesql_storage::Row>, String> + '_ {
+    move |q: &str| SubscriptionManager::execute_query_against(q, db)
+}
+
+#[tokio::test]
+async fn test_coalesced_burst_requeries_once() {
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    let id = manager.subscribe("SELECT * FROM users ORDER BY id".to_string(), tx).unwrap();
+    manager.prime_initial_result(id, Vec::new()).await.unwrap();
+    let _ = rx.recv().await.unwrap(); // consume initial empty Full
+
+    // Apply a three-row write *before* handling its change events, so a single
+    // re-query already reflects all three rows.
+    insert_user(&mut db, 1, "alice", true);
+    insert_user(&mut db, 2, "bob", true);
+    insert_user(&mut db, 3, "carol", true);
+
+    // The apply path would have emitted three Insert events for this write.
+    let batch = vec![
+        vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 },
+        vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 1 },
+        vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 2 },
+    ];
+
+    let qf = query_against(&db);
+    manager.handle_changes_coalesced(&batch, &qf).await;
+
+    // Exactly ONE update is delivered for the whole burst, carrying all rows.
+    let update = rx.recv().await.unwrap();
+    match update {
+        SubscriptionUpdate::Delta { inserts, .. } => assert_eq!(inserts.len(), 3),
+        SubscriptionUpdate::Full { rows, .. } => assert_eq!(rows.len(), 3),
+        other => panic!("expected Delta/Full, got {other:?}"),
+    }
+    assert!(rx.try_recv().is_err(), "coalescing must deliver one update for the burst");
+
+    // Two of the three event→subscription matches were redundant re-queries.
+    assert_eq!(manager.replicated_requeries_coalesced(), 2);
+}
+
+#[tokio::test]
+async fn test_coalesced_delivers_insert_update_delete() {
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    insert_user(&mut db, 1, "alice", true);
+    let id = manager.subscribe("SELECT * FROM users ORDER BY id".to_string(), tx).unwrap();
+    manager.send_initial_results(id, &db).await.unwrap();
+    let _ = rx.recv().await.unwrap(); // initial Full with one row
+
+    // INSERT -> subscriber sees the new row.
+    insert_user(&mut db, 2, "bob", true);
+    {
+        let qf = query_against(&db);
+        manager
+            .handle_changes_coalesced(
+                &[vibesql_storage::ChangeEvent::Insert {
+                    table_name: "users".to_string(),
+                    row_index: 1,
+                }],
+                &qf,
+            )
+            .await;
+    }
+    match rx.recv().await.unwrap() {
+        SubscriptionUpdate::Delta { inserts, .. } => {
+            assert!(inserts.iter().any(|r| r.values[0] == SqlValue::Integer(2)));
+        }
+        SubscriptionUpdate::Full { rows, .. } => assert_eq!(rows.len(), 2),
+        other => panic!("expected insert delta, got {other:?}"),
+    }
+
+    // UPDATE -> subscriber sees the changed row.
+    if let vibesql_ast::Statement::Update(stmt) =
+        vibesql_parser::Parser::parse_sql("UPDATE users SET name = 'robert' WHERE id = 2").unwrap()
+    {
+        vibesql_executor::UpdateExecutor::execute(&stmt, &mut db).unwrap();
+    }
+    {
+        let qf = query_against(&db);
+        manager
+            .handle_changes_coalesced(
+                &[vibesql_storage::ChangeEvent::Update {
+                    table_name: "users".to_string(),
+                    row_index: 1,
+                }],
+                &qf,
+            )
+            .await;
+    }
+    match rx.recv().await.unwrap() {
+        SubscriptionUpdate::Delta { updates, .. } => {
+            assert!(updates.iter().any(|(_, new)| new.values[1]
+                == SqlValue::Varchar(arcstr::ArcStr::from("robert"))));
+        }
+        SubscriptionUpdate::Partial { .. } => {} // selective-column form also acceptable
+        SubscriptionUpdate::Full { rows, .. } => assert_eq!(rows.len(), 2),
+        other => panic!("expected update delta, got {other:?}"),
+    }
+
+    // DELETE -> subscriber sees the removed row.
+    if let vibesql_ast::Statement::Delete(stmt) =
+        vibesql_parser::Parser::parse_sql("DELETE FROM users WHERE id = 2").unwrap()
+    {
+        vibesql_executor::DeleteExecutor::execute(&stmt, &mut db).unwrap();
+    }
+    {
+        let qf = query_against(&db);
+        manager
+            .handle_changes_coalesced(
+                &[vibesql_storage::ChangeEvent::Delete {
+                    table_name: "users".to_string(),
+                    row_index: 1,
+                }],
+                &qf,
+            )
+            .await;
+    }
+    match rx.recv().await.unwrap() {
+        SubscriptionUpdate::Delta { deletes, .. } => {
+            assert!(deletes.iter().any(|r| r.values[0] == SqlValue::Integer(2)));
+        }
+        SubscriptionUpdate::Full { rows, .. } => assert_eq!(rows.len(), 1),
+        other => panic!("expected delete delta, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_coalesced_respects_where_filter() {
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    // Subscription is filtered to active users only.
+    let id = manager
+        .subscribe("SELECT * FROM users WHERE active = TRUE ORDER BY id".to_string(), tx)
+        .unwrap();
+    manager.prime_initial_result(id, Vec::new()).await.unwrap();
+    let _ = rx.recv().await.unwrap(); // initial empty Full
+
+    // Insert a row that does NOT match the filter (inactive user). A change
+    // event fires for the table, but the re-query result is unchanged, so the
+    // subscriber must NOT be notified.
+    insert_user(&mut db, 1, "ghost", false);
+    {
+        let qf = query_against(&db);
+        manager
+            .handle_changes_coalesced(
+                &[vibesql_storage::ChangeEvent::Insert {
+                    table_name: "users".to_string(),
+                    row_index: 0,
+                }],
+                &qf,
+            )
+            .await;
+    }
+    assert!(rx.try_recv().is_err(), "non-matching row must not be delivered");
+
+    // Now insert a matching row; the subscriber IS notified with just that row.
+    insert_user(&mut db, 2, "alice", true);
+    {
+        let qf = query_against(&db);
+        manager
+            .handle_changes_coalesced(
+                &[vibesql_storage::ChangeEvent::Insert {
+                    table_name: "users".to_string(),
+                    row_index: 1,
+                }],
+                &qf,
+            )
+            .await;
+    }
+    match rx.recv().await.unwrap() {
+        SubscriptionUpdate::Delta { inserts, .. } => {
+            assert_eq!(inserts.len(), 1);
+            assert_eq!(inserts[0].values[0], SqlValue::Integer(2));
+        }
+        SubscriptionUpdate::Full { rows, .. } => {
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].values[0], SqlValue::Integer(2));
+        }
+        other => panic!("expected single matching row, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_coalesced_ignores_unrelated_table() {
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let db = setup_test_db();
+
+    let id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
+    manager.prime_initial_result(id, Vec::new()).await.unwrap();
+    let _ = rx.recv().await.unwrap();
+
+    // A burst of events on a table the subscription does not depend on.
+    let batch = vec![
+        vibesql_storage::ChangeEvent::Insert { table_name: "orders".to_string(), row_index: 0 },
+        vibesql_storage::ChangeEvent::Insert { table_name: "orders".to_string(), row_index: 1 },
+    ];
+    let qf = query_against(&db);
+    manager.handle_changes_coalesced(&batch, &qf).await;
+
+    assert!(rx.try_recv().is_err(), "unrelated-table changes must not notify");
+    assert_eq!(manager.replicated_requeries_coalesced(), 0);
+}
+
+#[tokio::test]
+async fn test_coalesce_disabled_requeries_per_event() {
+    let config = SubscriptionConfig { replicated_coalesce: false, ..Default::default() };
+    let manager = SubscriptionManager::with_config(config);
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    let id = manager.subscribe("SELECT * FROM users ORDER BY id".to_string(), tx).unwrap();
+    manager.prime_initial_result(id, Vec::new()).await.unwrap();
+    let _ = rx.recv().await.unwrap();
+
+    // With coalescing off, the per-event handler still delivers correctly. Feed
+    // two events with the db already holding both rows; each event re-queries
+    // and the second is a no-op (hash unchanged), so exactly one update lands.
+    insert_user(&mut db, 1, "alice", true);
+    insert_user(&mut db, 2, "bob", true);
+    {
+        let qf = query_against(&db);
+        manager
+            .handle_change_replicated(
+                vibesql_storage::ChangeEvent::Insert {
+                    table_name: "users".to_string(),
+                    row_index: 0,
+                },
+                &qf,
+            )
+            .await;
+        manager
+            .handle_change_replicated(
+                vibesql_storage::ChangeEvent::Insert {
+                    table_name: "users".to_string(),
+                    row_index: 1,
+                },
+                &qf,
+            )
+            .await;
+    }
+
+    let first = rx.recv().await.unwrap();
+    match first {
+        SubscriptionUpdate::Delta { inserts, .. } => assert_eq!(inserts.len(), 2),
+        SubscriptionUpdate::Full { rows, .. } => assert_eq!(rows.len(), 2),
+        other => panic!("expected both rows, got {other:?}"),
+    }
+    // Second event re-queried but the result was identical -> no extra update.
+    assert!(rx.try_recv().is_err());
+    // Coalescing was disabled, so nothing was coalesced.
+    assert_eq!(manager.replicated_requeries_coalesced(), 0);
 }

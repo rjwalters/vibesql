@@ -63,6 +63,28 @@ pub struct SubscriptionConfig {
     /// instead of full rows, reducing bandwidth for wide tables with few changes.
     #[serde(default)]
     pub selective_updates: SelectiveColumnConfig,
+
+    /// Coalesce a burst of apply-path change events before re-querying
+    /// subscriptions in **replicated mode** (default: `true`). See #5456.
+    ///
+    /// The replicated subscription loop drives off the consensus apply-path
+    /// change feed, which emits one [`ChangeEvent`](vibesql_storage::ChangeEvent)
+    /// per mutated row. A single committed write (or a burst of committed
+    /// entries) therefore produces many events back-to-back. Re-querying each
+    /// affected subscription once *per event* is correct but wasteful: a busy
+    /// table forces a full re-query per row.
+    ///
+    /// When enabled, the loop drains all change events currently available, then
+    /// re-queries each affected subscription **at most once** for the whole
+    /// batch. This is purely a fan-out optimization — every affected
+    /// subscription is still re-queried against the applied state and diffed via
+    /// the standard delta path, so no change is ever missed or over-delivered.
+    /// Set to `false` to keep strict one-re-query-per-event behavior.
+    ///
+    /// Standalone subscriptions are unaffected (they drive from the local
+    /// `Database` change stream via a separate loop).
+    #[serde(default = "default_replicated_coalesce")]
+    pub replicated_coalesce: bool,
 }
 
 fn default_max_per_connection() -> usize {
@@ -89,6 +111,10 @@ fn default_slow_consumer_threshold_percent() -> u8 {
     80
 }
 
+fn default_replicated_coalesce() -> bool {
+    true
+}
+
 impl Default for SubscriptionConfig {
     fn default() -> Self {
         Self {
@@ -99,6 +125,7 @@ impl Default for SubscriptionConfig {
             channel_buffer_size: default_channel_buffer_size(),
             slow_consumer_threshold_percent: default_slow_consumer_threshold_percent(),
             selective_updates: SelectiveColumnConfig::default(),
+            replicated_coalesce: default_replicated_coalesce(),
         }
     }
 }

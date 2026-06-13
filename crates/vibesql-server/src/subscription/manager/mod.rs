@@ -87,6 +87,12 @@ pub struct SubscriptionManager {
 
     /// Per-connection subscription counts (for per-connection limit enforcement)
     pub(crate) connection_subscription_counts: DashMap<String, AtomicUsize>,
+
+    /// Count of subscription re-queries saved by coalescing apply-path change
+    /// events in replicated mode (#5456). Each increment is one re-query that a
+    /// strict one-per-event loop would have run but the coalesced loop skipped
+    /// because the affected subscription was already re-queried for this batch.
+    pub(crate) replicated_requeries_coalesced: AtomicUsize,
 }
 
 impl SubscriptionManager {
@@ -107,6 +113,7 @@ impl SubscriptionManager {
             result_set_exceeded_count: AtomicUsize::new(0),
             subscription_count_atomic: AtomicUsize::new(0),
             connection_subscription_counts: DashMap::new(),
+            replicated_requeries_coalesced: AtomicUsize::new(0),
         }
     }
 }
