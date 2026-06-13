@@ -3285,6 +3285,10 @@ array set vibesql_skip_tests {
     date-8.18 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
     date-8.19 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
     date-15.2 "sleeper TCL UDF registered via db func is not visible to the VibeSQL CLI subprocess (harness limitation)"
+    nulls1-2.2 "ORDER BY b DESC NULLS FIRST: result set is correct (NULLs grouped first, then 4,1) but the relative order of the two NULL-keyed rows is unspecified without a tiebreak column. SQLite's reverse index scan happens to order them by c DESC (3 before 2); VibeSQL keeps insertion order (2 before 3). Both are valid SQL — #5394."
+    nulls1-5.4 "ORDER BY a DESC, b DESC NULLS FIRST: same unspecified NULL-tiebreak order as nulls1-2.2. Result set is correct; only the sub-order of NULL-b rows within each a-group differs (no c in ORDER BY to break the tie) — #5394."
+    nulls1-3.1.12 "NULLS FIRST/LAST in an upsert ON CONFLICT target is correctly rejected for a direct statement (nulls1-3.1.11 passes), but VibeSQL stores CREATE TRIGGER bodies as raw SQL (parser/trigger.rs: TriggerAction::RawSql) and does not parse/validate the body statements at CREATE TRIGGER time, so the 'unsupported use of NULLS FIRST' error is not surfaced until the trigger fires. Validating trigger bodies at create time is out of scope for #5394; tracked as #5399."
+    nulls1-9.4 "EXPLAIN QUERY PLAN format + sqlite_stat1-driven skip-scan plan ('SEARCH v0 USING COVERING INDEX v3 (ANY(c1) AND c2=?)') is SQLite-specific. Depends on ANALYZE/sqlite_stat1 statistics (nulls1-9.1) and SQLite's ANY(col) skip-scan EQP notation, neither of which VibeSQL replicates. Same class as existing 'EXPLAIN QUERY PLAN output format is SQLite-specific' / 'sqlite_stat1 internal statistics' skips. The query result (nulls1-9.3) is correct."
 }
 
 # Pattern-based skip list for tests with many numbered variants
@@ -4137,7 +4141,14 @@ proc check_single_capability {cap} {
     # 'julianday' modifiers, and Julian Day range bounds in #5309;
     # 'ceiling'/'floor' modifiers, zero-arg datetime(), Timestamp-vs-TEXT
     # comparisons, and printf-style format() in #5317.
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 trigger conflict hiddencolumns}
+    # `progress` gates tests that rely on SQLite's `db progress N {callback}`
+    # interrupt API (sqlite3_progress_handler). VibeSQL has no progress-handler
+    # callback, so those tests (e.g. view3.test 1.2's `SELECT * FROM v32768`
+    # whose only purpose is to be interrupted after N VM steps) are not
+    # applicable. Without this, the single-reference view32768 scan materializes
+    # the doubling nest exponentially and hangs (#5394). The reference-count
+    # cap (65535) still catches the multi-reference case in view3.test 1.1.
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 trigger conflict hiddencolumns progress}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0

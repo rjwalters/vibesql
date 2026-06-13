@@ -18,31 +18,63 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
         return Ok(());
     }
 
-    // If no explicit column list is provided, derive column names from the query
-    // This ensures views with SELECT * preserve original column names
-    // Use simple column names (without table prefix) for view schema compatibility
-    let columns = if stmt.columns.is_none() {
-        // Execute the query once to derive column names.
-        //
-        // SQLite-compatible error prefixing: in SQLite the "error in view <name>: "
-        // prefix is exclusively an ALTER-time schema-reparse phenomenon (alter.c);
-        // query-time view expansion errors are bare. VibeSQL compiles views eagerly,
-        // so both error classes surface here at CREATE VIEW time. We allow-list the
-        // prefix to OrderByTermNotInResultSet only — the sole class the TCL suite
-        // expects prefixed (window1.test 32.10, altertab.test). All other variants
-        // (notably SetOperationColumnMismatch, see select7.test 8.2) pass through
-        // bare, matching SQLite's query-time messages.
-        use crate::select::SelectExecutor;
-        let executor = SelectExecutor::new(db);
-        let result = executor.execute_with_simple_columns(&stmt.query).map_err(|e| match e {
-            e @ ExecutorError::OrderByTermNotInResultSet { .. } => {
-                ExecutorError::SqliteCompatError(format!("error in view {}: {}", stmt.view_name, e))
-            }
-            other => other,
-        })?;
-        Some(result.columns)
-    } else {
+    // Guard against exponentially self-referential view nests before we (eagerly)
+    // execute the view body to derive its columns. VibeSQL materializes views by
+    // executing their queries, so a doubling nest (v2=v1∪v1, v4=v2∪v2, …) would
+    // expand exponentially and hang here. Match SQLite (ticket [d58ccbb3f1b],
+    // view3.test / #5394) by raising `too many references to "<view>": max 65535`
+    // at CREATE VIEW time instead. See crate::select::view_reference_guard.
+    crate::select::view_reference_guard::check_view_reference_limit(&stmt.query, db)?;
+
+    // If no explicit column list is provided, derive column names from the query.
+    // This ensures views with SELECT * preserve original column names. Use simple
+    // column names (without table prefix) for view schema compatibility.
+    //
+    // VibeSQL materializes views by executing them, so a deeply nested (doubling)
+    // view nest expands exponentially and would hang while deriving columns here
+    // (#5394, view3.test). When the body would re-materialize many views, derive
+    // the columns statically from the catalog instead. Ordinary views keep the
+    // eager execution path so all existing CREATE-time validations
+    // (set-operation arity, ORDER BY term resolution, etc.) surface as before.
+    const STATIC_COLUMN_DERIVATION_THRESHOLD: u64 = 64;
+    let columns = if stmt.columns.is_some() {
         stmt.columns.clone()
+    } else {
+        let body_is_expensive =
+            crate::select::view_reference_guard::max_view_reference_count(&stmt.query, db)
+                > STATIC_COLUMN_DERIVATION_THRESHOLD;
+
+        // Static fast path for expensive bodies only (avoids exponential
+        // re-materialization of deep view nests).
+        let static_cols = if body_is_expensive {
+            crate::select::cte::try_static_select_columns(&stmt.query, db)
+        } else {
+            None
+        };
+
+        if let Some(cols) = static_cols {
+            Some(cols)
+        } else {
+            // Execute the query once to derive column names.
+            //
+            // SQLite-compatible error prefixing: in SQLite the "error in view <name>: "
+            // prefix is exclusively an ALTER-time schema-reparse phenomenon (alter.c);
+            // query-time view expansion errors are bare. VibeSQL compiles views eagerly,
+            // so both error classes surface here at CREATE VIEW time. We allow-list the
+            // prefix to OrderByTermNotInResultSet only — the sole class the TCL suite
+            // expects prefixed (window1.test 32.10, altertab.test). All other variants
+            // (notably SetOperationColumnMismatch, see select7.test 8.2) pass through
+            // bare, matching SQLite's query-time messages.
+            use crate::select::SelectExecutor;
+            let executor = SelectExecutor::new(db);
+            let result = executor.execute_with_simple_columns(&stmt.query).map_err(|e| match e {
+                e @ ExecutorError::OrderByTermNotInResultSet { .. } => ExecutorError::SqliteCompatError(
+                    format!("error in view {}: {}", stmt.view_name, e),
+                ),
+                other => other,
+            })?;
+            Some(result.columns)
+        }
     };
 
     let view = if let Some(ref sql) = stmt.sql_definition {

@@ -146,6 +146,16 @@ impl SelectExecutor<'_> {
             });
         }
 
+        // Guard against exponentially self-referential view nests (SQLite ticket
+        // [d58ccbb3f1b], exercised by view3.test / #5394). VibeSQL materializes
+        // views lazily by executing their queries, so a doubling view nest
+        // (v2=v1∪v1, v4=v2∪v2, …) expands exponentially and would hang. Match
+        // SQLite by statically detecting >65535 references to any view before
+        // execution. Only run once per top-level query.
+        if self.subquery_depth == 0 {
+            crate::select::view_reference_guard::check_view_reference_limit(stmt, self.database)?;
+        }
+
         // Fast path for simple point-lookup queries (TPC-C optimization)
         // This bypasses expensive optimizer passes for queries like:
         // SELECT col FROM table WHERE pk = value
@@ -411,6 +421,12 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &vibesql_ast::SelectStmt,
     ) -> Result<SelectResult, ExecutorError> {
+        // Guard exponentially self-referential view nests before executing the
+        // FROM clause (which materializes views). This entry point runs the FROM
+        // *before* execute(), so the guard inside execute() would be too late
+        // (#5394, view3.test).
+        crate::select::view_reference_guard::check_view_reference_limit(stmt, self.database)?;
+
         // Resolve SELECT aliases in WHERE clause BEFORE predicate pushdown (SQLite extension)
         // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
         // IMPORTANT: Use schema-aware resolution to avoid incorrectly substituting
@@ -511,6 +527,11 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &vibesql_ast::SelectStmt,
     ) -> Result<SelectResult, ExecutorError> {
+        // Guard exponentially self-referential view nests before executing the
+        // FROM clause (which materializes views). See execute_with_columns and
+        // #5394 (view3.test).
+        crate::select::view_reference_guard::check_view_reference_limit(stmt, self.database)?;
+
         // Resolve SELECT aliases in WHERE clause BEFORE predicate pushdown (SQLite extension)
         // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
         // IMPORTANT: Use schema-aware resolution to avoid incorrectly substituting
