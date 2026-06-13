@@ -503,6 +503,102 @@ impl VibesqlStateMachine {
         Ok(rows.into_iter().map(|r| r.values.to_vec()).collect())
     }
 
+    /// Speculatively read inside an open replicated transaction so the
+    /// session observes its **own** buffered (not-yet-committed) writes —
+    /// full mid-transaction read-your-own-writes (#5401).
+    ///
+    /// `entry` carries the session's buffered write statements with the
+    /// values they were frozen with at buffer time
+    /// ([`freeze_for_propose`](Self::freeze_for_propose)) — *the very same
+    /// `TxnEntry` that will be proposed authoritatively at `COMMIT`*. This
+    /// replays the frozen statements into a **discardable scratch
+    /// transaction** on the leader's applied state (using the same
+    /// per-statement path [`apply`](Self::apply) uses, seeded with the
+    /// same `commit_ts = last_applied + 1` so MVCC visibility of the
+    /// replayed rows matches what the committed entry will produce), runs
+    /// `select_sql` against that in-flight state, then **rolls the scratch
+    /// transaction back**. Nothing is committed here:
+    ///
+    /// - The authoritative state change happens exactly once, via the consensus entry at `COMMIT`
+    ///   (`propose_entry` → `apply`). The scratch transaction is always rolled back, so this path
+    ///   never double-applies.
+    /// - Because the replay reuses `entry`'s already-frozen values (not a fresh freeze), a mid-txn
+    ///   read of a `random()` / `now()` write sees exactly the value the committed row will carry —
+    ///   freeze happens once, at buffer time, and is reused both here and at propose.
+    ///
+    /// A buffered statement that fails deterministically (e.g. a
+    /// constraint violation) surfaces here as a [`ConsensusError`] — the
+    /// same failure the client would see at `COMMIT` — leaving the applied
+    /// state untouched.
+    pub fn speculative_query(
+        &self,
+        entry: &TxnEntry,
+        select_sql: &str,
+    ) -> Result<Vec<Vec<SqlValue>>> {
+        let select = match vibesql_parser::parse_with_arena_fallback(select_sql)
+            .map_err(|e| ConsensusError::Backend(format!("parse error: {e}")))?
+        {
+            Statement::Select(select) => select,
+            other => {
+                return Err(ConsensusError::Backend(format!(
+                    "speculative_query() only accepts SELECT statements, got: {other:?}"
+                )))
+            }
+        };
+
+        let mut inner = self.lock();
+        let scratch_ts = inner.last_applied + 1;
+
+        // Seed + open the scratch transaction exactly as `apply` does, so
+        // the replayed rows get the commit_ts they would get if this entry
+        // were the next committed one — keeping mid-txn reads consistent
+        // with the eventual committed state.
+        inner.db.set_next_txn_id(scratch_ts).map_err(|e| {
+            ConsensusError::Backend(format!("failed to seed speculative commit_ts: {e}"))
+        })?;
+        inner.db.begin_transaction().map_err(|e| {
+            ConsensusError::Backend(format!("failed to begin speculative txn: {e}"))
+        })?;
+
+        // Replay the frozen buffer, then read, capturing any failure so we
+        // can always roll the scratch transaction back before returning.
+        let result = (|| {
+            static NO_FROZEN: &[FrozenValue] = &[];
+            for (i, sql) in entry.statements.iter().enumerate() {
+                let frozen = entry.frozen.get(i).map(Vec::as_slice).unwrap_or(NO_FROZEN);
+                let frozen_defaults =
+                    entry.frozen_defaults.get(i).map(Vec::as_slice).unwrap_or(NO_FROZEN);
+                execute_write_statement(&mut inner.db, sql, frozen, frozen_defaults).map_err(
+                    |e| match e {
+                        StatementFailure::Rejected(reason) | StatementFailure::Fatal(reason) => {
+                            ConsensusError::Backend(format!(
+                                "speculative replay of a buffered statement failed: {reason}"
+                            ))
+                        }
+                    },
+                )?;
+            }
+            vibesql_executor::SelectExecutor::new(&inner.db)
+                .execute(&select)
+                .map(|rows| rows.into_iter().map(|r| r.values.to_vec()).collect::<Vec<_>>())
+                .map_err(|e| {
+                    ConsensusError::Backend(format!("speculative query failed: {e}"))
+                })
+        })();
+
+        // Discard the scratch transaction unconditionally: the
+        // authoritative write happens only through the consensus entry at
+        // COMMIT. A rollback failure after a successful read is itself
+        // fatal bookkeeping — surface it rather than leak an open txn.
+        if let Err(rollback_err) = inner.db.rollback_transaction() {
+            return Err(ConsensusError::Backend(format!(
+                "failed to discard speculative txn: {rollback_err}"
+            )));
+        }
+
+        result
+    }
+
     /// Capture a snapshot of the applied state: the database serialized
     /// with the binary persistence format, covering everything up to
     /// [`last_applied`](Self::last_applied).
@@ -1017,6 +1113,60 @@ mod tests {
 
         assert_eq!(names(&machine), vec!["bobby", "carol"]);
         assert_eq!(machine.last_applied(), 4);
+    }
+
+    /// Speculative reads (#5401) see the buffer's own writes but never
+    /// commit them: after a `speculative_query`, the applied state is
+    /// unchanged (no double-apply), and the entry can still be applied
+    /// authoritatively to land the same rows.
+    #[test]
+    fn speculative_query_sees_buffer_without_applying_it() {
+        let machine = VibesqlStateMachine::new();
+        create_users(&machine, 1);
+        machine.apply(2, &TxnEntry::single("INSERT INTO users VALUES (1, 'alice')")).unwrap();
+
+        let buffer = TxnEntry::batch([
+            "INSERT INTO users VALUES (2, 'bob')",
+            "INSERT INTO users VALUES (3, 'carol')",
+        ]);
+
+        // The speculative read sees the committed row plus the buffered ones.
+        let rows = machine.speculative_query(&buffer, "SELECT name FROM users ORDER BY id").unwrap();
+        let seen: Vec<String> = rows.into_iter().map(|r| r[0].to_string()).collect();
+        assert_eq!(seen, vec!["alice", "bob", "carol"], "read-your-own-writes");
+
+        // Nothing was committed: applied state still has only the committed
+        // row, and last_applied is unchanged (no double-apply).
+        assert_eq!(names(&machine), vec!["alice"], "speculative read must not commit");
+        assert_eq!(machine.last_applied(), 2);
+
+        // The same buffer, applied authoritatively, lands exactly those rows.
+        machine.apply(3, &buffer).unwrap();
+        assert_eq!(names(&machine), vec!["alice", "bob", "carol"]);
+        assert_eq!(machine.last_applied(), 3);
+    }
+
+    /// A buffered statement that fails deterministically surfaces at
+    /// speculative read time (the same failure the client gets at COMMIT)
+    /// and leaves the applied state untouched.
+    #[test]
+    fn speculative_query_surfaces_buffer_failure_and_rolls_back() {
+        let machine = VibesqlStateMachine::new();
+        create_users(&machine, 1);
+        machine.apply(2, &TxnEntry::single("INSERT INTO users VALUES (1, 'alice')")).unwrap();
+
+        // Duplicate primary key inside the buffer.
+        let buffer = TxnEntry::batch(["INSERT INTO users VALUES (1, 'dup')"]);
+        let err =
+            machine.speculative_query(&buffer, "SELECT name FROM users").unwrap_err();
+        assert!(format!("{err}").contains("speculative replay"), "unexpected error: {err}");
+
+        // Applied state untouched; no open transaction left behind.
+        assert_eq!(names(&machine), vec!["alice"]);
+        assert_eq!(machine.last_applied(), 2);
+        // A subsequent apply still works (the scratch txn was rolled back).
+        machine.apply(3, &TxnEntry::single("INSERT INTO users VALUES (2, 'bob')")).unwrap();
+        assert_eq!(names(&machine), vec!["alice", "bob"]);
     }
 
     /// commit_ts = log index: every MVCC stamp written by entry `N`
