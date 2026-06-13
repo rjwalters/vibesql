@@ -21,7 +21,7 @@ use crate::{
 };
 
 use super::protocol::{
-    send_empty_query_response, send_error_response, send_query_result, send_ready_for_query,
+    send_empty_query_response, send_execution_error, send_query_result, send_ready_for_query,
 };
 use super::subscription::{broadcast_mutation, notify_affected_subscriptions};
 use super::TableMutationNotification;
@@ -107,7 +107,7 @@ pub async fn execute_query(
                 metrics.record_query_error("execution_error", None);
             }
 
-            send_error_response(write_half, write_buf, &format!("{}", e)).await?;
+            send_execution_error(write_half, write_buf, &e).await?;
 
             // If in transaction and error occurred, report failed transaction state
             let txn_status = if session.in_transaction() {

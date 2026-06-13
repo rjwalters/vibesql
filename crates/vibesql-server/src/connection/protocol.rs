@@ -81,6 +81,37 @@ pub async fn send_error_response(
     flush_write_buffer(write_half, write_buf).await
 }
 
+/// Send an execution error, preserving a structured [`SqlError`]'s
+/// SQLSTATE / detail / hint when the error carries one (#5383: NotLeader
+/// redirects, staleness refusals, fatal-apply halts); anything else keeps
+/// the existing `XX000` catch-all.
+///
+/// [`SqlError`]: crate::replication::SqlError
+pub async fn send_execution_error(
+    write_half: &mut OwnedWriteHalf,
+    write_buf: &mut BytesMut,
+    error: &anyhow::Error,
+) -> Result<()> {
+    let Some(sql_error) = error.downcast_ref::<crate::replication::SqlError>() else {
+        return send_error_response(write_half, write_buf, &format!("{}", error)).await;
+    };
+
+    let mut fields = HashMap::new();
+    fields.insert(b'S', "ERROR".to_string());
+    fields.insert(b'V', "ERROR".to_string());
+    fields.insert(b'C', sql_error.code.to_string());
+    fields.insert(b'M', sql_error.message.clone());
+    if let Some(detail) = &sql_error.detail {
+        fields.insert(b'D', detail.clone());
+    }
+    if let Some(hint) = &sql_error.hint {
+        fields.insert(b'H', hint.clone());
+    }
+
+    BackendMessage::ErrorResponse { fields }.encode(write_buf);
+    flush_write_buffer(write_half, write_buf).await
+}
+
 /// Send empty query response message
 pub async fn send_empty_query_response(
     write_half: &mut OwnedWriteHalf,

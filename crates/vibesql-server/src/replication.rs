@@ -1,0 +1,501 @@
+//! Replicated-mode wiring: PostgreSQL sessions → [`MvccRaftNode`] (#5383).
+//!
+//! When `[replication]` is enabled in the server config, startup boots one
+//! voter of a Raft cluster ([`ReplicationHandle::start`]) and every wire
+//! session routes writes through consensus instead of the local executor
+//! ([`crate::session::Session::new_replicated`]). Standalone mode (the
+//! default) is untouched.
+//!
+//! # SQLSTATE mapping
+//!
+//! Consensus refusals surface as PostgreSQL errors with deliberately
+//! chosen SQLSTATEs (see [`SqlError`]):
+//!
+//! - [`ConsensusError::NotLeader`] → **`25006`** (`read_only_sql_transaction`).
+//!   This is exactly what real PostgreSQL returns when a write reaches a
+//!   hot-standby replica ("cannot execute INSERT in a read-only
+//!   transaction"), so PG-aware clients and poolers that already handle
+//!   primary/replica routing (libpq `target_session_attrs=read-write`,
+//!   JDBC `targetServerType=primary`, pgpool) treat it as "wrong node,
+//!   find the primary". The error's DETAIL carries the leader hint (node
+//!   id + consensus address from this node's `cluster.toml` view) so a
+//!   client can redirect without re-probing the whole cluster.
+//! - [`ConsensusError::StalenessExceeded`] / [`ConsensusError::ReadTimeout`]
+//!   → **`57P03`** (`cannot_connect_now`): the node cannot serve this
+//!   read *right now* — the same retryable class PostgreSQL uses while a
+//!   standby is catching up ("the database system is starting up").
+//!   DETAIL carries the observed staleness / applied-vs-required indices
+//!   and the leader hint.
+//! - [`ConsensusError::FatalApply`] → **`58000`** (`system_error`): this
+//!   node halted on a fatal apply and must be restarted to resync; every
+//!   statement on the halted node fails with the retained reason rather
+//!   than silently serving stale reads. (Failing health checks / refusing
+//!   new sessions is follow-on #5393.)
+//! - Anything else → **`XX000`** (`internal_error`), matching the
+//!   server's existing catch-all.
+//!
+//! Features a replicated session does not support yet return **`0A000`**
+//! (`feature_not_supported`) with a pointer to the follow-on issue:
+//! interactive transactions (#5391), `PREPARE`/`EXECUTE`-syntax writes,
+//! cursors, `EXPLAIN`, `ANALYZE`, `VACUUM` (#5393).
+//!
+//! [`ConsensusError::NotLeader`]: vibesql_consensus::ConsensusError::NotLeader
+//! [`ConsensusError::StalenessExceeded`]: vibesql_consensus::ConsensusError::StalenessExceeded
+//! [`ConsensusError::ReadTimeout`]: vibesql_consensus::ConsensusError::ReadTimeout
+//! [`ConsensusError::FatalApply`]: vibesql_consensus::ConsensusError::FatalApply
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::Result;
+use vibesql_consensus::{
+    ApplyOutcome, ClusterConfig, ConsensusError, LogIndex, MvccRaftNode, RaftTuning, Role,
+};
+
+use crate::config::ReplicationConfig;
+
+// ---------------------------------------------------------------------------
+// SQLSTATE constants (documented in the module docs above)
+// ---------------------------------------------------------------------------
+
+/// `read_only_sql_transaction`: writes (or linearizable reads) reached a
+/// non-leader node — what PostgreSQL hot standby returns for writes on a
+/// replica.
+pub const SQLSTATE_NOT_LEADER: &str = "25006";
+/// `cannot_connect_now`: this node cannot serve the read right now
+/// (staleness bound not provable / read-your-writes wait expired).
+pub const SQLSTATE_RETRY: &str = "57P03";
+/// `system_error`: this node halted on a fatal apply.
+pub const SQLSTATE_FATAL: &str = "58000";
+/// `feature_not_supported`: not available in replicated mode (yet).
+pub const SQLSTATE_NOT_SUPPORTED: &str = "0A000";
+/// `invalid_parameter_value`: bad value for a `SET vibesql_*` setting.
+pub const SQLSTATE_INVALID_PARAMETER: &str = "22023";
+/// `internal_error`: the server's existing catch-all.
+pub const SQLSTATE_INTERNAL: &str = "XX000";
+
+/// A SQL-level error with a definite SQLSTATE and optional PostgreSQL
+/// DETAIL / HINT fields, surfaced to the client as a proper
+/// `ErrorResponse` instead of the catch-all `XX000`.
+///
+/// Carried through `anyhow::Error`; the wire layer downcasts to recover
+/// the structured fields (see `connection::query` / `connection::extended`).
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+pub struct SqlError {
+    /// Five-character SQLSTATE code.
+    pub code: &'static str,
+    /// Primary human-readable message (`M` field).
+    pub message: String,
+    /// Optional detail (`D` field).
+    pub detail: Option<String>,
+    /// Optional hint (`H` field).
+    pub hint: Option<String>,
+}
+
+impl SqlError {
+    /// A bare error with no detail/hint.
+    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self { code, message: message.into(), detail: None, hint: None }
+    }
+
+    /// `0A000` for a feature a replicated session does not support yet.
+    pub fn not_supported(feature: &str, follow_on: &str) -> Self {
+        Self {
+            code: SQLSTATE_NOT_SUPPORTED,
+            message: format!("{feature} is not supported in replicated mode yet"),
+            detail: None,
+            hint: Some(format!("tracked in {follow_on}")),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The handle
+// ---------------------------------------------------------------------------
+
+/// One booted consensus voter plus the cluster view it was booted from,
+/// shared by every session of a replicated server.
+///
+/// Thin by design: all consensus semantics live on [`MvccRaftNode`]; this
+/// adds config validation, leader-hint address resolution, and the
+/// consensus-error → [`SqlError`] mapping.
+pub struct ReplicationHandle {
+    node: MvccRaftNode,
+    cluster: ClusterConfig,
+    node_id: u64,
+}
+
+impl ReplicationHandle {
+    /// Boot this server's consensus voter from the `[replication]`
+    /// config: loads `cluster.toml`, then joins the cluster (durably
+    /// under `data_dir` when configured, in-memory otherwise).
+    ///
+    /// Does **not** wait for an election — sessions opened before the
+    /// cluster elects a leader simply get `NotLeader` errors on writes
+    /// until it does, which is the correct degraded behavior.
+    pub async fn start(config: &ReplicationConfig) -> Result<Arc<Self>> {
+        let cluster_path = config.cluster_config.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("replication.enabled requires replication.cluster_config")
+        })?;
+        let node_id = config
+            .node_id
+            .ok_or_else(|| anyhow::anyhow!("replication.enabled requires replication.node_id"))?;
+        let cluster = ClusterConfig::load(cluster_path)
+            .map_err(|e| anyhow::anyhow!("failed to load {}: {e}", cluster_path.display()))?;
+        if cluster.addr(node_id).is_none() {
+            return Err(anyhow::anyhow!(
+                "replication.node_id {node_id} is not a member of {}",
+                cluster_path.display()
+            ));
+        }
+        let tuning =
+            RaftTuning { staleness_beacon_ms: config.staleness_beacon_ms, ..RaftTuning::default() };
+        let node = match &config.data_dir {
+            Some(dir) => {
+                MvccRaftNode::join_tcp_cluster_with_data_dir_tuned(node_id, &cluster, dir, tuning)
+                    .await
+            }
+            None => MvccRaftNode::join_tcp_cluster_tuned(node_id, &cluster, tuning).await,
+        }
+        .map_err(|e| anyhow::anyhow!("failed to join consensus cluster: {e}"))?;
+        Ok(Arc::new(Self { node, cluster, node_id }))
+    }
+
+    /// The underlying consensus node.
+    pub fn node(&self) -> &MvccRaftNode {
+        &self.node
+    }
+
+    /// This node's id in the cluster.
+    pub fn node_id(&self) -> u64 {
+        self.node_id
+    }
+
+    /// Number of members in the cluster config.
+    pub fn cluster_size(&self) -> usize {
+        self.cluster.len()
+    }
+
+    /// This node's current consensus role.
+    pub fn role(&self) -> Role {
+        self.node.role()
+    }
+
+    /// The reason this node halted on a fatal apply, if it did.
+    pub fn fatal_reason(&self) -> Option<String> {
+        self.node.fatal_reason()
+    }
+
+    /// Execute one autocommit write statement through consensus,
+    /// returning the dense log index (the session's read-your-writes
+    /// token) and the apply outcome.
+    pub async fn execute_write(&self, sql: &str) -> Result<(LogIndex, ApplyOutcome), SqlError> {
+        self.node.execute_replicated(sql).await.map_err(|e| self.sql_error("the statement", e))
+    }
+
+    /// Local, stale-allowed read (the default read mode).
+    pub fn query_local(&self, sql: &str) -> Result<Vec<Vec<vibesql_types::SqlValue>>, SqlError> {
+        self.node.query(sql).map_err(|e| self.sql_error("the query", e))
+    }
+
+    /// Linearizable read (quorum-confirmed leadership).
+    pub async fn query_linearizable(
+        &self,
+        sql: &str,
+    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>, SqlError> {
+        self.node.query_linearizable(sql).await.map_err(|e| self.sql_error("the query", e))
+    }
+
+    /// Bounded-staleness read; a zero bound delegates to linearizable.
+    pub async fn query_bounded_staleness(
+        &self,
+        max_staleness: Duration,
+        sql: &str,
+    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>, SqlError> {
+        self.node
+            .query_bounded_staleness(max_staleness, sql)
+            .await
+            .map_err(|e| self.sql_error("the query", e))
+    }
+
+    /// Read-your-writes read against the session's write token.
+    pub async fn query_at_least(
+        &self,
+        min_index: LogIndex,
+        sql: &str,
+        wait: Duration,
+    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>, SqlError> {
+        self.node
+            .query_at_least(min_index, sql, wait)
+            .await
+            .map_err(|e| self.sql_error("the query", e))
+    }
+
+    /// Map a consensus refusal onto a [`SqlError`] (codes documented in
+    /// the module docs). `context` names what was being executed, for
+    /// the message ("the statement", "the query").
+    pub fn sql_error(&self, context: &str, e: ConsensusError) -> SqlError {
+        map_consensus_error(self.node_id, &self.cluster, context, e)
+    }
+
+    /// The [`SqlError`] every statement gets on a halted node.
+    pub fn halted_error(&self, reason: String) -> SqlError {
+        self.sql_error("the statement", ConsensusError::FatalApply(reason))
+    }
+}
+
+/// Best-effort human-readable description of a leader hint, resolved
+/// against this node's `cluster.toml` view ("node 2 at 10.0.0.2:5433").
+fn describe_leader(cluster: &ClusterConfig, hint: Option<u64>) -> Option<String> {
+    let id = hint?;
+    Some(match cluster.addr(id) {
+        Some(addr) => format!("node {id} at {addr} (consensus address)"),
+        None => format!("node {id}"),
+    })
+}
+
+/// The consensus-error → SQLSTATE mapping (free function so it is
+/// unit-testable without booting a node; see the module docs for the
+/// code choices).
+fn map_consensus_error(
+    node_id: u64,
+    cluster: &ClusterConfig,
+    context: &str,
+    e: ConsensusError,
+) -> SqlError {
+    match e {
+        ConsensusError::NotLeader { leader_hint } => {
+            let leader = describe_leader(cluster, leader_hint);
+            SqlError {
+                code: SQLSTATE_NOT_LEADER,
+                message: format!(
+                    "cannot execute {context} on node {node_id}: not the cluster leader"
+                ),
+                detail: leader.as_ref().map(|l| format!("current leader: {l}")),
+                hint: Some(match &leader {
+                    Some(l) => format!("redirect to the leader: {l}"),
+                    None => "no leader is currently known; retry shortly".to_string(),
+                }),
+            }
+        }
+        ConsensusError::StalenessExceeded { observed_ms, max_staleness_ms, leader_hint } => {
+            SqlError {
+                code: SQLSTATE_RETRY,
+                message: format!(
+                    "cannot serve {context} within the staleness bound on node {node_id}"
+                ),
+                detail: Some(match observed_ms {
+                    Some(observed) => format!(
+                        "observed staleness {observed}ms exceeds the {max_staleness_ms}ms bound"
+                    ),
+                    None => format!(
+                        "staleness is unknown (no leader-stamped entry applied yet); the bound \
+                         is {max_staleness_ms}ms"
+                    ),
+                }),
+                hint: Some(match describe_leader(cluster, leader_hint) {
+                    Some(l) => format!(
+                        "redirect the read to the leader ({l}) or raise vibesql_max_staleness_ms"
+                    ),
+                    None => "retry with a larger vibesql_max_staleness_ms, or redirect the read \
+                             to the leader"
+                        .to_string(),
+                }),
+            }
+        }
+        ConsensusError::ReadTimeout { required, applied, leader_hint } => SqlError {
+            code: SQLSTATE_RETRY,
+            message: format!(
+                "read-your-writes wait expired on node {node_id}: applied index {applied} has \
+                 not reached the session token {required}"
+            ),
+            detail: Some(format!("required index {required}, applied index {applied}")),
+            hint: Some(match describe_leader(cluster, leader_hint) {
+                Some(l) => format!("retry here, or redirect the read to the leader ({l})"),
+                None => "retry here, or redirect the read to the leader".to_string(),
+            }),
+        },
+        ConsensusError::FatalApply(reason) => SqlError {
+            code: SQLSTATE_FATAL,
+            message: format!("node {node_id} has halted on a fatal apply error"),
+            detail: Some(reason),
+            hint: Some("restart the node to resync via snapshot install + log replay".to_string()),
+        },
+        other => SqlError::new(SQLSTATE_INTERNAL, other.to_string()),
+    }
+}
+
+impl std::fmt::Debug for ReplicationHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReplicationHandle")
+            .field("node_id", &self.node_id)
+            .field("cluster_size", &self.cluster.len())
+            .field("role", &self.role())
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cluster() -> ClusterConfig {
+        ClusterConfig::new([
+            (1, "10.0.0.1:5433".to_string()),
+            (2, "10.0.0.2:5433".to_string()),
+            (3, "10.0.0.3:5433".to_string()),
+        ])
+        .unwrap()
+    }
+
+    #[test]
+    fn not_leader_maps_to_25006_with_resolved_leader_address() {
+        let err = map_consensus_error(
+            2,
+            &cluster(),
+            "the statement",
+            ConsensusError::NotLeader { leader_hint: Some(1) },
+        );
+        assert_eq!(err.code, SQLSTATE_NOT_LEADER);
+        assert!(err.message.contains("node 2"), "{}", err.message);
+        let detail = err.detail.expect("detail with leader");
+        assert!(detail.contains("node 1 at 10.0.0.1:5433"), "{detail}");
+        assert!(err.hint.expect("hint").contains("10.0.0.1:5433"));
+    }
+
+    #[test]
+    fn not_leader_without_hint_says_so() {
+        let err = map_consensus_error(
+            3,
+            &cluster(),
+            "the statement",
+            ConsensusError::NotLeader { leader_hint: None },
+        );
+        assert_eq!(err.code, SQLSTATE_NOT_LEADER);
+        assert!(err.detail.is_none());
+        assert!(err.hint.expect("hint").contains("no leader is currently known"));
+    }
+
+    #[test]
+    fn staleness_exceeded_maps_to_57p03() {
+        let err = map_consensus_error(
+            2,
+            &cluster(),
+            "the query",
+            ConsensusError::StalenessExceeded {
+                observed_ms: Some(750),
+                max_staleness_ms: 500,
+                leader_hint: Some(1),
+            },
+        );
+        assert_eq!(err.code, SQLSTATE_RETRY);
+        let detail = err.detail.expect("detail");
+        assert!(detail.contains("750ms") && detail.contains("500ms"), "{detail}");
+        assert!(err.hint.expect("hint").contains("node 1 at 10.0.0.1:5433"));
+    }
+
+    #[test]
+    fn unknown_staleness_is_explained() {
+        let err = map_consensus_error(
+            2,
+            &cluster(),
+            "the query",
+            ConsensusError::StalenessExceeded {
+                observed_ms: None,
+                max_staleness_ms: 500,
+                leader_hint: None,
+            },
+        );
+        assert_eq!(err.code, SQLSTATE_RETRY);
+        assert!(err.detail.expect("detail").contains("unknown"));
+    }
+
+    #[test]
+    fn read_timeout_maps_to_57p03_with_indices() {
+        let err = map_consensus_error(
+            2,
+            &cluster(),
+            "the query",
+            ConsensusError::ReadTimeout { required: 9, applied: 4, leader_hint: Some(1) },
+        );
+        assert_eq!(err.code, SQLSTATE_RETRY);
+        assert!(err.message.contains('9') && err.message.contains('4'), "{}", err.message);
+        assert_eq!(err.detail.as_deref(), Some("required index 9, applied index 4"));
+    }
+
+    #[test]
+    fn fatal_apply_maps_to_58000_with_reason() {
+        let err = map_consensus_error(
+            1,
+            &cluster(),
+            "the statement",
+            ConsensusError::FatalApply("disk exploded".to_string()),
+        );
+        assert_eq!(err.code, SQLSTATE_FATAL);
+        assert_eq!(err.detail.as_deref(), Some("disk exploded"));
+        assert!(err.hint.expect("hint").contains("restart"));
+    }
+
+    #[test]
+    fn other_errors_fall_back_to_internal() {
+        let err = map_consensus_error(
+            1,
+            &cluster(),
+            "the statement",
+            ConsensusError::Backend("boom".to_string()),
+        );
+        assert_eq!(err.code, SQLSTATE_INTERNAL);
+        assert!(err.message.contains("boom"));
+    }
+
+    #[test]
+    fn leader_hint_outside_cluster_config_degrades_gracefully() {
+        let err = map_consensus_error(
+            1,
+            &cluster(),
+            "the statement",
+            ConsensusError::NotLeader { leader_hint: Some(42) },
+        );
+        assert!(err.detail.expect("detail").contains("node 42"));
+    }
+
+    #[tokio::test]
+    async fn start_validates_required_fields() {
+        use crate::config::ReplicationConfig;
+
+        // Missing cluster_config.
+        let err = ReplicationHandle::start(&ReplicationConfig {
+            enabled: true,
+            node_id: Some(1),
+            ..ReplicationConfig::default()
+        })
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("cluster_config"), "{err}");
+
+        // Missing node_id.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cluster.toml");
+        std::fs::write(&path, "[[node]]\nid = 1\naddr = \"127.0.0.1:0\"\n").unwrap();
+        let err = ReplicationHandle::start(&ReplicationConfig {
+            enabled: true,
+            cluster_config: Some(path.clone()),
+            ..ReplicationConfig::default()
+        })
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("node_id"), "{err}");
+
+        // node_id not a cluster member.
+        let err = ReplicationHandle::start(&ReplicationConfig {
+            enabled: true,
+            cluster_config: Some(path),
+            node_id: Some(7),
+            ..ReplicationConfig::default()
+        })
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("not a member"), "{err}");
+    }
+}

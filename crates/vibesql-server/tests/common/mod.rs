@@ -218,6 +218,7 @@ pub fn test_config() -> Config {
         },
         observability: ObservabilityConfig::default(),
         subscriptions: SubscriptionConfig::default(),
+        replication: vibesql_server::config::ReplicationConfig::default(),
     }
 }
 
