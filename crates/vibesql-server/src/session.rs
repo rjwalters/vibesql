@@ -698,18 +698,33 @@ impl Session {
         &mut self,
         execute_stmt: &vibesql_ast::ExecuteStmt,
     ) -> Result<ExecutionResult> {
-        let name = execute_stmt.name.clone();
+        let sql = self.substitute_execute_sql(execute_stmt)?;
+        // Box the recursive dispatch: `execute` → `execute_replicated` →
+        // here → `execute` would otherwise be an infinitely sized future.
+        Box::pin(self.execute(&sql)).await
+    }
+
+    /// Resolve an `EXECUTE <name>(args...)` to the substituted SQL *text*.
+    ///
+    /// Looks up the named prepared statement, evaluates the EXECUTE arguments
+    /// to literal values, validates the count, and renders them back into the
+    /// prepared statement's SQL text by replacing the `?` / `$N` placeholders
+    /// in order — the same text-substitution contract the extended wire
+    /// protocol's Bind path uses to route parameterized writes through
+    /// consensus. Shared by the autocommit EXECUTE path (`replicated_execute`)
+    /// and the open-transaction EXECUTE path (`execute_in_open_txn`), so a
+    /// prepared write buffers into the open transaction exactly as if the
+    /// substituted SQL had been issued directly.
+    fn substitute_execute_sql(
+        &self,
+        execute_stmt: &vibesql_ast::ExecuteStmt,
+    ) -> Result<String> {
+        let name = &execute_stmt.name;
         let prepared = self
             .named_statements
-            .get(&name)
-            .ok_or_else(|| anyhow::anyhow!("Prepared statement '{}' not found", name))?
-            .clone();
+            .get(name)
+            .ok_or_else(|| anyhow::anyhow!("Prepared statement '{}' not found", name))?;
 
-        // Evaluate the EXECUTE arguments to literal values, then render them
-        // back into the prepared statement's SQL text by replacing the `?`
-        // / `$N` placeholders in order — the same text-substitution contract
-        // the extended wire protocol's Bind path already uses to route
-        // parameterized writes through consensus.
         let params: Vec<SqlValue> =
             execute_stmt.params.iter().map(evaluate_expression).collect::<Result<Vec<_>>>()?;
 
@@ -722,10 +737,7 @@ impl Session {
             ));
         }
 
-        let sql = substitute_named_params(prepared.sql(), &params);
-        // Box the recursive dispatch: `execute` → `execute_replicated` →
-        // here → `execute` would otherwise be an infinitely sized future.
-        Box::pin(self.execute(&sql)).await
+        Ok(substitute_named_params(prepared.sql(), &params))
     }
 
     /// Roll back an open replicated transaction (#5391): discard the
@@ -931,20 +943,32 @@ impl Session {
             Statement::Pragma(_) => Ok(ExecutionResult::Other { message: "PRAGMA".to_string() }),
 
             // PREPARE/DEALLOCATE are session-local and harmless inside a
-            // transaction. EXECUTE of a prepared *write* inside a
-            // transaction is refused: `execute_in_open_txn` is synchronous
-            // (it cannot re-enter the async replicated dispatch to buffer the
-            // substituted SQL), and silently dropping it would be unsound.
-            // Use the substituted SQL directly inside the transaction, or
-            // run the prepared statement outside one (full prepared-EXECUTE
-            // inside replicated transactions is the scoped follow-on #5401).
+            // transaction.
             Statement::Prepare(stmt) => self.replicated_prepare(stmt),
             Statement::Deallocate(stmt) => self.execute_deallocate(stmt),
-            Statement::Execute(_) => Err(SqlError::not_supported(
-                "EXECUTE of a prepared statement inside a replicated transaction",
-                "#5401",
-            )
-            .into()),
+
+            // EXECUTE inside an open replicated transaction (#5414):
+            // substitute the prepared statement's literal parameters back into
+            // its SQL *text* (the same contract the autocommit EXECUTE path
+            // uses), re-parse the result, and dispatch it through this same
+            // open-transaction path. A prepared INSERT therefore freezes and
+            // buffers into the open transaction exactly as if its substituted
+            // SQL had been issued directly — it joins the atomic COMMIT batch,
+            // a mid-transaction read sees it via the speculative replay (full
+            // read-your-own-writes), and ROLLBACK discards it. Substitution +
+            // re-parse are synchronous, so no async re-entry is needed.
+            Statement::Execute(execute_stmt) => {
+                let substituted = self.substitute_execute_sql(execute_stmt)?;
+                // Parse + cache the substituted text, cloning the AST out so
+                // we can re-dispatch against `&mut self` without holding the
+                // cache borrow.
+                let prepared = self
+                    .stmt_cache
+                    .get_or_prepare(&substituted)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                let statement = prepared.statement().clone();
+                self.execute_in_open_txn(&substituted, &statement)
+            }
             Statement::DeclareCursor(_)
             | Statement::OpenCursor(_)
             | Statement::Fetch(_)
