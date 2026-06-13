@@ -85,6 +85,92 @@ impl SubscriptionManager {
         self.execute_with_retry(subscription, db, id).await;
     }
 
+    /// Handle a change event in **replicated mode** (#5422).
+    ///
+    /// Identical fanout to [`handle_change`](Self::handle_change), but each
+    /// affected subscription's SELECT is re-executed against the consensus
+    /// **applied** state machine via `query_fn` (which the server backs with
+    /// `ReplicationHandle::with_applied_db`) instead of a local `Database`. The
+    /// (sync) notification — delta computation, selective-column handling,
+    /// slow-consumer detection — is shared with the standalone path via
+    /// [`notify_with_rows`](Self::notify_with_rows).
+    pub async fn handle_change_replicated<F>(&self, event: vibesql_storage::ChangeEvent, query_fn: &F)
+    where
+        F: Fn(&str) -> Result<Vec<vibesql_storage::Row>, String>,
+    {
+        let table = event.table_name();
+        trace!(table = %table, event = ?event, "Processing replicated apply-path change event");
+
+        let affected_ids = self.find_affected_subscriptions(table);
+        if affected_ids.is_empty() {
+            return;
+        }
+
+        for id in affected_ids {
+            // Clone the query string out before re-querying so the state
+            // machine lock (held inside `query_fn`) never overlaps the DashMap
+            // mutable borrow used for notification.
+            let query = match self.subscriptions.get(&id) {
+                Some(sub) => sub.query.clone(),
+                None => continue,
+            };
+
+            match query_fn(&query) {
+                Ok(rows) => {
+                    if let Some(mut sub_ref) = self.subscriptions.get_mut(&id) {
+                        self.notify_with_rows(sub_ref.value_mut(), id, rows);
+                    }
+                }
+                Err(error_msg) => {
+                    warn!(
+                        subscription_id = %id,
+                        error = %error_msg,
+                        "Replicated subscription query failed; skipping this change"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Run the **replicated** subscription event loop (#5422).
+    ///
+    /// Drains the consensus apply-path change feed (`change_rx`, from
+    /// `ReplicationHandle::subscribe_changes`) and re-checks affected
+    /// subscriptions against the applied state machine using `query_fn`. Runs
+    /// until the feed closes — which happens when the state machine is replaced
+    /// by a snapshot install or the node shuts down.
+    pub async fn run_replicated_event_loop<F>(
+        &self,
+        mut change_rx: vibesql_storage::ChangeEventReceiver,
+        query_fn: F,
+    ) where
+        F: Fn(&str) -> Result<Vec<vibesql_storage::Row>, String>,
+    {
+        loop {
+            match change_rx.try_recv() {
+                Ok(event) => {
+                    self.handle_change_replicated(event, &query_fn).await;
+                }
+                Err(RecvError::Lagged(n)) => {
+                    warn!(
+                        lagged_count = n,
+                        "Replicated SubscriptionManager lagged behind apply-path change events"
+                    );
+                }
+                Err(RecvError::Closed) => {
+                    debug!(
+                        "Apply-path change feed closed (snapshot install or shutdown); stopping \
+                         replicated subscription loop"
+                    );
+                    break;
+                }
+                Err(RecvError::Empty) => {
+                    tokio::task::yield_now().await;
+                }
+            }
+        }
+    }
+
     /// Run the subscription manager event loop
     ///
     /// Listens for change events from the storage layer and processes them.
