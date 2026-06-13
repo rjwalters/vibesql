@@ -312,11 +312,17 @@ fn cascade_delete(
         }
     }
 
-    // Recursively check integrity for each child row before deleting
-    // This handles multi-level CASCADE (grandchildren, etc.)
-    for child_row in &rows_to_delete {
-        check_no_child_references(db, child_table_name, child_row)?;
-    }
+    // FK cascade fires the child table's row triggers, matching sqlite3
+    // 3.51 (#5440). sqlite3 fires child BEFORE/AFTER DELETE triggers for
+    // every cascaded row regardless of the `recursive_triggers` pragma —
+    // that pragma gates a trigger re-firing itself, not FK-cascade-fired
+    // triggers. The depth-16 RecursionGuard inside the firing helpers
+    // bounds multi-level FK chains.
+    let has_child_delete_triggers = db
+        .catalog
+        .get_triggers_for_table(child_table_name, Some(vibesql_ast::TriggerEvent::Delete))
+        .next()
+        .is_some();
 
     // Phase 1c (Issue #5150 / #5136) note: FK cascade DELETE uses the
     // content-matching `delete_where` predicate (not index-based), so we
@@ -328,11 +334,50 @@ fn cascade_delete(
     // This is a known minor gap; cascade DELETE in a transaction with
     // mvcc_enabled is uncommon and the off-state behavior is unchanged.
 
-    // Now delete the child rows
-    let child_table_mut = db.get_table_mut(child_table_name).unwrap();
-    for row_to_delete in &rows_to_delete {
-        // Ignore delete_result since we unconditionally rebuild indexes after the loop
-        let _ = child_table_mut.delete_where(|row| row == row_to_delete);
+    // Process each cascaded child row in collection order so that trigger
+    // firing interleaves with multi-level cascade exactly as sqlite3 does
+    // (#5440): for a given child row the order is
+    //   BEFORE child trigger -> grandchild cascade -> delete -> AFTER child trigger.
+    // Verified against sqlite3 3.51.0.
+    for child_row in &rows_to_delete {
+        // BEFORE DELETE row triggers on the child. A RAISE(IGNORE)
+        // (SkipRow) abandons this child row's cascade — it is not deleted
+        // (matching sqlite3, where the surviving orphan then typically
+        // trips an FK check at statement end). A RAISE(ABORT|FAIL|
+        // ROLLBACK) propagates as Err and aborts the whole statement.
+        if has_child_delete_triggers {
+            let outcome = crate::TriggerFirer::execute_before_triggers(
+                db,
+                child_table_name,
+                vibesql_ast::TriggerEvent::Delete,
+                Some(child_row),
+                None,
+            )?;
+            if outcome == crate::TriggerOutcome::SkipRow {
+                continue;
+            }
+        }
+
+        // Recursively check integrity for this child row before deleting.
+        // This handles multi-level CASCADE (grandchildren, etc.) and runs
+        // after the child's BEFORE trigger, matching sqlite3 ordering.
+        check_no_child_references(db, child_table_name, child_row)?;
+
+        // Delete this child row.
+        let child_table_mut = db.get_table_mut(child_table_name).unwrap();
+        // Ignore delete_result since we unconditionally rebuild indexes after the loop.
+        let _ = child_table_mut.delete_where(|row| row == child_row);
+
+        // AFTER DELETE row triggers fire once this child row is gone.
+        if has_child_delete_triggers {
+            let _after = crate::TriggerFirer::execute_after_triggers(
+                db,
+                child_table_name,
+                vibesql_ast::TriggerEvent::Delete,
+                Some(child_row),
+                None,
+            )?;
+        }
     }
 
     // Rebuild indexes after deletion (handles both compaction and non-compaction cases)
