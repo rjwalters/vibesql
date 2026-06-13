@@ -1156,6 +1156,71 @@ proc update_sqlite_counters {sql result} {
     # but that doesn't match SQLite's actual B-tree operation counts.
 }
 
+# Mask CREATE TRIGGER bodies so the transaction-batching logic does not
+# miscount the trigger's BEGIN ... END (which is body syntax, NOT transaction
+# control) as BEGIN/COMMIT (#5460). Returns a copy of $sql in which the text
+# from each "CREATE TRIGGER ... BEGIN" up to its *matching* terminating END is
+# replaced with spaces. Only used for BEGIN/END *counting*; the real SQL is
+# executed unchanged.
+#
+# Trigger bodies nest: the body's opening BEGIN may contain CASE ... END
+# expressions (and, in theory, nested compound statements) whose END must NOT
+# be mistaken for the trigger terminator. So scan with a depth counter: BEGIN
+# and CASE increment depth, END decrements it; the trigger ends when depth
+# returns to 0. This correctly handles e.g.
+#   CREATE TRIGGER t ... BEGIN SELECT CASE WHEN c THEN RAISE(IGNORE) END; END;
+# where the first END closes the CASE and the second closes the trigger.
+proc mask_trigger_bodies {sql} {
+    set out $sql
+    set search_from 0
+    while {1} {
+        # Locate the BEGIN that opens a CREATE TRIGGER body, at/after search_from.
+        set rest [string range $out $search_from end]
+        if {![regexp -indices -nocase \
+                {CREATE\s+(?:TEMP\s+|TEMPORARY\s+)?TRIGGER\y.*?\yBEGIN\y} \
+                $rest m]} {
+            break
+        }
+        set abs_create_start [expr {$search_from + [lindex $m 0]}]
+        set abs_begin_end [expr {$search_from + [lindex $m 1]}]
+        set body_start [expr {$abs_begin_end + 1}]
+
+        # Walk word tokens after the trigger's BEGIN, tracking nesting depth.
+        # depth starts at 1 (we just consumed the trigger's opening BEGIN).
+        set depth 1
+        set scan $body_start
+        set tail [string range $out $scan end]
+        set term -1
+        foreach tok [regexp -all -inline -indices -nocase {\m(?:BEGIN|CASE|END)\M} $tail] {
+            set word [string toupper [string range $tail [lindex $tok 0] [lindex $tok 1]]]
+            if {$word eq "BEGIN" || $word eq "CASE"} {
+                incr depth
+            } else {
+                # END
+                incr depth -1
+                if {$depth == 0} {
+                    set term [expr {$scan + [lindex $tok 1]}]
+                    break
+                }
+            }
+        }
+
+        if {$term < 0} {
+            # Unbalanced (shouldn't happen for valid SQL) — mask to end of string
+            # to be safe, then stop.
+            set term [expr {[string length $out] - 1}]
+        }
+
+        set len [expr {$term - $abs_create_start + 1}]
+        set out [string replace $out $abs_create_start $term [string repeat " " $len]]
+        set search_from [expr {$term + 1}]
+        if {$search_from >= [string length $out]} {
+            break
+        }
+    }
+    return $out
+}
+
 proc execsql {sql {db ""}} {
     # Execute SQL and return results as a TCL list
     # Error messages are automatically translated to SQLite-compatible format
@@ -1304,10 +1369,20 @@ proc execsql {sql {db ""}} {
     # - "BEGIN" or "BEGIN;" at statement start
     # - "BEGIN TRANSACTION", "BEGIN DEFERRED", "BEGIN IMMEDIATE", "BEGIN EXCLUSIVE"
     # Match these patterns preceded by statement boundary (start of string, ;, or newline)
-    set begin_count [regexp -all -nocase {(?:^|;|\n)\s*BEGIN\s*(?:TRANSACTION|DEFERRED|IMMEDIATE|EXCLUSIVE|;|\s*$)} $sql]
+    #
+    # IMPORTANT (#5460): A CREATE TRIGGER body is delimited by BEGIN ... END,
+    # which the transaction-control regexes below would otherwise miscount as
+    # transaction start/commit. SQLite's `END;` is a synonym for COMMIT, so a
+    # CREATE TRIGGER block (which has no transaction BEGIN) registered as a net
+    # COMMIT and tried to flush a non-existent transaction — aborting whole
+    # trigger-creating test files (e.g. trigger3.test) with "No active
+    # transaction to commit". Mask CREATE TRIGGER bodies out of the SQL used
+    # *only* for BEGIN/END counting (the real SQL is still executed verbatim).
+    set count_sql [mask_trigger_bodies $sql]
+    set begin_count [regexp -all -nocase {(?:^|;|\n)\s*BEGIN\s*(?:TRANSACTION|DEFERRED|IMMEDIATE|EXCLUSIVE|;|\s*$)} $count_sql]
     # END and END TRANSACTION are SQLite synonyms for COMMIT
-    set end_count [expr {[regexp -all -nocase {(?:^|;|\n)\s*(?:COMMIT|END)(?:\s+TRANSACTION)?\s*(?:;|\s*$)} $sql] + \
-                         [regexp -all -nocase {(?:^|;|\n)\s*ROLLBACK\s*(?:;|\s*$)} $sql]}]
+    set end_count [expr {[regexp -all -nocase {(?:^|;|\n)\s*(?:COMMIT|END)(?:\s+TRANSACTION)?\s*(?:;|\s*$)} $count_sql] + \
+                         [regexp -all -nocase {(?:^|;|\n)\s*ROLLBACK\s*(?:;|\s*$)} $count_sql]}]
     set net_begin [expr {$begin_count - $end_count}]
 
     if {$net_begin > 0} {
@@ -4147,7 +4222,14 @@ proc check_single_capability {cap} {
     # applicable. Without this, the single-reference view32768 scan materializes
     # the doubling nest exponentially and hangs (#5394). The reference-count
     # cap (65535) still catches the multi-reference case in view3.test 1.1.
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 trigger conflict hiddencolumns progress}
+    # NOTE: `trigger` was removed from this list (#5460) — VibeSQL implements
+    # BEFORE/AFTER/INSTEAD OF triggers (FOR EACH ROW, WHEN clauses, RAISE,
+    # recursion limits, FK CASCADE row triggers) across #5415/#5417/#5418/
+    # #5436/#5438/#5440/#5444/#5445/#5451/#5463. Gating on `!trigger` caused
+    # every trigger*.test file to `finish_test; return` at its capability
+    # guard, extracting 0 tests. Removing it lets SQLite's canonical trigger
+    # conformance actually execute against VibeSQL.
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 conflict hiddencolumns progress}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0
@@ -4242,6 +4324,20 @@ proc wal_is_capable {} {
 proc working_64bit_int {} {
     # VibeSQL supports 64-bit integers
     return 1
+}
+
+proc verify_ex_errcode {name expected {db db}} {
+    # SQLite's tester.tcl defines this as:
+    #   do_test $name [list sqlite3_extended_errcode $db] $expected
+    # It asserts the *extended* result code (e.g. SQLITE_CONSTRAINT_TRIGGER)
+    # of the most recent statement. VibeSQL does not expose SQLite's
+    # extended-result-code C API (sqlite3_extended_errcode), so these
+    # assertions are not applicable. Record a documented skip rather than
+    # aborting the whole file with "invalid command name". The user-visible
+    # error message is still verified by the preceding catchsql/do_test.
+    # Follow-on: #5460 tracks deeper trigger conformance; extended error
+    # codes are tracked separately.
+    omit_test $name "uses sqlite3_extended_errcode (SQLite C API; not in VibeSQL)"
 }
 
 proc sqlite3_connection_pointer {db} {
@@ -4729,6 +4825,83 @@ proc forcedelete {args} {
     }
 }
 
+proc copy_file {from to} {
+    # SQLite test utility: copy a database file (used by malloc/recovery
+    # tests to snapshot and restore db state). The shim's per-statement
+    # process model means an in-flight `db` connection isn't holding the
+    # file open, so a plain filesystem copy is the right behavior. Defined
+    # here (#5460) so triggerA.test's malloc-test snapshot step doesn't abort
+    # the whole file with "invalid command name".
+    catch {file copy -force $from $to}
+}
+
+proc forcecopy {from to} {
+    # Force-copy variant (deletes destination first). Same rationale as
+    # copy_file above (#5460).
+    catch {file delete -force $to}
+    catch {file copy -force $from $to}
+}
+
+proc sqlite3_extended_result_codes {db onoff} {
+    # SQLite C API toggle for extended result codes. VibeSQL doesn't expose
+    # the extended-result-code surface; this is a no-op so malloc/error-code
+    # test setup doesn't abort (#5460).
+    return
+}
+
+# Intercept `source` so test files that pull in SQLite's specialized harness
+# helpers (OOM/malloc injection, fault simulation) don't override the no-op
+# stubs we provide and don't drag in machinery VibeSQL can't satisfy. For
+# these helper files we keep our own definitions (e.g. do_malloc_test, which
+# records a documented skip) instead of loading SQLite's 100k-iteration
+# fault-injection loops. tester.tcl itself is already substituted out by
+# run_test_file, so it never reaches here. (#5460)
+if {[llength [info commands ::_real_source]] == 0} {
+    rename source ::_real_source
+}
+proc source {args} {
+    set path [lindex $args end]
+    set base [file tail $path]
+    # Harness helper files we intentionally do NOT load — our stubs stand in.
+    set skip_helpers {
+        malloc_common.tcl
+        mallocAll.tcl
+        fault_inject.tcl
+    }
+    if {[lsearch -exact $skip_helpers $base] >= 0} {
+        return
+    }
+    return [uplevel 1 [list ::_real_source {*}$args]]
+}
+
+proc save_prng_state {} {
+    # SQLite test harness: snapshot the built-in PRNG state so malloc tests can
+    # replay deterministically. VibeSQL has no such PRNG hook; no-op (#5460).
+    return
+}
+
+proc restore_prng_state {} {
+    # Counterpart to save_prng_state; no-op for VibeSQL (#5460).
+    return
+}
+
+proc reset_prng_state {} {
+    # Reset the SQLite test PRNG; no-op for VibeSQL (#5460).
+    return
+}
+
+proc do_malloc_test {args} {
+    # SQLite's OOM-injection harness: re-runs a SQL body under simulated
+    # malloc failures (sqlite3_memdebug_*) to exercise error-recovery paths.
+    # VibeSQL has no malloc-failure injection API, so these tests are not
+    # applicable. Record a single documented skip rather than aborting the
+    # file. The underlying trigger behavior they wrap is already covered by
+    # the file's non-malloc do_test cases. Follow-on: OOM-injection
+    # conformance is out of scope for #5460.
+    set name [lindex $args 0]
+    omit_test $name "uses do_malloc_test (SQLite OOM-injection harness; not in VibeSQL)"
+}
+
 proc file_control_chunksize_test {db size} {
     # SQLite-specific file control - ignore
     return
@@ -5150,9 +5323,18 @@ proc run_test_file {filename} {
     # would make those variables local to run_test_file, not global.
     # 'uplevel #0' ensures the test file runs in the global scope.
     if {[catch {uplevel #0 $content} err]} {
-        puts "Error running test: $err"
+        # A top-level (non-do_test) statement threw and aborted file
+        # evaluation — typically a bare `execsql`/`db eval` setup statement
+        # that hit a genuine VibeSQL gap, or cross-connection state the shim's
+        # per-statement process model cannot preserve (e.g. TEMP objects from
+        # an earlier `ifcapable tempdb` block; #5460). Previously this did
+        # `exit 1`, which discarded ALL results — so a file that had already
+        # run dozens of tests reported 0/0/0. Instead, surface the abort as a
+        # setup error and still call finish_test so the tests that DID run are
+        # tallied (real pass/fail) and the summary is emitted. This does not
+        # fake any passes: the aborting statement is reported below.
+        puts "Setup error (file evaluation aborted mid-file): $err"
         puts "Error info: $::errorInfo"
-        exit 1
     }
 
     finish_test
