@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS benchmark_runs (
     run_timestamp TEXT NOT NULL,
     git_commit TEXT,
     git_branch TEXT,
-    benchmark_suite TEXT NOT NULL CHECK (benchmark_suite IN ('tpch', 'tpcc', 'tpcds', 'sysbench', 'sqllogictest_suite', 'custom')),
+    benchmark_suite TEXT NOT NULL CHECK (benchmark_suite IN ('tpch', 'tpcc', 'tpcds', 'sysbench', 'hnsw', 'sqllogictest_suite', 'custom')),
     scale_factor TEXT,
     timeout_secs INTEGER,
     total_queries INTEGER,
@@ -43,6 +43,30 @@ CREATE TABLE IF NOT EXISTS sysbench_results (
     std_dev_ns REAL,
     median_time_ns REAL,
     iterations INTEGER,
+    FOREIGN KEY (run_id) REFERENCES benchmark_runs(run_id)
+);
+
+-- HNSW Recall Results: vector-index quality metrics (recall@k) for
+-- delete-heavy workloads. Unlike the latency-oriented tables above this stores
+-- a *quality* metric: the fraction of true k-nearest neighbours returned by an
+-- approximate HNSW search vs brute-force ground truth, measured across three
+-- index states (fresh build / degraded-by-lazy-deletes / post-compaction) and
+-- a sweep of ef_search + delete ratio. See #5466.
+CREATE TABLE IF NOT EXISTS hnsw_recall_results (
+    result_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    database_engine TEXT NOT NULL,  -- 'vibesql'
+    k INTEGER NOT NULL,             -- recall@k neighbour count
+    dataset_size INTEGER,           -- number of base vectors
+    dimensions INTEGER,             -- vector dimensionality
+    -- NB: named `ef_search_param` (not `ef_search`) because EF_SEARCH is a
+    -- reserved keyword in VibeSQL's CREATE INDEX ... WITH (...) syntax.
+    ef_search_param INTEGER,        -- query-time search beam width
+    delete_ratio REAL,             -- fraction of vectors lazily deleted
+    live_count INTEGER,            -- surviving vectors
+    deleted_count INTEGER,         -- removed vectors
+    index_state TEXT NOT NULL CHECK (index_state IN ('fresh', 'degraded', 'compacted')),
+    recall REAL NOT NULL,          -- measured recall@k in [0, 1]
     FOREIGN KEY (run_id) REFERENCES benchmark_runs(run_id)
 );
 
@@ -203,6 +227,46 @@ CREATE INDEX IF NOT EXISTS idx_tpcc_results_txn_type ON tpcc_results(transaction
 CREATE INDEX IF NOT EXISTS idx_sysbench_results_run ON sysbench_results(run_id);
 CREATE INDEX IF NOT EXISTS idx_sysbench_results_engine ON sysbench_results(database_engine);
 CREATE INDEX IF NOT EXISTS idx_sysbench_results_test ON sysbench_results(test_name);
+
+-- Indexes for HNSW recall results
+CREATE INDEX IF NOT EXISTS idx_hnsw_recall_results_run ON hnsw_recall_results(run_id);
+CREATE INDEX IF NOT EXISTS idx_hnsw_recall_results_state ON hnsw_recall_results(index_state);
+
+-- View: Latest HNSW recall benchmark summary
+CREATE VIEW IF NOT EXISTS latest_hnsw_recall_summary AS
+SELECT
+    hr.database_engine,
+    hr.k,
+    hr.ef_search_param,
+    hr.delete_ratio,
+    hr.index_state,
+    ROUND(hr.recall, 4) as recall,
+    hr.live_count,
+    hr.deleted_count,
+    brun.timestamp,
+    brun.git_commit
+FROM hnsw_recall_results hr
+JOIN benchmark_runs brun ON hr.run_id = brun.run_id
+WHERE brun.run_id = (SELECT MAX(run_id) FROM benchmark_runs WHERE benchmark_suite = 'hnsw')
+ORDER BY hr.ef_search_param, hr.delete_ratio, hr.index_state;
+
+-- View: HNSW recall trend over time (per ef_search / delete_ratio / state)
+CREATE VIEW IF NOT EXISTS hnsw_recall_trend AS
+SELECT
+    hr.ef_search_param,
+    hr.delete_ratio,
+    hr.index_state,
+    hr.run_id,
+    brun.timestamp,
+    brun.git_commit,
+    hr.recall,
+    LAG(hr.recall) OVER (
+        PARTITION BY hr.ef_search_param, hr.delete_ratio, hr.index_state
+        ORDER BY brun.timestamp
+    ) as prev_recall
+FROM hnsw_recall_results hr
+JOIN benchmark_runs brun ON hr.run_id = brun.run_id
+ORDER BY hr.ef_search_param, hr.delete_ratio, hr.index_state, brun.timestamp;
 
 -- View: Latest TPC-C benchmark summary
 CREATE VIEW IF NOT EXISTS latest_tpcc_summary AS

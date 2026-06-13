@@ -111,3 +111,7 @@ harness = false
 [[bench]]
 name = "skip_scan_benchmark"
 harness = false
+
+[[bench]]
+name = "hnsw_recall_benchmark"
+harness = false
