@@ -334,6 +334,67 @@ impl Database {
         self.lifecycle.transaction_manager_mut().release_savepoint(name)
     }
 
+    // ========================================================================
+    // Implicit statement-level savepoint (#5417 — RAISE(ABORT) scope)
+    // ========================================================================
+
+    /// Arm an implicit statement-level savepoint for the current statement.
+    ///
+    /// SQLite wraps every top-level statement in an implicit savepoint so a
+    /// `RAISE(ABORT)` (or ordinary constraint failure) can undo just that
+    /// statement's partial changes while keeping the enclosing transaction
+    /// open. The executor arms one of these before a top-level DML statement
+    /// that may fire a trigger, and on a `RAISE(ABORT)` calls
+    /// [`Self::rollback_statement_savepoint`].
+    ///
+    /// No-op (returns `false`) outside an explicit transaction: there is no
+    /// surrounding transaction whose earlier statements must survive, so the
+    /// auto-commit unit already provides the correct all-or-nothing scope.
+    ///
+    /// Snapshots catalog/tables/operations wholesale, so the subsequent
+    /// rollback correctly undoes INSERT/UPDATE/DELETE row data as well as any
+    /// PK/UNIQUE/spatial index key mutations the statement made.
+    pub fn arm_statement_savepoint(&mut self) -> bool {
+        let catalog = self.catalog.clone();
+        let tables = self.tables.clone();
+        let operations = self.operations.clone();
+        self.lifecycle.transaction_manager_mut().arm_statement_savepoint(
+            &catalog,
+            &tables,
+            &operations,
+        )
+    }
+
+    /// Roll back to the armed statement savepoint, undoing just the current
+    /// statement's changes (`RAISE(ABORT)` scope). The enclosing transaction
+    /// stays open. Returns `true` if a savepoint was armed and restored.
+    pub fn rollback_statement_savepoint(&mut self) -> bool {
+        let mut catalog = std::mem::take(&mut self.catalog);
+        let mut tables = std::mem::take(&mut self.tables);
+        let mut operations = std::mem::take(&mut self.operations);
+        let restored = self.lifecycle.transaction_manager_mut().rollback_statement_savepoint(
+            &mut catalog,
+            &mut tables,
+            &mut operations,
+        );
+        self.catalog = catalog;
+        self.tables = tables;
+        self.operations = operations;
+        restored
+    }
+
+    /// Disarm the statement savepoint without rolling back — the statement
+    /// succeeded, or a different rollback scope (`FAIL` keeps changes,
+    /// `ROLLBACK` already discarded the whole transaction) was chosen.
+    pub fn release_statement_savepoint(&mut self) {
+        self.lifecycle.transaction_manager_mut().release_statement_savepoint();
+    }
+
+    /// True when an implicit statement savepoint is currently armed.
+    pub fn has_statement_savepoint(&self) -> bool {
+        self.lifecycle.transaction_manager().has_statement_savepoint()
+    }
+
     // ============================================================================
     // Deferred FK Violation Queue (Phase C2 of #5085)
     // ============================================================================
@@ -361,5 +422,54 @@ impl Database {
     /// `sqlite3_db_status DBSTATUS_DEFERRED_FKS` PRAGMA bridge.
     pub fn deferred_fk_violations(&self) -> &[DeferredFkViolation] {
         self.lifecycle.transaction_manager().deferred_fk_violations()
+    }
+}
+
+#[cfg(test)]
+mod statement_savepoint_tests {
+    //! Contract tests for the implicit statement-level savepoint (#5417),
+    //! the primitive behind SQLite's `RAISE(ABORT)` statement-scope rollback.
+    //! End-to-end behavior (RAISE(ABORT) vs FAIL vs ROLLBACK survival rows) is
+    //! verified against sqlite3 3.51.0 in `vibesql-executor`'s
+    //! `raise_trigger_tests`.
+
+    use crate::Database;
+
+    #[test]
+    fn statement_savepoint_is_a_noop_outside_a_transaction() {
+        let mut db = Database::new();
+        // Outside a transaction nothing can be armed.
+        assert!(!db.arm_statement_savepoint(), "must not arm without a transaction");
+        assert!(!db.has_statement_savepoint());
+        // Rollback / release are harmless no-ops.
+        assert!(!db.rollback_statement_savepoint());
+        db.release_statement_savepoint();
+        assert!(!db.in_transaction(), "savepoint API must not open a transaction");
+    }
+
+    #[test]
+    fn arm_release_and_rollback_toggle_the_armed_flag() {
+        let mut db = Database::new();
+        db.begin_transaction().expect("BEGIN");
+
+        assert!(!db.has_statement_savepoint());
+        assert!(db.arm_statement_savepoint(), "arm inside a transaction succeeds");
+        assert!(db.has_statement_savepoint());
+
+        // Release disarms without ending the transaction.
+        db.release_statement_savepoint();
+        assert!(!db.has_statement_savepoint());
+        assert!(db.in_transaction());
+
+        // Re-arm, then roll back: consumes the savepoint, transaction stays open.
+        assert!(db.arm_statement_savepoint());
+        assert!(db.rollback_statement_savepoint(), "armed savepoint rolls back");
+        assert!(!db.has_statement_savepoint(), "rollback consumes the savepoint");
+        assert!(db.in_transaction(), "statement rollback keeps the transaction open");
+
+        // A second rollback with nothing armed is a no-op.
+        assert!(!db.rollback_statement_savepoint());
+
+        db.rollback_transaction().expect("ROLLBACK");
     }
 }

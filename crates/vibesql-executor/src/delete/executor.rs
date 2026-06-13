@@ -95,7 +95,12 @@ impl DeleteExecutor {
     /// assert_eq!(count, 1);
     /// ```
     pub fn execute(stmt: &DeleteStmt, database: &mut Database) -> Result<usize, ExecutorError> {
-        Self::execute_internal(stmt, database, None, None).map(|(count, _)| count)
+        // SQLite per-variant RAISE scope handling for the top-level statement
+        // (#5417): see [`crate::raise_scope::run_top_level_dml`].
+        let may_fire = crate::raise_scope::table_may_fire_trigger(database, &stmt.table_name);
+        crate::raise_scope::run_top_level_dml(database, may_fire, |database| {
+            Self::execute_internal(stmt, database, None, None).map(|(count, _)| count)
+        })
     }
 
     /// Execute a DELETE statement, capturing RETURNING rows (SQLite 3.35.0+)
