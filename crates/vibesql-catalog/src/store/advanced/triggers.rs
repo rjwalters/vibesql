@@ -64,4 +64,54 @@ impl super::super::Catalog {
     pub fn list_triggers(&self) -> Vec<String> {
         self.triggers.keys().cloned().collect()
     }
+
+    /// Cheap O(1) check: does the catalog hold *any* trigger at all?
+    ///
+    /// Used by the executor's hot-path trigger guard to short-circuit before
+    /// the (allocating) per-table cascade walk: a database with zero triggers
+    /// can never fire a `RAISE()` regardless of foreign-key state.
+    pub fn has_any_triggers(&self) -> bool {
+        !self.triggers.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
+
+    use crate::{store::Catalog, trigger::TriggerDefinition};
+
+    fn sample_trigger(name: &str, table: &str) -> TriggerDefinition {
+        TriggerDefinition::new(
+            name.to_string(),
+            TriggerTiming::Before,
+            TriggerEvent::Insert,
+            table.to_string(),
+            TriggerGranularity::Row,
+            None,
+            TriggerAction::RawSql("SELECT 1".to_string()),
+        )
+    }
+
+    #[test]
+    fn has_any_triggers_tracks_trigger_collection() {
+        let mut catalog = Catalog::new();
+
+        // Empty catalog: the executor hot-path guard must short-circuit here.
+        assert!(!catalog.has_any_triggers());
+
+        catalog.create_trigger(sample_trigger("t1", "users")).unwrap();
+        assert!(catalog.has_any_triggers());
+
+        // Still true with multiple triggers on different tables.
+        catalog
+            .create_trigger(sample_trigger("t2", "orders"))
+            .unwrap();
+        assert!(catalog.has_any_triggers());
+
+        // Dropping all triggers returns to the O(1) false fast path.
+        catalog.drop_trigger("t1").unwrap();
+        catalog.drop_trigger("t2").unwrap();
+        assert!(!catalog.has_any_triggers());
+    }
 }

@@ -69,6 +69,15 @@ pub(crate) fn table_may_fire_trigger(db: &Database, table: &str) -> bool {
         return true;
     }
 
+    // O(1) short-circuit for the dominant hot path: a database with zero
+    // triggers can never fire a `RAISE()` (or any cascade-reached trigger),
+    // regardless of FK state. Returning here avoids the allocating
+    // `list_tables()` walk below on *every* trigger-free auto-commit write —
+    // including the very common `PRAGMA foreign_keys=ON` + no-triggers case.
+    if !db.catalog.has_any_triggers() {
+        return false;
+    }
+
     // Cascade can reach another table's trigger only when FK enforcement is
     // active. Bail out cheaply otherwise.
     if !db.foreign_keys_enabled() {
