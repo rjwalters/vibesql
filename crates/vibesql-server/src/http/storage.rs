@@ -2,6 +2,32 @@
 //!
 //! This module provides REST endpoints for uploading, downloading,
 //! and managing blobs via HTTP.
+//!
+//! # Replicated vs. standalone storage (#5455)
+//!
+//! The blob storage API has two backends selected by the server mode:
+//!
+//! * **Standalone**: blobs are written to a separate [`BlobStorageService`]
+//!   byte store (OpenDAL — filesystem, S3, GCS, Azure, in-memory). This path is
+//!   unchanged: the bytes live outside the SQL database and never touch
+//!   consensus.
+//!
+//! * **Replicated**: a separate node-local byte store would never replicate, so
+//!   blob writes are instead routed through the **same consensus SQL write
+//!   path** every other replicated HTTP surface uses. Each blob is a row in the
+//!   replicated `__vibesql_blobs` system table `(id, content_type, size,
+//!   created_at, data BLOB)`. An upload proposes an `INSERT` through consensus
+//!   via the [`HttpState::session`](crate::http::rest::HttpState) choke point
+//!   (leader-only, freeze-at-propose); a delete proposes a `DELETE`; a download
+//!   / metadata read runs the `SELECT` against the replicated state machine. So
+//!   a blob written on the leader replicates to every follower and is readable
+//!   on any node, an upload/delete on a follower surfaces the `NOT_LEADER`
+//!   refusal as `421` (never written locally — the split-brain invariant), and
+//!   there is no local-only blob write. The blob bytes ride the Raft log as a
+//!   SQL `BLOB` literal; this is sound for modest blobs but large blobs would
+//!   bloat the log/snapshots, so replicated uploads are capped at
+//!   [`MAX_REPLICATED_BLOB_BYTES`] (streaming large blobs out-of-band is a
+//!   documented follow-on).
 
 use std::sync::Arc;
 
@@ -17,10 +43,23 @@ use tokio::sync::RwLock;
 use tracing::{debug, error};
 use vibesql_storage::{BlobId, BlobStorageConfig, BlobStorageService, Database};
 
+use super::rest::{execution_error_response, get_database_name, HttpState};
 use super::types::*;
 use crate::registry::DatabaseRegistry;
 
-/// State for storage endpoints
+/// Replicated system table that holds blobs as rows so blob writes ride the
+/// consensus SQL write path (#5455).
+const BLOB_TABLE: &str = "__vibesql_blobs";
+
+/// Upper bound on a blob uploaded in replicated mode. Replicated blobs flow
+/// through the Raft log (and into snapshots) as a SQL `BLOB` literal, so a very
+/// large blob would bloat the log; cap at a conservative size and reject larger
+/// uploads with a clear error. Streaming large blobs out-of-band (e.g. an
+/// external object store referenced by a replicated row) is a documented
+/// follow-on.
+pub const MAX_REPLICATED_BLOB_BYTES: usize = 8 * 1024 * 1024;
+
+/// State for the standalone storage endpoints (separate byte store).
 #[derive(Clone)]
 pub struct StorageState {
     /// Database registry for shared database access
@@ -58,7 +97,7 @@ impl StorageState {
     }
 }
 
-/// Create the storage API router
+/// Create the storage API router for **standalone** mode (separate byte store).
 pub fn create_storage_router(db: Arc<Database>, registry: DatabaseRegistry) -> Router {
     let state = StorageState::new(db, registry);
 
@@ -67,6 +106,21 @@ pub fn create_storage_router(db: Arc<Database>, registry: DatabaseRegistry) -> R
         .route("/{blob_id}", get(download_blob))
         .route("/{blob_id}", delete(delete_blob))
         .route("/{blob_id}/metadata", get(get_blob_metadata))
+        .with_state(state)
+}
+
+/// Create the storage API router for **replicated** mode (#5455).
+///
+/// Blob writes route through consensus (the `__vibesql_blobs` table) via the
+/// shared [`HttpState::session`] choke point, exactly like the other replicated
+/// HTTP surfaces, so they replicate to every node, are readable on any node, and
+/// a write on a follower is refused with `421` rather than written locally.
+pub fn create_replicated_storage_router(state: HttpState) -> Router {
+    Router::new()
+        .route("/upload", post(replicated_upload_blob))
+        .route("/{blob_id}", get(replicated_download_blob))
+        .route("/{blob_id}", delete(replicated_delete_blob))
+        .route("/{blob_id}/metadata", get(replicated_get_blob_metadata))
         .with_state(state)
 }
 
@@ -248,6 +302,297 @@ async fn delete_blob(
     }
 }
 
+// ===========================================================================
+// Replicated blob handlers (#5455) — blobs as rows in the consensus state
+// machine, routed through the shared `HttpState::session` choke point.
+// ===========================================================================
+
+/// Render bytes as a SQL `BLOB` literal (`X'..'`). Hex digits cannot break out
+/// of the literal, so this is injection-safe for arbitrary blob bytes.
+fn blob_literal(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2 + 3);
+    s.push_str("X'");
+    for b in bytes {
+        s.push_str(&format!("{:02X}", b));
+    }
+    s.push('\'');
+    s
+}
+
+/// Escape a value for a single-quoted SQL string literal (double any quote).
+fn sql_string_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+/// Ensure the replicated `__vibesql_blobs` table exists, creating it through
+/// consensus on first use. `CREATE TABLE IF NOT EXISTS` is idempotent and
+/// deterministic, so it is safe to propose on every upload.
+async fn ensure_blob_table(state: &HttpState, db_name: &str) -> Result<(), anyhow::Error> {
+    let shared_db = state.registry.get_or_create(db_name).await;
+    let mut session = state.session(db_name, shared_db);
+    let ddl = format!(
+        "CREATE TABLE IF NOT EXISTS {BLOB_TABLE} (\
+            id VARCHAR(64) PRIMARY KEY, \
+            content_type VARCHAR(255), \
+            size BIGINT, \
+            created_at VARCHAR(64), \
+            data BLOB)"
+    );
+    session.execute(&ddl).await?;
+    Ok(())
+}
+
+/// Upload a blob in replicated mode: propose an INSERT through consensus.
+async fn replicated_upload_blob(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+
+    let size = body.len() as i64;
+
+    if body.len() > MAX_REPLICATED_BLOB_BYTES {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(ErrorResponse::new(format!(
+                "blob is {} bytes; replicated blob uploads are capped at {} bytes (large blobs \
+                 would bloat the Raft log/snapshots)",
+                body.len(),
+                MAX_REPLICATED_BLOB_BYTES
+            ))),
+        )
+            .into_response();
+    }
+
+    let db_name = get_database_name(&headers);
+
+    // Create the blob table through consensus if needed.
+    if let Err(e) = ensure_blob_table(&state, &db_name).await {
+        return execution_error_response(&e);
+    }
+
+    let id = BlobId::new();
+    let created_at = chrono::Utc::now().to_rfc3339();
+
+    debug!("Uploading replicated blob {}: {} bytes, content-type: {}", id, size, content_type);
+
+    let sql = format!(
+        "INSERT INTO {BLOB_TABLE} (id, content_type, size, created_at, data) VALUES ({}, {}, {}, {}, {})",
+        sql_string_literal(&id.to_string()),
+        sql_string_literal(&content_type),
+        size,
+        sql_string_literal(&created_at),
+        blob_literal(&body),
+    );
+
+    let shared_db = state.registry.get_or_create(&db_name).await;
+    let mut session = state.session(&db_name, shared_db);
+    match session.execute(&sql).await {
+        Ok(_) => {
+            let url = format!("/api/storage/{}", id);
+            let response = BlobUploadResponse { id: id.to_string(), size, content_type, url };
+            (StatusCode::CREATED, Json(response)).into_response()
+        }
+        Err(e) => {
+            error!("Failed to upload replicated blob {}: {}", id, e);
+            // NOT_LEADER → 421 (+ leader hint), staleness/FATAL → 503, a
+            // deterministic SQL error → 400 — the same mapping the SQL/CRUD
+            // surfaces use, so a follower upload is refused, never stored locally.
+            execution_error_response(&e)
+        }
+    }
+}
+
+/// Read a single blob row's columns from the replicated state machine.
+///
+/// Returns `Ok(Some(..))` when the blob exists, `Ok(None)` when it does not (or
+/// the table has not been created yet), and `Err` only on a consensus refusal.
+async fn fetch_replicated_blob(
+    state: &HttpState,
+    db_name: &str,
+    id: &BlobId,
+) -> Result<Option<(String, i64, String, Vec<u8>)>, anyhow::Error> {
+    let sql = format!(
+        "SELECT content_type, size, created_at, data FROM {BLOB_TABLE} WHERE id = {}",
+        sql_string_literal(&id.to_string()),
+    );
+    let shared_db = state.registry.get_or_create(db_name).await;
+    let mut session = state.session(db_name, shared_db);
+    let result = match session.execute(&sql).await {
+        Ok(r) => r,
+        Err(e) => {
+            // A missing table reads as "no such blob", not a server error — the
+            // table is created lazily on first upload. Any other error (e.g. a
+            // consensus refusal) propagates.
+            let msg = e.to_string().to_lowercase();
+            if msg.contains("no such table")
+                || msg.contains("does not exist")
+                || msg.contains("not found")
+                || msg.contains("unknown table")
+            {
+                return Ok(None);
+            }
+            return Err(e);
+        }
+    };
+
+    let crate::session::ExecutionResult::Select { rows, .. } = result else {
+        return Ok(None);
+    };
+    let Some(row) = rows.into_iter().next() else {
+        return Ok(None);
+    };
+
+    use vibesql_types::SqlValue;
+    let content_type = match row.values.first() {
+        Some(SqlValue::Character(s)) | Some(SqlValue::Varchar(s)) => s.to_string(),
+        _ => "application/octet-stream".to_string(),
+    };
+    let size = match row.values.get(1) {
+        Some(SqlValue::Bigint(n)) => *n,
+        Some(SqlValue::Integer(n)) => *n,
+        _ => 0,
+    };
+    let created_at = match row.values.get(2) {
+        Some(SqlValue::Character(s)) | Some(SqlValue::Varchar(s)) => s.to_string(),
+        _ => String::new(),
+    };
+    let data = match row.values.get(3) {
+        Some(SqlValue::Blob(b)) => b.clone(),
+        _ => Vec::new(),
+    };
+
+    Ok(Some((content_type, size, created_at, data)))
+}
+
+/// Download a blob in replicated mode: read from the replicated state machine.
+async fn replicated_download_blob(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    Path(blob_id): Path<String>,
+) -> axum::response::Response {
+    let id = match BlobId::parse(&blob_id) {
+        Some(id) => id,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse::new(format!("Invalid blob ID: {}", blob_id))),
+            )
+                .into_response();
+        }
+    };
+
+    let db_name = get_database_name(&headers);
+    debug!("Downloading replicated blob: {}", id);
+
+    match fetch_replicated_blob(&state, &db_name, &id).await {
+        Ok(Some((content_type, _size, _created_at, data))) => {
+            let mut out_headers = HeaderMap::new();
+            out_headers.insert(
+                header::CONTENT_TYPE,
+                content_type
+                    .parse()
+                    .unwrap_or(header::HeaderValue::from_static("application/octet-stream")),
+            );
+            out_headers.insert(header::CONTENT_LENGTH, data.len().to_string().parse().unwrap());
+            (StatusCode::OK, out_headers, data).into_response()
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse::new(format!("Blob not found: {}", blob_id))),
+        )
+            .into_response(),
+        Err(e) => execution_error_response(&e),
+    }
+}
+
+/// Get blob metadata in replicated mode: read from the replicated state machine.
+async fn replicated_get_blob_metadata(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    Path(blob_id): Path<String>,
+) -> axum::response::Response {
+    let id = match BlobId::parse(&blob_id) {
+        Some(id) => id,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse::new(format!("Invalid blob ID: {}", blob_id))),
+            )
+                .into_response();
+        }
+    };
+
+    let db_name = get_database_name(&headers);
+    debug!("Getting metadata for replicated blob: {}", id);
+
+    match fetch_replicated_blob(&state, &db_name, &id).await {
+        Ok(Some((content_type, size, created_at, _data))) => {
+            let response = BlobMetadataResponse {
+                id: id.to_string(),
+                size,
+                content_type,
+                created_at,
+            };
+            (StatusCode::OK, Json(response)).into_response()
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse::new(format!("Blob not found: {}", blob_id))),
+        )
+            .into_response(),
+        Err(e) => execution_error_response(&e),
+    }
+}
+
+/// Delete a blob in replicated mode: propose a DELETE through consensus.
+async fn replicated_delete_blob(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    Path(blob_id): Path<String>,
+) -> axum::response::Response {
+    let id = match BlobId::parse(&blob_id) {
+        Some(id) => id,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse::new(format!("Invalid blob ID: {}", blob_id))),
+            )
+                .into_response();
+        }
+    };
+
+    let db_name = get_database_name(&headers);
+    debug!("Deleting replicated blob: {}", id);
+
+    // Create the table if it does not exist so a delete-before-any-upload is
+    // idempotent (204), matching the standalone delete semantics.
+    if let Err(e) = ensure_blob_table(&state, &db_name).await {
+        return execution_error_response(&e);
+    }
+
+    let sql = format!(
+        "DELETE FROM {BLOB_TABLE} WHERE id = {}",
+        sql_string_literal(&id.to_string()),
+    );
+
+    let shared_db = state.registry.get_or_create(&db_name).await;
+    let mut session = state.session(&db_name, shared_db);
+    match session.execute(&sql).await {
+        // Delete is idempotent — deleting a non-existent blob still succeeds.
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            error!("Failed to delete replicated blob {}: {}", id, e);
+            execution_error_response(&e)
+        }
+    }
+}
+
 /// Tests for blob storage HTTP handlers.
 /// These tests require the memory storage backend to be enabled.
 #[cfg(all(test, feature = "opendal", feature = "storage-memory"))]
@@ -342,5 +687,18 @@ mod tests {
         let response = router.oneshot(request).await.unwrap();
         // Delete is idempotent - deleting non-existent blob returns 204
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[test]
+    fn test_blob_literal_roundtrip_safe() {
+        // Quotes/backslashes cannot break out of an X'' hex literal.
+        assert_eq!(blob_literal(&[0x00, 0xFF, 0x41]), "X'00FF41'");
+        assert_eq!(blob_literal(&[]), "X''");
+    }
+
+    #[test]
+    fn test_sql_string_literal_escapes_quotes() {
+        assert_eq!(sql_string_literal("a'b"), "'a''b'");
+        assert_eq!(sql_string_literal("plain"), "'plain'");
     }
 }
