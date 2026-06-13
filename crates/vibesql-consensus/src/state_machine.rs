@@ -150,6 +150,22 @@ pub struct TxnEntry {
     /// statement found to contain one.
     #[serde(default)]
     pub frozen: Vec<Vec<FrozenValue>>,
+    /// Proposer-evaluated values for the non-deterministic column
+    /// DEFAULTs each statement fires (#5381), parallel to
+    /// [`statements`](Self::statements): `frozen_defaults[i]` holds
+    /// statement `i`'s values in the deterministic site order of
+    /// [`crate::freeze::substitute_volatile_defaults`] (schema column
+    /// order, rows within each column, then `SET`-style assignments).
+    ///
+    /// Serde-compatible in both directions: entries encoded before
+    /// #5381 decode as empty (the apply path then *rejects* any
+    /// statement that fires a volatile DEFAULT — the #5377 behavior),
+    /// and an all-empty list is normalized away by
+    /// [`with_frozen_defaults`](Self::with_frozen_defaults) +
+    /// `skip_serializing_if`, so DEFAULT-free entries keep the pre-#5381
+    /// byte encoding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub frozen_defaults: Vec<Vec<FrozenValue>>,
     /// The proposing leader's wall clock at propose time, in
     /// milliseconds since the UNIX epoch (Raft Phase B2, #5200, PR 2).
     ///
@@ -173,7 +189,12 @@ impl TxnEntry {
     /// (as [`ReplicatedDb`](crate::ReplicatedDb) does) to replicate
     /// non-deterministic SQL.
     pub fn single(sql: impl Into<String>) -> Self {
-        Self { statements: vec![sql.into()], frozen: Vec::new(), leader_time_ms: None }
+        Self {
+            statements: vec![sql.into()],
+            frozen: Vec::new(),
+            frozen_defaults: Vec::new(),
+            leader_time_ms: None,
+        }
     }
 
     /// Entry for a multi-statement transaction (no frozen values — see
@@ -182,6 +203,7 @@ impl TxnEntry {
         Self {
             statements: statements.into_iter().map(Into::into).collect(),
             frozen: Vec::new(),
+            frozen_defaults: Vec::new(),
             leader_time_ms: None,
         }
     }
@@ -191,7 +213,24 @@ impl TxnEntry {
     /// `statements[i]`.
     pub fn frozen_batch(statements: Vec<String>, frozen: Vec<Vec<FrozenValue>>) -> Self {
         debug_assert_eq!(statements.len(), frozen.len());
-        Self { statements, frozen, leader_time_ms: None }
+        Self { statements, frozen, frozen_defaults: Vec::new(), leader_time_ms: None }
+    }
+
+    /// Attach proposer-frozen DEFAULT values (#5381):
+    /// `frozen_defaults[i]` carries the values for the
+    /// non-deterministic column DEFAULTs `statements[i]` fires. An
+    /// all-empty list is normalized to empty so DEFAULT-free entries
+    /// keep the pre-#5381 byte encoding.
+    pub fn with_frozen_defaults(mut self, frozen_defaults: Vec<Vec<FrozenValue>>) -> Self {
+        debug_assert!(
+            frozen_defaults.is_empty() || frozen_defaults.len() == self.statements.len()
+        );
+        self.frozen_defaults = if frozen_defaults.iter().all(Vec::is_empty) {
+            Vec::new()
+        } else {
+            frozen_defaults
+        };
+        self
     }
 
     /// Stamp this entry with the proposing leader's wall clock (ms since
@@ -337,7 +376,9 @@ impl VibesqlStateMachine {
         static NO_FROZEN: &[FrozenValue] = &[];
         for (i, sql) in entry.statements.iter().enumerate() {
             let frozen = entry.frozen.get(i).map(Vec::as_slice).unwrap_or(NO_FROZEN);
-            match execute_write_statement(&mut inner.db, sql, frozen) {
+            let frozen_defaults =
+                entry.frozen_defaults.get(i).map(Vec::as_slice).unwrap_or(NO_FROZEN);
+            match execute_write_statement(&mut inner.db, sql, frozen, frozen_defaults) {
                 Ok(n) => rows_affected += n,
                 Err(StatementFailure::Rejected(reason)) => {
                     failure = Some(reason);
@@ -397,6 +438,39 @@ impl VibesqlStateMachine {
         // entry is rejected identically on every replica.
         inner.last_applied = index;
         Ok(outcome)
+    }
+
+    /// Propose-side freeze with schema access (#5381): freeze the
+    /// statement's positional non-deterministic sites **and** the
+    /// non-deterministic column DEFAULTs it fires, resolved against
+    /// this machine's applied state — on the leader, that *is* the
+    /// replicated schema. Returns `(positional, defaults)` for
+    /// [`TxnEntry::frozen_batch`] /
+    /// [`TxnEntry::with_frozen_defaults`].
+    ///
+    /// A statement whose target table is not in the applied state
+    /// freezes no DEFAULT values (e.g. the table is created earlier in
+    /// the same entry); if it turns out to fire a volatile DEFAULT at
+    /// apply time, the apply path rejects it deterministically.
+    pub(crate) fn freeze_for_propose(
+        &self,
+        sql: &str,
+    ) -> std::result::Result<(Vec<FrozenValue>, Vec<FrozenValue>), freeze::FreezeError> {
+        let schema: Option<vibesql_catalog::TableSchema> =
+            vibesql_parser::parse_with_arena_fallback(sql).ok().and_then(|statement| {
+                let inner = self.lock();
+                match &statement {
+                    Statement::Insert(stmt) => {
+                        lookup_table_schema(&inner.db, stmt.schema_name.as_deref(), &stmt.table_name)
+                            .cloned()
+                    }
+                    Statement::Update(stmt) => {
+                        lookup_table_schema(&inner.db, None, &stmt.table_name).cloned()
+                    }
+                    _ => None,
+                }
+            });
+        freeze::freeze_statement_with_schema(sql, schema.as_ref())
     }
 
     /// Run a read-only SELECT against the applied state, returning row
@@ -639,21 +713,24 @@ fn run_executor<T>(
 ///
 /// Before execution, the statement's non-deterministic call sites are
 /// replaced with the entry's frozen values
-/// ([`freeze::substitute_statement`]); a statement with unfrozen
-/// volatile sites — or one that would fire a non-deterministic column
-/// DEFAULT — is rejected deterministically, so the state machine never
-/// evaluates volatile SQL.
+/// ([`freeze::substitute_statement`]), and the non-deterministic column
+/// DEFAULTs it fires are replaced with the entry's frozen DEFAULT
+/// values ([`freeze::substitute_volatile_defaults`], #5381). A
+/// statement with unfrozen volatile sites — or one firing a volatile
+/// DEFAULT without frozen values — is rejected deterministically, so
+/// the state machine never evaluates volatile SQL.
 ///
 /// The supported set covers the replicated write surface: DML
 /// (INSERT/UPDATE/DELETE) and the core DDL (CREATE/DROP TABLE,
-/// CREATE/DROP INDEX, CREATE/DROP VIEW). Reads are not replicated, and
-/// transaction control lives at the entry boundary (the whole entry IS
-/// the transaction), so SELECT/BEGIN/COMMIT/ROLLBACK inside an entry are
-/// rejected — deterministically, on every replica.
+/// CREATE/DROP INDEX, CREATE/DROP VIEW, CREATE/DROP TRIGGER). Reads are
+/// not replicated, and transaction control lives at the entry boundary
+/// (the whole entry IS the transaction), so SELECT/BEGIN/COMMIT/ROLLBACK
+/// inside an entry are rejected — deterministically, on every replica.
 fn execute_write_statement(
     db: &mut Database,
     sql: &str,
     frozen: &[FrozenValue],
+    frozen_defaults: &[FrozenValue],
 ) -> std::result::Result<usize, StatementFailure> {
     let statement = vibesql_parser::parse_with_arena_fallback(sql).map_err(|e| {
         StatementFailure::Rejected(format!("parse error in replicated statement: {e}"))
@@ -664,34 +741,67 @@ fn execute_write_statement(
     })?;
 
     // Schema-dependent nondeterminism the positional freeze pass cannot
-    // see: non-deterministic column DEFAULTs (`DEFAULT
-    // CURRENT_TIMESTAMP`) that the statement would fire, and
-    // `CAST(<TIME column> AS TIMESTAMP)` (SQL:1999 stamps the current
-    // date per row). Both would be evaluated by the executor at apply
-    // time; reject any statement containing one. The schema is
-    // replicated state, so these rejections are identical on every
-    // replica.
-    let schema_violation = match &statement {
+    // see (#5381). The schema is replicated state, so everything below
+    // is identical on every replica.
+    //
+    // 1. Non-deterministic column DEFAULTs the statement fires: splice
+    //    in the proposer-frozen values (`frozen_defaults`); reject
+    //    deterministically when the sites and values disagree (entries
+    //    proposed around / before DEFAULT freezing, or a schema change
+    //    between propose and apply).
+    let target_schema: Option<vibesql_catalog::TableSchema> = match &statement {
         Statement::Insert(stmt) => {
-            lookup_table_schema(db, stmt.schema_name.as_deref(), &stmt.table_name).and_then(
-                |schema| {
-                    freeze::volatile_default_violation(stmt, schema)
-                        .or_else(|| freeze::time_cast_violation(&statement, schema))
-                },
-            )
+            lookup_table_schema(db, stmt.schema_name.as_deref(), &stmt.table_name).cloned()
         }
-        Statement::Update(stmt) => {
-            lookup_table_schema(db, None, &stmt.table_name).and_then(|schema| {
-                freeze::volatile_default_violation_update(stmt, schema)
-                    .or_else(|| freeze::time_cast_violation(&statement, schema))
-            })
-        }
-        Statement::Delete(stmt) => lookup_table_schema(db, None, &stmt.table_name)
-            .and_then(|schema| freeze::time_cast_violation(&statement, schema)),
+        Statement::Update(stmt) => lookup_table_schema(db, None, &stmt.table_name).cloned(),
+        Statement::Delete(stmt) => lookup_table_schema(db, None, &stmt.table_name).cloned(),
         _ => None,
     };
-    if let Some(reason) = schema_violation {
-        return Err(StatementFailure::Rejected(reason));
+    let can_fire_defaults = matches!(statement, Statement::Insert(_) | Statement::Update(_))
+        && target_schema.is_some();
+    let statement = if can_fire_defaults {
+        let schema = target_schema.as_ref().expect("checked above");
+        freeze::substitute_volatile_defaults(statement, schema, frozen_defaults)
+            .map_err(StatementFailure::Rejected)?
+    } else {
+        if !frozen_defaults.is_empty() {
+            // Deterministic: every replica resolves the same statement
+            // against the same replicated catalog (a missing table here
+            // means it was dropped between propose and apply).
+            return Err(StatementFailure::Rejected(format!(
+                "entry carries {} frozen DEFAULT value(s) but the statement cannot fire a \
+                 column DEFAULT against the current replicated schema (table dropped between \
+                 propose and apply?); retry the statement (#5381)",
+                frozen_defaults.len()
+            )));
+        }
+        statement
+    };
+
+    // 2. `CAST(<TIME column> AS TIMESTAMP)` (SQL:1999 stamps the
+    //    current date per row at apply time): reject against the
+    //    replicated target-table schema.
+    if let Some(schema) = &target_schema {
+        if let Some(reason) = freeze::time_cast_violation(&statement, schema) {
+            return Err(StatementFailure::Rejected(reason));
+        }
+    }
+
+    // 3. Trigger-body backstop (#5381): this DML may fire triggers
+    //    whose bodies were audited at CREATE time against a schema that
+    //    later DDL may have invalidated (drop + recreate with a
+    //    volatile DEFAULT); re-audit them — transitively through
+    //    trigger cascades — against the current replicated catalog.
+    let trigger_target: Option<&str> = match &statement {
+        Statement::Insert(stmt) => Some(&stmt.table_name),
+        Statement::Update(stmt) => Some(&stmt.table_name),
+        Statement::Delete(stmt) => Some(&stmt.table_name),
+        _ => None,
+    };
+    if let Some(table_name) = trigger_target {
+        if let Some(reason) = freeze::dml_trigger_violation(db, table_name) {
+            return Err(StatementFailure::Rejected(reason));
+        }
     }
 
     match &statement {
@@ -721,6 +831,24 @@ fn execute_write_statement(
         }
         Statement::DropView(stmt) => {
             run_executor(vibesql_executor::advanced_objects::execute_drop_view(stmt, db).map(|_| 0))
+        }
+        Statement::CreateTrigger(stmt) => {
+            // The static volatility validation already ran (inside
+            // `substitute_statement`); the schema-dependent body audit
+            // (volatile DEFAULTs / TIME casts fired by body DML) needs
+            // the replicated catalog and runs here (#5381).
+            if let Some(reason) = freeze::trigger_body_schema_violation(stmt, db) {
+                return Err(StatementFailure::Rejected(reason));
+            }
+            // Preserve the original SQL text so the trigger survives
+            // SQL-dump persistence round-trips.
+            run_executor(
+                vibesql_executor::TriggerExecutor::create_trigger_with_sql(db, stmt, Some(sql))
+                    .map(|_| 0),
+            )
+        }
+        Statement::DropTrigger(stmt) => {
+            run_executor(vibesql_executor::TriggerExecutor::drop_trigger(db, stmt).map(|_| 0))
         }
         Statement::BeginTransaction(_) | Statement::Commit(_) | Statement::Rollback(_) => {
             Err(StatementFailure::Rejected(

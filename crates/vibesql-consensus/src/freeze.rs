@@ -71,17 +71,58 @@
 //! as **fatal** (halt the node, do not record a rejection — see
 //! [`ConsensusError::FatalApply`](crate::ConsensusError::FatalApply)).
 //!
-//! # Non-deterministic DEFAULT clauses
+//! # Non-deterministic DEFAULT clauses (frozen through the schema, #5381)
 //!
 //! `CREATE TABLE t (… ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)` stores
 //! the expression in the schema; an INSERT that *fires* such a default
 //! (column omitted, explicit `DEFAULT`, explicit `NULL` — VibeSQL
-//! applies defaults to NULL values — or `DEFAULT VALUES`) would
-//! evaluate the clock at apply time. [`volatile_default_violation`]
-//! detects this against the (replicated, hence identical) schema and
-//! the apply path rejects the entry deterministically. The fix for
-//! users is to supply the column value explicitly; freezing through the
-//! schema is left to the effects-form follow-up.
+//! applies defaults to NULL **values** — or `DEFAULT VALUES`) would
+//! evaluate the clock at apply time. These sites are invisible to the
+//! positional freeze pass (they live in the schema, not the statement
+//! text), so they get their own freeze/substitute pair keyed off the
+//! target table's schema:
+//!
+//! - [`freeze_statement_with_schema`] (propose, on the leader — whose applied state *is* the
+//!   replicated schema): after the positional pass, enumerate the DEFAULT-firing sites in a
+//!   deterministic order and evaluate each one with the **executor's own DEFAULT evaluator**
+//!   ([`vibesql_executor::evaluate_default_expression`]), **once per firing row** — exactly the
+//!   per-row evaluation `apply_default_values` performs at execution time. (sqlite3 stamps one
+//!   statement-stable `CURRENT_TIMESTAMP` across a multi-row INSERT; VibeSQL's executor has no
+//!   per-statement 'now' cache, so per-row draws are the faithful semantics — see the #5382
+//!   review notes.) The drawn values travel in `TxnEntry::frozen_defaults`.
+//! - [`substitute_volatile_defaults`] (apply, every replica): repeat the same enumeration against
+//!   the same (replicated, hence identical) schema and splice the values in as literals — the
+//!   executor then never fires the volatile DEFAULT. A site/value count mismatch means the schema
+//!   changed between propose and apply (a propose-time race, not version skew): the mismatch is a
+//!   *deterministic* function of the entry and the replicated schema, so it rejects identically
+//!   on every replica. An entry with firing sites and **no** frozen values (produced by pre-#5381
+//!   propose code, or proposed around the freeze pass) is rejected the same way — the #5377
+//!   defense in depth is preserved.
+//!
+//! Sites that cannot be frozen are rejected at propose: `INSERT … SELECT` into a table with a
+//! volatile DEFAULT (row count and NULL-ness are not statically known), a non-literal VALUES
+//! cell for a volatile-DEFAULT column (VibeSQL applies the DEFAULT to an evaluated NULL, so the
+//! proposer cannot prove whether it fires), and DEFAULTs that read session state.
+//! [`volatile_default_violation`] / [`volatile_default_violation_update`] remain the audit
+//! primitives for statements that are *not* rewritten — trigger bodies.
+//!
+//! # Trigger DDL (#5381)
+//!
+//! `CREATE TRIGGER` joins the replicated surface with strict validation: a trigger body
+//! re-executes through the executor **at apply time, on every replica, data-dependently** — no
+//! positional freeze can cover it — so [`validate_statement`] admits the definition only if the
+//! WHEN clause and every body statement are volatile-free (the same strict detector that guards
+//! `CREATE VIEW` bodies). Firing is then deterministic by induction: the triggering statement is
+//! in the entry, the trigger exists identically in every replica's catalog, and its body draws on
+//! nothing but replicated state. Two schema-dependent hazards remain beyond the static check,
+//! both handled against the replicated catalog: at `CREATE TRIGGER` apply time,
+//! [`trigger_body_schema_violation`] rejects bodies whose DML would fire a volatile DEFAULT or a
+//! TIME→TIMESTAMP column cast; and because later DDL can invalidate that audit (drop + recreate a
+//! body-referenced table with a volatile DEFAULT), every replicated DML statement re-checks the
+//! trigger bodies it could fire — transitively through trigger cascades — via
+//! [`dml_trigger_violation`].
+
+use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use vibesql_ast::{
@@ -89,9 +130,9 @@ use vibesql_ast::{
         transform_expression, walk_expression, walk_select, ExpressionMutVisitor,
         ExpressionVisitor, VisitResult,
     },
-    volatility, Assignment, CommonTableExpr, ConflictTargetItem, DeleteStmt, Expression,
-    FromClause, IndexColumn, InsertSource, InsertStmt, OnConflictAction, SelectStmt, Statement,
-    UpdateStmt, WhereClause,
+    volatility, Assignment, CommonTableExpr, ConflictTargetItem, CreateTriggerStmt, DeleteStmt,
+    Expression, FromClause, IndexColumn, InsertSource, InsertStmt, OnConflictAction, SelectStmt,
+    Statement, TriggerAction, UpdateStmt, WhereClause,
 };
 use vibesql_types::{DataType, Date, SqlValue, StringValue, Time, Timestamp};
 
@@ -319,18 +360,57 @@ impl std::fmt::Display for SubstituteError {
 /// deterministic (and matches the pre-freeze behavior of consuming a
 /// log index for malformed entries).
 pub fn freeze_statement(sql: &str) -> Result<Vec<FrozenValue>, FreezeError> {
+    freeze_statement_with_schema(sql, None).map(|(frozen, _)| frozen)
+}
+
+/// Propose side with schema access (#5381): freeze the statement's
+/// positional non-deterministic sites **and** the non-deterministic
+/// column DEFAULTs it would fire.
+///
+/// `schema` is the target table's schema from the proposer's applied
+/// state — on the leader that *is* the replicated schema. `None` (table
+/// not found, statement has no target table, or the caller has no
+/// schema access) skips DEFAULT freezing; the apply path then rejects
+/// any statement that fires a volatile DEFAULT, exactly as before
+/// #5381.
+///
+/// Returns `(positional_values, default_values)` — the first list is
+/// what [`substitute_statement`] consumes, the second what
+/// [`substitute_volatile_defaults`] consumes. DEFAULT sites are
+/// enumerated on the statement *after* positional substitution (so a
+/// frozen `CURRENT_TIMESTAMP` cell counts as the literal it will be at
+/// apply time), in the deterministic order the apply side repeats:
+/// schema column order, then row order within each column, then
+/// `ON CONFLICT DO UPDATE` / `ON DUPLICATE KEY UPDATE` / `SET`
+/// assignments in statement order.
+pub fn freeze_statement_with_schema(
+    sql: &str,
+    schema: Option<&vibesql_catalog::TableSchema>,
+) -> Result<(Vec<FrozenValue>, Vec<FrozenValue>), FreezeError> {
     let Ok(statement) = vibesql_parser::parse_with_arena_fallback(sql) else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     };
     validate_statement(&statement).map_err(FreezeError::NotReplicable)?;
 
     let mut visitor = SiteTransformer::capture();
-    let _ = transform_statement_sites(statement, &mut visitor);
-    match visitor.mode {
-        Mode::Capture { error: Some(e), .. } => Err(e),
-        Mode::Capture { values, .. } => Ok(values),
+    let mut statement = transform_statement_sites(statement, &mut visitor);
+    let frozen = match visitor.mode {
+        Mode::Capture { error: Some(e), .. } => return Err(e),
+        Mode::Capture { values, .. } => values,
         Mode::Substitute { .. } => unreachable!("capture visitor"),
+    };
+
+    let mut defaults = Vec::new();
+    if let Some(schema) = schema {
+        let mut mode = DefaultMode::Capture { values: Vec::new() };
+        transform_default_sites(&mut statement, schema, &mut mode).map_err(|e| match e {
+            DefaultSiteError::Policy(m) => FreezeError::NotReplicable(m),
+            DefaultSiteError::Eval(m) => FreezeError::Eval(m),
+        })?;
+        let DefaultMode::Capture { values } = mode else { unreachable!("capture mode") };
+        defaults = values;
     }
+    Ok((frozen, defaults))
 }
 
 /// Apply side: validate the statement and splice the frozen values back
@@ -365,6 +445,301 @@ pub fn substitute_statement(
     }
 }
 
+/// Apply side of DEFAULT freezing (#5381): repeat the propose-side
+/// enumeration of [`freeze_statement_with_schema`] against the
+/// (replicated, hence identical) target-table schema and splice
+/// `frozen_defaults` in as literals, so the executor never fires the
+/// volatile DEFAULT.
+///
+/// The statement must already have gone through
+/// [`substitute_statement`] (positional sites spliced to literals) —
+/// the enumeration classifies VALUES cells by literal-ness, and both
+/// sides must see the same shapes.
+///
+/// Errors are **deterministic rejections** (every replica computes the
+/// same site list from the same entry and the same replicated schema):
+///
+/// - firing sites with no frozen values — the entry predates DEFAULT freezing or was proposed
+///   around it (the #5377 defense-in-depth rejection, preserved);
+/// - a site/value count mismatch — the schema changed between propose and apply (a propose-time
+///   race, not version skew; retrying the statement re-freezes against the current schema);
+/// - sites that can never be frozen (non-literal cell for a volatile-DEFAULT column,
+///   `INSERT … SELECT`, session-state DEFAULTs).
+pub fn substitute_volatile_defaults(
+    mut statement: Statement,
+    schema: &vibesql_catalog::TableSchema,
+    frozen_defaults: &[FrozenValue],
+) -> Result<Statement, String> {
+    let mut mode = DefaultMode::Substitute { values: frozen_defaults, cursor: 0 };
+    transform_default_sites(&mut statement, schema, &mut mode).map_err(|e| match e {
+        DefaultSiteError::Policy(m) | DefaultSiteError::Eval(m) => m,
+    })?;
+    let DefaultMode::Substitute { cursor, .. } = mode else { unreachable!("substitute mode") };
+    match cursor {
+        sites if sites == frozen_defaults.len() => Ok(statement),
+        sites if frozen_defaults.is_empty() => Err(format!(
+            "this statement fires {sites} non-deterministic column DEFAULT site(s) of table \
+             '{}' that would be evaluated at apply time; propose it through the replication \
+             layer so the DEFAULT values can be frozen (#5381)",
+            schema.name
+        )),
+        sites => Err(format!(
+            "statement fires {sites} non-deterministic DEFAULT site(s) of table '{}' but the \
+             entry carries {} frozen DEFAULT value(s); the table's schema changed between \
+             propose and apply — retry the statement (#5381)",
+            schema.name,
+            frozen_defaults.len()
+        )),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Volatile DEFAULT sites (shared capture / substitution walker, #5381)
+// ---------------------------------------------------------------------------
+
+/// One pass over the DEFAULT-firing sites: capture (evaluate on the
+/// proposer) or substitute (splice the entry's values at apply). The
+/// crux is the same as the positional pass: **one** walker, so the site
+/// order cannot drift between propose and apply.
+enum DefaultMode<'a> {
+    Capture { values: Vec<FrozenValue> },
+    Substitute { values: &'a [FrozenValue], cursor: usize },
+}
+
+enum DefaultSiteError {
+    /// The statement cannot be made deterministic (policy rejection).
+    Policy(String),
+    /// Evaluating a DEFAULT at propose time failed.
+    Eval(String),
+}
+
+/// Walk every DEFAULT-firing site of the statement in the fixed shared
+/// order: INSERT source sites in schema-column order (rows in order
+/// within each column), then `ON CONFLICT DO UPDATE`, then
+/// `ON DUPLICATE KEY UPDATE`, then UPDATE `SET` assignments in
+/// statement order. Only INSERT and UPDATE have DEFAULT sites.
+fn transform_default_sites(
+    statement: &mut Statement,
+    schema: &vibesql_catalog::TableSchema,
+    mode: &mut DefaultMode,
+) -> Result<(), DefaultSiteError> {
+    match statement {
+        Statement::Insert(stmt) => transform_insert_default_sites(stmt, schema, mode),
+        Statement::Update(stmt) => {
+            transform_assignment_default_sites(&mut stmt.assignments, schema, mode)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn transform_insert_default_sites(
+    stmt: &mut InsertStmt,
+    schema: &vibesql_catalog::TableSchema,
+    mode: &mut DefaultMode,
+) -> Result<(), DefaultSiteError> {
+    let volatile_columns: Vec<(usize, &vibesql_catalog::ColumnSchema)> = schema
+        .columns
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.default_value.as_ref().is_some_and(default_expr_is_volatile))
+        .collect();
+
+    if !volatile_columns.is_empty() {
+        match &mut stmt.source {
+            InsertSource::DefaultValues => {
+                // Rewrite `DEFAULT VALUES` into an explicit column list
+                // carrying the frozen values; the executor fills the
+                // remaining columns from their (deterministic) DEFAULTs
+                // exactly as `DEFAULT VALUES` would have.
+                let mut columns = Vec::new();
+                let mut row = Vec::new();
+                for (_, column) in &volatile_columns {
+                    let default_expr = column.default_value.as_ref().expect("filtered above");
+                    reject_unfreezable_default(default_expr, &column.name, &schema.name)?;
+                    columns.push(column.name.clone());
+                    row.push(default_site_literal(default_expr, &column.name, mode)?);
+                }
+                stmt.columns = columns;
+                stmt.source = InsertSource::Values(vec![row]);
+            }
+            InsertSource::Values(rows) => {
+                for (column_idx, column) in &volatile_columns {
+                    let default_expr = column.default_value.as_ref().expect("filtered above");
+                    let position = if stmt.columns.is_empty() {
+                        // Positional insert: the column sits at its
+                        // schema index. (Rows shorter than the schema
+                        // are a deterministic executor error.)
+                        Some(*column_idx)
+                    } else {
+                        stmt.columns.iter().position(|c| c.eq_ignore_ascii_case(&column.name))
+                    };
+                    match position {
+                        Some(position) => {
+                            for row in rows.iter_mut() {
+                                let Some(cell) = row.get_mut(position) else { continue };
+                                match cell {
+                                    Expression::Default
+                                    | Expression::Literal(SqlValue::Null) => {
+                                        reject_unfreezable_default(
+                                            default_expr,
+                                            &column.name,
+                                            &schema.name,
+                                        )?;
+                                        *cell = default_site_literal(
+                                            default_expr,
+                                            &column.name,
+                                            mode,
+                                        )?;
+                                    }
+                                    Expression::Literal(_) => {}
+                                    _ => {
+                                        // VibeSQL applies the DEFAULT to an
+                                        // evaluated NULL, so a non-literal
+                                        // cell may fire it at apply time —
+                                        // unprovable at propose.
+                                        return Err(DefaultSiteError::Policy(format!(
+                                            "column '{}' of table '{}' has a non-deterministic \
+                                             DEFAULT, and VibeSQL applies DEFAULTs to NULL \
+                                             values: the value supplied for it in a replicated \
+                                             INSERT must be a literal or the DEFAULT keyword so \
+                                             the proposer can prove whether the DEFAULT fires \
+                                             (#5381)",
+                                            column.name, schema.name
+                                        )));
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            // Omitted from an explicit column list: the
+                            // DEFAULT fires for every row — one drawn
+                            // value per row (matching the executor's
+                            // per-row `apply_default_values`). Append
+                            // the column and the per-row literals.
+                            reject_unfreezable_default(default_expr, &column.name, &schema.name)?;
+                            for row in rows.iter_mut() {
+                                let literal =
+                                    default_site_literal(default_expr, &column.name, mode)?;
+                                row.push(literal);
+                            }
+                            stmt.columns.push(column.name.clone());
+                        }
+                    }
+                }
+            }
+            InsertSource::Select(_) => {
+                let names: Vec<&str> =
+                    volatile_columns.iter().map(|(_, c)| c.name.as_str()).collect();
+                return Err(DefaultSiteError::Policy(format!(
+                    "table '{}' has non-deterministic DEFAULT(s) on column(s) {} and the rows \
+                     of an INSERT … SELECT are not statically known (a NULL output fires the \
+                     DEFAULT at apply time); insert explicit VALUES instead (#5381)",
+                    schema.name,
+                    names.join(", ")
+                )));
+            }
+        }
+    }
+
+    if let Some(on_conflict) = &mut stmt.on_conflict {
+        if let OnConflictAction::DoUpdate { assignments, .. } = &mut on_conflict.action {
+            transform_assignment_default_sites(assignments, schema, mode)?;
+        }
+    }
+    if let Some(assignments) = &mut stmt.on_duplicate_key_update {
+        transform_assignment_default_sites(assignments, schema, mode)?;
+    }
+    Ok(())
+}
+
+/// `SET col = DEFAULT` sites (UPDATE, `ON CONFLICT DO UPDATE`,
+/// `ON DUPLICATE KEY UPDATE`): one frozen value per assignment. The
+/// only evaluable volatile DEFAULTs are clock readings
+/// (`CURRENT_DATE`/`CURRENT_TIME`/`CURRENT_TIMESTAMP` — see the
+/// executor's `evaluate_default_expression`), and a single
+/// per-statement clock value in a per-row context is the established
+/// freeze policy (SQLite fixes `'now'` per statement).
+fn transform_assignment_default_sites(
+    assignments: &mut [Assignment],
+    schema: &vibesql_catalog::TableSchema,
+    mode: &mut DefaultMode,
+) -> Result<(), DefaultSiteError> {
+    for assignment in assignments.iter_mut() {
+        if !matches!(assignment.value, Expression::Default) {
+            continue;
+        }
+        let Some(column) =
+            schema.columns.iter().find(|c| c.name.eq_ignore_ascii_case(&assignment.column))
+        else {
+            continue;
+        };
+        let Some(default_expr) = &column.default_value else { continue };
+        if !default_expr_is_volatile(default_expr) {
+            continue;
+        }
+        reject_unfreezable_default(default_expr, &column.name, &schema.name)?;
+        assignment.value = default_site_literal(default_expr, &column.name, mode)?;
+    }
+    Ok(())
+}
+
+/// DEFAULTs that read session state can never be frozen (consistent
+/// with the top-level session-state rejection).
+fn reject_unfreezable_default(
+    default_expr: &Expression,
+    column: &str,
+    table: &str,
+) -> Result<(), DefaultSiteError> {
+    if let Expression::Function { name, .. } = default_expr {
+        if volatility::is_session_state_function(name.canonical()) {
+            return Err(DefaultSiteError::Policy(format!(
+                "column '{column}' of table '{table}' has a DEFAULT that reads session state \
+                 ({}), which is not part of replicated database state; supply an explicit value \
+                 (#5381)",
+                name.canonical()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Produce the literal for one DEFAULT-firing site: capture evaluates
+/// the DEFAULT with the executor's own evaluator (identical semantics
+/// to the apply-time fire it replaces); substitute splices the entry's
+/// next frozen value. A missing value still advances the cursor — the
+/// caller reports the count mismatch and the statement never executes.
+fn default_site_literal(
+    default_expr: &Expression,
+    column: &str,
+    mode: &mut DefaultMode,
+) -> Result<Expression, DefaultSiteError> {
+    match mode {
+        DefaultMode::Capture { values } => {
+            let value =
+                vibesql_executor::evaluate_default_expression(default_expr).map_err(|e| {
+                    DefaultSiteError::Eval(format!(
+                        "failed to evaluate the DEFAULT for column '{column}' at propose time: \
+                         {e}"
+                    ))
+                })?;
+            let frozen = FrozenValue::try_from(value).map_err(DefaultSiteError::Eval)?;
+            let literal = Expression::Literal(SqlValue::from(frozen.clone()));
+            values.push(frozen);
+            Ok(literal)
+        }
+        DefaultMode::Substitute { values, cursor } => {
+            let site = *cursor;
+            *cursor += 1;
+            Ok(match values.get(site) {
+                Some(frozen) => Expression::Literal(SqlValue::from(frozen.clone())),
+                // Mismatch: splice a placeholder; the caller reports the
+                // count mismatch and the statement is rejected unexecuted.
+                None => Expression::Literal(SqlValue::Null),
+            })
+        }
+    }
+}
+
 /// Does this INSERT fire a non-deterministic column DEFAULT?
 ///
 /// `schema` must be the (replicated, hence identical on every node)
@@ -375,6 +750,10 @@ pub fn substitute_statement(
 /// explicit `NULL` (VibeSQL applies defaults to NULL values), the
 /// statement is `INSERT … DEFAULT VALUES`, or the rows come from a
 /// SELECT (values not statically known).
+///
+/// Used for statements that are **not** rewritten by the DEFAULT
+/// freeze pass — trigger body DML, audited by
+/// [`trigger_body_schema_violation`] / [`dml_trigger_violation`].
 pub fn volatile_default_violation(
     stmt: &InsertStmt,
     schema: &vibesql_catalog::TableSchema,
@@ -419,6 +798,149 @@ pub fn volatile_default_violation_update(
         }
     }
     None
+}
+
+/// Schema-dependent audit of a `CREATE TRIGGER` body at apply time
+/// (#5381). The static validation in [`validate_statement`] guarantees
+/// the body is volatile-free, but two hazards only resolve against the
+/// (replicated, hence identical) catalog:
+///
+/// - body DML that would **fire a non-deterministic DEFAULT** of its own target table (the
+///   classic audit-table pattern `audit(…, ts DEFAULT CURRENT_TIMESTAMP)` — the trigger fires at
+///   apply, the body INSERT fires the DEFAULT, every replica stamps its own clock);
+/// - body DML containing `CAST(<TIME column> AS TIMESTAMP)` (per-row clock read).
+///
+/// Body DML targeting a table that does not exist is rejected too: the
+/// body cannot be audited against a schema that is not there yet, and
+/// admitting it would let a later `CREATE TABLE` introduce a volatile
+/// DEFAULT behind the trigger's back (the fire-time backstop
+/// [`dml_trigger_violation`] would still catch it, but rejecting at
+/// CREATE is the actionable error).
+pub fn trigger_body_schema_violation(
+    stmt: &CreateTriggerStmt,
+    db: &vibesql_storage::Database,
+) -> Option<String> {
+    let body = match parse_trigger_body(stmt) {
+        Ok(body) => body,
+        Err(reason) => return Some(reason),
+    };
+    for statement in &body {
+        if let Some(reason) =
+            trigger_body_statement_schema_violation(statement, db, &stmt.trigger_name)
+        {
+            return Some(reason);
+        }
+    }
+    None
+}
+
+/// Fire-time backstop for trigger-body nondeterminism (#5381): before a
+/// replicated DML statement on `table_name` executes, re-audit the
+/// bodies of every enabled trigger it could fire — transitively through
+/// trigger cascades (a body INSERT can fire the target table's own
+/// triggers) — against the **current** replicated catalog.
+///
+/// [`trigger_body_schema_violation`] already ran when each trigger was
+/// created, but later DDL can rot that audit: drop + recreate a
+/// body-referenced table *with* a volatile DEFAULT and the body's
+/// INSERT would fire the apply-time clock. The catalog is replicated
+/// state, so this rejection is identical on every replica. Triggers are
+/// matched by table only (not by event) — a deliberate
+/// over-approximation that keeps the walk simple; it can only reject
+/// statements on tables whose trigger graph has rotted, where a loud
+/// deterministic error is the desired behavior.
+pub fn dml_trigger_violation(
+    db: &vibesql_storage::Database,
+    table_name: &str,
+) -> Option<String> {
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut pending = vec![table_name.to_ascii_lowercase()];
+    while let Some(table) = pending.pop() {
+        if !visited.insert(table.clone()) {
+            continue;
+        }
+        for trigger in db.catalog.get_triggers_for_table(&table, None).filter(|t| t.enabled) {
+            let TriggerAction::RawSql(sql) = &trigger.triggered_action;
+            let body = match vibesql_executor::TriggerFirer::parse_trigger_sql(sql) {
+                Ok(body) => body,
+                Err(e) => {
+                    return Some(format!(
+                        "body of trigger '{}' (on table '{}') cannot be parsed, so it cannot \
+                         be audited for deterministic replication: {e} (#5381)",
+                        trigger.name, table
+                    ));
+                }
+            };
+            for statement in &body {
+                if let Some(reason) =
+                    trigger_body_statement_schema_violation(statement, db, &trigger.name)
+                {
+                    return Some(reason);
+                }
+                // Body DML can fire the *next* table's triggers.
+                match statement {
+                    Statement::Insert(s) => pending.push(s.table_name.to_ascii_lowercase()),
+                    Statement::Update(s) => pending.push(s.table_name.to_ascii_lowercase()),
+                    Statement::Delete(s) => pending.push(s.table_name.to_ascii_lowercase()),
+                    _ => {}
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Audit one trigger-body statement against the replicated catalog:
+/// volatile DEFAULTs its DML would fire, and TIME→TIMESTAMP column
+/// casts. Shared by the CREATE-time audit and the fire-time backstop.
+fn trigger_body_statement_schema_violation(
+    statement: &Statement,
+    db: &vibesql_storage::Database,
+    trigger_name: &str,
+) -> Option<String> {
+    let table_name = match statement {
+        Statement::Insert(s) => &s.table_name,
+        Statement::Update(s) => &s.table_name,
+        Statement::Delete(s) => &s.table_name,
+        // SELECT (and anything else, which the static validation
+        // rejects) writes nothing.
+        _ => return None,
+    };
+    let Some(table) = db.get_table(table_name) else {
+        return Some(format!(
+            "body of trigger '{trigger_name}' references table '{table_name}', which does not \
+             exist in the replicated catalog; create it first so the body can be audited for \
+             deterministic replication (#5381)"
+        ));
+    };
+    let schema = &table.schema;
+    let violation = match statement {
+        Statement::Insert(s) => volatile_default_violation(s, schema),
+        Statement::Update(s) => volatile_default_violation_update(s, schema),
+        _ => None,
+    };
+    if let Some(reason) = violation {
+        return Some(format!("body of trigger '{trigger_name}': {reason}"));
+    }
+    if let Some(reason) = time_cast_violation(statement, schema) {
+        return Some(format!("body of trigger '{trigger_name}': {reason}"));
+    }
+    None
+}
+
+/// Parse a trigger body with **exactly** the parsing the executor uses
+/// when the trigger fires
+/// ([`vibesql_executor::TriggerFirer::parse_trigger_sql`]) — validating
+/// against a different parse would let nondeterminism through.
+fn parse_trigger_body(stmt: &CreateTriggerStmt) -> Result<Vec<Statement>, String> {
+    let TriggerAction::RawSql(sql) = &stmt.triggered_action;
+    vibesql_executor::TriggerFirer::parse_trigger_sql(sql).map_err(|e| {
+        format!(
+            "body of trigger '{}' cannot be parsed, so it cannot be validated for \
+             deterministic replication: {e} (#5381)",
+            stmt.trigger_name
+        )
+    })
 }
 
 /// Does this write statement cast a TIME column of its target table to
@@ -728,12 +1250,131 @@ fn validate_statement(statement: &Statement) -> Result<(), String> {
             }
             Ok(())
         }
+        // A trigger body re-executes at apply time on every replica,
+        // data-dependently — strict validation, like CREATE VIEW
+        // (#5381). DROP TRIGGER carries no expressions.
+        Statement::CreateTrigger(stmt) => validate_create_trigger(stmt),
         // CREATE TABLE stores DEFAULT expressions without evaluating
         // them — deterministic as DDL. INSERTs that would *fire* a
-        // volatile default are caught by `volatile_default_violation`.
-        // Other statements either carry no expressions or are rejected
-        // by the state machine's statement dispatch.
+        // volatile default are frozen through the schema (or rejected)
+        // by the DEFAULT freeze pass. Other statements either carry no
+        // expressions or are rejected by the state machine's statement
+        // dispatch.
         _ => Ok(()),
+    }
+}
+
+/// Strict validation of a `CREATE TRIGGER` definition (#5381): the WHEN
+/// clause and every body statement must be volatile-free, because the
+/// body re-executes through the executor at apply time — per firing
+/// row, data-dependently — where nothing can be frozen. Runs at propose
+/// (actionable error before a log index is consumed) **and** at apply
+/// (via [`substitute_statement`]'s re-validation: defense in depth for
+/// entries proposed around the freeze pass). Schema-dependent hazards
+/// (volatile DEFAULTs fired by body DML, TIME column casts) need
+/// catalog access and are audited separately by
+/// [`trigger_body_schema_violation`].
+fn validate_create_trigger(stmt: &CreateTriggerStmt) -> Result<(), String> {
+    if let Some(when_condition) = &stmt.when_condition {
+        check_expr_volatile_free(when_condition, "trigger WHEN clause")?;
+    }
+    for statement in parse_trigger_body(stmt)? {
+        check_trigger_body_statement(&statement)?;
+    }
+    Ok(())
+}
+
+/// Strict volatile-free check over one trigger-body statement. The
+/// statement kinds mirror what the executor's trigger firing supports
+/// (`TriggerFirer::execute_statement`): INSERT/UPDATE/DELETE/SELECT —
+/// anything else is rejected here with a clearer error than the
+/// fire-time one. `RETURNING` clauses are exempt for the same reason as
+/// at top level (computed and discarded; never feeds replicated state).
+fn check_trigger_body_statement(statement: &Statement) -> Result<(), String> {
+    const CTX: &str = "trigger body";
+    match statement {
+        Statement::Insert(stmt) => {
+            check_ctes_volatile_free(&stmt.with_clause)?;
+            match &stmt.source {
+                InsertSource::Values(rows) => {
+                    for row in rows {
+                        for expr in row {
+                            check_expr_volatile_free(expr, CTX)?;
+                        }
+                    }
+                }
+                InsertSource::Select(query) => {
+                    check_query_volatile_free(query, "trigger body INSERT … SELECT")?;
+                }
+                InsertSource::DefaultValues => {}
+            }
+            if let Some(on_conflict) = &stmt.on_conflict {
+                if let Some(items) = &on_conflict.conflict_target {
+                    for item in items {
+                        if let ConflictTargetItem::Expression(expr) = item {
+                            check_expr_volatile_free(expr, CTX)?;
+                        }
+                    }
+                }
+                if let Some(target_where) = &on_conflict.target_where {
+                    check_expr_volatile_free(target_where, CTX)?;
+                }
+                if let OnConflictAction::DoUpdate { assignments, where_clause } =
+                    &on_conflict.action
+                {
+                    for assignment in assignments {
+                        check_expr_volatile_free(&assignment.value, CTX)?;
+                    }
+                    if let Some(where_clause) = where_clause {
+                        check_expr_volatile_free(where_clause, CTX)?;
+                    }
+                }
+            }
+            if let Some(assignments) = &stmt.on_duplicate_key_update {
+                for assignment in assignments {
+                    check_expr_volatile_free(&assignment.value, CTX)?;
+                }
+            }
+            Ok(())
+        }
+        Statement::Update(stmt) => {
+            check_ctes_volatile_free(&stmt.with_clause)?;
+            if let Some(from_clauses) = &stmt.from_clause {
+                for from in from_clauses {
+                    check_from_volatile_free(from)?;
+                }
+            }
+            for assignment in &stmt.assignments {
+                check_expr_volatile_free(&assignment.value, CTX)?;
+            }
+            if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
+                check_expr_volatile_free(expr, CTX)?;
+            }
+            Ok(())
+        }
+        Statement::Delete(stmt) => {
+            check_ctes_volatile_free(&stmt.with_clause)?;
+            if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
+                check_expr_volatile_free(expr, CTX)?;
+            }
+            if let Some(order_by) = &stmt.order_by {
+                for item in order_by {
+                    check_expr_volatile_free(&item.expr, CTX)?;
+                }
+            }
+            if let Some(limit) = &stmt.limit {
+                check_expr_volatile_free(limit, CTX)?;
+            }
+            if let Some(offset) = &stmt.offset {
+                check_expr_volatile_free(offset, CTX)?;
+            }
+            Ok(())
+        }
+        Statement::Select(query) => check_query_volatile_free(query, "trigger body SELECT"),
+        other => Err(format!(
+            "statement is not supported in a replicated trigger body (the apply-time executor \
+             fires INSERT/UPDATE/DELETE/SELECT only): {other:?}"
+        )),
     }
 }
 
@@ -1192,7 +1833,13 @@ fn insert_fires_default(stmt: &InsertStmt, column_name: &str, column_idx: usize)
             // Explicit DEFAULT keyword, or explicit NULL (VibeSQL
             // applies column defaults to NULL values).
             Some(Expression::Default) | Some(Expression::Literal(SqlValue::Null)) => true,
-            Some(_) => false,
+            // A literal value cannot evaluate to NULL: never fires.
+            Some(Expression::Literal(_)) => false,
+            // Any other expression *may* evaluate to NULL (e.g.
+            // `nullif(1, 1)`, a scalar subquery, `NEW.col` in a trigger
+            // body), which fires the default — unprovable statically, so
+            // conservatively treat it as a fire (#5381).
+            Some(_) => true,
             // Row too short: deterministic executor error, not a
             // default fire.
             None => false,
@@ -1612,6 +2259,77 @@ mod tests {
             "DELETE FROM sched WHERE id IN (SELECT id FROM x WHERE CAST(t AS TIMESTAMP) > y)",
         ] {
             assert_eq!(time_cast_violation(&parse(sql), &schema), None, "{sql}");
+        }
+    }
+
+    // -- DEFAULT freeze / substitute round-trip (#5381) ----------------------
+
+    /// The propose-side capture and the apply-side substitution walk the
+    /// firing sites in the same order, so a frozen value round-trips back
+    /// into the statement as a literal — and apply repeating the walk
+    /// against the same schema reproduces the same site count.
+    #[test]
+    fn default_freeze_and_substitute_round_trip() {
+        let schema = users_schema_with_volatile_default();
+        let (positional, defaults) = freeze_statement_with_schema(
+            "INSERT INTO users (id, name) VALUES (1, 'a'), (2, 'b')",
+            Some(&schema),
+        )
+        .unwrap();
+        assert!(positional.is_empty(), "no positional volatile sites");
+        assert_eq!(defaults.len(), 2, "one frozen CURRENT_TIMESTAMP per row");
+
+        // Apply side: splice the frozen values; the statement now carries
+        // them as literals and fires no DEFAULT.
+        let stmt = parse("INSERT INTO users (id, name) VALUES (1, 'a'), (2, 'b')");
+        let spliced = substitute_volatile_defaults(stmt, &schema, &defaults).unwrap();
+        let Statement::Insert(insert) = &spliced else { panic!("not an insert") };
+        // The omitted `ts` column was appended with per-row literals.
+        assert!(insert.columns.iter().any(|c| c.eq_ignore_ascii_case("ts")));
+        assert!(volatile_default_violation(insert, &schema).is_none(), "no DEFAULT fires anymore");
+    }
+
+    /// An entry that fires DEFAULT sites but carries no frozen values
+    /// (pre-#5381 / proposed around the freeze pass) is rejected — the
+    /// preserved #5377 defense in depth.
+    #[test]
+    fn substitute_with_no_frozen_values_rejects_firing_sites() {
+        let schema = users_schema_with_volatile_default();
+        let stmt = parse("INSERT INTO users (id, name) VALUES (1, 'a')");
+        let err = substitute_volatile_defaults(stmt, &schema, &[]).unwrap_err();
+        assert!(err.contains("DEFAULT") && err.contains("#5381"), "got: {err}");
+    }
+
+    // -- CREATE TRIGGER validation (#5381) -----------------------------------
+
+    #[test]
+    fn deterministic_trigger_body_is_admitted() {
+        for sql in [
+            "CREATE TRIGGER trg AFTER INSERT ON t \
+             BEGIN INSERT INTO audit (k, v) VALUES (NEW.id, NEW.v); END",
+            "CREATE TRIGGER trg AFTER UPDATE ON t \
+             BEGIN UPDATE audit SET v = NEW.v WHERE k = OLD.id; END",
+            "CREATE TRIGGER trg AFTER DELETE ON t \
+             BEGIN DELETE FROM audit WHERE k = OLD.id; END",
+        ] {
+            validate_statement(&parse(sql)).unwrap_or_else(|e| panic!("{sql} must be admitted: {e}"));
+        }
+    }
+
+    #[test]
+    fn volatile_trigger_body_is_rejected() {
+        for sql in [
+            // random() in the body INSERT.
+            "CREATE TRIGGER trg AFTER INSERT ON t \
+             BEGIN INSERT INTO audit (k, v) VALUES (NEW.id, random()); END",
+            // datetime('now') in the body.
+            "CREATE TRIGGER trg AFTER INSERT ON t \
+             BEGIN INSERT INTO audit (k, v) VALUES (NEW.id, datetime('now')); END",
+            // Volatile WHEN clause.
+            "CREATE TRIGGER trg AFTER INSERT ON t WHEN random() > 0 \
+             BEGIN INSERT INTO audit (k, v) VALUES (NEW.id, NEW.v); END",
+        ] {
+            assert!(validate_statement(&parse(sql)).is_err(), "{sql} must be rejected");
         }
     }
 }

@@ -242,6 +242,55 @@ pub fn evaluate_default_expression(
                 ))),
             }
         }
+        // The parser represents bare `DEFAULT CURRENT_DATE` /
+        // `CURRENT_TIME` / `CURRENT_TIMESTAMP` as dedicated AST variants
+        // (not `Function`), so evaluate them here with the same clock
+        // semantics as the `Function`-named forms above. This is the
+        // path the Raft freeze pass relies on to materialize a
+        // deterministic value at propose time (#5381).
+        vibesql_ast::Expression::CurrentDate => {
+            use chrono::Datelike;
+            let now = chrono::Local::now();
+            let date = vibesql_types::Date::new(now.year(), now.month() as u8, now.day() as u8)
+                .map_err(|e| {
+                    ExecutorError::UnsupportedFeature(format!("Failed to create date: {}", e))
+                })?;
+            Ok(vibesql_types::SqlValue::Date(date))
+        }
+        vibesql_ast::Expression::CurrentTime { .. } => {
+            use chrono::Timelike;
+            let now = chrono::Local::now();
+            let time_naive = now.time();
+            let time = vibesql_types::Time::new(
+                time_naive.hour() as u8,
+                time_naive.minute() as u8,
+                time_naive.second() as u8,
+                time_naive.nanosecond(),
+            )
+            .map_err(|e| {
+                ExecutorError::UnsupportedFeature(format!("Failed to create time: {}", e))
+            })?;
+            Ok(vibesql_types::SqlValue::Time(time))
+        }
+        vibesql_ast::Expression::CurrentTimestamp { .. } => {
+            use chrono::{Datelike, Timelike};
+            let now = chrono::Local::now();
+            let time_naive = now.time();
+            let date = vibesql_types::Date::new(now.year(), now.month() as u8, now.day() as u8)
+                .map_err(|e| {
+                    ExecutorError::UnsupportedFeature(format!("Failed to create date: {}", e))
+                })?;
+            let time = vibesql_types::Time::new(
+                time_naive.hour() as u8,
+                time_naive.minute() as u8,
+                time_naive.second() as u8,
+                time_naive.nanosecond(),
+            )
+            .map_err(|e| {
+                ExecutorError::UnsupportedFeature(format!("Failed to create time: {}", e))
+            })?;
+            Ok(vibesql_types::SqlValue::Timestamp(vibesql_types::Timestamp::new(date, time)))
+        }
         _ => Err(ExecutorError::UnsupportedExpression(
             "Only literals and functions are supported in DEFAULT expressions".to_string(),
         )),
