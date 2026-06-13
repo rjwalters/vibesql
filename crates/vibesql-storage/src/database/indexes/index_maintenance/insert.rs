@@ -95,24 +95,47 @@ impl IndexManager {
                             }
                         }
                         IndexData::IVFFlat { index } => {
-                            // IVFFlat indexes are maintained separately via rebuild
-                            // Incremental inserts would require re-clustering which is expensive
-                            // For now, log a warning - users should rebuild the index after bulk
-                            // inserts
-                            log::debug!(
-                                "IVFFlat index '{}' does not support incremental inserts. Consider rebuilding after bulk operations.",
-                                index_name
-                            );
-                            let _ = index; // Suppress unused warning
+                            // Incrementally add this row's vector so the index
+                            // stays in sync without a full rebuild. The vector is
+                            // assigned to its nearest centroid (O(probe)); if the
+                            // index is not yet trained it lands in the staging
+                            // list, matching IVFFlatIndex::insert semantics.
+                            if let Some(col_idx) = Self::vector_index_column_idx(
+                                metadata,
+                                table_schema,
+                                index_name,
+                            ) {
+                                if let Some(vector) = Self::extract_vector(&row.values[col_idx]) {
+                                    if let Err(e) = index.insert(row_index, vector) {
+                                        log::warn!(
+                                            "Failed to insert into IVFFlat index '{}': {}",
+                                            index_name,
+                                            e
+                                        );
+                                    }
+                                }
+                                // NULL / non-vector cells are not indexed, mirroring
+                                // the build path.
+                            }
                         }
                         IndexData::Hnsw { index } => {
-                            // HNSW indexes support incremental inserts
-                            // The index is self-organizing and doesn't require rebuilding
-                            log::debug!(
-                                "HNSW index '{}' does not support incremental inserts via standard index maintenance. Use search_hnsw_index API.",
-                                index_name
-                            );
-                            let _ = index; // Suppress unused warning
+                            // HNSW supports incremental inserts natively (no
+                            // training step); wire the row's vector into the graph.
+                            if let Some(col_idx) = Self::vector_index_column_idx(
+                                metadata,
+                                table_schema,
+                                index_name,
+                            ) {
+                                if let Some(vector) = Self::extract_vector(&row.values[col_idx]) {
+                                    if let Err(e) = index.insert(row_index, vector) {
+                                        log::warn!(
+                                            "Failed to insert into HNSW index '{}': {}",
+                                            index_name,
+                                            e
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -300,9 +323,37 @@ impl IndexManager {
                             }
                         }
                     }
-                    IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => {
-                        // Vector indexes don't support incremental inserts via this path
-                        // They need to be rebuilt after bulk operations
+                    IndexData::IVFFlat { index } => {
+                        // Incrementally add each inserted row's vector. The single
+                        // indexed vector column lives at column_info[0].
+                        if let Some(&(col_idx, _)) = column_info.first() {
+                            for &(row_index, row) in rows_to_insert {
+                                if let Some(vector) = Self::extract_vector(&row.values[col_idx]) {
+                                    if let Err(e) = index.insert(row_index, vector) {
+                                        log::warn!(
+                                            "Failed to batch-insert into IVFFlat index '{}': {}",
+                                            index_name,
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    IndexData::Hnsw { index } => {
+                        if let Some(&(col_idx, _)) = column_info.first() {
+                            for &(row_index, row) in rows_to_insert {
+                                if let Some(vector) = Self::extract_vector(&row.values[col_idx]) {
+                                    if let Err(e) = index.insert(row_index, vector) {
+                                        log::warn!(
+                                            "Failed to batch-insert into HNSW index '{}': {}",
+                                            index_name,
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

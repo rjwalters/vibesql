@@ -110,22 +110,19 @@ impl IndexManager {
                             }
                         }
                         IndexData::IVFFlat { index } => {
-                            // IVFFlat indexes are maintained separately via rebuild
-                            // Incremental deletes would require re-clustering which is expensive
-                            log::debug!(
-                                "IVFFlat index '{}' does not support incremental deletes. Consider rebuilding after bulk operations.",
-                                index_name
-                            );
-                            let _ = index; // Suppress unused warning
+                            // Drop the deleted row's vector from its posting list so
+                            // a subsequent nearest-neighbor search cannot return the
+                            // deleted row. Tables tombstone deletes via a bitmap (no
+                            // row renumbering) until a compaction, which triggers a
+                            // full rebuild (#5446) — so removing by absolute row_id
+                            // is sufficient and correct on the non-compacting path.
+                            index.remove(row_index);
                         }
                         IndexData::Hnsw { index } => {
-                            // HNSW indexes support incremental deletes
-                            // But we're not tracking which row maps to which vector
-                            log::debug!(
-                                "HNSW index '{}' does not support incremental deletes. Consider rebuilding after bulk operations.",
-                                index_name
-                            );
-                            let _ = index; // Suppress unused warning
+                            // HnswIndex::remove unlinks the node from every graph
+                            // layer (and repairs the entry point), so the deleted
+                            // row is no longer reachable by search.
+                            index.remove(row_index);
                         }
                     }
                 }
@@ -319,9 +316,16 @@ impl IndexManager {
                             }
                         }
                     }
-                    IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => {
-                        // Vector indexes don't support incremental deletes
-                        // They need to be rebuilt after bulk operations
+                    IndexData::IVFFlat { index } => {
+                        // Remove each deleted row's vector by absolute row_id.
+                        for &(row_index, _) in rows_to_delete {
+                            index.remove(row_index);
+                        }
+                    }
+                    IndexData::Hnsw { index } => {
+                        for &(row_index, _) in rows_to_delete {
+                            index.remove(row_index);
+                        }
                     }
                 }
             }
@@ -420,23 +424,17 @@ impl IndexManager {
                             }
                         }
                     }
-                    IndexData::IVFFlat { index } => {
-                        // IVFFlat indexes store row IDs in inverted lists
-                        // This would require iterating through all lists and adjusting row IDs
-                        log::debug!(
-                            "IVFFlat index '{}' row ID adjustment not yet implemented. Consider rebuilding.",
-                            index_name
-                        );
-                        let _ = index; // Suppress unused warning
-                    }
-                    IndexData::Hnsw { index } => {
-                        // HNSW indexes store row IDs in the proximity graph
-                        // This would require iterating through all nodes and adjusting row IDs
-                        log::debug!(
-                            "HNSW index '{}' row ID adjustment not yet implemented. Consider rebuilding.",
-                            index_name
-                        );
-                        let _ = index; // Suppress unused warning
+                    IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => {
+                        // No row-id adjustment is needed for vector indexes here.
+                        //
+                        // Deletes tombstone rows via the table's deletion bitmap
+                        // and do NOT renumber surviving row positions, so the
+                        // absolute row_ids stored in the vector index remain
+                        // valid. The deleted row's vector was already removed in
+                        // `update_indexes_for_delete_with_values`. Row positions
+                        // only change on compaction, which renumbers rows and
+                        // triggers a full vector-index rebuild (#5446) via
+                        // `rebuild_indexes`.
                     }
                 }
             }

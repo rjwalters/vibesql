@@ -151,22 +151,50 @@ impl IndexManager {
                                 }
                             }
                             IndexData::IVFFlat { index } => {
-                                // IVFFlat indexes are maintained separately via rebuild
-                                // Incremental updates would require re-clustering which is
-                                // expensive
-                                log::debug!(
-                                    "IVFFlat index '{}' does not support incremental updates. Consider rebuilding after bulk operations.",
-                                    index_name
-                                );
-                                let _ = index; // Suppress unused warning
+                                // The vector for this row changed: drop the old
+                                // entry and re-insert at the new vector's nearest
+                                // centroid so search reflects the updated value.
+                                // (This arm only runs when old_key != new_key.)
+                                index.remove(row_index);
+                                if let Some(col_idx) = Self::vector_index_column_idx(
+                                    metadata,
+                                    table_schema,
+                                    index_name,
+                                ) {
+                                    if let Some(vector) =
+                                        Self::extract_vector(&new_row.values[col_idx])
+                                    {
+                                        if let Err(e) = index.insert(row_index, vector) {
+                                            log::warn!(
+                                                "Failed to re-insert into IVFFlat index '{}' on update: {}",
+                                                index_name,
+                                                e
+                                            );
+                                        }
+                                    }
+                                    // If the new value is NULL/non-vector, the row
+                                    // is correctly left out of the index.
+                                }
                             }
                             IndexData::Hnsw { index } => {
-                                // HNSW indexes would need remove + insert for updates
-                                log::debug!(
-                                    "HNSW index '{}' does not support incremental updates. Consider rebuilding after bulk operations.",
-                                    index_name
-                                );
-                                let _ = index; // Suppress unused warning
+                                index.remove(row_index);
+                                if let Some(col_idx) = Self::vector_index_column_idx(
+                                    metadata,
+                                    table_schema,
+                                    index_name,
+                                ) {
+                                    if let Some(vector) =
+                                        Self::extract_vector(&new_row.values[col_idx])
+                                    {
+                                        if let Err(e) = index.insert(row_index, vector) {
+                                            log::warn!(
+                                                "Failed to re-insert into HNSW index '{}' on update: {}",
+                                                index_name,
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

@@ -480,6 +480,32 @@ impl IndexManager {
         Ok(())
     }
 
+    /// Resolve the table-column index of a vector index's single indexed column.
+    ///
+    /// IVFFlat / HNSW indexes always index exactly one (non-expression) column.
+    /// Returns `None` (with a warning) if the metadata or schema can't be
+    /// resolved, so callers can skip per-row maintenance for that index rather
+    /// than panic.
+    pub(crate) fn vector_index_column_idx(
+        metadata: &IndexMetadata,
+        table_schema: &vibesql_catalog::TableSchema,
+        index_name: &str,
+    ) -> Option<usize> {
+        let col = metadata.columns.first()?;
+        let col_name = col.column_name()?;
+        match table_schema.get_column_index(col_name) {
+            Some(idx) => Some(idx),
+            None => {
+                log::warn!(
+                    "Vector index '{}' column '{}' not found in schema; skipping per-row maintenance",
+                    index_name,
+                    col_name
+                );
+                None
+            }
+        }
+    }
+
     /// Extract a vector from a SqlValue, converting f32 to f64
     ///
     /// Note: SqlValue::Vector stores f32 for storage efficiency,
