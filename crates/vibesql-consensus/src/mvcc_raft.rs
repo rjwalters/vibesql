@@ -1012,6 +1012,17 @@ impl MvccRaftNode {
         self.sm.machine.query(sql)
     }
 
+    /// Resolve the single-column primary key of `table_name` against the
+    /// locally applied replicated catalog (#5420). Local read of the
+    /// applied schema — no leadership check or network round — used by the
+    /// HTTP CRUD by-id endpoints to build their `WHERE pk = {id}` SQL in
+    /// replicated mode, where the schema lives in the state machine rather
+    /// than the (empty) local registry database. Returns `None` for an
+    /// unknown table, no primary key, or a composite primary key.
+    pub fn primary_key_column(&self, table_name: &str) -> Option<String> {
+        self.sm.machine.primary_key_column(table_name)
+    }
+
     /// Run a read-only SELECT with **linearizable** semantics (Raft
     /// Phase B2, #5200, PR 1): openraft's ReadIndex protocol
     /// ([`Raft::ensure_linearizable`]) first confirms this node's

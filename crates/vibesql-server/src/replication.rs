@@ -290,6 +290,19 @@ impl ReplicationHandle {
         self.node.query(sql).map_err(|e| self.sql_error("the query", e))
     }
 
+    /// Resolve the single-column primary key of `table_name` from the
+    /// applied replicated catalog (#5420). The HTTP CRUD by-id endpoints
+    /// use this to introspect the PK in replicated mode — where the schema
+    /// lives in the consensus state machine, not the (empty) local registry
+    /// database — then build their `WHERE pk = {id}` SQL and route it
+    /// through the replicated session like the collection endpoints.
+    /// Returns `None` for an unknown table, no primary key, or a composite
+    /// primary key (the by-id endpoints support single-column keys only,
+    /// matching the standalone path).
+    pub fn primary_key_column(&self, table_name: &str) -> Option<String> {
+        self.node.primary_key_column(table_name)
+    }
+
     /// Linearizable read (quorum-confirmed leadership).
     pub async fn query_linearizable(
         &self,

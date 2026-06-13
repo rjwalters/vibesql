@@ -585,6 +585,27 @@ impl VibesqlStateMachine {
         Ok(QueryResult::from(result))
     }
 
+    /// Resolve the (single-column) primary-key column of `table_name`
+    /// against the **applied replicated catalog** (#5420). This is the
+    /// replicated-mode counterpart of reading the local registry schema:
+    /// the HTTP CRUD by-id endpoints need the PK column to build their
+    /// `WHERE pk = {id}` SQL, but in replicated mode the schema lives here
+    /// in the state machine, not in the (empty) local registry database.
+    ///
+    /// Returns `None` if the table is unknown, has no declared primary
+    /// key, or has a composite primary key (the by-id endpoints only
+    /// support a single-column key, matching the standalone path).
+    pub fn primary_key_column(&self, table_name: &str) -> Option<String> {
+        let inner = self.lock();
+        let schema = lookup_table_schema(&inner.db, None, table_name)?;
+        let pk = schema.primary_key.as_ref()?;
+        // Single-column primary keys only (same restriction as standalone).
+        match pk.as_slice() {
+            [single] => Some(single.clone()),
+            _ => None,
+        }
+    }
+
     /// Speculatively read inside an open replicated transaction so the
     /// session observes its **own** buffered (not-yet-committed) writes —
     /// full mid-transaction read-your-own-writes (#5401).
@@ -1123,6 +1144,29 @@ mod tests {
             .into_iter()
             .map(|row| row[0].to_string())
             .collect()
+    }
+
+    #[test]
+    fn primary_key_column_resolves_from_applied_catalog() {
+        let machine = VibesqlStateMachine::new();
+        create_users(&machine, 1);
+
+        // Single-column PK resolves (the HTTP CRUD by-id path, #5420).
+        assert_eq!(machine.primary_key_column("users").as_deref(), Some("id"));
+
+        // Unknown table → None.
+        assert_eq!(machine.primary_key_column("missing"), None);
+
+        // No declared primary key → None.
+        machine.apply(2, &TxnEntry::single("CREATE TABLE nopk (a INT, b INT)")).unwrap();
+        assert_eq!(machine.primary_key_column("nopk"), None);
+
+        // Composite primary key → None (by-id endpoints support single-column
+        // keys only, matching the standalone path).
+        machine
+            .apply(3, &TxnEntry::single("CREATE TABLE composite (a INT, b INT, PRIMARY KEY (a, b))"))
+            .unwrap();
+        assert_eq!(machine.primary_key_column("composite"), None);
     }
 
     #[test]

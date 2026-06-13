@@ -76,11 +76,13 @@ pub struct HttpState {
     ///
     /// Present only in replicated mode. Surfaces that have been wired through
     /// consensus (#5410 — the `/api/query` endpoint and the CRUD collection
-    /// endpoints) build a **replicated** session via [`Self::session`], so
-    /// writes propose through this handle (leader-only, freeze-at-propose)
-    /// and reads run against the replicated state machine — never against the
-    /// unreplicated local registry database. Surfaces that still depend on
-    /// local-database schema/state introspection (CRUD by-id, GraphQL,
+    /// endpoints; #5420 — the CRUD by-id endpoints, which resolve the primary
+    /// key from the replicated catalog via
+    /// [`ReplicationHandle::primary_key_column`]) build a **replicated** session
+    /// via [`Self::session`], so writes propose through this handle (leader-only,
+    /// freeze-at-propose) and reads run against the replicated state machine —
+    /// never against the unreplicated local registry database. Surfaces that
+    /// still depend on local-database schema/state introspection (GraphQL,
     /// subscriptions, blob storage) remain gated (see [`Self::replicated_gate`])
     /// to a clear error rather than silently reading stale data or accepting a
     /// write that never replicates; those are tracked as follow-ons to #5410.

@@ -364,13 +364,39 @@ fn json_to_sql_literal(val: &JsonValue) -> String {
     }
 }
 
-/// Get the primary key column name for a table using shared database
+/// Get the primary key column name for a table from the local registry
+/// database schema (single-column keys only). Used in standalone mode.
 async fn get_primary_key_column(shared_db: &SharedDatabase, table_name: &str) -> Option<String> {
     let db = shared_db.read().await;
     let table = db.get_table(table_name)?;
     let pk = table.schema.primary_key.as_ref()?;
-    // For now, support single-column primary keys
-    pk.first().cloned()
+    // Single-column primary keys only.
+    match pk.as_slice() {
+        [single] => Some(single.clone()),
+        _ => None,
+    }
+}
+
+/// Resolve the primary-key column for the CRUD by-id endpoints, from the
+/// right catalog for the server's mode (#5420):
+///
+/// - **Replicated mode**: the schema lives in the consensus state machine, not
+///   the (empty) local registry database, so resolve it through the
+///   replication handle's catalog accessor.
+/// - **Standalone mode**: read the local registry database schema as before.
+///
+/// Returns `None` when the table is unknown, has no primary key, or has a
+/// composite primary key (the by-id endpoints support single-column keys only,
+/// identically in both modes).
+async fn resolve_pk_column(
+    state: &HttpState,
+    shared_db: &SharedDatabase,
+    table_name: &str,
+) -> Option<String> {
+    match &state.replication {
+        Some(handle) => handle.primary_key_column(table_name),
+        None => get_primary_key_column(shared_db, table_name).await,
+    }
 }
 
 /// Convert execution result rows to JSON objects
@@ -456,18 +482,16 @@ pub async fn get_row(
 ) -> impl IntoResponse {
     debug!("CRUD: GET /api/tables/{}/rows/{}", table_name, id);
 
-    if let Some((code, body)) = state.replicated_gate("the CRUD by-id API (resolving the primary key needs schema introspection through consensus)") {
-        return (code, body).into_response();
-    }
-
     // Get the database name from headers
     let db_name = get_database_name(&headers);
 
     // Get or create the shared database from the registry
     let shared_db = state.registry.get_or_create(&db_name).await;
 
-    // Get primary key column
-    let pk_column = match get_primary_key_column(&shared_db, &table_name).await {
+    // Resolve the primary key column. In replicated mode this reads the
+    // schema from the consensus state machine (the local registry DB is
+    // empty); in standalone mode it reads the local registry schema (#5420).
+    let pk_column = match resolve_pk_column(&state, &shared_db, &table_name).await {
         Some(pk) => pk,
         None => {
             return (
@@ -485,8 +509,9 @@ pub async fn get_row(
     let sql = build_select_by_pk_sql(&table_name, &pk_column, &id, params.select.as_deref());
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session =
-        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
+    // Replicated session in replicated mode (the SELECT runs against the
+    // state machine per the session's read-consistency mode); local otherwise.
+    let mut session = state.session(&db_name, shared_db);
 
     match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Select { rows, columns }) => {
@@ -513,8 +538,7 @@ pub async fn get_row(
             .into_response(),
         Err(e) => {
             error!("Query execution failed: {}", e);
-            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Query failed: {}", e))))
-                .into_response()
+            execution_error_response(&e)
         }
     }
 }
@@ -592,10 +616,6 @@ pub async fn update_row(
 ) -> impl IntoResponse {
     debug!("CRUD: PUT /api/tables/{}/rows/{} with body: {:?}", table_name, id, body);
 
-    if let Some((code, gate_body)) = state.replicated_gate("the CRUD by-id API (resolving the primary key needs schema introspection through consensus)") {
-        return (code, gate_body).into_response();
-    }
-
     if body.values.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -610,8 +630,9 @@ pub async fn update_row(
     // Get or create the shared database from the registry
     let shared_db = state.registry.get_or_create(&db_name).await;
 
-    // Get primary key column
-    let pk_column = match get_primary_key_column(&shared_db, &table_name).await {
+    // Resolve the primary key column (replicated catalog in replicated mode,
+    // local registry schema otherwise) (#5420).
+    let pk_column = match resolve_pk_column(&state, &shared_db, &table_name).await {
         Some(pk) => pk,
         None => {
             return (
@@ -629,8 +650,10 @@ pub async fn update_row(
     let sql = build_update_sql(&table_name, &pk_column, &id, &body.values);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session =
-        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
+    // Replicated session in replicated mode: the UPDATE proposes through
+    // consensus (leader-only); a write on a follower surfaces as 421 with a
+    // leader hint. Local session otherwise.
+    let mut session = state.session(&db_name, shared_db);
 
     match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Update { rows_affected }) => {
@@ -651,8 +674,7 @@ pub async fn update_row(
             .into_response(),
         Err(e) => {
             error!("Update failed: {}", e);
-            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Update failed: {}", e))))
-                .into_response()
+            execution_error_response(&e)
         }
     }
 }
@@ -665,10 +687,6 @@ pub async fn patch_row(
     Json(body): Json<PatchRequest>,
 ) -> impl IntoResponse {
     debug!("CRUD: PATCH /api/tables/{}/rows/{} with body: {:?}", table_name, id, body);
-
-    if let Some((code, gate_body)) = state.replicated_gate("the CRUD by-id API (resolving the primary key needs schema introspection through consensus)") {
-        return (code, gate_body).into_response();
-    }
 
     if body.values.is_empty() {
         return (
@@ -684,8 +702,9 @@ pub async fn patch_row(
     // Get or create the shared database from the registry
     let shared_db = state.registry.get_or_create(&db_name).await;
 
-    // Get primary key column
-    let pk_column = match get_primary_key_column(&shared_db, &table_name).await {
+    // Resolve the primary key column (replicated catalog in replicated mode,
+    // local registry schema otherwise) (#5420).
+    let pk_column = match resolve_pk_column(&state, &shared_db, &table_name).await {
         Some(pk) => pk,
         None => {
             return (
@@ -703,8 +722,10 @@ pub async fn patch_row(
     let sql = build_update_sql(&table_name, &pk_column, &id, &body.values);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session =
-        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
+    // Replicated session in replicated mode: the UPDATE proposes through
+    // consensus (leader-only); a write on a follower surfaces as 421 with a
+    // leader hint. Local session otherwise.
+    let mut session = state.session(&db_name, shared_db);
 
     match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Update { rows_affected }) => {
@@ -725,8 +746,7 @@ pub async fn patch_row(
             .into_response(),
         Err(e) => {
             error!("Patch failed: {}", e);
-            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Patch failed: {}", e))))
-                .into_response()
+            execution_error_response(&e)
         }
     }
 }
@@ -739,18 +759,15 @@ pub async fn delete_row(
 ) -> impl IntoResponse {
     debug!("CRUD: DELETE /api/tables/{}/rows/{}", table_name, id);
 
-    if let Some((code, body)) = state.replicated_gate("the CRUD by-id API (resolving the primary key needs schema introspection through consensus)") {
-        return (code, body).into_response();
-    }
-
     // Get the database name from headers
     let db_name = get_database_name(&headers);
 
     // Get or create the shared database from the registry
     let shared_db = state.registry.get_or_create(&db_name).await;
 
-    // Get primary key column
-    let pk_column = match get_primary_key_column(&shared_db, &table_name).await {
+    // Resolve the primary key column (replicated catalog in replicated mode,
+    // local registry schema otherwise) (#5420).
+    let pk_column = match resolve_pk_column(&state, &shared_db, &table_name).await {
         Some(pk) => pk,
         None => {
             return (
@@ -768,8 +785,10 @@ pub async fn delete_row(
     let sql = build_delete_sql(&table_name, &pk_column, &id);
     debug!("CRUD: Executing SQL: {}", sql);
 
-    let mut session =
-        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
+    // Replicated session in replicated mode: the DELETE proposes through
+    // consensus (leader-only); a write on a follower surfaces as 421 with a
+    // leader hint. Local session otherwise.
+    let mut session = state.session(&db_name, shared_db);
 
     match session.execute(&sql).await {
         Ok(crate::session::ExecutionResult::Delete { rows_affected }) => {
@@ -790,8 +809,7 @@ pub async fn delete_row(
             .into_response(),
         Err(e) => {
             error!("Delete failed: {}", e);
-            (StatusCode::BAD_REQUEST, Json(ErrorResponse::new(format!("Delete failed: {}", e))))
-                .into_response()
+            execution_error_response(&e)
         }
     }
 }
