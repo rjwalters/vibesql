@@ -459,9 +459,40 @@ fn extract_where_clauses(query: &str) -> Result<(Option<WhereClause>, Option<Str
     }
 }
 
-/// Convert GraphQL query info to SQL (simple version without relationships)
+/// Error returned when a query uses the legacy raw-string WHERE clause while
+/// the raw-WHERE escape hatch is disabled (the default). Surfaced to the
+/// client verbatim; no SQL is generated or executed.
+pub const RAW_WHERE_DISABLED_ERROR: &str =
+    "raw where clause is disabled; enable server.graphql_allow_raw_where \
+     (env VIBESQL_SERVER_GRAPHQL_ALLOW_RAW_WHERE) or use the structured \
+     where: { ... } form";
+
+/// Render the SQL fragment for a legacy raw-string WHERE clause, or reject it
+/// when the raw-WHERE escape hatch is disabled.
+///
+/// The raw string is interpolated **verbatim** — it is an explicit,
+/// trusted-input-only SQL-injection surface (see
+/// [`crate::config::ServerConfig::graphql_allow_raw_where`]). When
+/// `allow_raw_where` is false (the default) this returns
+/// [`RAW_WHERE_DISABLED_ERROR`] and the caller emits no SQL.
+fn render_raw_where(raw_where: &str, allow_raw_where: bool) -> Result<String, String> {
+    if allow_raw_where {
+        Ok(format!(" WHERE {}", raw_where))
+    } else {
+        Err(RAW_WHERE_DISABLED_ERROR.to_string())
+    }
+}
+
+/// Convert GraphQL query info to SQL (simple version without relationships).
+///
+/// `allow_raw_where` gates the legacy `where: "<raw sql>"` escape hatch. When
+/// false (the default), any query that supplies a raw-string WHERE is rejected
+/// with [`RAW_WHERE_DISABLED_ERROR`] and **no SQL is produced** — see
+/// [`crate::config::ServerConfig::graphql_allow_raw_where`]. The structured
+/// `where: { ... }` form is unaffected by this flag.
 pub fn graphql_to_sql(
     query_info: &GraphQLQueryInfo,
+    allow_raw_where: bool,
 ) -> Result<(String, Vec<vibesql_types::SqlValue>), String> {
     match query_info {
         GraphQLQueryInfo::Query {
@@ -488,8 +519,8 @@ pub fn graphql_to_sql(
                 let where_sql = where_clause_to_sql(clause, &mut params)?;
                 sql.push_str(&format!(" WHERE {}", where_sql));
             } else if let Some(raw_where) = where_clause_raw {
-                // Fall back to raw WHERE clause (legacy)
-                sql.push_str(&format!(" WHERE {}", raw_where));
+                // Fall back to raw WHERE clause (legacy, gated escape hatch).
+                sql.push_str(&render_raw_where(raw_where, allow_raw_where)?);
             }
 
             if let Some(limit) = limit {
@@ -569,8 +600,8 @@ pub fn graphql_to_sql(
                             let where_sql = where_clause_to_sql(clause, &mut params)?;
                             sql.push_str(&format!(" WHERE {}", where_sql));
                         } else if let Some(raw_where) = where_clause_raw {
-                            // Fall back to raw WHERE clause (legacy)
-                            sql.push_str(&format!(" WHERE {}", raw_where));
+                            // Fall back to raw WHERE clause (legacy, gated).
+                            sql.push_str(&render_raw_where(raw_where, allow_raw_where)?);
                         }
 
                         Ok((sql, params))
@@ -587,8 +618,8 @@ pub fn graphql_to_sql(
                         let where_sql = where_clause_to_sql(clause, &mut params)?;
                         sql.push_str(&format!(" WHERE {}", where_sql));
                     } else if let Some(raw_where) = where_clause_raw {
-                        // Fall back to raw WHERE clause (legacy)
-                        sql.push_str(&format!(" WHERE {}", raw_where));
+                        // Fall back to raw WHERE clause (legacy, gated).
+                        sql.push_str(&render_raw_where(raw_where, allow_raw_where)?);
                     } else {
                         return Err("DELETE requires WHERE clause".to_string());
                     }
@@ -600,12 +631,18 @@ pub fn graphql_to_sql(
     }
 }
 
-/// Generate SQL for the main query (without JOINs - we'll use separate queries for nested data)
+/// Generate SQL for the main query (without JOINs - we'll use separate queries
+/// for nested data).
+///
+/// `allow_raw_where` is forwarded to [`graphql_to_sql`]; see that function and
+/// [`crate::config::ServerConfig::graphql_allow_raw_where`] for the legacy
+/// raw-WHERE gating semantics.
 pub fn generate_main_query_sql(
     query_info: &GraphQLQueryInfo,
+    allow_raw_where: bool,
 ) -> Result<(String, Vec<vibesql_types::SqlValue>), String> {
     // Just delegate to the simple version for the main query
-    graphql_to_sql(query_info)
+    graphql_to_sql(query_info, allow_raw_where)
 }
 
 /// Check if a query has nested fields that need relationship resolution
@@ -694,7 +731,8 @@ mod tests {
     fn test_graphql_to_sql_with_structured_where() {
         let query = r#"{ users(where: {"age": {"gte": 18}, "status": "active"}) { id, name } }"#;
         let result = parse_graphql_query(query).unwrap();
-        let (sql, params) = graphql_to_sql(&result).unwrap();
+        // Structured WHERE works regardless of the raw-WHERE flag (here: off).
+        let (sql, params) = graphql_to_sql(&result, false).unwrap();
         // Check key parts are present (order may vary due to HashMap)
         assert!(sql.starts_with("SELECT"), "SQL should start with SELECT");
         assert!(sql.contains("FROM users"), "SQL should contain 'FROM users'");
@@ -708,7 +746,7 @@ mod tests {
     fn test_graphql_to_sql_with_or() {
         let query = r#"{ users(where: {"OR": [{"name": {"contains": "john"}}, {"email": {"endsWith": "@test.com"}}]}) { id, name } }"#;
         let result = parse_graphql_query(query).unwrap();
-        let (sql, _) = graphql_to_sql(&result).unwrap();
+        let (sql, _) = graphql_to_sql(&result, false).unwrap();
         assert!(sql.contains("OR"));
     }
 
@@ -716,9 +754,80 @@ mod tests {
     fn test_graphql_with_limit_offset() {
         let query = r#"{ users(limit: 10, offset: 20) { id, name } }"#;
         let result = parse_graphql_query(query).unwrap();
-        let (sql, _) = graphql_to_sql(&result).unwrap();
+        let (sql, _) = graphql_to_sql(&result, false).unwrap();
         assert!(sql.contains("LIMIT 10"));
         assert!(sql.contains("OFFSET 20"));
+    }
+
+    // --- Raw-WHERE escape-hatch gating (#5448) ---------------------------
+
+    /// With the flag OFF (the default), a SELECT using the legacy raw-string
+    /// WHERE is rejected and produces no SQL.
+    #[test]
+    fn test_raw_where_select_rejected_when_disabled() {
+        let query = r#"{ users(where: "id = 1 OR 1=1") { id, name } }"#;
+        let result = parse_graphql_query(query).unwrap();
+        let err = graphql_to_sql(&result, false).unwrap_err();
+        assert_eq!(err, RAW_WHERE_DISABLED_ERROR);
+    }
+
+    /// With the flag ON, the raw-string WHERE is applied verbatim (legacy
+    /// behavior; the operator has accepted the trusted-input risk).
+    #[test]
+    fn test_raw_where_select_applied_when_enabled() {
+        let query = r#"{ users(where: "id = 1") { id, name } }"#;
+        let result = parse_graphql_query(query).unwrap();
+        let (sql, params) = graphql_to_sql(&result, true).unwrap();
+        assert!(sql.contains("WHERE id = 1"), "raw WHERE should be applied: {sql}");
+        assert!(params.is_empty(), "raw WHERE produces no bound params");
+    }
+
+    /// The injection payload reaches the generated SQL verbatim only when the
+    /// flag is ON — demonstrating both why it is dangerous and that the
+    /// default-off gate closes the surface.
+    #[test]
+    fn test_raw_where_injection_surface_gated() {
+        let query = r#"{ users(where: "1=1; DROP TABLE users") { id } }"#;
+        let result = parse_graphql_query(query).unwrap();
+        // OFF: rejected, no SQL.
+        assert_eq!(graphql_to_sql(&result, false).unwrap_err(), RAW_WHERE_DISABLED_ERROR);
+        // ON: interpolated verbatim (the documented trusted-input risk).
+        let (sql, _) = graphql_to_sql(&result, true).unwrap();
+        assert!(sql.contains("DROP TABLE users"));
+    }
+
+    /// A DELETE using raw WHERE is rejected when disabled (no SQL), applied
+    /// when enabled.
+    #[test]
+    fn test_raw_where_delete_gating() {
+        let query = r#"mutation { delete(table: "users", where: "id = 5") { id } }"#;
+        let result = parse_graphql_query(query).unwrap();
+        assert_eq!(graphql_to_sql(&result, false).unwrap_err(), RAW_WHERE_DISABLED_ERROR);
+        let (sql, _) = graphql_to_sql(&result, true).unwrap();
+        assert!(sql.starts_with("DELETE FROM users"), "got: {sql}");
+        assert!(sql.contains("WHERE id = 5"), "got: {sql}");
+    }
+
+    /// Structured WHERE is unaffected by the flag: it works with the gate both
+    /// off and on, never depending on the escape hatch.
+    #[test]
+    fn test_structured_where_unaffected_by_flag() {
+        let query = r#"{ users(where: {"id": {"eq": 1}}) { id, name } }"#;
+        let result = parse_graphql_query(query).unwrap();
+        for allow_raw in [false, true] {
+            let (sql, params) = graphql_to_sql(&result, allow_raw).unwrap();
+            assert!(sql.contains("WHERE id = $1"), "structured WHERE should parameterize: {sql}");
+            assert_eq!(params.len(), 1);
+        }
+    }
+
+    /// A query with no WHERE at all is unaffected by the flag.
+    #[test]
+    fn test_no_where_unaffected_by_flag() {
+        let query = r#"{ users { id, name } }"#;
+        let result = parse_graphql_query(query).unwrap();
+        let (sql, _) = graphql_to_sql(&result, false).unwrap();
+        assert!(!sql.contains("WHERE"));
     }
 
     #[test]

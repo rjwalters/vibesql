@@ -96,6 +96,16 @@ pub struct HttpState {
     /// remains gated to 503 in replicated mode.
     /// `/health` uses the handle to report node role/writability.
     pub replication: Option<StdArc<ReplicationHandle>>,
+    /// Whether the legacy GraphQL `where: "<raw sql>"` escape hatch is enabled
+    /// (default: false). Mirrors
+    /// [`crate::config::ServerConfig::graphql_allow_raw_where`].
+    ///
+    /// When false, a GraphQL query that supplies a raw-string WHERE is rejected
+    /// before any SQL executes (the raw string is otherwise interpolated
+    /// verbatim — a SQL-injection surface). The flag is honored identically in
+    /// standalone and replicated mode, since it gates GraphQL→SQL lowering,
+    /// which is shared by both paths.
+    pub graphql_allow_raw_where: bool,
 }
 
 impl HttpState {
@@ -234,12 +244,16 @@ fn sql_error_message(e: &SqlError) -> String {
 /// * `registry` - Database registry for shared database access
 /// * `subscription_manager` - Subscription manager for real-time updates
 /// * `metrics` - Optional server metrics for observability
+/// * `graphql_allow_raw_where` - Enable the legacy GraphQL `where: "<raw sql>"`
+///   escape hatch (default off; see
+///   [`crate::config::ServerConfig::graphql_allow_raw_where`])
 pub fn create_http_router(
     db: Arc<Database>,
     registry: DatabaseRegistry,
     subscription_manager: Arc<SubscriptionManager>,
     metrics: Option<ServerMetrics>,
     replication: Option<StdArc<ReplicationHandle>>,
+    graphql_allow_raw_where: bool,
 ) -> Router {
     let state = HttpState {
         registry: registry.clone(),
@@ -247,6 +261,7 @@ pub fn create_http_router(
         subscription_manager: subscription_manager.clone(),
         metrics,
         replication,
+        graphql_allow_raw_where,
     };
     let is_replicated = state.replication.is_some();
 
@@ -368,8 +383,10 @@ async fn graphql_handler(
     // Check if we have nested fields that need relationship resolution
     let has_nested = graphql::has_nested_fields(&query_info);
 
-    // Convert to SQL
-    let (sql, params) = match graphql::graphql_to_sql(&query_info) {
+    // Convert to SQL. The legacy raw-string WHERE escape hatch is gated by
+    // `graphql_allow_raw_where` (default off): when disabled, a raw-WHERE query
+    // is rejected here with a clear error and no SQL executes.
+    let (sql, params) = match graphql::graphql_to_sql(&query_info, state.graphql_allow_raw_where) {
         Ok((sql, params)) => (sql, params),
         Err(e) => {
             error!("Failed to convert GraphQL to SQL: {}", e);

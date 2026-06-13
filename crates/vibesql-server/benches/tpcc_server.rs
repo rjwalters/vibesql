@@ -164,6 +164,7 @@ async fn start_vibesql_server_with_db(
             ssl_enabled: false,
             ssl_cert: None,
             ssl_key: None,
+            graphql_allow_raw_where: false,
         },
         auth: AuthConfig { method: "trust".to_string(), password_file: None },
         logging: LoggingConfig { level: "error".to_string(), file: None },

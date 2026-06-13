@@ -1358,6 +1358,14 @@ async fn wire_protocol_extended_write_on_follower_redirects() {
 /// Bind the HTTP router (in replicated mode against `handle`) to an
 /// ephemeral port and return its base URL plus a shutdown sender.
 async fn start_http(handle: Option<Arc<ReplicationHandle>>) -> (String, oneshot::Sender<()>) {
+    // Default: the legacy raw-WHERE escape hatch is off (#5448).
+    start_http_with_raw_where(handle, false).await
+}
+
+async fn start_http_with_raw_where(
+    handle: Option<Arc<ReplicationHandle>>,
+    graphql_allow_raw_where: bool,
+) -> (String, oneshot::Sender<()>) {
     use vibesql_server::{http::create_http_router, registry::DatabaseRegistry};
     use vibesql_storage::Database;
 
@@ -1368,7 +1376,7 @@ async fn start_http(handle: Option<Arc<ReplicationHandle>>) -> (String, oneshot:
     let db = Arc::new(Database::new());
     let registry = DatabaseRegistry::new();
     let subs = Arc::new(SubscriptionManager::new());
-    let app = create_http_router(db, registry, subs, None, handle);
+    let app = create_http_router(db, registry, subs, None, handle, graphql_allow_raw_where);
 
     tokio::spawn(async move {
         axum::serve(listener, app)
@@ -2386,6 +2394,102 @@ async fn http_graphql_string_arg_is_injection_safe() {
         handles[0].node().query("SELECT COUNT(*) FROM gql_inj").unwrap()[0][0].to_string(),
         "1"
     );
+}
+
+/// With the legacy raw-WHERE escape hatch disabled (the default), a GraphQL
+/// query using `where: "<raw sql>"` is rejected with a clear error and no SQL
+/// executes — the unescaped injection surface is closed by default (#5448).
+/// Verified in replicated mode (gating is honored on the consensus path too).
+#[tokio::test]
+async fn http_graphql_raw_where_rejected_when_disabled() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[0]))).await; // raw-WHERE off
+    let client = reqwest::Client::new();
+
+    for sql in [
+        "CREATE TABLE gql_raw_off (id INT, name VARCHAR(100))",
+        "INSERT INTO gql_raw_off VALUES (1, 'Alice')",
+    ] {
+        let resp = client
+            .post(format!("{base}/api/query"))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({ "sql": sql }).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success(), "{sql}: {}", resp.status());
+    }
+
+    // Raw-string WHERE: must be refused before any SQL runs.
+    let query = serde_json::json!({
+        "query": r#"{ gql_raw_off(where: "1=1") { id name } }"#
+    })
+    .to_string();
+    let resp = client
+        .post(format!("{base}/api/graphql"))
+        .header("content-type", "application/json")
+        .body(query)
+        .send()
+        .await
+        .unwrap();
+    // The handler returns a GraphQL error payload (HTTP 400) with no data.
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    assert!(body["data"].is_null(), "no data should be returned, got {body}");
+    let errors = body["errors"].as_array().expect("errors array");
+    assert!(
+        errors.iter().any(|e| e["message"]
+            .as_str()
+            .map(|m| m.contains("raw where clause is disabled"))
+            .unwrap_or(false)),
+        "expected a clear raw-WHERE-disabled error, got {body}"
+    );
+}
+
+/// With the flag explicitly enabled, the legacy `where: "<raw sql>"` form is
+/// applied verbatim — the opt-in operator accepts the trusted-input risk
+/// (#5448). Honored on the replicated consensus path.
+#[tokio::test]
+async fn http_graphql_raw_where_applied_when_enabled() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    // raw-WHERE explicitly enabled.
+    let (base, _tx) = start_http_with_raw_where(Some(Arc::clone(&handles[0])), true).await;
+    let client = reqwest::Client::new();
+
+    for sql in [
+        "CREATE TABLE gql_raw_on (id INT, name VARCHAR(100))",
+        "INSERT INTO gql_raw_on VALUES (1, 'Alice')",
+        "INSERT INTO gql_raw_on VALUES (2, 'Bob')",
+    ] {
+        let resp = client
+            .post(format!("{base}/api/query"))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({ "sql": sql }).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success(), "{sql}: {}", resp.status());
+    }
+
+    // Raw-string WHERE is applied: selects only id = 1.
+    let query = serde_json::json!({
+        "query": r#"{ gql_raw_on(where: "id = 1") { id name } }"#
+    })
+    .to_string();
+    let resp = client
+        .post(format!("{base}/api/graphql"))
+        .header("content-type", "application/json")
+        .body(query)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    let rows = body["data"]["data"].as_array().expect("data.data array");
+    assert_eq!(rows.len(), 1, "raw WHERE should filter to one row, got {body}");
+    assert_eq!(rows[0]["id"].as_i64(), Some(1));
 }
 
 /// Standalone HTTP is unaffected: `/health` is 200 with no `replication`
