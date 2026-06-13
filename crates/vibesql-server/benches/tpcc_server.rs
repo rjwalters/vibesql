@@ -170,6 +170,7 @@ async fn start_vibesql_server_with_db(
         http: Default::default(),
         observability: Default::default(),
         subscriptions: Default::default(),
+        replication: Default::default(),
     };
 
     let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port).parse()?;
