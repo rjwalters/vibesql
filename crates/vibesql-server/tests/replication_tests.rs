@@ -1604,6 +1604,224 @@ async fn http_write_on_follower_redirects_with_leader_hint() {
     assert_eq!(resp.status(), reqwest::StatusCode::MISDIRECTED_REQUEST);
 }
 
+/// The CRUD by-id endpoints (GET/PUT/PATCH/DELETE one row) work in replicated
+/// mode (#5420): the primary key is resolved from the consensus state machine's
+/// catalog (the local registry DB is empty), reads run against the replicated
+/// state machine, and writes propose through consensus. A by-id GET returns the
+/// row with its real column names (post-#5428).
+#[tokio::test]
+async fn http_crud_by_id_routes_through_consensus() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[0]))).await;
+    let client = reqwest::Client::new();
+
+    // Schema + seed row via the (already replicated) /api/query endpoint.
+    for sql in [
+        "CREATE TABLE byid (id INTEGER PRIMARY KEY, name VARCHAR(100))",
+        "INSERT INTO byid VALUES (1, 'Alice')",
+    ] {
+        let resp = client
+            .post(format!("{base}/api/query"))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({ "sql": sql }).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success(), "{sql}: {}", resp.status());
+    }
+
+    // GET by id resolves the PK through consensus and reads the row back from
+    // the replicated state machine, with real column names (#5428).
+    let resp = client.get(format!("{base}/api/tables/byid/rows/1")).send().await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    assert_eq!(body["data"]["id"], 1, "by-id GET must read the replicated row, got {body}");
+    assert_eq!(body["data"]["name"], "Alice", "real column name (post-#5428), got {body}");
+
+    // GET a missing id → 404.
+    let resp = client.get(format!("{base}/api/tables/byid/rows/999")).send().await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // PUT by id proposes an UPDATE through consensus.
+    let resp = client
+        .put(format!("{base}/api/tables/byid/rows/1"))
+        .header("content-type", "application/json")
+        .body(r#"{"name":"Alicia"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        handles[0].node().query("SELECT name FROM byid WHERE id = 1").unwrap()[0][0].to_string(),
+        "Alicia",
+        "the PUT must land in the consensus state machine"
+    );
+
+    // PUT a missing id → 404 (zero rows affected).
+    let resp = client
+        .put(format!("{base}/api/tables/byid/rows/999"))
+        .header("content-type", "application/json")
+        .body(r#"{"name":"Nobody"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // PATCH by id proposes a partial UPDATE through consensus.
+    let resp = client
+        .patch(format!("{base}/api/tables/byid/rows/1"))
+        .header("content-type", "application/json")
+        .body(r#"{"name":"Allie"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        handles[0].node().query("SELECT name FROM byid WHERE id = 1").unwrap()[0][0].to_string(),
+        "Allie",
+        "the PATCH must land in the consensus state machine"
+    );
+
+    // DELETE by id proposes a DELETE through consensus.
+    let resp = client.delete(format!("{base}/api/tables/byid/rows/1")).send().await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        handles[0].node().query("SELECT COUNT(*) FROM byid").unwrap()[0][0].to_string(),
+        "0",
+        "the DELETE must land in the consensus state machine"
+    );
+
+    // DELETE a missing id → 404.
+    let resp = client.delete(format!("{base}/api/tables/byid/rows/1")).send().await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+/// A CRUD by-id write replicates to followers (#5420): PUT/PATCH/DELETE on the
+/// leader's HTTP port converge on a second node.
+#[tokio::test]
+async fn http_crud_by_id_writes_replicate_to_followers() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[leader]))).await;
+    let client = reqwest::Client::new();
+
+    for sql in [
+        "CREATE TABLE byid_repl (id INTEGER PRIMARY KEY, n INT)",
+        "INSERT INTO byid_repl VALUES (1, 10)",
+    ] {
+        let resp = client
+            .post(format!("{base}/api/query"))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({ "sql": sql }).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success(), "{sql}: {}", resp.status());
+    }
+
+    // PATCH the row by id on the leader's HTTP port.
+    let resp = client
+        .patch(format!("{base}/api/tables/byid_repl/rows/1"))
+        .header("content-type", "application/json")
+        .body(r#"{"n":42}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // Every follower converges to the updated value.
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    for (i, h) in handles.iter().enumerate() {
+        if i == leader {
+            continue;
+        }
+        loop {
+            let n = h
+                .node()
+                .query("SELECT n FROM byid_repl WHERE id = 1")
+                .ok()
+                .and_then(|r| r.first().and_then(|row| row.first()).map(ToString::to_string));
+            if n.as_deref() == Some("42") {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "follower {i} did not converge to n=42 (saw {n:?})"
+            );
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
+}
+
+/// A CRUD by-id write on a **follower** is refused with `421 Misdirected
+/// Request` carrying the leader hint — the same redirect contract as the
+/// collection endpoints (#5420). It must never execute against the follower's
+/// local database (the split-brain invariant).
+#[tokio::test]
+async fn http_crud_by_id_write_on_follower_redirects_with_leader_hint() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+
+    // Create + seed the table through the leader.
+    for sql in [
+        "CREATE TABLE byid_redir (id INTEGER PRIMARY KEY, name VARCHAR(100))",
+        "INSERT INTO byid_redir VALUES (1, 'Alice')",
+    ] {
+        replicated_session(&handles[leader]).execute(sql).await.unwrap();
+    }
+    let leader_id = handles[leader].node_id();
+
+    // Pick a follower that knows who leads (so the hint is populated) and that
+    // has applied the seed row (so the resolution sees the table).
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let follower = loop {
+        if let Some(i) = handles.iter().position(|h| {
+            h.role() == Role::Follower
+                && h.node().current_leader().is_some()
+                && h.primary_key_column("byid_redir").as_deref() == Some("id")
+        }) {
+            break i;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "timed out waiting for a follower");
+        tokio::time::sleep(POLL_INTERVAL).await;
+    };
+
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[follower]))).await;
+    let client = reqwest::Client::new();
+
+    // PUT by id on the follower → 421 + leader hint header (NOT_LEADER).
+    let resp = client
+        .put(format!("{base}/api/tables/byid_redir/rows/1"))
+        .header("content-type", "application/json")
+        .body(r#"{"name":"Bob"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::MISDIRECTED_REQUEST);
+    let leader_hint = resp
+        .headers()
+        .get("X-VibeSQL-Leader")
+        .expect("leader-hint header")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(leader_hint.contains(&format!("node {leader_id}")), "{leader_hint}");
+
+    // DELETE by id on the follower → same 421 contract.
+    let resp = client.delete(format!("{base}/api/tables/byid_redir/rows/1")).send().await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::MISDIRECTED_REQUEST);
+
+    // The follower's local database never executed the write: the row is
+    // untouched in the replicated state machine.
+    assert_eq!(
+        handles[follower].node().query("SELECT name FROM byid_redir WHERE id = 1").unwrap()[0][0]
+            .to_string(),
+        "Alice",
+        "a by-id write on a follower must not mutate state outside consensus"
+    );
+}
+
 /// An HTTP write replicates to a second node (#5410): after a `POST /api/query`
 /// INSERT on the leader's HTTP port, every follower converges to the row.
 #[tokio::test]
@@ -1652,20 +1870,18 @@ async fn http_write_replicates_to_followers() {
     }
 }
 
-/// In replicated mode the CRUD by-id, GraphQL, subscription, and blob-storage
-/// surfaces remain gated to a clear 503 (they depend on local-database schema
-/// /state introspection that is not yet wired through consensus — follow-ons
-/// to #5410). They must never silently execute against the local database.
+/// In replicated mode the GraphQL, subscription, and blob-storage surfaces
+/// remain gated to a clear 503 (they depend on local-database schema/state
+/// introspection that is not yet wired through consensus — follow-ons to
+/// #5410). They must never silently execute against the local database. The
+/// CRUD by-id endpoints are no longer gated (#5420 wired them through
+/// consensus); see `http_crud_by_id_*` below.
 #[tokio::test]
 async fn http_unwired_surfaces_still_gated_in_replicated_mode() {
     let (handles, _dir) = boot_cluster(1).await;
     wait_for_leader(&handles).await;
     let (base, _tx) = start_http(Some(Arc::clone(&handles[0]))).await;
     let client = reqwest::Client::new();
-
-    // CRUD by-id (needs primary-key schema introspection).
-    let resp = client.get(format!("{base}/api/tables/t/rows/1")).send().await.unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
 
     // GraphQL.
     let resp = client
