@@ -50,6 +50,20 @@ struct ReplicatedSessionState {
     /// Dense log index of this session's last replicated write (`0` =
     /// none) — the read-your-writes token `execute_replicated` returned.
     last_write_token: vibesql_consensus::LogIndex,
+    /// Open interactive transaction (#5391): `Some` between `BEGIN` and
+    /// `COMMIT`/`ROLLBACK`. Holds the buffered write statements (in
+    /// execution order) that are proposed as **one** `TxnEntry` at
+    /// `COMMIT` — the one-entry-per-committed-transaction design.
+    ///
+    /// During the open transaction the buffer is *not yet* proposed, so:
+    /// - write statements return an optimistic ack (`rows_affected = 0`);
+    ///   the authoritative row counts are knowable only after the atomic
+    ///   apply at `COMMIT`;
+    /// - reads are refused once the buffer is non-empty, because the
+    ///   buffered writes are not applied anywhere yet and a local read
+    ///   would silently miss the session's own writes (full mid-txn read
+    ///   fidelity is the scoped follow-on #5401).
+    open_txn: Option<Vec<String>>,
 }
 
 /// Session state for a database connection
@@ -235,6 +249,7 @@ impl Session {
             max_staleness_ms: 0,
             ryw_wait_ms: DEFAULT_RYW_WAIT_MS,
             last_write_token: 0,
+            open_txn: None,
         });
         session
     }
@@ -360,14 +375,46 @@ impl Session {
     ) -> Result<ExecutionResult> {
         use vibesql_ast::Statement;
 
-        let state = self.replication.as_ref().expect("execute_replicated without state");
-
-        // A halted node serves nothing further (fatal apply, see
-        // ConsensusError::FatalApply): every statement gets the retained
-        // reason instead of a stale read or a hung write.
-        if let Some(reason) = state.handle.fatal_reason() {
-            return Err(state.handle.halted_error(reason).into());
+        {
+            let state = self.replication.as_ref().expect("execute_replicated without state");
+            // A halted node serves nothing further (fatal apply, see
+            // ConsensusError::FatalApply): every statement gets the
+            // retained reason instead of a stale read or a hung write.
+            if let Some(reason) = state.handle.fatal_reason() {
+                return Err(state.handle.halted_error(reason).into());
+            }
         }
+
+        // Interactive transaction control (#5391): BEGIN opens a write
+        // buffer, COMMIT proposes it as one TxnEntry, ROLLBACK discards
+        // it. Handled before the per-statement dispatch so an open
+        // transaction can intercept buffered writes and gated reads.
+        match statement {
+            Statement::BeginTransaction(_) => return self.replicated_begin(),
+            Statement::Commit(_) => return self.replicated_commit().await,
+            Statement::Rollback(_) => return self.replicated_rollback(),
+            // Savepoints are out of scope (#5391); standalone sessions do
+            // not support them either. Refuse clearly.
+            Statement::Savepoint(_)
+            | Statement::RollbackToSavepoint(_)
+            | Statement::ReleaseSavepoint(_) => {
+                return Err(SqlError::not_supported(
+                    "savepoints in replicated transactions",
+                    "#5401",
+                )
+                .into())
+            }
+            _ => {}
+        }
+
+        // Inside an open transaction, writes are buffered (proposed as
+        // one entry at COMMIT) and reads are gated once the buffer is
+        // non-empty. Re-borrow `state` after this returns where needed.
+        if self.replication.as_ref().is_some_and(|s| s.open_txn.is_some()) {
+            return self.execute_in_open_txn(sql, statement);
+        }
+
+        let state = self.replication.as_ref().expect("execute_replicated without state");
 
         match statement {
             // Reads: dispatch on the session's read-consistency mode.
@@ -456,21 +503,8 @@ impl Session {
             // PRAGMA stays the no-op it is in standalone mode.
             Statement::Pragma(_) => Ok(ExecutionResult::Other { message: "PRAGMA".to_string() }),
 
-            // Interactive transactions are follow-on #5391: buffering the
-            // statements and proposing one TxnEntry at COMMIT needs its
-            // own design review (results during the open transaction,
-            // reads of buffered writes). Refusing is sound; guessing is
-            // not.
-            Statement::BeginTransaction(_)
-            | Statement::Commit(_)
-            | Statement::Rollback(_)
-            | Statement::Savepoint(_)
-            | Statement::RollbackToSavepoint(_)
-            | Statement::ReleaseSavepoint(_) => Err(SqlError::not_supported(
-                "interactive transaction control (BEGIN/COMMIT/ROLLBACK)",
-                "#5391",
-            )
-            .into()),
+            // Transaction control (BEGIN/COMMIT/ROLLBACK/SAVEPOINT) is
+            // intercepted above, before this autocommit dispatch.
 
             // Named prepared statements execute from a bound AST without
             // the SQL text the propose path replicates; cursors, EXPLAIN,
@@ -517,6 +551,220 @@ impl Session {
             // Unreachable from a fresh propose (idempotence replays only
             // overlap snapshot-install with log replay), but harmless.
             vibesql_consensus::ApplyOutcome::AlreadyApplied => Ok(0),
+        }
+    }
+
+    /// Open an interactive transaction in a replicated session (#5391):
+    /// installs an empty write buffer that subsequent DML/DDL append to
+    /// and that `COMMIT` proposes as one `TxnEntry`. `BEGIN` inside an
+    /// open transaction errors, matching the standalone behavior.
+    fn replicated_begin(&mut self) -> Result<ExecutionResult> {
+        let state = self.replication.as_mut().expect("replicated_begin without state");
+        if state.open_txn.is_some() {
+            return Err(anyhow::anyhow!("a transaction is already in progress"));
+        }
+        state.open_txn = Some(Vec::new());
+        Ok(ExecutionResult::Begin)
+    }
+
+    /// Commit an open replicated transaction (#5391): propose the whole
+    /// buffered write batch as **one** `TxnEntry` via
+    /// `execute_replicated_txn` (freeze-at-propose runs once, on the
+    /// leader, at COMMIT) and map the outcome:
+    ///
+    /// - `Applied` → the transaction committed atomically (`COMMIT`);
+    /// - `Rejected` → a deterministic statement failure rolled the whole
+    ///   batch back identically on every replica; the buffer is discarded
+    ///   and the executor error surfaced (no partial state);
+    /// - `NotLeader` / `FatalApply` → surfaced as the usual SQLSTATE; the
+    ///   buffer is discarded so a retry against the leader starts clean.
+    ///
+    /// An empty transaction (`BEGIN; COMMIT;` with no writes) consumes no
+    /// log index — there is nothing to replicate.
+    async fn replicated_commit(&mut self) -> Result<ExecutionResult> {
+        let buffered = {
+            let state = self.replication.as_mut().expect("replicated_commit without state");
+            match state.open_txn.take() {
+                Some(buf) => buf,
+                None => return Err(anyhow::anyhow!("no transaction is in progress")),
+            }
+        };
+
+        // Empty transaction: nothing to propose.
+        if buffered.is_empty() {
+            return Ok(ExecutionResult::Commit);
+        }
+
+        let state = self.replication.as_ref().expect("replicated_commit without state");
+        let handle = Arc::clone(&state.handle);
+        let statements: Vec<&str> = buffered.iter().map(String::as_str).collect();
+
+        // Propose the batch as one entry. `NotLeader`/`FatalApply`/etc.
+        // surface as a structured SqlError; the buffer is already cleared
+        // above so the session is back in autocommit on any error.
+        let (index, outcome) = handle.execute_txn(&statements).await?;
+
+        let state = self.replication.as_mut().expect("replicated_commit without state");
+        state.last_write_token = index;
+
+        match outcome {
+            vibesql_consensus::ApplyOutcome::Applied { .. } => Ok(ExecutionResult::Commit),
+            // Deterministic failure inside the batch: rolled back
+            // identically on every replica, no partial state committed.
+            vibesql_consensus::ApplyOutcome::Rejected { reason } => {
+                Err(anyhow::anyhow!("{}", reason))
+            }
+            // Not reachable from a fresh propose (see `replicated_write`).
+            vibesql_consensus::ApplyOutcome::AlreadyApplied => Ok(ExecutionResult::Commit),
+        }
+    }
+
+    /// Roll back an open replicated transaction (#5391): discard the
+    /// buffered writes without proposing anything — the batch never
+    /// reached consensus, so no log index is consumed.
+    fn replicated_rollback(&mut self) -> Result<ExecutionResult> {
+        let state = self.replication.as_mut().expect("replicated_rollback without state");
+        if state.open_txn.take().is_none() {
+            return Err(anyhow::anyhow!("no transaction is in progress"));
+        }
+        Ok(ExecutionResult::Rollback)
+    }
+
+    /// Execute one statement inside an open replicated transaction
+    /// (#5391). Writes are appended to the buffer and acknowledged
+    /// optimistically; reads are gated; unsupported features keep their
+    /// `0A000` refusal.
+    ///
+    /// Mid-transaction result semantics (documented contract):
+    /// - **Writes** return their command tag with `rows_affected = 0`.
+    ///   The buffer is not proposed until `COMMIT`, so the authoritative
+    ///   row count is not yet known; clients learn the outcome (success
+    ///   or a deterministic rejection) at `COMMIT`.
+    /// - **Reads** are refused with `0A000` once the buffer holds any
+    ///   writes: those writes are applied nowhere yet, so a local read
+    ///   would silently miss the session's own writes. A read before any
+    ///   buffered write (it observes committed state coherently) is
+    ///   allowed. Full read-your-own-writes inside the transaction is the
+    ///   scoped follow-on #5401.
+    fn execute_in_open_txn(
+        &mut self,
+        sql: &str,
+        statement: &vibesql_ast::Statement,
+    ) -> Result<ExecutionResult> {
+        use vibesql_ast::Statement;
+
+        // Whether the buffer already holds writes (read gating).
+        let buffer_has_writes = self
+            .replication
+            .as_ref()
+            .and_then(|s| s.open_txn.as_ref())
+            .is_some_and(|buf| !buf.is_empty());
+
+        // Append `sql` to the open transaction buffer.
+        let buffer = |this: &mut Self| {
+            this.replication
+                .as_mut()
+                .and_then(|s| s.open_txn.as_mut())
+                .expect("execute_in_open_txn without open transaction")
+                .push(sql.to_string());
+        };
+
+        match statement {
+            Statement::Select(_) => {
+                if buffer_has_writes {
+                    Err(SqlError::not_supported(
+                        "reads of a replicated transaction's own buffered writes",
+                        "#5401",
+                    )
+                    .into())
+                } else {
+                    // No buffered writes yet: serve against committed
+                    // state through the normal local read path.
+                    let handle = Arc::clone(
+                        &self
+                            .replication
+                            .as_ref()
+                            .expect("execute_in_open_txn without state")
+                            .handle,
+                    );
+                    let rows = handle.query_local(sql)?;
+                    let columns = rows
+                        .first()
+                        .map(|r| {
+                            (0..r.len()).map(|i| Column { name: format!("col{i}") }).collect()
+                        })
+                        .unwrap_or_default();
+                    let rows = rows.into_iter().map(|values| Row { values }).collect();
+                    Ok(ExecutionResult::Select { rows, columns })
+                }
+            }
+
+            // Writes: buffer for the COMMIT batch, ack optimistically.
+            Statement::Insert(stmt) => {
+                buffer(self);
+                self.stmt_cache.invalidate_table(&stmt.table_name);
+                Ok(ExecutionResult::Insert { rows_affected: 0 })
+            }
+            Statement::Update(stmt) => {
+                buffer(self);
+                self.stmt_cache.invalidate_table(&stmt.table_name);
+                Ok(ExecutionResult::Update { rows_affected: 0 })
+            }
+            Statement::Delete(stmt) => {
+                buffer(self);
+                self.stmt_cache.invalidate_table(&stmt.table_name);
+                Ok(ExecutionResult::Delete { rows_affected: 0 })
+            }
+            Statement::CreateTable(_) => {
+                buffer(self);
+                Ok(ExecutionResult::CreateTable)
+            }
+            Statement::CreateIndex(_) => {
+                buffer(self);
+                Ok(ExecutionResult::CreateIndex)
+            }
+            Statement::CreateView(_) => {
+                buffer(self);
+                Ok(ExecutionResult::CreateView)
+            }
+            Statement::DropTable(stmt) => {
+                buffer(self);
+                self.stmt_cache.invalidate_table(&stmt.table_name);
+                Ok(ExecutionResult::DropTable)
+            }
+            Statement::DropIndex(_) => {
+                buffer(self);
+                Ok(ExecutionResult::DropIndex)
+            }
+            Statement::DropView(_) => {
+                buffer(self);
+                Ok(ExecutionResult::DropView)
+            }
+
+            // SET adjusts session-local read settings; harmless inside a
+            // transaction and not part of the replicated batch.
+            Statement::SetVariable(stmt) => self.execute_replicated_set(stmt),
+
+            // PRAGMA stays the no-op it is in standalone mode.
+            Statement::Pragma(_) => Ok(ExecutionResult::Other { message: "PRAGMA".to_string() }),
+
+            // Everything else (PREPARE/EXECUTE, cursors, EXPLAIN, ANALYZE,
+            // VACUUM, ...) keeps its autocommit refusal inside the
+            // transaction too.
+            Statement::Prepare(_) | Statement::Execute(_) | Statement::Deallocate(_) => {
+                Err(SqlError::not_supported("PREPARE/EXECUTE statement syntax", "#5393").into())
+            }
+            Statement::DeclareCursor(_)
+            | Statement::OpenCursor(_)
+            | Statement::Fetch(_)
+            | Statement::CloseCursor(_) => {
+                Err(SqlError::not_supported("cursors", "#5393").into())
+            }
+            Statement::Explain(_) => Err(SqlError::not_supported("EXPLAIN", "#5393").into()),
+            Statement::Analyze(_) => Err(SqlError::not_supported("ANALYZE", "#5393").into()),
+            Statement::Vacuum(_) => Err(SqlError::not_supported("VACUUM", "#5393").into()),
+
+            _ => Err(SqlError::not_supported("this statement", "#5393").into()),
         }
     }
 
